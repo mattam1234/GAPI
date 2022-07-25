@@ -1,6 +1,10 @@
 <script setup lang="ts">
+// imports for custom components
 import { RouterLink, RouterView } from "vue-router";
-import HelloWorld from "@/components/HelloWorld.vue";
+import Login from "./components/Login.vue";
+import Create from "./components/CreateSession.vue"
+
+
 </script>
 
 <template>
@@ -8,23 +12,28 @@ import HelloWorld from "@/components/HelloWorld.vue";
     <img
       alt="Vue logo"
       class="logo"
-      src="@/assets/logo.svg"
+      src="@/assets/4039_Oof.gif"
       width="125"
       height="125"
     />
-
     <div class="wrapper">
-      <HelloWorld msg="You did it!" />
-
-      <nav>
-        <RouterLink to="/">Home</RouterLink>
-        <RouterLink to="/about">About</RouterLink>
-      </nav>
+      <h1 class="center">
+        Welkom bij de bois gamepicker
+      </h1>
+      <p class="center">
+        Deze app is mede mogelijk gemaakt door mikes moeite om te kiezen. Met deze app kan je inloggen 
+      </p>
     </div>
+    <div>
+  </div>
   </header>
-
   <RouterView />
+  <Aside>
+    <Login/>
+    <Create/>
+  </Aside>
 </template>
+
 
 <style>
 @import "@/assets/base.css";
@@ -83,6 +92,10 @@ nav a {
 
 nav a:first-of-type {
   border: 0;
+}
+
+center {
+  text-align: center !important;
 }
 
 @media (min-width: 1024px) {
