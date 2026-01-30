@@ -33,6 +33,11 @@ cd GAPI
 pip install -r requirements.txt
 ```
 
+Or use the automated setup script:
+```bash
+bash setup.sh
+```
+
 3. Configure your Steam credentials:
 ```bash
 cp config_template.json config.json
@@ -45,6 +50,15 @@ cp config_template.json config.json
   "steam_id": "YOUR_STEAM_ID"
 }
 ```
+
+### Try the Demo
+
+Want to try GAPI without setting up Steam credentials? Run the demo:
+```bash
+python3 demo.py
+```
+
+This will run GAPI with mock game data so you can see how it works.
 
 ## Usage
 

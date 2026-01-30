@@ -41,6 +41,9 @@ Thumbs.db
 config.json
 *.ini
 
+# Demo
+.demo_config.json
+
 # History
 .gapi_history.json
 
