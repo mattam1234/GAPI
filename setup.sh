@@ -15,9 +15,34 @@ fi
 echo "✅ Python 3 found: $(python3 --version)"
 echo ""
 
+# Check if pip is available
+if ! python3 -m pip --version &> /dev/null; then
+    echo "❌ Error: pip is not installed for Python 3."
+    echo "Please install pip and try again."
+    exit 1
+fi
+
+echo "✅ pip found: $(python3 -m pip --version)"
+echo ""
+
+# Recommend using virtual environment
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo "⚠️  RECOMMENDATION: Consider using a virtual environment"
+    echo "   python3 -m venv venv"
+    echo "   source venv/bin/activate  # On Linux/Mac"
+    echo "   venv\\Scripts\\activate     # On Windows"
+    echo ""
+    read -p "Continue with system-wide installation? (y/N): " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Installation cancelled."
+        exit 0
+    fi
+fi
+
 # Install dependencies
 echo "📦 Installing dependencies..."
-pip3 install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 if [ $? -ne 0 ]; then
     echo "❌ Error: Failed to install dependencies."

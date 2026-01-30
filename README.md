@@ -50,7 +50,7 @@ cp config_template.json config.json
 
 Run the application:
 ```bash
-python gapi.py
+python3 gapi.py
 ```
 
 ### Command-Line Options
@@ -59,34 +59,34 @@ GAPI supports both interactive and non-interactive modes:
 
 **Interactive Mode** (default):
 ```bash
-python gapi.py
+python3 gapi.py
 ```
 
 **Non-Interactive Mode** - Pick a game and exit:
 ```bash
 # Pick any random game
-python gapi.py --random
+python3 gapi.py --random
 
 # Pick from unplayed games
-python gapi.py --unplayed
+python3 gapi.py --unplayed
 
 # Pick from barely played games (< 2 hours)
-python gapi.py --barely-played
+python3 gapi.py --barely-played
 
 # Pick from well-played games (> 10 hours)
-python gapi.py --well-played
+python3 gapi.py --well-played
 
 # Custom playtime filter
-python gapi.py --min-hours 5 --max-hours 50
+python3 gapi.py --min-hours 5 --max-hours 50
 
 # Show statistics only
-python gapi.py --stats
+python3 gapi.py --stats
 
 # Skip detailed information (faster)
-python gapi.py --random --no-details
+python3 gapi.py --random --no-details
 
 # Use custom config file
-python gapi.py --config /path/to/config.json
+python3 gapi.py --config /path/to/config.json
 ```
 
 **Available Arguments:**
@@ -94,8 +94,8 @@ python gapi.py --config /path/to/config.json
 - `--unplayed, -u`: Pick from unplayed games only
 - `--barely-played, -b`: Pick from barely played games (< 2 hours)
 - `--well-played, -w`: Pick from well-played games (> 10 hours)
-- `--min-hours HOURS`: Minimum playtime in hours
-- `--max-hours HOURS`: Maximum playtime in hours
+- `--min-hours HOURS`: Minimum playtime in hours (must be non-negative)
+- `--max-hours HOURS`: Maximum playtime in hours (must be non-negative)
 - `--stats, -s`: Show library statistics and exit
 - `--no-details`: Skip fetching detailed game information
 - `--config, -c PATH`: Path to config file (default: config.json)

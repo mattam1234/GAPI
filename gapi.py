@@ -72,6 +72,8 @@ class GamePicker:
     
     HISTORY_FILE = '.gapi_history.json'
     MAX_HISTORY = 20
+    BARELY_PLAYED_THRESHOLD_MINUTES = 120  # 2 hours
+    WELL_PLAYED_THRESHOLD_MINUTES = 600    # 10 hours
     
     def __init__(self, config_path: str = 'config.json'):
         self.config = self.load_config(config_path)
@@ -110,6 +112,10 @@ class GamePicker:
             
             if config.get('steam_api_key') == 'YOUR_STEAM_API_KEY_HERE':
                 print(f"{Fore.RED}Error: Please configure your Steam API key in config.json")
+                sys.exit(1)
+            
+            if config.get('steam_id') == 'YOUR_STEAM_ID_HERE':
+                print(f"{Fore.RED}Error: Please configure your Steam ID in config.json")
                 sys.exit(1)
             
             return config
@@ -238,7 +244,7 @@ class GamePicker:
                 else:
                     print(f"{Fore.YELLOW}No unplayed games found!")
             elif choice == '3':
-                filtered = self.filter_games(max_playtime=120)  # 2 hours in minutes
+                filtered = self.filter_games(max_playtime=self.BARELY_PLAYED_THRESHOLD_MINUTES)
                 if filtered:
                     print(f"{Fore.GREEN}Found {len(filtered)} barely played games.")
                     game = self.pick_random_game(filtered)
@@ -246,7 +252,7 @@ class GamePicker:
                 else:
                     print(f"{Fore.YELLOW}No barely played games found!")
             elif choice == '4':
-                filtered = self.filter_games(min_playtime=600)  # 10 hours in minutes
+                filtered = self.filter_games(min_playtime=self.WELL_PLAYED_THRESHOLD_MINUTES)
                 if filtered:
                     print(f"{Fore.GREEN}Found {len(filtered)} well-played games.")
                     game = self.pick_random_game(filtered)
@@ -285,11 +291,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python gapi.py                    # Run in interactive mode
-  python gapi.py --random           # Pick a random game and exit
-  python gapi.py --unplayed         # Pick from unplayed games
-  python gapi.py --barely-played    # Pick from barely played games (< 2 hours)
-  python gapi.py --stats            # Show library statistics only
+  python3 gapi.py                    # Run in interactive mode
+  python3 gapi.py --random           # Pick a random game and exit
+  python3 gapi.py --unplayed         # Pick from unplayed games
+  python3 gapi.py --barely-played    # Pick from barely played games (< 2 hours)
+  python3 gapi.py --stats            # Show library statistics only
         """
     )
     
@@ -321,12 +327,12 @@ Examples:
     parser.add_argument(
         '--min-hours',
         type=float,
-        help='Minimum playtime in hours'
+        help='Minimum playtime in hours (must be non-negative)'
     )
     parser.add_argument(
         '--max-hours',
         type=float,
-        help='Maximum playtime in hours'
+        help='Maximum playtime in hours (must be non-negative)'
     )
     parser.add_argument(
         '--stats', '-s',
@@ -353,6 +359,14 @@ Examples:
     try:
         picker = GamePicker(config_path=args.config)
         
+        # Validate hour arguments
+        if args.min_hours is not None and args.min_hours < 0:
+            print(f"{Fore.RED}Error: --min-hours must be non-negative")
+            sys.exit(1)
+        if args.max_hours is not None and args.max_hours < 0:
+            print(f"{Fore.RED}Error: --max-hours must be non-negative")
+            sys.exit(1)
+        
         # Non-interactive modes
         if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None:
             if not picker.fetch_games():
@@ -369,15 +383,15 @@ Examples:
                 filtered_games = picker.filter_games(max_playtime=0)
                 print(f"{Fore.GREEN}Filtering to unplayed games...")
             elif args.barely_played:
-                filtered_games = picker.filter_games(max_playtime=120)
+                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES)
                 print(f"{Fore.GREEN}Filtering to barely played games (< 2 hours)...")
             elif args.well_played:
-                filtered_games = picker.filter_games(min_playtime=600)
+                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES)
                 print(f"{Fore.GREEN}Filtering to well-played games (> 10 hours)...")
             elif args.min_hours is not None or args.max_hours is not None:
-                min_min = int(args.min_hours * 60) if args.min_hours is not None else 0
-                max_min = int(args.max_hours * 60) if args.max_hours is not None else None
-                filtered_games = picker.filter_games(min_playtime=min_min, max_playtime=max_min)
+                min_minutes = int(args.min_hours * 60) if args.min_hours is not None else 0
+                max_minutes = int(args.max_hours * 60) if args.max_hours is not None else None
+                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes)
                 filter_desc = []
                 if args.min_hours is not None:
                     filter_desc.append(f">= {args.min_hours} hours")
