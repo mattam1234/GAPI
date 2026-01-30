@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import random
+import argparse
 from typing import Dict, List, Optional
 import requests
 from colorama import init, Fore, Style
@@ -69,10 +70,32 @@ class SteamAPIClient:
 class GamePicker:
     """Main game picker application"""
     
+    HISTORY_FILE = '.gapi_history.json'
+    MAX_HISTORY = 20
+    
     def __init__(self, config_path: str = 'config.json'):
         self.config = self.load_config(config_path)
         self.steam_client = SteamAPIClient(self.config['steam_api_key'])
         self.games: List[Dict] = []
+        self.history: List[int] = self.load_history()
+    
+    def load_history(self) -> List[int]:
+        """Load game picking history"""
+        if os.path.exists(self.HISTORY_FILE):
+            try:
+                with open(self.HISTORY_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return []
+        return []
+    
+    def save_history(self):
+        """Save game picking history"""
+        try:
+            with open(self.HISTORY_FILE, 'w') as f:
+                json.dump(self.history[-self.MAX_HISTORY:], f)
+        except IOError:
+            pass  # Silently fail if we can't save history
     
     def load_config(self, config_path: str) -> Dict:
         """Load configuration from JSON file"""
@@ -118,14 +141,30 @@ class GamePicker:
         
         return filtered
     
-    def pick_random_game(self, filtered_games: Optional[List[Dict]] = None) -> Optional[Dict]:
+    def pick_random_game(self, filtered_games: Optional[List[Dict]] = None, avoid_recent: bool = True) -> Optional[Dict]:
         """Pick a random game from the library"""
         games_to_pick = filtered_games if filtered_games is not None else self.games
         
         if not games_to_pick:
             return None
         
-        return random.choice(games_to_pick)
+        # Try to avoid recently picked games if possible
+        if avoid_recent and self.history and len(games_to_pick) > len(self.history):
+            available = [g for g in games_to_pick if g.get('appid') not in self.history[-10:]]
+            if available:
+                games_to_pick = available
+        
+        game = random.choice(games_to_pick)
+        
+        # Add to history
+        app_id = game.get('appid')
+        if app_id:
+            if app_id in self.history:
+                self.history.remove(app_id)
+            self.history.append(app_id)
+            self.save_history()
+        
+        return game
     
     def display_game_info(self, game: Dict, detailed: bool = True):
         """Display information about a game"""
@@ -241,6 +280,67 @@ class GamePicker:
 
 def main():
     """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description='GAPI - Game Picker with SteamDB Integration',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python gapi.py                    # Run in interactive mode
+  python gapi.py --random           # Pick a random game and exit
+  python gapi.py --unplayed         # Pick from unplayed games
+  python gapi.py --barely-played    # Pick from barely played games (< 2 hours)
+  python gapi.py --stats            # Show library statistics only
+        """
+    )
+    
+    parser.add_argument(
+        '--config', '-c',
+        default='config.json',
+        help='Path to config file (default: config.json)'
+    )
+    parser.add_argument(
+        '--random', '-r',
+        action='store_true',
+        help='Pick a random game and exit (non-interactive)'
+    )
+    parser.add_argument(
+        '--unplayed', '-u',
+        action='store_true',
+        help='Pick from unplayed games only'
+    )
+    parser.add_argument(
+        '--barely-played', '-b',
+        action='store_true',
+        help='Pick from barely played games (< 2 hours)'
+    )
+    parser.add_argument(
+        '--well-played', '-w',
+        action='store_true',
+        help='Pick from well-played games (> 10 hours)'
+    )
+    parser.add_argument(
+        '--min-hours',
+        type=float,
+        help='Minimum playtime in hours'
+    )
+    parser.add_argument(
+        '--max-hours',
+        type=float,
+        help='Maximum playtime in hours'
+    )
+    parser.add_argument(
+        '--stats', '-s',
+        action='store_true',
+        help='Show library statistics and exit'
+    )
+    parser.add_argument(
+        '--no-details',
+        action='store_true',
+        help='Skip fetching detailed game information'
+    )
+    
+    args = parser.parse_args()
+    
     print(f"{Fore.CYAN}{Style.BRIGHT}")
     print("  ____    _    ____ ___ ")
     print(" / ___|  / \\  |  _ \\_ _|")
@@ -251,8 +351,53 @@ def main():
     print(f"{Fore.WHITE}Game Picker with SteamDB Integration\n")
     
     try:
-        picker = GamePicker()
-        picker.interactive_mode()
+        picker = GamePicker(config_path=args.config)
+        
+        # Non-interactive modes
+        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None:
+            if not picker.fetch_games():
+                sys.exit(1)
+            
+            if args.stats:
+                picker.show_stats()
+                return
+            
+            # Determine which filter to use
+            filtered_games = None
+            
+            if args.unplayed:
+                filtered_games = picker.filter_games(max_playtime=0)
+                print(f"{Fore.GREEN}Filtering to unplayed games...")
+            elif args.barely_played:
+                filtered_games = picker.filter_games(max_playtime=120)
+                print(f"{Fore.GREEN}Filtering to barely played games (< 2 hours)...")
+            elif args.well_played:
+                filtered_games = picker.filter_games(min_playtime=600)
+                print(f"{Fore.GREEN}Filtering to well-played games (> 10 hours)...")
+            elif args.min_hours is not None or args.max_hours is not None:
+                min_min = int(args.min_hours * 60) if args.min_hours is not None else 0
+                max_min = int(args.max_hours * 60) if args.max_hours is not None else None
+                filtered_games = picker.filter_games(min_playtime=min_min, max_playtime=max_min)
+                filter_desc = []
+                if args.min_hours is not None:
+                    filter_desc.append(f">= {args.min_hours} hours")
+                if args.max_hours is not None:
+                    filter_desc.append(f"<= {args.max_hours} hours")
+                print(f"{Fore.GREEN}Filtering to games with {' and '.join(filter_desc)}...")
+            
+            if filtered_games is not None and not filtered_games:
+                print(f"{Fore.RED}No games found matching the filter criteria.")
+                sys.exit(1)
+            
+            game = picker.pick_random_game(filtered_games)
+            if game:
+                picker.display_game_info(game, detailed=not args.no_details)
+            else:
+                print(f"{Fore.RED}No games available to pick from.")
+                sys.exit(1)
+        else:
+            # Interactive mode
+            picker.interactive_mode()
     except KeyboardInterrupt:
         print(f"\n\n{Fore.YELLOW}Interrupted by user. Goodbye!")
     except Exception as e:

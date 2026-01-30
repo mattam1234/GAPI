@@ -10,6 +10,9 @@ GAPI is a command-line tool that helps you decide what to play from your Steam l
 - 🔍 **Detailed Game Info**: Fetch descriptions, genres, release dates, and Metacritic scores
 - 🔗 **Direct Links**: Quick access to Steam Store and SteamDB pages
 - 🎨 **Colorful Interface**: Easy-to-read colored terminal output
+- 💾 **Smart History**: Avoids suggesting recently picked games
+- ⚡ **CLI Mode**: Command-line arguments for scripting and quick picks
+- 🔧 **Configurable**: Custom playtime filters and settings
 
 ## Prerequisites
 
@@ -49,6 +52,54 @@ Run the application:
 ```bash
 python gapi.py
 ```
+
+### Command-Line Options
+
+GAPI supports both interactive and non-interactive modes:
+
+**Interactive Mode** (default):
+```bash
+python gapi.py
+```
+
+**Non-Interactive Mode** - Pick a game and exit:
+```bash
+# Pick any random game
+python gapi.py --random
+
+# Pick from unplayed games
+python gapi.py --unplayed
+
+# Pick from barely played games (< 2 hours)
+python gapi.py --barely-played
+
+# Pick from well-played games (> 10 hours)
+python gapi.py --well-played
+
+# Custom playtime filter
+python gapi.py --min-hours 5 --max-hours 50
+
+# Show statistics only
+python gapi.py --stats
+
+# Skip detailed information (faster)
+python gapi.py --random --no-details
+
+# Use custom config file
+python gapi.py --config /path/to/config.json
+```
+
+**Available Arguments:**
+- `--random, -r`: Pick a random game and exit
+- `--unplayed, -u`: Pick from unplayed games only
+- `--barely-played, -b`: Pick from barely played games (< 2 hours)
+- `--well-played, -w`: Pick from well-played games (> 10 hours)
+- `--min-hours HOURS`: Minimum playtime in hours
+- `--max-hours HOURS`: Maximum playtime in hours
+- `--stats, -s`: Show library statistics and exit
+- `--no-details`: Skip fetching detailed game information
+- `--config, -c PATH`: Path to config file (default: config.json)
+- `--help, -h`: Show help message
 
 ### Interactive Menu
 
