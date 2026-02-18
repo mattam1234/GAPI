@@ -217,23 +217,23 @@ python3 discord_bot.py
 ```
 
 **Discord Commands:**
-- `!gapi link <steam_id> [username]` - Link your Discord account to your Steam account
-- `!gapi unlink` - Unlink your Steam account
-- `!gapi users` - List all users with linked Steam accounts
-- `!gapi vote [duration]` - Start a voting session (react with ✅ to join)
-- `!gapi pick [@user1 @user2]` - Pick a random common game for mentioned users
-- `!gapi common [limit]` - Show common games owned by all linked users
-- `!gapi stats` - Display library statistics for all users
+- `/link <steam_id> [username]` - Link your Discord account to your Steam account
+- `/unlink` - Unlink your Steam account
+- `/users` - List all users with linked Steam accounts
+- `/vote [duration]` - Start a voting session (react with ✅ to join)
+- `/pick [user1] [user2] ...` - Pick a random common game for mentioned users (or all if none mentioned)
+- `/common [limit]` - Show common games owned by all linked users
+- `/stats` - Display library statistics for all users
 
 **Example Discord Workflow:**
 ```
-User1: !gapi link 76561198000000001 User1
+User1: /link 76561198000000001 User1
 Bot: ✅ Linked @User1 to Steam ID: 76561198000000001
 
-User2: !gapi link 76561198000000002 User2
+User2: /link 76561198000000002 User2
 Bot: ✅ Linked @User2 to Steam ID: 76561198000000002
 
-User1: !gapi vote 60
+User1: /vote 60
 Bot: 🗳️ Vote to Play! React with ✅ to join...
 [Users react with ✅]
 [After 60 seconds]
