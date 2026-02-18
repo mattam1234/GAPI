@@ -19,6 +19,18 @@ from colorama import init, Fore, Style
 init(autoreset=True)
 
 
+def extract_game_id(game: Dict) -> Optional[str]:
+    """Helper function to extract game ID from various formats"""
+    return game.get('appid') or game.get('id') or game.get('game_id')
+
+
+def is_placeholder_value(value: str) -> bool:
+    """Check if a value is a placeholder (starts with YOUR_)"""
+    if not value or not isinstance(value, str):
+        return True
+    return value.startswith('YOUR_')
+
+
 class GamePlatformClient(ABC):
     """Abstract base class for game platform API clients"""
     
@@ -379,7 +391,7 @@ class GamePicker:
             user_id_key = f'{platform_name}_id' if platform_name != 'steam' else 'steam_id'
             user_id = self.config.get(user_id_key)
             
-            if not user_id or user_id == f'YOUR_{platform_name.upper()}_ID_HERE':
+            if not user_id or is_placeholder_value(user_id):
                 continue
             
             print(f"{Fore.CYAN}Fetching your {platform_name.title()} library...")
@@ -388,7 +400,7 @@ class GamePicker:
                 if games:
                     # Add composite game ID for multi-platform support
                     for game in games:
-                        game_id = game.get('appid') or game.get('id') or game.get('game_id')
+                        game_id = extract_game_id(game)
                         game['game_id'] = f"{platform_name}:{game_id}"
                         game['platform'] = platform_name
                         # Ensure appid exists for backward compatibility
@@ -431,7 +443,7 @@ class GamePicker:
             
             for game in filtered:
                 platform = game.get('platform', 'steam')
-                game_id = game.get('appid') or game.get('id')
+                game_id = extract_game_id(game)
                 
                 if game_id and platform in self.clients:
                     details = self.clients[platform].get_game_details(str(game_id))

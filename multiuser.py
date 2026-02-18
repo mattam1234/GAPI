@@ -156,7 +156,7 @@ class MultiUserPicker:
             
             # Fetch games from each platform
             for platform_name, user_id in platforms.items():
-                if not user_id or user_id.startswith('YOUR_'):
+                if not user_id or gapi.is_placeholder_value(user_id):
                     continue
                 
                 if platform_name in self.clients:
@@ -165,7 +165,7 @@ class MultiUserPicker:
                         if games:
                             # Add composite game ID and platform info
                             for game in games:
-                                game_id = game.get('appid') or game.get('id') or game.get('game_id')
+                                game_id = gapi.extract_game_id(game)
                                 game['game_id'] = f"{platform_name}:{game_id}"
                                 game['platform'] = platform_name
                                 if 'appid' not in game:
@@ -232,7 +232,7 @@ class MultiUserPicker:
         coop_games = []
         
         for game in games:
-            app_id = game.get('appid')
+            app_id = gapi.extract_game_id(game)
             platform = game.get('platform', 'steam')
             
             if not app_id or platform not in self.clients:
