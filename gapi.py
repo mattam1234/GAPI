@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-GAPI - Game Picker with SteamDB Integration
-A tool to randomly pick a game from your Steam library with detailed information.
+GAPI - Game Picker with Multi-Platform Integration
+A tool to randomly pick a game from your Steam, Epic Games, and GOG libraries with detailed information.
 """
 
 import json
@@ -11,6 +11,7 @@ import random
 import argparse
 import datetime
 from typing import Dict, List, Optional
+from abc import ABC, abstractmethod
 import requests
 from colorama import init, Fore, Style
 
@@ -18,15 +19,46 @@ from colorama import init, Fore, Style
 init(autoreset=True)
 
 
-class SteamAPIClient:
+class GamePlatformClient(ABC):
+    """Abstract base class for game platform API clients"""
+    
+    def __init__(self):
+        self.session = requests.Session()
+        self.details_cache = {}
+    
+    @abstractmethod
+    def get_owned_games(self, user_id: str) -> List[Dict]:
+        """
+        Get list of games owned by a user.
+        Returns list of dicts with at minimum: name, appid/game_id, playtime_forever
+        """
+        pass
+    
+    @abstractmethod
+    def get_game_details(self, game_id: str) -> Optional[Dict]:
+        """
+        Get detailed information about a specific game.
+        Returns dict with game details or None if not found
+        """
+        pass
+    
+    @abstractmethod
+    def get_platform_name(self) -> str:
+        """Return the platform name (e.g., 'steam', 'epic', 'gog')"""
+        pass
+
+
+class SteamAPIClient(GamePlatformClient):
     """Client for interacting with Steam Web API"""
     
     BASE_URL = "https://api.steampowered.com"
     
     def __init__(self, api_key: str):
+        super().__init__()
         self.api_key = api_key
-        self.session = requests.Session()
-        self.details_cache = {}  # Cache for game details
+    
+    def get_platform_name(self) -> str:
+        return "steam"
     
     def get_owned_games(self, steam_id: str, include_appinfo: bool = True) -> List[Dict]:
         """Get list of games owned by a Steam user"""
@@ -45,34 +77,136 @@ class SteamAPIClient:
             data = response.json()
             
             if 'response' in data and 'games' in data['response']:
-                return data['response']['games']
+                games = data['response']['games']
+                # Add platform info to each game
+                for game in games:
+                    game['platform'] = self.get_platform_name()
+                return games
             return []
         except requests.RequestException as e:
             print(f"{Fore.RED}Error fetching games from Steam API: {e}")
             return []
     
-    def get_game_details(self, app_id: int) -> Optional[Dict]:
+    def get_game_details(self, app_id: str) -> Optional[Dict]:
         """Get detailed information about a specific game"""
+        # Convert to int for Steam API
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return None
+        
         # Check cache first
-        if app_id in self.details_cache:
-            return self.details_cache[app_id]
+        if app_id_int in self.details_cache:
+            return self.details_cache[app_id_int]
         
         url = "https://store.steampowered.com/api/appdetails"
-        params = {'appids': app_id}
+        params = {'appids': app_id_int}
         
         try:
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
             
-            if str(app_id) in data and data[str(app_id)]['success']:
-                details = data[str(app_id)]['data']
-                self.details_cache[app_id] = details
+            if str(app_id_int) in data and data[str(app_id_int)]['success']:
+                details = data[str(app_id_int)]['data']
+                self.details_cache[app_id_int] = details
                 return details
             return None
         except requests.RequestException as e:
             print(f"{Fore.YELLOW}Warning: Could not fetch details for app {app_id}: {e}")
             return None
+
+
+class EpicAPIClient(GamePlatformClient):
+    """Client for interacting with Epic Games Store API"""
+    
+    def __init__(self):
+        super().__init__()
+        try:
+            from epicstore_api import EpicGamesStoreAPI
+            self.api = EpicGamesStoreAPI()
+        except ImportError:
+            print(f"{Fore.YELLOW}Warning: epicstore-api not installed. Epic Games support disabled.")
+            self.api = None
+    
+    def get_platform_name(self) -> str:
+        return "epic"
+    
+    def get_owned_games(self, user_id: str) -> List[Dict]:
+        """
+        Get list of games from Epic Games Store.
+        Note: Epic doesn't provide a user library API without OAuth, 
+        so this returns an empty list for now.
+        """
+        if not self.api:
+            return []
+        
+        # Epic Games Store API doesn't provide user library access without OAuth
+        # This would require the user to authenticate via Epic's OAuth flow
+        # For now, return empty list with a note
+        print(f"{Fore.YELLOW}Note: Epic Games library access requires OAuth authentication.")
+        print(f"{Fore.YELLOW}Epic Games integration currently supports store browsing only.")
+        return []
+    
+    def get_game_details(self, game_id: str) -> Optional[Dict]:
+        """Get detailed information about a specific Epic game"""
+        if not self.api:
+            return None
+        
+        # Check cache first
+        if game_id in self.details_cache:
+            return self.details_cache[game_id]
+        
+        try:
+            # Try to get product details
+            product = self.api.get_product(game_id)
+            if product:
+                # Normalize to match Steam API format
+                details = {
+                    'name': product.get('title', 'Unknown'),
+                    'short_description': product.get('description', ''),
+                    'developers': [product.get('developer', 'Unknown')],
+                    'publishers': [product.get('publisher', 'Unknown')],
+                }
+                self.details_cache[game_id] = details
+                return details
+        except Exception as e:
+            print(f"{Fore.YELLOW}Warning: Could not fetch details for Epic game {game_id}: {e}")
+        
+        return None
+
+
+class GOGAPIClient(GamePlatformClient):
+    """Client for interacting with GOG Galaxy API"""
+    
+    def __init__(self):
+        super().__init__()
+        # GOG Galaxy API is primarily for plugin development
+        # Direct library access requires authentication
+        self.authenticated = False
+    
+    def get_platform_name(self) -> str:
+        return "gog"
+    
+    def get_owned_games(self, user_id: str) -> List[Dict]:
+        """
+        Get list of games from GOG library.
+        Note: GOG's API requires authentication and is meant for Galaxy plugins.
+        This returns an empty list for now.
+        """
+        print(f"{Fore.YELLOW}Note: GOG library access requires Galaxy plugin authentication.")
+        print(f"{Fore.YELLOW}GOG Games integration currently not fully supported.")
+        return []
+    
+    def get_game_details(self, game_id: str) -> Optional[Dict]:
+        """Get detailed information about a specific GOG game"""
+        # Check cache first
+        if game_id in self.details_cache:
+            return self.details_cache[game_id]
+        
+        # GOG API requires authentication for most operations
+        # For now, return minimal info
+        return None
 
 
 class GamePicker:
@@ -86,17 +220,43 @@ class GamePicker:
     
     def __init__(self, config_path: str = 'config.json'):
         self.config = self.load_config(config_path)
-        self.steam_client = SteamAPIClient(self.config['steam_api_key'])
+        
+        # Initialize platform clients
+        self.clients: Dict[str, GamePlatformClient] = {}
+        
+        # Always try to initialize Steam if API key is available
+        if self.config.get('steam_api_key') and self.config['steam_api_key'] != 'YOUR_STEAM_API_KEY_HERE':
+            self.clients['steam'] = SteamAPIClient(self.config['steam_api_key'])
+        
+        # Initialize Epic Games client if enabled
+        if self.config.get('epic_enabled', False):
+            try:
+                self.clients['epic'] = EpicAPIClient()
+            except Exception as e:
+                print(f"{Fore.YELLOW}Warning: Could not initialize Epic Games client: {e}")
+        
+        # Initialize GOG client if enabled
+        if self.config.get('gog_enabled', False):
+            try:
+                self.clients['gog'] = GOGAPIClient()
+            except Exception as e:
+                print(f"{Fore.YELLOW}Warning: Could not initialize GOG client: {e}")
+        
+        # For backward compatibility, keep steam_client reference
+        self.steam_client = self.clients.get('steam')
+        
         self.games: List[Dict] = []
-        self.history: List[int] = self.load_history()
-        self.favorites: List[int] = self.load_favorites()
+        self.history: List[str] = self.load_history()  # Now stores composite IDs
+        self.favorites: List[str] = self.load_favorites()  # Now stores composite IDs
     
-    def load_history(self) -> List[int]:
-        """Load game picking history"""
+    def load_history(self) -> List[str]:
+        """Load game picking history (supports both old int and new composite ID formats)"""
         if os.path.exists(self.HISTORY_FILE):
             try:
                 with open(self.HISTORY_FILE, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Convert old integer IDs to composite format (steam:id)
+                    return [f"steam:{item}" if isinstance(item, int) else item for item in data]
             except (json.JSONDecodeError, IOError):
                 return []
         return []
@@ -109,12 +269,14 @@ class GamePicker:
         except IOError:
             pass  # Silently fail if we can't save history
     
-    def load_favorites(self) -> List[int]:
-        """Load favorite games list"""
+    def load_favorites(self) -> List[str]:
+        """Load favorite games list (supports both old int and new composite ID formats)"""
         if os.path.exists(self.FAVORITES_FILE):
             try:
                 with open(self.FAVORITES_FILE, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Convert old integer IDs to composite format (steam:id)
+                    return [f"steam:{item}" if isinstance(item, int) else item for item in data]
             except (json.JSONDecodeError, IOError):
                 return []
         return []
@@ -127,18 +289,26 @@ class GamePicker:
         except IOError as e:
             print(f"{Fore.RED}Error saving favorites: {e}")
     
-    def add_favorite(self, app_id: int) -> bool:
-        """Add a game to favorites"""
-        if app_id not in self.favorites:
-            self.favorites.append(app_id)
+    def add_favorite(self, game_id: str) -> bool:
+        """Add a game to favorites (accepts composite ID like 'steam:620' or int for backward compatibility)"""
+        # Convert int to composite ID for backward compatibility
+        if isinstance(game_id, int):
+            game_id = f"steam:{game_id}"
+        
+        if game_id not in self.favorites:
+            self.favorites.append(game_id)
             self.save_favorites()
             return True
         return False
     
-    def remove_favorite(self, app_id: int) -> bool:
-        """Remove a game from favorites"""
-        if app_id in self.favorites:
-            self.favorites.remove(app_id)
+    def remove_favorite(self, game_id: str) -> bool:
+        """Remove a game from favorites (accepts composite ID like 'steam:620' or int for backward compatibility)"""
+        # Convert int to composite ID for backward compatibility
+        if isinstance(game_id, int):
+            game_id = f"steam:{game_id}"
+        
+        if game_id in self.favorites:
+            self.favorites.remove(game_id)
             self.save_favorites()
             return True
         return False
@@ -200,15 +370,42 @@ class GamePicker:
             sys.exit(1)
     
     def fetch_games(self) -> bool:
-        """Fetch games from Steam library"""
-        print(f"{Fore.CYAN}Fetching your Steam library...")
-        self.games = self.steam_client.get_owned_games(self.config['steam_id'])
+        """Fetch games from all configured platform libraries"""
+        self.games = []
+        total_games = 0
+        
+        # Fetch from each platform
+        for platform_name, client in self.clients.items():
+            user_id_key = f'{platform_name}_id' if platform_name != 'steam' else 'steam_id'
+            user_id = self.config.get(user_id_key)
+            
+            if not user_id or user_id == f'YOUR_{platform_name.upper()}_ID_HERE':
+                continue
+            
+            print(f"{Fore.CYAN}Fetching your {platform_name.title()} library...")
+            try:
+                games = client.get_owned_games(user_id)
+                if games:
+                    # Add composite game ID for multi-platform support
+                    for game in games:
+                        game_id = game.get('appid') or game.get('id') or game.get('game_id')
+                        game['game_id'] = f"{platform_name}:{game_id}"
+                        game['platform'] = platform_name
+                        # Ensure appid exists for backward compatibility
+                        if 'appid' not in game:
+                            game['appid'] = game_id
+                    
+                    self.games.extend(games)
+                    print(f"{Fore.GREEN}Found {len(games)} games on {platform_name.title()}!")
+                    total_games += len(games)
+            except Exception as e:
+                print(f"{Fore.RED}Error fetching games from {platform_name}: {e}")
         
         if not self.games:
-            print(f"{Fore.RED}No games found or error fetching games.")
+            print(f"{Fore.RED}No games found or error fetching games from any platform.")
             return False
         
-        print(f"{Fore.GREEN}Found {len(self.games)} games in your library!")
+        print(f"{Fore.GREEN}Total: {total_games} games across all platforms!")
         return True
     
     def filter_games(self, min_playtime: int = 0, max_playtime: Optional[int] = None, 
@@ -225,7 +422,7 @@ class GamePicker:
         
         # Filter by favorites
         if favorites_only:
-            filtered = [g for g in filtered if g.get('appid') in self.favorites]
+            filtered = [g for g in filtered if g.get('game_id') in self.favorites]
         
         # Filter by genres (requires fetching details)
         if genres:
@@ -233,9 +430,11 @@ class GamePicker:
             genres_lower = [g.lower() for g in genres]
             
             for game in filtered:
-                app_id = game.get('appid')
-                if app_id:
-                    details = self.steam_client.get_game_details(app_id)
+                platform = game.get('platform', 'steam')
+                game_id = game.get('appid') or game.get('id')
+                
+                if game_id and platform in self.clients:
+                    details = self.clients[platform].get_game_details(str(game_id))
                     if details and 'genres' in details:
                         game_genres = [g['description'].lower() for g in details['genres']]
                         # Check if any requested genre matches
@@ -255,41 +454,44 @@ class GamePicker:
         
         # Try to avoid recently picked games if possible
         if avoid_recent and self.history and len(games_to_pick) > len(self.history):
-            available = [g for g in games_to_pick if g.get('appid') not in self.history[-10:]]
+            available = [g for g in games_to_pick if g.get('game_id') not in self.history[-10:]]
             if available:
                 games_to_pick = available
         
         game = random.choice(games_to_pick)
         
-        # Add to history
-        app_id = game.get('appid')
-        if app_id:
-            if app_id in self.history:
-                self.history.remove(app_id)
-            self.history.append(app_id)
+        # Add to history using composite ID
+        game_id = game.get('game_id')
+        if game_id:
+            if game_id in self.history:
+                self.history.remove(game_id)
+            self.history.append(game_id)
             self.save_history()
         
         return game
     
     def display_game_info(self, game: Dict, detailed: bool = True, show_favorite_prompt: bool = True):
         """Display information about a game"""
+        game_id = game.get('game_id')
         app_id = game.get('appid')
         name = game.get('name', 'Unknown Game')
+        platform = game.get('platform', 'steam')
         playtime_minutes = game.get('playtime_forever', 0)
         playtime_hours = playtime_minutes / 60
-        is_favorite = app_id in self.favorites if app_id else False
+        is_favorite = game_id in self.favorites if game_id else False
         
         print(f"\n{Fore.GREEN}{'='*60}")
         print(f"{Fore.CYAN}{Style.BRIGHT}🎮 {name}")
         if is_favorite:
             print(f"{Fore.YELLOW}⭐ FAVORITE")
         print(f"{Fore.GREEN}{'='*60}")
-        print(f"{Fore.YELLOW}App ID: {Fore.WHITE}{app_id}")
+        print(f"{Fore.YELLOW}Platform: {Fore.WHITE}{platform.title()}")
+        print(f"{Fore.YELLOW}Game ID: {Fore.WHITE}{app_id}")
         print(f"{Fore.YELLOW}Playtime: {Fore.WHITE}{playtime_hours:.1f} hours")
         
-        if detailed and app_id:
-            print(f"\n{Fore.CYAN}Fetching detailed information from Steam Store...")
-            details = self.steam_client.get_game_details(app_id)
+        if detailed and app_id and platform in self.clients:
+            print(f"\n{Fore.CYAN}Fetching detailed information from {platform.title()} store...")
+            details = self.clients[platform].get_game_details(str(app_id))
             
             if details:
                 if 'short_description' in details:
@@ -308,21 +510,28 @@ class GamePicker:
                     score = details['metacritic'].get('score', 'N/A')
                     print(f"{Fore.YELLOW}Metacritic Score: {Fore.WHITE}{score}")
         
-        print(f"\n{Fore.YELLOW}Steam Store: {Fore.WHITE}https://store.steampowered.com/app/{app_id}/")
-        print(f"{Fore.YELLOW}SteamDB: {Fore.WHITE}https://steamdb.info/app/{app_id}/")
+        # Platform-specific store links
+        if platform == 'steam':
+            print(f"\n{Fore.YELLOW}Steam Store: {Fore.WHITE}https://store.steampowered.com/app/{app_id}/")
+            print(f"{Fore.YELLOW}SteamDB: {Fore.WHITE}https://steamdb.info/app/{app_id}/")
+        elif platform == 'epic':
+            print(f"\n{Fore.YELLOW}Epic Store: {Fore.WHITE}https://store.epicgames.com/")
+        elif platform == 'gog':
+            print(f"\n{Fore.YELLOW}GOG Store: {Fore.WHITE}https://www.gog.com/")
+        
         print(f"{Fore.GREEN}{'='*60}\n")
         
         # Prompt to add/remove from favorites in interactive mode
-        if show_favorite_prompt and app_id:
+        if show_favorite_prompt and game_id:
             if is_favorite:
                 choice = input(f"{Fore.YELLOW}Remove from favorites? (y/n): {Fore.WHITE}").strip().lower()
                 if choice == 'y':
-                    self.remove_favorite(app_id)
+                    self.remove_favorite(game_id)
                     print(f"{Fore.GREEN}Removed from favorites!")
             else:
                 choice = input(f"{Fore.YELLOW}Add to favorites? (y/n): {Fore.WHITE}").strip().lower()
                 if choice == 'y':
-                    self.add_favorite(app_id)
+                    self.add_favorite(game_id)
                     print(f"{Fore.GREEN}Added to favorites!")
     
     def interactive_mode(self):
@@ -485,14 +694,15 @@ class GamePicker:
         print(f"\n{Fore.CYAN}{Style.BRIGHT}⭐ Your Favorite Games ({len(self.favorites)})")
         print(f"{Fore.GREEN}{'='*60}")
         
-        for app_id in self.favorites:
-            game = next((g for g in self.games if g.get('appid') == app_id), None)
+        for game_id in self.favorites:
+            game = next((g for g in self.games if g.get('game_id') == game_id), None)
             if game:
                 name = game.get('name', 'Unknown')
+                platform = game.get('platform', 'unknown')
                 playtime = game.get('playtime_forever', 0) / 60
-                print(f"{Fore.YELLOW}{app_id}: {Fore.WHITE}{name} {Fore.CYAN}({playtime:.1f} hours)")
+                print(f"{Fore.YELLOW}{game_id}: {Fore.WHITE}{name} {Fore.MAGENTA}[{platform}] {Fore.CYAN}({playtime:.1f} hours)")
             else:
-                print(f"{Fore.YELLOW}{app_id}: {Fore.RED}(Not in library)")
+                print(f"{Fore.YELLOW}{game_id}: {Fore.RED}(Not in library)")
         
         print(f"{Fore.GREEN}{'='*60}\n")
     
@@ -503,16 +713,12 @@ class GamePicker:
             return
         
         self.list_favorites()
-        app_id_str = input(f"\n{Fore.GREEN}Enter App ID to remove: {Fore.WHITE}").strip()
+        game_id_str = input(f"\n{Fore.GREEN}Enter Game ID to remove: {Fore.WHITE}").strip()
         
-        try:
-            app_id = int(app_id_str)
-            if self.remove_favorite(app_id):
-                print(f"{Fore.GREEN}Removed from favorites!")
-            else:
-                print(f"{Fore.YELLOW}Game not found in favorites.")
-        except ValueError:
-            print(f"{Fore.RED}Invalid App ID.")
+        if self.remove_favorite(game_id_str):
+            print(f"{Fore.GREEN}Removed from favorites!")
+        else:
+            print(f"{Fore.YELLOW}Game not found in favorites.")
     
     def export_import_menu(self):
         """Export/Import history menu"""

@@ -3,13 +3,21 @@
     {
       "name": "User1",
       "email": "user1@example.com",
-      "steam_id": "YOUR_STEAM_ID_1",
+      "platforms": {
+        "steam": "YOUR_STEAM_ID_1",
+        "epic": "",
+        "gog": ""
+      },
       "discord_id": "YOUR_DISCORD_ID_1"
     },
     {
       "name": "User2",
       "email": "user2@example.com",
-      "steam_id": "YOUR_STEAM_ID_2",
+      "platforms": {
+        "steam": "YOUR_STEAM_ID_2",
+        "epic": "",
+        "gog": ""
+      },
       "discord_id": "YOUR_DISCORD_ID_2"
     }
   ]

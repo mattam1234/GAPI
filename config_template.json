@@ -1,5 +1,9 @@
 {
   "steam_api_key": "YOUR_STEAM_API_KEY_HERE",
   "steam_id": "YOUR_STEAM_ID_HERE",
+  "epic_enabled": false,
+  "epic_id": "YOUR_EPIC_ID_HERE",
+  "gog_enabled": false,
+  "gog_id": "YOUR_GOG_ID_HERE",
   "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE"
 }
