@@ -51,6 +51,10 @@ config.json
 # Favorites
 .gapi_favorites.json
 
+# Users
+users.json
+discord_config.json
+
 # Export files
 history_export.json
 

@@ -11,6 +11,7 @@ import os
 import sys
 from typing import Optional, List, Dict
 import gapi
+import multiuser
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -20,14 +21,21 @@ picker: Optional[gapi.GamePicker] = None
 picker_lock = threading.Lock()
 current_game: Optional[Dict] = None
 
+# Multi-user picker instance
+multi_picker: Optional[multiuser.MultiUserPicker] = None
+multi_picker_lock = threading.Lock()
+
 
 def initialize_picker(config_path: str = 'config.json'):
     """Initialize the game picker"""
-    global picker
+    global picker, multi_picker
     with picker_lock:
         try:
             picker = gapi.GamePicker(config_path=config_path)
             if picker.fetch_games():
+                # Initialize multi-user picker
+                with multi_picker_lock:
+                    multi_picker = multiuser.MultiUserPicker(picker.config['steam_api_key'])
                 return True, f"Loaded {len(picker.games)} games"
             return False, "Failed to fetch games"
         except Exception as e:
@@ -276,6 +284,184 @@ def api_stats():
             'favorite_count': len(picker.favorites),
             'top_games': top_games
         })
+
+
+@app.route('/api/users')
+def api_users_list():
+    """Get all users"""
+    global multi_picker
+    
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+    
+    with multi_picker_lock:
+        return jsonify({'users': multi_picker.users})
+
+
+@app.route('/api/users/add', methods=['POST'])
+def api_users_add():
+    """Add a new user"""
+    global multi_picker
+    
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+    
+    data = request.json or {}
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip()
+    steam_id = data.get('steam_id', '').strip()
+    discord_id = data.get('discord_id', '').strip()
+    
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    
+    if not steam_id:
+        return jsonify({'error': 'Steam ID is required'}), 400
+    
+    with multi_picker_lock:
+        success = multi_picker.add_user(
+            name=name,
+            steam_id=steam_id,
+            email=email,
+            discord_id=discord_id
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': f'User {name} added successfully'})
+        else:
+            return jsonify({'error': 'User already exists'}), 400
+
+
+@app.route('/api/users/update', methods=['POST'])
+def api_users_update():
+    """Update user information"""
+    global multi_picker
+    
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+    
+    data = request.json or {}
+    identifier = data.get('identifier', '').strip()
+    updates = data.get('updates', {})
+    
+    if not identifier:
+        return jsonify({'error': 'Identifier is required'}), 400
+    
+    if not updates:
+        return jsonify({'error': 'No updates provided'}), 400
+    
+    with multi_picker_lock:
+        success = multi_picker.update_user(identifier, **updates)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'User updated successfully'})
+        else:
+            return jsonify({'error': 'User not found'}), 404
+
+
+@app.route('/api/users/remove', methods=['POST'])
+def api_users_remove():
+    """Remove a user"""
+    global multi_picker
+    
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+    
+    data = request.json or {}
+    name = data.get('name', '').strip()
+    
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    
+    with multi_picker_lock:
+        success = multi_picker.remove_user(name)
+        
+        if success:
+            return jsonify({'success': True, 'message': f'User {name} removed successfully'})
+        else:
+            return jsonify({'error': 'User not found'}), 404
+
+
+@app.route('/api/multiuser/common')
+def api_multiuser_common():
+    """Get common games for selected users"""
+    global multi_picker
+    
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+    
+    user_names = request.args.get('users', '').split(',')
+    user_names = [u.strip() for u in user_names if u.strip()]
+    
+    with multi_picker_lock:
+        common_games = multi_picker.find_common_games(user_names if user_names else None)
+        
+        games_data = []
+        for game in common_games[:50]:  # Limit to 50 games
+            games_data.append({
+                'app_id': game.get('appid'),
+                'name': game.get('name', 'Unknown'),
+                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
+                'owners': game.get('owners', [])
+            })
+        
+        return jsonify({
+            'total_common': len(common_games),
+            'games': games_data
+        })
+
+
+@app.route('/api/multiuser/pick', methods=['POST'])
+def api_multiuser_pick():
+    """Pick a common game for multiple users"""
+    global multi_picker
+    
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+    
+    data = request.json or {}
+    user_names = data.get('users', [])
+    coop_only = data.get('coop_only', False)
+    max_players = data.get('max_players')
+    
+    with multi_picker_lock:
+        game = multi_picker.pick_common_game(
+            user_names if user_names else None,
+            coop_only=coop_only,
+            max_players=max_players
+        )
+        
+        if not game:
+            return jsonify({'error': 'No common games found'}), 404
+        
+        app_id = game.get('appid')
+        
+        return jsonify({
+            'app_id': app_id,
+            'name': game.get('name', 'Unknown'),
+            'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
+            'owners': game.get('owners', []),
+            'is_coop': game.get('is_coop', False),
+            'is_multiplayer': game.get('is_multiplayer', False),
+            'steam_url': f'https://store.steampowered.com/app/{app_id}/',
+            'steamdb_url': f'https://steamdb.info/app/{app_id}/'
+        })
+
+
+@app.route('/api/multiuser/stats')
+def api_multiuser_stats():
+    """Get multi-user library statistics"""
+    global multi_picker
+    
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+    
+    user_names = request.args.get('users', '').split(',')
+    user_names = [u.strip() for u in user_names if u.strip()]
+    
+    with multi_picker_lock:
+        stats = multi_picker.get_library_stats(user_names if user_names else None)
+        return jsonify(stats)
 
 
 def create_templates():
@@ -625,6 +811,8 @@ def create_templates():
             <button class="tab" onclick="switchTab('library', event)">Library</button>
             <button class="tab" onclick="switchTab('favorites', event)">Favorites</button>
             <button class="tab" onclick="switchTab('stats', event)">Statistics</button>
+            <button class="tab" onclick="switchTab('users', event)">Users</button>
+            <button class="tab" onclick="switchTab('multiuser', event)">Multi-User</button>
         </div>
         
         <!-- Picker Tab -->
@@ -692,6 +880,83 @@ def create_templates():
                 <div class="loading">Loading statistics...</div>
             </div>
         </div>
+        
+        <!-- Users Tab -->
+        <div id="users-tab" class="tab-content">
+            <h2>👥 User Management</h2>
+            
+            <!-- Add User Form -->
+            <div class="user-form" style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>Add New User</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Name *</label>
+                        <input type="text" id="user-name" class="search-input" placeholder="Enter name" style="margin-bottom: 0;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Email</label>
+                        <input type="email" id="user-email" class="search-input" placeholder="Enter email" style="margin-bottom: 0;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Steam ID *</label>
+                        <input type="text" id="user-steam-id" class="search-input" placeholder="Enter Steam ID" style="margin-bottom: 0;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Discord ID</label>
+                        <input type="text" id="user-discord-id" class="search-input" placeholder="Enter Discord ID" style="margin-bottom: 0;">
+                    </div>
+                </div>
+                <button onclick="addUser()" style="margin-top: 15px; padding: 10px 30px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    ➕ Add User
+                </button>
+            </div>
+            
+            <!-- Users List -->
+            <h3>Current Users</h3>
+            <div id="users-list" class="list-container">
+                <div class="loading">Loading users...</div>
+            </div>
+        </div>
+        
+        <!-- Multi-User Tab -->
+        <div id="multiuser-tab" class="tab-content">
+            <h2>🎮 Multi-User Game Picker</h2>
+            
+            <!-- User Selection -->
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>Select Players</h3>
+                <div id="user-checkboxes" style="margin-top: 15px;">
+                    <div class="loading">Loading users...</div>
+                </div>
+                
+                <div style="margin-top: 15px;">
+                    <label style="display: flex; align-items: center; gap: 10px;">
+                        <input type="checkbox" id="coop-only" style="width: 18px; height: 18px;">
+                        <span style="font-weight: 600;">Co-op/Multiplayer Games Only</span>
+                    </label>
+                </div>
+                
+                <button onclick="pickMultiUserGame()" style="margin-top: 20px; padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
+                    🎲 Pick Common Game
+                </button>
+            </div>
+            
+            <!-- Multi-User Game Result -->
+            <div id="multiuser-result" style="display: none; background: #f8f9fa; padding: 25px; border-radius: 10px;">
+                <!-- Result will be displayed here -->
+            </div>
+            
+            <!-- Common Games List -->
+            <div style="margin-top: 20px;">
+                <h3>Common Games <span id="common-count"></span></h3>
+                <div id="common-games-list" class="list-container">
+                    <div class="loading">Select users and click "Show Common Games" to see shared games</div>
+                </div>
+                <button onclick="showCommonGames()" style="margin-top: 10px; padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    🔍 Show Common Games
+                </button>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -703,6 +968,7 @@ def create_templates():
             loadLibrary();
             loadFavorites();
             loadStats();
+            loadUsers();
         }
         
         async function updateStatus() {
@@ -733,6 +999,12 @@ def create_templates():
             // Reload data for the tab
             if (tabName === 'library') loadLibrary();
             if (tabName === 'favorites') loadFavorites();
+            if (tabName === 'stats') loadStats();
+            if (tabName === 'users') loadUsers();
+            if (tabName === 'multiuser') {
+                loadUsersForMultiUser();
+                document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
+            }
             if (tabName === 'stats') loadStats();
         }
         
@@ -1017,6 +1289,249 @@ def create_templates():
                 statsDiv.innerHTML = html;
             } catch (error) {
                 statsDiv.innerHTML = '<div class="error">Error loading statistics</div>';
+            }
+        }
+        
+        // User Management Functions
+        async function loadUsers() {
+            const listDiv = document.getElementById('users-list');
+            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch('/api/users');
+                const data = await response.json();
+                
+                if (data.users && data.users.length > 0) {
+                    let html = '';
+                    data.users.forEach(user => {
+                        html += `
+                            <div class="list-item" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 15px; align-items: center;">
+                                <div>
+                                    <strong>${user.name}</strong><br>
+                                    <small style="color: #666;">${user.email || 'No email'}</small>
+                                </div>
+                                <div>
+                                    <small style="color: #666;">Steam ID:</small><br>
+                                    ${user.steam_id}
+                                </div>
+                                <div>
+                                    <small style="color: #666;">Discord ID:</small><br>
+                                    ${user.discord_id || 'Not linked'}
+                                </div>
+                                <div>
+                                    <button onclick="removeUser('${user.name}')" class="btn btn-favorite" style="background: #f38ba8; padding: 5px 15px;">
+                                        Remove
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    listDiv.innerHTML = html;
+                } else {
+                    listDiv.innerHTML = '<div class="loading">No users yet. Add one above!</div>';
+                }
+            } catch (error) {
+                listDiv.innerHTML = '<div class="error">Error loading users</div>';
+            }
+        }
+        
+        async function addUser() {
+            const name = document.getElementById('user-name').value.trim();
+            const email = document.getElementById('user-email').value.trim();
+            const steamId = document.getElementById('user-steam-id').value.trim();
+            const discordId = document.getElementById('user-discord-id').value.trim();
+            
+            if (!name) {
+                alert('Name is required!');
+                return;
+            }
+            
+            if (!steamId) {
+                alert('Steam ID is required!');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/users/add', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        name: name,
+                        email: email,
+                        steam_id: steamId,
+                        discord_id: discordId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    alert(data.message || 'User added successfully!');
+                    // Clear form
+                    document.getElementById('user-name').value = '';
+                    document.getElementById('user-email').value = '';
+                    document.getElementById('user-steam-id').value = '';
+                    document.getElementById('user-discord-id').value = '';
+                    // Reload users list
+                    loadUsers();
+                } else {
+                    alert(data.error || 'Failed to add user');
+                }
+            } catch (error) {
+                alert('Error adding user: ' + error.message);
+            }
+        }
+        
+        async function removeUser(name) {
+            if (!confirm(`Are you sure you want to remove ${name}?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/users/remove', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name})
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    alert(data.message || 'User removed successfully!');
+                    loadUsers();
+                    loadUsersForMultiUser();
+                } else {
+                    alert(data.error || 'Failed to remove user');
+                }
+            } catch (error) {
+                alert('Error removing user: ' + error.message);
+            }
+        }
+        
+        // Multi-User Functions
+        async function loadUsersForMultiUser() {
+            const checkboxDiv = document.getElementById('user-checkboxes');
+            checkboxDiv.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch('/api/users');
+                const data = await response.json();
+                
+                if (data.users && data.users.length > 0) {
+                    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">';
+                    data.users.forEach(user => {
+                        html += `
+                            <label style="display: flex; align-items: center; gap: 10px; padding: 10px; background: white; border-radius: 8px; cursor: pointer;">
+                                <input type="checkbox" class="user-checkbox" value="${user.name}" style="width: 18px; height: 18px;">
+                                <span><strong>${user.name}</strong></span>
+                            </label>
+                        `;
+                    });
+                    html += '</div>';
+                    checkboxDiv.innerHTML = html;
+                } else {
+                    checkboxDiv.innerHTML = '<div class="loading">No users found. Add users in the Users tab first.</div>';
+                }
+            } catch (error) {
+                checkboxDiv.innerHTML = '<div class="error">Error loading users</div>';
+            }
+        }
+        
+        function getSelectedUsers() {
+            const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+            return Array.from(checkboxes).map(cb => cb.value);
+        }
+        
+        async function pickMultiUserGame() {
+            const selectedUsers = getSelectedUsers();
+            
+            if (selectedUsers.length === 0) {
+                alert('Please select at least one user!');
+                return;
+            }
+            
+            const coopOnly = document.getElementById('coop-only').checked;
+            const resultDiv = document.getElementById('multiuser-result');
+            
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div class="loading">Picking a game...</div>';
+            
+            try {
+                const response = await fetch('/api/multiuser/pick', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        users: selectedUsers,
+                        coop_only: coopOnly,
+                        max_players: selectedUsers.length
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    resultDiv.innerHTML = `<div class="error">${error.error || 'No common games found'}</div>`;
+                    return;
+                }
+                
+                const game = await response.json();
+                
+                let html = `
+                    <h3 style="color: #667eea; margin-bottom: 15px;">🎮 ${game.name}</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <strong>App ID:</strong> ${game.app_id}
+                        </div>
+                        <div>
+                            <strong>Players:</strong> ${game.owners ? game.owners.join(', ') : selectedUsers.join(', ')}
+                        </div>
+                        ${game.is_coop ? '<div><strong>✅ Co-op Game</strong></div>' : ''}
+                        ${game.is_multiplayer ? '<div><strong>✅ Multiplayer</strong></div>' : ''}
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <a href="${game.steam_url}" target="_blank" class="btn btn-link">🔗 Steam Store</a>
+                        <a href="${game.steamdb_url}" target="_blank" class="btn btn-link">📊 SteamDB</a>
+                    </div>
+                `;
+                
+                resultDiv.innerHTML = html;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        async function showCommonGames() {
+            const selectedUsers = getSelectedUsers();
+            const listDiv = document.getElementById('common-games-list');
+            const countSpan = document.getElementById('common-count');
+            
+            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const usersParam = selectedUsers.length > 0 ? selectedUsers.join(',') : '';
+                const response = await fetch(`/api/multiuser/common?users=${encodeURIComponent(usersParam)}`);
+                const data = await response.json();
+                
+                countSpan.textContent = `(${data.total_common})`;
+                
+                if (data.games && data.games.length > 0) {
+                    let html = '';
+                    data.games.forEach(game => {
+                        html += `
+                            <div class="list-item">
+                                <div>
+                                    <strong>${game.name}</strong><br>
+                                    <small style="color: #666;">Owned by: ${game.owners ? game.owners.join(', ') : 'All selected users'}</small>
+                                </div>
+                                <div>${game.playtime_hours}h</div>
+                            </div>
+                        `;
+                    });
+                    listDiv.innerHTML = html;
+                } else {
+                    listDiv.innerHTML = '<div class="loading">No common games found</div>';
+                }
+            } catch (error) {
+                listDiv.innerHTML = '<div class="error">Error loading common games</div>';
             }
         }
         

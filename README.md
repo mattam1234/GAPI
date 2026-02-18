@@ -7,8 +7,11 @@ GAPI is a game picker tool that helps you decide what to play from your Steam li
 
 ## Features
 
-- 🌐 **Modern Web GUI**: Beautiful browser-based interface with tabs for game picking, library browsing, favorites, and statistics
-- 🎮 **Random Game Selection**: Pick a random game from your entire Steam library
+- 🌐 **Modern Web GUI**: Beautiful browser-based interface with tabs for game picking, library browsing, favorites, statistics, and multi-user management
+- 👥 **Multi-User Support**: Link multiple Steam accounts and find common games among friends
+- 🎮 **Co-op Game Finder**: Automatically filter and pick co-op/multiplayer games for your group
+- 🤖 **Discord Bot Integration**: Pick games with friends directly from Discord with voting and auto-selection
+- 🎲 **Random Game Selection**: Pick a random game from your entire Steam library
 - 🎯 **Smart Filters**: Filter by playtime (unplayed, barely played, well-played games)
 - 🎨 **Genre Filtering**: Filter games by genre/tags (Action, RPG, Strategy, etc.)
 - ⭐ **Favorites System**: Mark games as favorites and pick from your favorite games
@@ -26,6 +29,7 @@ GAPI is a game picker tool that helps you decide what to play from your Steam li
 - Python 3.6 or higher
 - Steam API Key (get one at https://steamcommunity.com/dev/apikey)
 - Your Steam ID (find it at https://steamid.io/)
+- (Optional) Discord Bot Token for Discord integration (get one at https://discord.com/developers/applications)
 
 ## Installation
 
