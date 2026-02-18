@@ -5,7 +5,7 @@ Discord integration for multi-user game picking with voting and co-op support.
 """
 
 import discord
-from discord.ext import commands
+from discord import app_commands
 import json
 import os
 import asyncio
@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import multiuser
 
 
-class GAPIBot(commands.Bot):
+class GAPIBot(discord.Client):
     """Discord bot for GAPI game picking"""
     
     def __init__(self, steam_api_key: str, config_file: str = 'discord_config.json'):
@@ -22,7 +22,9 @@ class GAPIBot(commands.Bot):
         intents.message_content = True
         intents.members = True
         
-        super().__init__(command_prefix='!gapi ', intents=intents)
+        super().__init__(intents=intents)
+        
+        self.tree = app_commands.CommandTree(self)
         
         self.steam_api_key = steam_api_key
         self.config_file = config_file
@@ -36,7 +38,7 @@ class GAPIBot(commands.Bot):
         self.load_user_mappings()
         
         # Add commands
-        self.add_commands()
+        self.setup_commands()
     
     def load_user_mappings(self):
         """Load Discord user to Steam ID mappings"""
@@ -57,43 +59,47 @@ class GAPIBot(commands.Bot):
         except IOError as e:
             print(f"Error saving user mappings: {e}")
     
-    def add_commands(self):
-        """Register bot commands"""
+    def setup_commands(self):
+        """Register slash commands"""
         
-        @self.command(name='link', help='Link your Discord account to your Steam ID')
-        async def link_steam(ctx, steam_id: str, username: str = None):
+        @self.tree.command(name='link', description='Link your Discord account to your Steam ID')
+        @app_commands.describe(
+            steam_id='Your Steam ID (64-bit format)',
+            username='Optional: Custom username (defaults to your Discord name)'
+        )
+        async def link_steam(interaction: discord.Interaction, steam_id: str, username: str = None):
             """Link Discord user to Steam account"""
-            user_name = username or ctx.author.name
+            user_name = username or interaction.user.name
             
             # Add to multi-user picker
             self.multi_picker.add_user(user_name, steam_id)
             
             # Add to Discord mapping
-            self.user_mappings[ctx.author.id] = steam_id
+            self.user_mappings[interaction.user.id] = steam_id
             self.save_user_mappings()
             
-            await ctx.send(f"✅ Linked {ctx.author.mention} to Steam ID: {steam_id}")
+            await interaction.response.send_message(f"✅ Linked {interaction.user.mention} to Steam ID: {steam_id}")
         
-        @self.command(name='unlink', help='Unlink your Steam account')
-        async def unlink_steam(ctx):
+        @self.tree.command(name='unlink', description='Unlink your Steam account')
+        async def unlink_steam(interaction: discord.Interaction):
             """Unlink Discord user from Steam account"""
-            if ctx.author.id in self.user_mappings:
-                steam_id = self.user_mappings[ctx.author.id]
-                del self.user_mappings[ctx.author.id]
+            if interaction.user.id in self.user_mappings:
+                steam_id = self.user_mappings[interaction.user.id]
+                del self.user_mappings[interaction.user.id]
                 self.save_user_mappings()
                 
                 # Remove from multi-user picker
-                self.multi_picker.remove_user(ctx.author.name)
+                self.multi_picker.remove_user(interaction.user.name)
                 
-                await ctx.send(f"✅ Unlinked {ctx.author.mention} from Steam")
+                await interaction.response.send_message(f"✅ Unlinked {interaction.user.mention} from Steam")
             else:
-                await ctx.send(f"❌ {ctx.author.mention} is not linked to any Steam account")
+                await interaction.response.send_message(f"❌ {interaction.user.mention} is not linked to any Steam account")
         
-        @self.command(name='users', help='List all linked users')
-        async def list_users(ctx):
+        @self.tree.command(name='users', description='List all linked users')
+        async def list_users(interaction: discord.Interaction):
             """List all users with linked Steam accounts"""
             if not self.multi_picker.users:
-                await ctx.send("No users have linked their Steam accounts yet.")
+                await interaction.response.send_message("No users have linked their Steam accounts yet.")
                 return
             
             user_list = "\n".join([f"• {user['name']} (Steam ID: {user['steam_id']})" 
@@ -104,15 +110,16 @@ class GAPIBot(commands.Bot):
                 description=user_list,
                 color=discord.Color.blue()
             )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
         
-        @self.command(name='vote', help='Start a voting session to play a game')
-        async def start_vote(ctx, duration: int = 60):
+        @self.tree.command(name='vote', description='Start a voting session to play a game')
+        @app_commands.describe(duration='Duration in seconds for voting session (default: 60)')
+        async def start_vote(interaction: discord.Interaction, duration: int = 60):
             """Start a voting session for picking a co-op game"""
-            channel_id = ctx.channel.id
+            channel_id = interaction.channel_id
             
             if channel_id in self.active_votes:
-                await ctx.send("❌ A voting session is already active in this channel!")
+                await interaction.response.send_message("❌ A voting session is already active in this channel!")
                 return
             
             # Initialize vote
@@ -130,7 +137,8 @@ class GAPIBot(commands.Bot):
                 color=discord.Color.green()
             )
             
-            vote_msg = await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
+            vote_msg = await interaction.original_response()
             await vote_msg.add_reaction('✅')
             
             self.active_votes[channel_id]['message'] = vote_msg
@@ -139,34 +147,49 @@ class GAPIBot(commands.Bot):
             await asyncio.sleep(duration)
             
             # Process results
-            await self.process_vote(ctx.channel)
+            await self.process_vote(interaction.channel)
         
-        @self.command(name='pick', help='Pick a random game for mentioned/reacted users')
-        async def pick_game(ctx, *mentions):
+        @self.tree.command(name='pick', description='Pick a random game for mentioned users or all linked users')
+        @app_commands.describe(
+            user1='First user to include (optional)',
+            user2='Second user to include (optional)',
+            user3='Third user to include (optional)',
+            user4='Fourth user to include (optional)',
+            user5='Fifth user to include (optional)'
+        )
+        async def pick_game(
+            interaction: discord.Interaction, 
+            user1: discord.User = None,
+            user2: discord.User = None,
+            user3: discord.User = None,
+            user4: discord.User = None,
+            user5: discord.User = None
+        ):
             """Pick a random common game for specified users"""
             # Get participants
             participants = []
+            mentioned_users = [u for u in [user1, user2, user3, user4, user5] if u is not None]
             
-            if mentions:
+            if mentioned_users:
                 # Use mentioned users
-                for mention in ctx.message.mentions:
-                    if mention.id in self.user_mappings:
-                        participants.append(mention.name)
+                for user in mentioned_users:
+                    if user.id in self.user_mappings:
+                        participants.append(user.name)
             else:
                 # Use all linked users
                 participants = [user['name'] for user in self.multi_picker.users]
             
             if not participants:
-                await ctx.send("❌ No linked users found! Use `!gapi link <steam_id>` to link your account.")
+                await interaction.response.send_message("❌ No linked users found! Use `/link <steam_id>` to link your account.")
                 return
             
-            await ctx.send(f"🎲 Finding a common game for {len(participants)} player(s)...")
+            await interaction.response.send_message(f"🎲 Finding a common game for {len(participants)} player(s)...")
             
             # Pick a common game
             game = self.multi_picker.pick_common_game(participants, coop_only=True)
             
             if not game:
-                await ctx.send(f"❌ No common co-op games found for the selected users.")
+                await interaction.followup.send(f"❌ No common co-op games found for the selected users.")
                 return
             
             # Display result
@@ -195,15 +218,16 @@ class GAPIBot(commands.Bot):
                 inline=True
             )
             
-            await ctx.send(embed=embed)
+            await interaction.followup.send(embed=embed)
         
-        @self.command(name='common', help='Show common games between users')
-        async def show_common(ctx, limit: int = 10):
+        @self.tree.command(name='common', description='Show common games between users')
+        @app_commands.describe(limit='Maximum number of games to show (default: 10)')
+        async def show_common(interaction: discord.Interaction, limit: int = 10):
             """Show common games owned by all linked users"""
             common_games = self.multi_picker.find_common_games()
             
             if not common_games:
-                await ctx.send("❌ No common games found among linked users.")
+                await interaction.response.send_message("❌ No common games found among linked users.")
                 return
             
             # Sort by name
@@ -221,15 +245,15 @@ class GAPIBot(commands.Bot):
                 color=discord.Color.blue()
             )
             
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
         
-        @self.command(name='stats', help='Show library statistics')
-        async def show_stats(ctx):
+        @self.tree.command(name='stats', description='Show library statistics')
+        async def show_stats(interaction: discord.Interaction):
             """Show statistics about user libraries"""
             stats = self.multi_picker.get_library_stats()
             
             if not stats:
-                await ctx.send("❌ No user libraries loaded.")
+                await interaction.response.send_message("❌ No user libraries loaded.")
                 return
             
             embed = discord.Embed(
@@ -243,7 +267,7 @@ class GAPIBot(commands.Bot):
             embed.add_field(name="Common Games", value=str(stats['common_games_count']), inline=True)
             embed.add_field(name="Total Unique Games", value=str(stats['total_unique_games']), inline=True)
             
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
     
     async def process_vote(self, channel):
         """Process voting results and pick a game"""
@@ -318,6 +342,13 @@ def run_bot(token: str, steam_api_key: str):
     async def on_ready():
         print(f'✅ {bot.user} is now online!')
         print(f'Loaded {len(bot.multi_picker.users)} linked Steam accounts')
+        
+        # Sync slash commands with Discord
+        try:
+            synced = await bot.tree.sync()
+            print(f'✅ Synced {len(synced)} slash command(s)')
+        except Exception as e:
+            print(f'❌ Failed to sync commands: {e}')
     
     bot.run(token)
 
