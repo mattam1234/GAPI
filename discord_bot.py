@@ -17,7 +17,7 @@ import multiuser
 class GAPIBot(discord.Client):
     """Discord bot for GAPI game picking"""
     
-    def __init__(self, steam_api_key: str, config_file: str = 'discord_config.json'):
+    def __init__(self, config: Dict, config_file: str = 'discord_config.json'):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
@@ -26,9 +26,10 @@ class GAPIBot(discord.Client):
         
         self.tree = app_commands.CommandTree(self)
         
-        self.steam_api_key = steam_api_key
+        self.config = config
+        self.steam_api_key = config.get('steam_api_key')
         self.config_file = config_file
-        self.multi_picker = multiuser.MultiUserPicker(steam_api_key)
+        self.multi_picker = multiuser.MultiUserPicker(config)
         
         # Active voting sessions
         self.active_votes: Dict[int, Dict] = {}  # channel_id -> vote_data
@@ -334,14 +335,14 @@ class GAPIBot(discord.Client):
         await channel.send(embed=embed)
 
 
-def run_bot(token: str, steam_api_key: str):
+def run_bot(token: str, config: Dict):
     """Run the Discord bot"""
-    bot = GAPIBot(steam_api_key)
+    bot = GAPIBot(config)
     
     @bot.event
     async def on_ready():
         print(f'✅ {bot.user} is now online!')
-        print(f'Loaded {len(bot.multi_picker.users)} linked Steam accounts')
+        print(f'Loaded {len(bot.multi_picker.users)} linked accounts')
         
         # Sync slash commands with Discord
         try:
@@ -377,4 +378,4 @@ if __name__ == "__main__":
         print("Please add your Discord bot token to config.json")
         sys.exit(1)
     
-    run_bot(discord_token, steam_api_key)
+    run_bot(discord_token, config)

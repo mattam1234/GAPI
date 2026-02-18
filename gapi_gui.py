@@ -33,9 +33,9 @@ def initialize_picker(config_path: str = 'config.json'):
         try:
             picker = gapi.GamePicker(config_path=config_path)
             if picker.fetch_games():
-                # Initialize multi-user picker
+                # Initialize multi-user picker with full config
                 with multi_picker_lock:
-                    multi_picker = multiuser.MultiUserPicker(picker.config['steam_api_key'])
+                    multi_picker = multiuser.MultiUserPicker(picker.config)
                 return True, f"Loaded {len(picker.games)} games"
             return False, "Failed to fetch games"
         except Exception as e:
