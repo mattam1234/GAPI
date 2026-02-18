@@ -9,6 +9,7 @@ import os
 import sys
 import random
 import argparse
+import datetime
 from typing import Dict, List, Optional
 import requests
 from colorama import init, Fore, Style
@@ -147,7 +148,7 @@ class GamePicker:
         try:
             export_data = {
                 'history': self.history,
-                'exported_at': __import__('datetime').datetime.now().isoformat()
+                'exported_at': datetime.datetime.now().isoformat()
             }
             with open(filepath, 'w') as f:
                 json.dump(export_data, f, indent=2)
@@ -441,7 +442,8 @@ class GamePicker:
         
         if filtered:
             print(f"{Fore.GREEN}Picking from {len(filtered)} favorite games...")
-            game = self.pick_random_game(filtered, avoid_recent=False)
+            # Still avoid recent picks to provide variety
+            game = self.pick_random_game(filtered, avoid_recent=True)
             self.display_game_info(game)
         else:
             print(f"{Fore.YELLOW}None of your favorite games are in your library anymore.")
@@ -673,6 +675,10 @@ Examples:
         if args.genre:
             genres = [g.strip() for g in args.genre.split(',')]
         
+        # Show genre filtering message early if genres are specified
+        if genres:
+            print(f"{Fore.YELLOW}Note: Genre filtering may take a moment as we fetch game details...")
+        
         # Non-interactive modes
         if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None or args.favorites or genres:
             if not picker.fetch_games():
@@ -686,7 +692,8 @@ Examples:
             filtered_games = None
             
             if args.favorites:
-                filtered_games = picker.filter_games(favorites_only=True)
+                # Favorites filter should also respect genre parameter
+                filtered_games = picker.filter_games(favorites_only=True, genres=genres)
                 print(f"{Fore.GREEN}Filtering to favorite games...")
             elif args.unplayed:
                 filtered_games = picker.filter_games(max_playtime=0, genres=genres)
@@ -710,9 +717,6 @@ Examples:
             elif genres:
                 filtered_games = picker.filter_games(genres=genres)
                 print(f"{Fore.GREEN}Filtering to games with genres: {', '.join(genres)}...")
-            
-            if genres:
-                print(f"{Fore.YELLOW}Fetching game details for genre filtering, this may take a moment...")
             
             if filtered_games is not None and not filtered_games:
                 print(f"{Fore.RED}No games found matching the filter criteria.")
