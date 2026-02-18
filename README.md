@@ -12,13 +12,13 @@
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Usage](#usage)
-  - [Interactive Mode](#interactive-menu)
+  - [Interactive Menu](#interactive-menu)
   - [Command-Line Options](#command-line-options)
   - [Example Output](#example-output)
 - [Configuration](#configuration)
 - [Getting Your Steam Credentials](#getting-your-steam-credentials)
-- [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
+- [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -88,8 +88,6 @@ This lets you explore all features without needing Steam credentials!
    ```bash
    python3 gapi.py
    ```
-
-## 📦 Installation
 
 ## 📦 Installation
 
