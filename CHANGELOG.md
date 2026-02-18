@@ -4,6 +4,27 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.1.0] - 2026-02-18
+
+### Added
+- **Configurable Settings**: New configuration options in config.json
+  - `barely_played_hours` - Customize threshold for barely played games (default: 2 hours)
+  - `well_played_hours` - Customize threshold for well-played games (default: 10 hours)
+  - `max_history_size` - Configure how many recent picks to remember (default: 20)
+  - `api_timeout_seconds` - Set API request timeout (default: 10 seconds)
+- **ROADMAP.md** - Comprehensive roadmap for future features and improvements
+- Helper function `minutes_to_hours()` for consistent playtime conversion
+
+### Changed
+- Improved code maintainability by extracting hardcoded values to configuration
+- Refactored playtime conversion to use centralized helper function (DRY principle)
+- Steam API client now respects configurable timeout value
+
+### Developer Experience
+- Reduced code duplication with reusable helper functions
+- More flexible configuration system for easier customization
+- Better separation of concerns (configuration vs. constants)
+
 ## [Unreleased]
 
 ### Added

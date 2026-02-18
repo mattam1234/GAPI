@@ -599,6 +599,7 @@ For detailed guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md)
 ## 📚 Additional Resources
 
 - **[Contributing Guide](CONTRIBUTING.md)** - Detailed contribution guidelines
+- **[Roadmap](ROADMAP.md)** - Planned features and improvements
 - **[Changelog](CHANGELOG.md)** - Version history and changes
 - **[License](LICENSE)** - MIT License details
 

@@ -1,0 +1,152 @@
+# 🗺️ GAPI Roadmap
+
+This document outlines the planned features and improvements for GAPI (Game Picker with Multi-Platform Integration).
+
+## ✅ Recently Completed (Current Release)
+
+### Configuration & Code Quality
+- ✅ Configurable playtime thresholds (barely played, well played hours)
+- ✅ Configurable history size
+- ✅ Configurable API timeout
+- ✅ Helper function for playtime conversion (DRY principle)
+- ✅ Improved code maintainability
+
+## 🚀 Upcoming Features
+
+### 📅 Next Release (v2.1.0)
+
+#### High Priority - User Experience
+- [ ] **Environment Variable Support** - Support for sensitive credentials via environment variables (STEAM_API_KEY, STEAM_ID, etc.)
+- [ ] **Advanced Filtering Options**
+  - [ ] Filter by release date (e.g., games from 2020-2023)
+  - [ ] Filter by Metacritic score (e.g., score > 80)
+  - [ ] Exclude specific tags/genres (e.g., exclude "Horror")
+  - [ ] Exclude specific games from picker
+- [ ] **Batch Game Picker** - Pick multiple games at once (e.g., "pick 5 games")
+- [ ] **Loading Indicators** - Visual feedback in Web GUI for long operations
+- [ ] **Better Error Messages** - Actionable suggestions when errors occur
+
+#### High Priority - Performance
+- [ ] **Enhanced Caching System** - Persist game details cache between sessions
+- [ ] **Parallel Library Fetching** - Speed up multi-user game loading with async operations
+- [ ] **Optimized Genre Filtering** - Use cached data instead of refetching details
+
+#### Medium Priority - Data & Configuration
+- [ ] **Steam ID Validation** - Validate 64-bit format before API calls
+- [ ] **Atomic File Writes** - Prevent data corruption on crashes
+- [ ] **Logging Framework** - Replace print statements with proper logging (configurable levels)
+- [ ] **Configuration Validation** - Validate config values on startup with helpful error messages
+
+### 📅 Future Release (v2.2.0)
+
+#### Platform Integration
+- [ ] **Epic Games OAuth** - Full library access with OAuth authentication
+- [ ] **GOG Galaxy Integration** - Complete GOG library support
+- [ ] **Xbox Game Pass** - Integration with Xbox Game Pass library
+- [ ] **PlayStation Network** - PSN library integration (if API available)
+- [ ] **Nintendo eShop** - Nintendo Switch library support (if API available)
+
+#### Smart Features
+- [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
+- [ ] **Duplicate Detection** - Identify same games across platforms
+- [ ] **ProtonDB Integration** - Linux compatibility ratings for Windows games
+- [ ] **Achievement Tracking** - Display completion percentage
+- [ ] **Friend Activity** - See what friends are playing (Steam API)
+
+#### Social Features
+- [ ] **Discord Rich Presence** - Show currently picked game in Discord status
+- [ ] **Game Night Scheduler** - Schedule game sessions with friends
+- [ ] **Voting System Improvements** - Multiple voting rounds, ranked choice
+- [ ] **Game Reviews** - Add personal notes/reviews to games
+- [ ] **Share Picks** - Generate shareable links for game picks
+
+### 📅 Long-term Vision (v3.0.0+)
+
+#### Mobile & Cross-Platform
+- [ ] **Mobile App** - Native iOS/Android applications
+- [ ] **Progressive Web App** - Offline-capable PWA version
+- [ ] **Desktop Application** - Electron-based desktop app with system tray integration
+- [ ] **Browser Extension** - Quick game picker from browser toolbar
+
+#### Advanced Features
+- [ ] **Machine Learning Recommendations** - ML model trained on your playing habits
+- [ ] **Calendar Integration** - Sync game sessions with calendar apps
+- [ ] **Twitch Integration** - Pick games based on what's trending on Twitch
+- [ ] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
+- [ ] **Game Backlog Manager** - Prioritize and track game completion
+- [ ] **Budget Tracking** - Track game purchases and library value
+- [ ] **Sale Alerts** - Notify when wishlist games go on sale
+
+#### API & Integrations
+- [ ] **Public API** - RESTful API for third-party integrations
+- [ ] **Webhook Support** - Trigger external services on game picks
+- [ ] **IFTTT Integration** - Connect with IFTTT for automation
+- [ ] **Slack/Teams Bots** - Enterprise communication platform integrations
+- [ ] **Home Assistant** - Smart home integration for game lighting/setup
+
+## 🔧 Technical Improvements
+
+### Code Quality
+- [ ] Comprehensive test suite (unit, integration, e2e)
+- [ ] CI/CD pipeline with automated testing
+- [ ] Code coverage reports (target: 80%+)
+- [ ] Type checking with mypy
+- [ ] Automated dependency updates (Dependabot)
+- [ ] Security scanning (CodeQL, Snyk)
+
+### Architecture
+- [ ] Plugin system for custom platforms
+- [ ] Database support (SQLite/PostgreSQL) for better data management
+- [ ] Microservices architecture for scalability
+- [ ] GraphQL API alongside REST
+- [ ] WebSocket support for real-time updates
+
+### Documentation
+- [ ] API documentation (Swagger/OpenAPI)
+- [ ] Video tutorials
+- [ ] Interactive demo environment
+- [ ] Localization (i18n) - Support for multiple languages
+- [ ] Developer guide for contributors
+
+## 💡 Community Requested Features
+
+Features requested by the community will be tracked here. Please open an issue with the `feature-request` label to suggest new features!
+
+### Under Consideration
+- Custom themes for Web GUI
+- Dark mode support
+- Game statistics visualization (charts, graphs)
+- Import game lists from other services
+- Export game recommendations
+- Integration with HowLongToBeat API
+- VR game filtering
+- Controller support for desktop app
+- Voice commands for game picking
+
+## 🤝 How to Contribute
+
+We welcome contributions to help achieve these goals! Here's how you can help:
+
+1. **Pick a Feature** - Choose an item from the roadmap that interests you
+2. **Open an Issue** - Discuss the implementation approach
+3. **Submit a PR** - Implement the feature following our [Contributing Guide](CONTRIBUTING.md)
+4. **Review & Test** - Help review PRs from other contributors
+
+## 📊 Release Schedule
+
+- **Minor Releases (v2.x)** - Every 2-3 months
+- **Patch Releases (v2.x.y)** - As needed for bug fixes
+- **Major Releases (v3.0+)** - When significant architectural changes are ready
+
+## 📝 Notes
+
+- This roadmap is subject to change based on community feedback and priorities
+- Features are listed in approximate order of priority within each release
+- Timelines are estimates and may shift based on contributor availability
+- Security and critical bug fixes will be prioritized over new features
+
+---
+
+**Last Updated:** February 2026
+
+For questions about the roadmap, please open a [GitHub Discussion](https://github.com/mattam1234/GAPI/discussions).

@@ -31,6 +31,18 @@ def is_placeholder_value(value: str) -> bool:
     return value.startswith('YOUR_')
 
 
+def minutes_to_hours(minutes: int) -> float:
+    """Convert playtime from minutes to hours
+    
+    Args:
+        minutes: Playtime in minutes
+        
+    Returns:
+        Playtime in hours, rounded to 1 decimal place
+    """
+    return round(minutes / 60, 1)
+
+
 class GamePlatformClient(ABC):
     """Abstract base class for game platform API clients"""
     
@@ -65,9 +77,10 @@ class SteamAPIClient(GamePlatformClient):
     
     BASE_URL = "https://api.steampowered.com"
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, timeout: int = 10):
         super().__init__()
         self.api_key = api_key
+        self.timeout = timeout
     
     def get_platform_name(self) -> str:
         return "steam"
@@ -84,7 +97,7 @@ class SteamAPIClient(GamePlatformClient):
         }
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
+            response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
             
@@ -115,7 +128,7 @@ class SteamAPIClient(GamePlatformClient):
         params = {'appids': app_id_int}
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
+            response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
             
@@ -226,19 +239,28 @@ class GamePicker:
     
     HISTORY_FILE = '.gapi_history.json'
     FAVORITES_FILE = '.gapi_favorites.json'
-    MAX_HISTORY = 20
-    BARELY_PLAYED_THRESHOLD_MINUTES = 120  # 2 hours
-    WELL_PLAYED_THRESHOLD_MINUTES = 600    # 10 hours
+    
+    # Default values (can be overridden by config)
+    DEFAULT_MAX_HISTORY = 20
+    DEFAULT_BARELY_PLAYED_HOURS = 2
+    DEFAULT_WELL_PLAYED_HOURS = 10
+    DEFAULT_API_TIMEOUT = 10
     
     def __init__(self, config_path: str = 'config.json'):
         self.config = self.load_config(config_path)
+        
+        # Load configurable values from config or use defaults
+        self.MAX_HISTORY = self.config.get('max_history_size', self.DEFAULT_MAX_HISTORY)
+        self.BARELY_PLAYED_THRESHOLD_MINUTES = self.config.get('barely_played_hours', self.DEFAULT_BARELY_PLAYED_HOURS) * 60
+        self.WELL_PLAYED_THRESHOLD_MINUTES = self.config.get('well_played_hours', self.DEFAULT_WELL_PLAYED_HOURS) * 60
+        self.API_TIMEOUT = self.config.get('api_timeout_seconds', self.DEFAULT_API_TIMEOUT)
         
         # Initialize platform clients
         self.clients: Dict[str, GamePlatformClient] = {}
         
         # Always try to initialize Steam if API key is available
         if self.config.get('steam_api_key') and self.config['steam_api_key'] != 'YOUR_STEAM_API_KEY_HERE':
-            self.clients['steam'] = SteamAPIClient(self.config['steam_api_key'])
+            self.clients['steam'] = SteamAPIClient(self.config['steam_api_key'], timeout=self.API_TIMEOUT)
         
         # Initialize Epic Games client if enabled
         if self.config.get('epic_enabled', False):
@@ -489,7 +511,7 @@ class GamePicker:
         name = game.get('name', 'Unknown Game')
         platform = game.get('platform', 'steam')
         playtime_minutes = game.get('playtime_forever', 0)
-        playtime_hours = playtime_minutes / 60
+        playtime_hours = minutes_to_hours(playtime_minutes)
         is_favorite = game_id in self.favorites if game_id else False
         
         print(f"\n{Fore.GREEN}{'='*60}")
@@ -620,7 +642,7 @@ class GamePicker:
         
         total_games = len(self.games)
         unplayed = len([g for g in self.games if g.get('playtime_forever', 0) == 0])
-        total_playtime = sum(g.get('playtime_forever', 0) for g in self.games) / 60  # Convert to hours
+        total_playtime = minutes_to_hours(sum(g.get('playtime_forever', 0) for g in self.games))
         
         print(f"\n{Fore.CYAN}{Style.BRIGHT}📊 Library Statistics")
         print(f"{Fore.GREEN}{'='*40}")
@@ -711,7 +733,7 @@ class GamePicker:
             if game:
                 name = game.get('name', 'Unknown')
                 platform = game.get('platform', 'unknown')
-                playtime = game.get('playtime_forever', 0) / 60
+                playtime = minutes_to_hours(game.get('playtime_forever', 0))
                 print(f"{Fore.YELLOW}{game_id}: {Fore.WHITE}{name} {Fore.MAGENTA}[{platform}] {Fore.CYAN}({playtime:.1f} hours)")
             else:
                 print(f"{Fore.YELLOW}{game_id}: {Fore.RED}(Not in library)")

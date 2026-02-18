@@ -5,5 +5,9 @@
   "epic_id": "YOUR_EPIC_ID_HERE",
   "gog_enabled": false,
   "gog_id": "YOUR_GOG_ID_HERE",
-  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE"
+  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+  "barely_played_hours": 2,
+  "well_played_hours": 10,
+  "max_history_size": 20,
+  "api_timeout_seconds": 10
 }
