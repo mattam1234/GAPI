@@ -301,8 +301,11 @@ python3 gapi.py --min-hours 5 --max-hours 50
 # Filter by genre
 python3 gapi.py --genre "Action,RPG"
 
-# Combine filters (unplayed Action games)
-python3 gapi.py --unplayed --genre "Action"
+# Exclude specific genres (e.g., no horror or puzzle games)
+python3 gapi.py --exclude-genre "Horror,Puzzle"
+
+# Combine filters (unplayed Action games, no Horror)
+python3 gapi.py --unplayed --genre "Action" --exclude-genre "Horror"
 
 # Skip detailed info for faster results
 python3 gapi.py --random --no-details

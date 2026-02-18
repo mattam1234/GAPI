@@ -498,8 +498,20 @@ class GamePicker:
         return True
     
     def filter_games(self, min_playtime: int = 0, max_playtime: Optional[int] = None, 
-                     genres: Optional[List[str]] = None, favorites_only: bool = False) -> List[Dict]:
-        """Filter games based on various criteria"""
+                     genres: Optional[List[str]] = None, exclude_genres: Optional[List[str]] = None,
+                     favorites_only: bool = False) -> List[Dict]:
+        """Filter games based on various criteria
+        
+        Args:
+            min_playtime: Minimum playtime in minutes
+            max_playtime: Maximum playtime in minutes (None for no max)
+            genres: List of genres to include (OR logic - game must have at least one)
+            exclude_genres: List of genres to exclude (game must not have any of these)
+            favorites_only: Only include favorite games
+            
+        Returns:
+            List of filtered games
+        """
         filtered = self.games
         
         # Filter by playtime
@@ -514,9 +526,10 @@ class GamePicker:
             filtered = [g for g in filtered if g.get('game_id') in self.favorites]
         
         # Filter by genres (requires fetching details)
-        if genres:
+        if genres or exclude_genres:
             genre_filtered = []
-            genres_lower = [g.lower() for g in genres]
+            genres_lower = [g.lower() for g in genres] if genres else []
+            exclude_lower = [g.lower() for g in exclude_genres] if exclude_genres else []
             
             for game in filtered:
                 platform = game.get('platform', 'steam')
@@ -526,8 +539,17 @@ class GamePicker:
                     details = self.clients[platform].get_game_details(str(game_id))
                     if details and 'genres' in details:
                         game_genres = [g['description'].lower() for g in details['genres']]
-                        # Check if any requested genre matches
-                        if any(genre in game_genres for genre in genres_lower):
+                        
+                        # Check if game should be excluded
+                        if exclude_lower and any(genre in game_genres for genre in exclude_lower):
+                            continue
+                        
+                        # Check if game matches included genres (if specified)
+                        if genres_lower:
+                            if any(genre in game_genres for genre in genres_lower):
+                                genre_filtered.append(game)
+                        else:
+                            # No include filter, just exclude filter
                             genre_filtered.append(game)
             
             filtered = genre_filtered
@@ -904,6 +926,11 @@ Examples:
         help='Filter by genre(s), comma-separated (e.g., "Action,RPG")'
     )
     parser.add_argument(
+        '--exclude-genre',
+        type=str,
+        help='Exclude games with these genre(s), comma-separated (e.g., "Horror,Puzzle")'
+    )
+    parser.add_argument(
         '--favorites',
         action='store_true',
         help='Pick from favorite games only'
@@ -970,12 +997,16 @@ Examples:
         if args.genre:
             genres = [g.strip() for g in args.genre.split(',')]
         
+        exclude_genres = None
+        if args.exclude_genre:
+            exclude_genres = [g.strip() for g in args.exclude_genre.split(',')]
+        
         # Show genre filtering message early if genres are specified
-        if genres:
+        if genres or exclude_genres:
             print(f"{Fore.YELLOW}Note: Genre filtering may take a moment as we fetch game details...")
         
         # Non-interactive modes
-        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None or args.favorites or genres:
+        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None or args.favorites or genres or exclude_genres:
             if not picker.fetch_games():
                 sys.exit(1)
             
@@ -988,30 +1019,33 @@ Examples:
             
             if args.favorites:
                 # Favorites filter should also respect genre parameter
-                filtered_games = picker.filter_games(favorites_only=True, genres=genres)
+                filtered_games = picker.filter_games(favorites_only=True, genres=genres, exclude_genres=exclude_genres)
                 print(f"{Fore.GREEN}Filtering to favorite games...")
             elif args.unplayed:
-                filtered_games = picker.filter_games(max_playtime=0, genres=genres)
+                filtered_games = picker.filter_games(max_playtime=0, genres=genres, exclude_genres=exclude_genres)
                 print(f"{Fore.GREEN}Filtering to unplayed games...")
             elif args.barely_played:
-                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, genres=genres)
+                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
                 print(f"{Fore.GREEN}Filtering to barely played games (< 2 hours)...")
             elif args.well_played:
-                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, genres=genres)
+                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
                 print(f"{Fore.GREEN}Filtering to well-played games (> 10 hours)...")
             elif args.min_hours is not None or args.max_hours is not None:
                 min_minutes = int(args.min_hours * 60) if args.min_hours is not None else 0
                 max_minutes = int(args.max_hours * 60) if args.max_hours is not None else None
-                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes, genres=genres)
+                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes, genres=genres, exclude_genres=exclude_genres)
                 filter_desc = []
                 if args.min_hours is not None:
                     filter_desc.append(f">= {args.min_hours} hours")
                 if args.max_hours is not None:
                     filter_desc.append(f"<= {args.max_hours} hours")
                 print(f"{Fore.GREEN}Filtering to games with {' and '.join(filter_desc)}...")
-            elif genres:
-                filtered_games = picker.filter_games(genres=genres)
-                print(f"{Fore.GREEN}Filtering to games with genres: {', '.join(genres)}...")
+            elif genres or exclude_genres:
+                filtered_games = picker.filter_games(genres=genres, exclude_genres=exclude_genres)
+                if genres:
+                    print(f"{Fore.GREEN}Filtering to games with genres: {', '.join(genres)}...")
+                if exclude_genres:
+                    print(f"{Fore.GREEN}Excluding games with genres: {', '.join(exclude_genres)}...")
             
             if filtered_games is not None and not filtered_games:
                 print(f"{Fore.RED}No games found matching the filter criteria.")

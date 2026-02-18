@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [2.1.0] - 2026-02-18
 
 ### Added
+- **Genre Exclusion Filter**: New `--exclude-genre` CLI option to exclude games with specific genres
+  - Combine with `--genre` for precise filtering (e.g., "Action games but not Horror")
+  - Works with all filter combinations (playtime, favorites, etc.)
 - **Environment Variable Support**: Securely configure credentials via environment variables
   - `STEAM_API_KEY`, `STEAM_ID`, `DISCORD_BOT_TOKEN`, `EPIC_ID`, `GOG_ID`
   - Environment variables override config.json values
@@ -20,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Helpful error messages with link to steamid.io
 - **ROADMAP.md** - Comprehensive roadmap for future features and improvements
 - Helper function `minutes_to_hours()` for consistent playtime conversion
+- Helper function `is_valid_steam_id()` for Steam ID validation
 
 ### Changed
 - Improved code maintainability by extracting hardcoded values to configuration
