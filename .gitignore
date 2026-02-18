@@ -43,12 +43,17 @@ config.json
 
 # Demo
 .demo_config.json
+.demo_config_gui.json
 
 # History
 .gapi_history.json
 
 # Favorites
 .gapi_favorites.json
+
+# Users
+users.json
+discord_config.json
 
 # Export files
 history_export.json

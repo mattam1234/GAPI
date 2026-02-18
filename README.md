@@ -3,28 +3,33 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
 
-**Can't decide what to play?** GAPI is a command-line tool that helps you discover games in your Steam library. It randomly picks games based on smart filters and displays detailed information from Steam Store and SteamDB.
+GAPI is a game picker tool that helps you decide what to play from your Steam library. It randomly picks games based on various filters and displays detailed information from Steam Store and SteamDB. Available in both **Web GUI** and **CLI** modes!
 
 ## 📋 Table of Contents
 
-- [About](#about)
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Usage](#usage)
-  - [Interactive Menu](#interactive-menu)
-  - [Command-Line Options](#command-line-options)
-  - [Example Output](#example-output)
-- [Configuration](#configuration)
-- [Getting Your Steam Credentials](#getting-your-steam-credentials)
-- [FAQ](#faq)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [License](#license)
+- 🌐 **Modern Web GUI**: Beautiful browser-based interface with tabs for game picking, library browsing, favorites, statistics, and multi-user management
+- 👥 **Multi-User Support**: Link multiple Steam accounts and find common games among friends
+- 🎮 **Co-op Game Finder**: Automatically filter and pick co-op/multiplayer games for your group
+- 🤖 **Discord Bot Integration**: Pick games with friends directly from Discord with voting and auto-selection
+- 🎲 **Random Game Selection**: Pick a random game from your entire Steam library
+- 🎯 **Smart Filters**: Filter by playtime (unplayed, barely played, well-played games)
+- 🎨 **Genre Filtering**: Filter games by genre/tags (Action, RPG, Strategy, etc.)
+- ⭐ **Favorites System**: Mark games as favorites and pick from your favorite games
+- 📊 **Library Statistics**: View stats about your game collection including top played games
+- 🔍 **Detailed Game Info**: Fetch descriptions, genres, release dates, and Metacritic scores
+- 🔗 **Direct Links**: Quick access to Steam Store and SteamDB pages
+- 🎨 **Colorful Interface**: Easy-to-read colored terminal output (CLI mode)
+- 💾 **Smart History**: Avoids suggesting recently picked games
+- 📤 **Export/Import**: Export and import your game picking history
+- ⚡ **CLI Mode**: Command-line arguments for scripting and quick picks
+- 🔧 **Configurable**: Custom playtime filters and settings
 
 ## 🎯 About
 
-GAPI solves a common problem: having too many games and not knowing what to play! With hundreds of games in your Steam library, decision paralysis is real. GAPI helps by intelligently selecting games based on your preferences and providing all the information you need to make a decision.
+- Python 3.6 or higher
+- Steam API Key (get one at https://steamcommunity.com/dev/apikey)
+- Your Steam ID (find it at https://steamid.io/)
+- (Optional) Discord Bot Token for Discord integration (get one at https://discord.com/developers/applications)
 
 ## ✨ Features
 
@@ -131,15 +136,115 @@ cp config_template.json config.json
 }
 ```
 
-**5. Run GAPI:**
+### Try the Demo
+
+Want to try GAPI without setting up Steam credentials?
+
+**Web GUI Demo:**
+```bash
+python3 gapi_gui.py --demo
+```
+Then open your browser to http://127.0.0.1:5000
+
+**CLI Demo:**
 ```bash
 python3 gapi.py
 ```
 
-### Virtual Environment (Recommended)
+Both demos run GAPI with mock game data so you can see how it works.
 
 For a cleaner setup, use a virtual environment:
 
+GAPI can be used in two modes: **Web GUI** or **Command-Line Interface**.
+
+### Web GUI Mode (Recommended)
+
+Run the web-based graphical interface:
+```bash
+python3 gapi_gui.py
+```
+
+Then open your browser to: **http://127.0.0.1:5000**
+
+The Web GUI provides:
+- **Pick a Game Tab**: Select filters and pick random games with a beautiful interface
+- **Library Tab**: Browse your entire game library with search functionality
+- **Favorites Tab**: Manage your favorite games
+- **Statistics Tab**: View detailed statistics and top played games
+- **Users Tab**: Add and manage multiple user accounts (Steam ID, Discord ID, email, name)
+- **Multi-User Tab**: Pick common games among multiple users, perfect for finding co-op games
+
+![GAPI Web GUI](https://github.com/user-attachments/assets/ef5ae18a-da33-4332-91b0-9b2b3d67a481)
+![User Management](https://github.com/user-attachments/assets/4edf7a65-c401-4206-8384-55d0f01740e1)
+![Multi-User Picker](https://github.com/user-attachments/assets/59e3977f-2c7f-4112-b1bf-f3f76d7e8df9)
+
+### Multi-User Features
+
+**Adding Users via Web GUI:**
+1. Navigate to the **Users** tab
+2. Fill in the user information:
+   - Name (required)
+   - Email (optional, for future features)
+   - Steam ID (required)
+   - Discord ID (optional, for Discord bot integration)
+3. Click "Add User"
+
+**Finding Common Games:**
+1. Go to the **Multi-User** tab
+2. Select the players you want to include
+3. Optionally check "Co-op/Multiplayer Games Only"
+4. Click "Pick Common Game" to get a random game everyone owns
+5. Or click "Show Common Games" to see the full list
+
+### Discord Bot Integration
+
+GAPI includes a Discord bot that lets you and your friends pick games together!
+
+**Setup:**
+1. Create a Discord bot at https://discord.com/developers/applications
+2. Add your bot token to `config.json`:
+```json
+{
+  "steam_api_key": "YOUR_STEAM_API_KEY",
+  "steam_id": "YOUR_STEAM_ID",
+  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN"
+}
+```
+
+3. Run the bot:
+```bash
+python3 discord_bot.py
+```
+
+**Discord Commands:**
+- `!gapi link <steam_id> [username]` - Link your Discord account to your Steam account
+- `!gapi unlink` - Unlink your Steam account
+- `!gapi users` - List all users with linked Steam accounts
+- `!gapi vote [duration]` - Start a voting session (react with ✅ to join)
+- `!gapi pick [@user1 @user2]` - Pick a random common game for mentioned users
+- `!gapi common [limit]` - Show common games owned by all linked users
+- `!gapi stats` - Display library statistics for all users
+
+**Example Discord Workflow:**
+```
+User1: !gapi link 76561198000000001 User1
+Bot: ✅ Linked @User1 to Steam ID: 76561198000000001
+
+User2: !gapi link 76561198000000002 User2
+Bot: ✅ Linked @User2 to Steam ID: 76561198000000002
+
+User1: !gapi vote 60
+Bot: 🗳️ Vote to Play! React with ✅ to join...
+[Users react with ✅]
+[After 60 seconds]
+Bot: 🎮 Let's play: Portal 2!
+     Players: User1, User2
+     Steam Store: [link]
+```
+
+### Command-Line Interface (CLI) Mode
+
+Run the application in terminal mode:
 ```bash
 # Create virtual environment
 python3 -m venv venv
@@ -162,35 +267,12 @@ python3 gapi.py
 
 Run GAPI in interactive mode for the full experience:
 
+**Interactive CLI Mode** (default):
 ```bash
 python3 gapi.py
 ```
 
-You'll see a menu with these options:
-
-```
-GAPI - Game Picker
-========================================
-1. Pick a random game
-2. Pick from unplayed games
-3. Pick from barely played games (< 2 hours)
-4. Pick from well-played games (> 10 hours)
-5. Pick by genre/tag
-6. Pick from favorites
-7. Show library stats
-8. Manage favorites
-9. Export/Import history
-q. Quit
-========================================
-```
-
-After picking a game, you'll be able to add it to (or remove it from) your favorites!
-
-### Command-Line Options
-
-GAPI supports non-interactive mode for scripting and automation:
-
-**Basic Usage:**
+**Non-Interactive CLI Mode** - Pick a game and exit:
 ```bash
 # Pick any random game and exit
 python3 gapi.py --random
