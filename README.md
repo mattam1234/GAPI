@@ -280,6 +280,9 @@ python3 gapi.py
 # Pick any random game and exit
 python3 gapi.py --random
 
+# Pick multiple games at once (batch picking)
+python3 gapi.py --random --count 3
+
 # Pick from unplayed games
 python3 gapi.py --unplayed
 
@@ -306,6 +309,9 @@ python3 gapi.py --exclude-genre "Horror,Puzzle"
 
 # Combine filters (unplayed Action games, no Horror)
 python3 gapi.py --unplayed --genre "Action" --exclude-genre "Horror"
+
+# Pick multiple games with filters
+python3 gapi.py --genre "RPG" --count 5
 
 # Skip detailed info for faster results
 python3 gapi.py --random --no-details

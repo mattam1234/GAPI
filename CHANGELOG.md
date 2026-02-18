@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [2.1.0] - 2026-02-18
 
 ### Added
+- **Batch Game Picking**: New `--count N` CLI option to pick multiple games at once
+  - Pick up to 10 games in a single command
+  - Ensures no duplicate picks in the same batch
+  - Works with all filter combinations
+  - Example: `python3 gapi.py --genre "RPG" --count 5`
 - **Genre Exclusion Filter**: New `--exclude-genre` CLI option to exclude games with specific genres
   - Combine with `--genre` for precise filtering (e.g., "Action games but not Horror")
   - Works with all filter combinations (playtime, favorites, etc.)

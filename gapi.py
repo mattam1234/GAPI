@@ -952,6 +952,13 @@ Examples:
         action='store_true',
         help='List all favorite games and exit'
     )
+    parser.add_argument(
+        '--count',
+        type=int,
+        default=1,
+        metavar='N',
+        help='Number of games to pick (default: 1, max: 10)'
+    )
     
     args = parser.parse_args()
     
@@ -973,6 +980,14 @@ Examples:
             sys.exit(1)
         if args.max_hours is not None and args.max_hours < 0:
             print(f"{Fore.RED}Error: --max-hours must be non-negative")
+            sys.exit(1)
+        
+        # Validate count argument
+        if args.count < 1:
+            print(f"{Fore.RED}Error: --count must be at least 1")
+            sys.exit(1)
+        if args.count > 10:
+            print(f"{Fore.RED}Error: --count cannot exceed 10 (to avoid overwhelming output)")
             sys.exit(1)
         
         # Handle export/import operations
@@ -1051,12 +1066,50 @@ Examples:
                 print(f"{Fore.RED}No games found matching the filter criteria.")
                 sys.exit(1)
             
-            game = picker.pick_random_game(filtered_games)
-            if game:
-                picker.display_game_info(game, detailed=not args.no_details, show_favorite_prompt=False)
+            # Pick multiple games if count > 1
+            if args.count == 1:
+                game = picker.pick_random_game(filtered_games)
+                if game:
+                    picker.display_game_info(game, detailed=not args.no_details, show_favorite_prompt=False)
+                else:
+                    print(f"{Fore.RED}No games available to pick from.")
+                    sys.exit(1)
             else:
-                print(f"{Fore.RED}No games available to pick from.")
-                sys.exit(1)
+                # Pick multiple games
+                games_pool = filtered_games if filtered_games is not None else picker.games
+                if len(games_pool) < args.count:
+                    print(f"{Fore.YELLOW}Warning: Only {len(games_pool)} games available, picking all of them.")
+                    count_to_pick = len(games_pool)
+                else:
+                    count_to_pick = args.count
+                
+                print(f"{Fore.CYAN}Picking {count_to_pick} games...\n")
+                picked_games = []
+                
+                for i in range(count_to_pick):
+                    game = picker.pick_random_game(games_pool, avoid_recent=True)
+                    if game:
+                        picked_games.append(game)
+                        # Add to history to avoid in next picks
+                        game_id = game.get('game_id')
+                        if game_id and game_id not in picker.history:
+                            picker.history.append(game_id)
+                        # Remove from pool to avoid duplicate picks
+                        games_pool = [g for g in games_pool if g.get('game_id') != game_id]
+                
+                # Display all picked games
+                for i, game in enumerate(picked_games, 1):
+                    print(f"\n{Fore.MAGENTA}{'='*60}")
+                    print(f"{Fore.MAGENTA}Game {i} of {count_to_pick}")
+                    print(f"{Fore.MAGENTA}{'='*60}")
+                    picker.display_game_info(game, detailed=not args.no_details, show_favorite_prompt=False)
+                
+                if picked_games:
+                    picker.save_history()
+                    print(f"\n{Fore.GREEN}✅ Successfully picked {len(picked_games)} games!")
+                else:
+                    print(f"{Fore.RED}No games available to pick from.")
+                    sys.exit(1)
         else:
             # Interactive mode
             picker.interactive_mode()
