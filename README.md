@@ -9,11 +9,14 @@ GAPI is a command-line tool that helps you decide what to play from your Steam l
 
 - 🎮 **Random Game Selection**: Pick a random game from your entire Steam library
 - 🎯 **Smart Filters**: Filter by playtime (unplayed, barely played, well-played games)
-- 📊 **Library Statistics**: View stats about your game collection
+- 🎨 **Genre Filtering**: Filter games by genre/tags (Action, RPG, Strategy, etc.)
+- ⭐ **Favorites System**: Mark games as favorites and pick from your favorite games
+- 📊 **Library Statistics**: View stats about your game collection including favorites
 - 🔍 **Detailed Game Info**: Fetch descriptions, genres, release dates, and Metacritic scores
 - 🔗 **Direct Links**: Quick access to Steam Store and SteamDB pages
 - 🎨 **Colorful Interface**: Easy-to-read colored terminal output
 - 💾 **Smart History**: Avoids suggesting recently picked games
+- 📤 **Export/Import**: Export and import your game picking history
 - ⚡ **CLI Mode**: Command-line arguments for scripting and quick picks
 - 🔧 **Configurable**: Custom playtime filters and settings
 
@@ -96,11 +99,27 @@ python3 gapi.py --well-played
 # Custom playtime filter
 python3 gapi.py --min-hours 5 --max-hours 50
 
+# Filter by genre
+python3 gapi.py --genre "Action,RPG"
+
+# Pick from favorites
+python3 gapi.py --favorites
+
+# Combine filters (e.g., unplayed Action games)
+python3 gapi.py --unplayed --genre "Action"
+
 # Show statistics only
 python3 gapi.py --stats
 
 # Skip detailed information (faster)
 python3 gapi.py --random --no-details
+
+# Export/Import history
+python3 gapi.py --export-history my_history.json
+python3 gapi.py --import-history my_history.json
+
+# List favorites
+python3 gapi.py --list-favorites
 
 # Use custom config file
 python3 gapi.py --config /path/to/config.json
@@ -113,7 +132,12 @@ python3 gapi.py --config /path/to/config.json
 - `--well-played, -w`: Pick from well-played games (> 10 hours)
 - `--min-hours HOURS`: Minimum playtime in hours (must be non-negative)
 - `--max-hours HOURS`: Maximum playtime in hours (must be non-negative)
+- `--genre GENRES`: Filter by genre(s), comma-separated (e.g., "Action,RPG")
+- `--favorites`: Pick from favorite games only
 - `--stats, -s`: Show library statistics and exit
+- `--list-favorites`: List all favorite games and exit
+- `--export-history FILE`: Export game history to a file
+- `--import-history FILE`: Import game history from a file
 - `--no-details`: Skip fetching detailed game information
 - `--config, -c PATH`: Path to config file (default: config.json)
 - `--help, -h`: Show help message
@@ -126,8 +150,14 @@ Once started, you'll see an interactive menu with the following options:
 2. **Pick from unplayed games** - Only games you haven't played yet
 3. **Pick from barely played games** - Games with less than 2 hours playtime
 4. **Pick from well-played games** - Games with more than 10 hours playtime
-5. **Show library stats** - Display statistics about your game collection
+5. **Pick by genre/tag** - Filter games by genre (Action, RPG, Strategy, etc.)
+6. **Pick from favorites** - Select from your favorite games
+7. **Show library stats** - Display statistics about your game collection
+8. **Manage favorites** - Add, remove, or list your favorite games
+9. **Export/Import history** - Export or import your game picking history
 q. **Quit** - Exit the application
+
+After picking a game, you'll be prompted to add it to (or remove it from) your favorites!
 
 ### Example Output
 
