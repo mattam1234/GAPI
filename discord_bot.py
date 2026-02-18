@@ -151,11 +151,11 @@ class GAPIBot(discord.Client):
         
         @self.tree.command(name='pick', description='Pick a random game for mentioned users or all linked users')
         @app_commands.describe(
-            user1='First user to include (optional)',
-            user2='Second user to include (optional)',
-            user3='Third user to include (optional)',
-            user4='Fourth user to include (optional)',
-            user5='Fifth user to include (optional)'
+            user1='First user to pick a game for',
+            user2='Second user to pick a game for',
+            user3='Third user to pick a game for',
+            user4='Fourth user to pick a game for',
+            user5='Fifth user to pick a game for'
         )
         async def pick_game(
             interaction: discord.Interaction, 
@@ -180,7 +180,7 @@ class GAPIBot(discord.Client):
                 participants = [user['name'] for user in self.multi_picker.users]
             
             if not participants:
-                await interaction.response.send_message("❌ No linked users found! Use `/link <steam_id>` to link your account.")
+                await interaction.response.send_message("❌ No linked users found! Use `/link` to link your account.")
                 return
             
             await interaction.response.send_message(f"🎲 Finding a common game for {len(participants)} player(s)...")
