@@ -3,18 +3,19 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
 
-GAPI is a command-line tool that helps you decide what to play from your Steam library. It randomly picks games based on various filters and displays detailed information from Steam Store and SteamDB.
+GAPI is a game picker tool that helps you decide what to play from your Steam library. It randomly picks games based on various filters and displays detailed information from Steam Store and SteamDB. Available in both **Web GUI** and **CLI** modes!
 
 ## Features
 
+- 🌐 **Modern Web GUI**: Beautiful browser-based interface with tabs for game picking, library browsing, favorites, and statistics
 - 🎮 **Random Game Selection**: Pick a random game from your entire Steam library
 - 🎯 **Smart Filters**: Filter by playtime (unplayed, barely played, well-played games)
 - 🎨 **Genre Filtering**: Filter games by genre/tags (Action, RPG, Strategy, etc.)
 - ⭐ **Favorites System**: Mark games as favorites and pick from your favorite games
-- 📊 **Library Statistics**: View stats about your game collection including favorites
+- 📊 **Library Statistics**: View stats about your game collection including top played games
 - 🔍 **Detailed Game Info**: Fetch descriptions, genres, release dates, and Metacritic scores
 - 🔗 **Direct Links**: Quick access to Steam Store and SteamDB pages
-- 🎨 **Colorful Interface**: Easy-to-read colored terminal output
+- 🎨 **Colorful Interface**: Easy-to-read colored terminal output (CLI mode)
 - 💾 **Smart History**: Avoids suggesting recently picked games
 - 📤 **Export/Import**: Export and import your game picking history
 - ⚡ **CLI Mode**: Command-line arguments for scripting and quick picks
@@ -59,16 +60,48 @@ cp config_template.json config.json
 
 ### Try the Demo
 
-Want to try GAPI without setting up Steam credentials? Run the demo:
+Want to try GAPI without setting up Steam credentials?
+
+**Web GUI Demo:**
+```bash
+python3 gapi_gui.py --demo
+```
+Then open your browser to http://127.0.0.1:5000
+
+**CLI Demo:**
 ```bash
 python3 demo.py
 ```
 
-This will run GAPI with mock game data so you can see how it works.
+Both demos run GAPI with mock game data so you can see how it works.
 
 ## Usage
 
-Run the application:
+GAPI can be used in two modes: **Web GUI** or **Command-Line Interface**.
+
+### Web GUI Mode (Recommended)
+
+Run the web-based graphical interface:
+```bash
+python3 gapi_gui.py
+```
+
+Then open your browser to: **http://127.0.0.1:5000**
+
+The Web GUI provides:
+- **Pick a Game Tab**: Select filters and pick random games with a beautiful interface
+- **Library Tab**: Browse your entire game library with search functionality
+- **Favorites Tab**: Manage your favorite games
+- **Statistics Tab**: View detailed statistics and top played games
+
+![GAPI Web GUI](https://github.com/user-attachments/assets/e5217eda-8b37-4b79-9308-41f839db779e)
+![Game Picker](https://github.com/user-attachments/assets/d5299642-ade8-4517-9224-bfde6cd776e9)
+![Library View](https://github.com/user-attachments/assets/2c19d9ff-5d0a-4f90-b430-ef7f49565fb7)
+![Statistics](https://github.com/user-attachments/assets/73f62781-91f3-4d2b-a08d-62dbeab28c6f)
+
+### Command-Line Interface (CLI) Mode
+
+Run the application in terminal mode:
 ```bash
 python3 gapi.py
 ```
@@ -77,12 +110,12 @@ python3 gapi.py
 
 GAPI supports both interactive and non-interactive modes:
 
-**Interactive Mode** (default):
+**Interactive CLI Mode** (default):
 ```bash
 python3 gapi.py
 ```
 
-**Non-Interactive Mode** - Pick a game and exit:
+**Non-Interactive CLI Mode** - Pick a game and exit:
 ```bash
 # Pick any random game
 python3 gapi.py --random
