@@ -43,6 +43,31 @@ def minutes_to_hours(minutes: int) -> float:
     return round(minutes / 60, 1)
 
 
+def is_valid_steam_id(steam_id: str) -> bool:
+    """Validate Steam ID format (64-bit SteamID)
+    
+    Args:
+        steam_id: Steam ID to validate
+        
+    Returns:
+        True if valid 64-bit Steam ID format, False otherwise
+    """
+    if not steam_id or not isinstance(steam_id, str):
+        return False
+    
+    # Steam 64-bit IDs are 17-digit numbers starting with 7656119
+    if not steam_id.isdigit():
+        return False
+    
+    if len(steam_id) != 17:
+        return False
+    
+    if not steam_id.startswith('7656119'):
+        return False
+    
+    return True
+
+
 class GamePlatformClient(ABC):
     """Abstract base class for game platform API clients"""
     
@@ -380,7 +405,15 @@ class GamePicker:
             print(f"{Fore.RED}Error importing history: {e}")
     
     def load_config(self, config_path: str) -> Dict:
-        """Load configuration from JSON file"""
+        """Load configuration from JSON file with environment variable support
+        
+        Environment variables take precedence over config file values:
+        - STEAM_API_KEY overrides steam_api_key
+        - STEAM_ID overrides steam_id
+        - DISCORD_BOT_TOKEN overrides discord_bot_token
+        - EPIC_ID overrides epic_id
+        - GOG_ID overrides gog_id
+        """
         if not os.path.exists(config_path):
             print(f"{Fore.RED}Error: Config file '{config_path}' not found!")
             print(f"{Fore.YELLOW}Please copy 'config_template.json' to 'config.json' and add your Steam API key and ID.")
@@ -390,12 +423,34 @@ class GamePicker:
             with open(config_path, 'r') as f:
                 config = json.load(f)
             
-            if config.get('steam_api_key') == 'YOUR_STEAM_API_KEY_HERE':
-                print(f"{Fore.RED}Error: Please configure your Steam API key in config.json")
+            # Override with environment variables if present
+            if os.getenv('STEAM_API_KEY'):
+                config['steam_api_key'] = os.getenv('STEAM_API_KEY')
+            if os.getenv('STEAM_ID'):
+                config['steam_id'] = os.getenv('STEAM_ID')
+            if os.getenv('DISCORD_BOT_TOKEN'):
+                config['discord_bot_token'] = os.getenv('DISCORD_BOT_TOKEN')
+            if os.getenv('EPIC_ID'):
+                config['epic_id'] = os.getenv('EPIC_ID')
+            if os.getenv('GOG_ID'):
+                config['gog_id'] = os.getenv('GOG_ID')
+            
+            # Validate required Steam credentials
+            if config.get('steam_api_key') == 'YOUR_STEAM_API_KEY_HERE' or not config.get('steam_api_key'):
+                print(f"{Fore.RED}Error: Please configure your Steam API key in config.json or set STEAM_API_KEY environment variable")
                 sys.exit(1)
             
-            if config.get('steam_id') == 'YOUR_STEAM_ID_HERE':
-                print(f"{Fore.RED}Error: Please configure your Steam ID in config.json")
+            if config.get('steam_id') == 'YOUR_STEAM_ID_HERE' or not config.get('steam_id'):
+                print(f"{Fore.RED}Error: Please configure your Steam ID in config.json or set STEAM_ID environment variable")
+                sys.exit(1)
+            
+            # Validate Steam ID format (unless in demo mode)
+            steam_id = config.get('steam_id', '')
+            if steam_id not in ['DEMO_MODE', 'DEMO_ID'] and not is_valid_steam_id(steam_id):
+                print(f"{Fore.RED}Error: Invalid Steam ID format!")
+                print(f"{Fore.YELLOW}Steam IDs should be 17-digit numbers starting with 7656119")
+                print(f"{Fore.YELLOW}Find your Steam ID at: https://steamid.io/")
+                print(f"{Fore.YELLOW}Your provided ID: {steam_id}")
                 sys.exit(1)
             
             return config

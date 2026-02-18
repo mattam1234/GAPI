@@ -353,7 +353,9 @@ SteamDB: https://steamdb.info/app/620/
 
 ## ⚙️ Configuration
 
-The `config.json` file contains your platform credentials:
+### Configuration File
+
+The `config.json` file contains your platform credentials and settings:
 
 ```json
 {
@@ -363,7 +365,11 @@ The `config.json` file contains your platform credentials:
   "epic_id": "YOUR_EPIC_ID_HERE",
   "gog_enabled": false,
   "gog_id": "YOUR_GOG_ID_HERE",
-  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE"
+  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+  "barely_played_hours": 2,
+  "well_played_hours": 10,
+  "max_history_size": 20,
+  "api_timeout_seconds": 10
 }
 ```
 
@@ -375,6 +381,29 @@ The `config.json` file contains your platform credentials:
 - `gog_enabled` - Set to `true` to enable GOG integration *(optional)*
 - `gog_id` - Your GOG account ID *(optional)*
 - `discord_bot_token` - Discord bot token for Discord integration *(optional)*
+- `barely_played_hours` - Hours threshold for "barely played" games *(default: 2)*
+- `well_played_hours` - Hours threshold for "well-played" games *(default: 10)*
+- `max_history_size` - Number of recent picks to remember *(default: 20)*
+- `api_timeout_seconds` - API request timeout in seconds *(default: 10)*
+
+### Environment Variables (Recommended for Security)
+
+For better security, you can use environment variables instead of storing credentials in `config.json`:
+
+```bash
+export STEAM_API_KEY="your_steam_api_key"
+export STEAM_ID="your_steam_id"
+export DISCORD_BOT_TOKEN="your_discord_token"  # Optional
+export EPIC_ID="your_epic_id"                   # Optional
+export GOG_ID="your_gog_id"                     # Optional
+```
+
+**Using .env file:**
+1. Copy `.env.example` to `.env`
+2. Fill in your credentials
+3. Use a tool like [python-dotenv](https://pypi.org/project/python-dotenv/) to load the variables
+
+Environment variables take precedence over config.json values.
 
 ## 🔑 Getting Your Credentials
 
