@@ -1005,7 +1005,6 @@ def create_templates():
                 loadUsersForMultiUser();
                 document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
             }
-            if (tabName === 'stats') loadStats();
         }
         
         async function pickGame() {

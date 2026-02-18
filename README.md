@@ -97,11 +97,76 @@ The Web GUI provides:
 - **Library Tab**: Browse your entire game library with search functionality
 - **Favorites Tab**: Manage your favorite games
 - **Statistics Tab**: View detailed statistics and top played games
+- **Users Tab**: Add and manage multiple user accounts (Steam ID, Discord ID, email, name)
+- **Multi-User Tab**: Pick common games among multiple users, perfect for finding co-op games
 
-![GAPI Web GUI](https://github.com/user-attachments/assets/e5217eda-8b37-4b79-9308-41f839db779e)
-![Game Picker](https://github.com/user-attachments/assets/d5299642-ade8-4517-9224-bfde6cd776e9)
-![Library View](https://github.com/user-attachments/assets/2c19d9ff-5d0a-4f90-b430-ef7f49565fb7)
-![Statistics](https://github.com/user-attachments/assets/73f62781-91f3-4d2b-a08d-62dbeab28c6f)
+![GAPI Web GUI](https://github.com/user-attachments/assets/ef5ae18a-da33-4332-91b0-9b2b3d67a481)
+![User Management](https://github.com/user-attachments/assets/4edf7a65-c401-4206-8384-55d0f01740e1)
+![Multi-User Picker](https://github.com/user-attachments/assets/59e3977f-2c7f-4112-b1bf-f3f76d7e8df9)
+
+### Multi-User Features
+
+**Adding Users via Web GUI:**
+1. Navigate to the **Users** tab
+2. Fill in the user information:
+   - Name (required)
+   - Email (optional, for future features)
+   - Steam ID (required)
+   - Discord ID (optional, for Discord bot integration)
+3. Click "Add User"
+
+**Finding Common Games:**
+1. Go to the **Multi-User** tab
+2. Select the players you want to include
+3. Optionally check "Co-op/Multiplayer Games Only"
+4. Click "Pick Common Game" to get a random game everyone owns
+5. Or click "Show Common Games" to see the full list
+
+### Discord Bot Integration
+
+GAPI includes a Discord bot that lets you and your friends pick games together!
+
+**Setup:**
+1. Create a Discord bot at https://discord.com/developers/applications
+2. Add your bot token to `config.json`:
+```json
+{
+  "steam_api_key": "YOUR_STEAM_API_KEY",
+  "steam_id": "YOUR_STEAM_ID",
+  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN"
+}
+```
+
+3. Run the bot:
+```bash
+python3 discord_bot.py
+```
+
+**Discord Commands:**
+- `!gapi link <steam_id> [username]` - Link your Discord account to your Steam account
+- `!gapi unlink` - Unlink your Steam account
+- `!gapi users` - List all users with linked Steam accounts
+- `!gapi vote [duration]` - Start a voting session (react with ✅ to join)
+- `!gapi pick [@user1 @user2]` - Pick a random common game for mentioned users
+- `!gapi common [limit]` - Show common games owned by all linked users
+- `!gapi stats` - Display library statistics for all users
+
+**Example Discord Workflow:**
+```
+User1: !gapi link 76561198000000001 User1
+Bot: ✅ Linked @User1 to Steam ID: 76561198000000001
+
+User2: !gapi link 76561198000000002 User2
+Bot: ✅ Linked @User2 to Steam ID: 76561198000000002
+
+User1: !gapi vote 60
+Bot: 🗳️ Vote to Play! React with ✅ to join...
+[Users react with ✅]
+[After 60 seconds]
+Bot: 🎮 Let's play: Portal 2!
+     Players: User1, User2
+     Steam Store: [link]
+```
 
 ### Command-Line Interface (CLI) Mode
 
