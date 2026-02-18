@@ -25,6 +25,7 @@ class SteamAPIClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.session = requests.Session()
+        self.details_cache = {}  # Cache for game details
     
     def get_owned_games(self, steam_id: str, include_appinfo: bool = True) -> List[Dict]:
         """Get list of games owned by a Steam user"""
@@ -51,6 +52,10 @@ class SteamAPIClient:
     
     def get_game_details(self, app_id: int) -> Optional[Dict]:
         """Get detailed information about a specific game"""
+        # Check cache first
+        if app_id in self.details_cache:
+            return self.details_cache[app_id]
+        
         url = "https://store.steampowered.com/api/appdetails"
         params = {'appids': app_id}
         
@@ -60,7 +65,9 @@ class SteamAPIClient:
             data = response.json()
             
             if str(app_id) in data and data[str(app_id)]['success']:
-                return data[str(app_id)]['data']
+                details = data[str(app_id)]['data']
+                self.details_cache[app_id] = details
+                return details
             return None
         except requests.RequestException as e:
             print(f"{Fore.YELLOW}Warning: Could not fetch details for app {app_id}: {e}")
@@ -71,6 +78,7 @@ class GamePicker:
     """Main game picker application"""
     
     HISTORY_FILE = '.gapi_history.json'
+    FAVORITES_FILE = '.gapi_favorites.json'
     MAX_HISTORY = 20
     BARELY_PLAYED_THRESHOLD_MINUTES = 120  # 2 hours
     WELL_PLAYED_THRESHOLD_MINUTES = 600    # 10 hours
@@ -80,6 +88,7 @@ class GamePicker:
         self.steam_client = SteamAPIClient(self.config['steam_api_key'])
         self.games: List[Dict] = []
         self.history: List[int] = self.load_history()
+        self.favorites: List[int] = self.load_favorites()
     
     def load_history(self) -> List[int]:
         """Load game picking history"""
@@ -98,6 +107,72 @@ class GamePicker:
                 json.dump(self.history[-self.MAX_HISTORY:], f)
         except IOError:
             pass  # Silently fail if we can't save history
+    
+    def load_favorites(self) -> List[int]:
+        """Load favorite games list"""
+        if os.path.exists(self.FAVORITES_FILE):
+            try:
+                with open(self.FAVORITES_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return []
+        return []
+    
+    def save_favorites(self):
+        """Save favorite games list"""
+        try:
+            with open(self.FAVORITES_FILE, 'w') as f:
+                json.dump(self.favorites, f, indent=2)
+        except IOError as e:
+            print(f"{Fore.RED}Error saving favorites: {e}")
+    
+    def add_favorite(self, app_id: int) -> bool:
+        """Add a game to favorites"""
+        if app_id not in self.favorites:
+            self.favorites.append(app_id)
+            self.save_favorites()
+            return True
+        return False
+    
+    def remove_favorite(self, app_id: int) -> bool:
+        """Remove a game from favorites"""
+        if app_id in self.favorites:
+            self.favorites.remove(app_id)
+            self.save_favorites()
+            return True
+        return False
+    
+    def export_history(self, filepath: str):
+        """Export game history to a file"""
+        try:
+            export_data = {
+                'history': self.history,
+                'exported_at': __import__('datetime').datetime.now().isoformat()
+            }
+            with open(filepath, 'w') as f:
+                json.dump(export_data, f, indent=2)
+            print(f"{Fore.GREEN}History exported to {filepath}")
+        except IOError as e:
+            print(f"{Fore.RED}Error exporting history: {e}")
+    
+    def import_history(self, filepath: str):
+        """Import game history from a file"""
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+            
+            if isinstance(data, dict) and 'history' in data:
+                self.history = data['history']
+            elif isinstance(data, list):
+                self.history = data
+            else:
+                print(f"{Fore.RED}Invalid history file format")
+                return
+            
+            self.save_history()
+            print(f"{Fore.GREEN}History imported from {filepath}")
+        except (IOError, json.JSONDecodeError) as e:
+            print(f"{Fore.RED}Error importing history: {e}")
     
     def load_config(self, config_path: str) -> Dict:
         """Load configuration from JSON file"""
@@ -135,15 +210,38 @@ class GamePicker:
         print(f"{Fore.GREEN}Found {len(self.games)} games in your library!")
         return True
     
-    def filter_games(self, min_playtime: int = 0, max_playtime: Optional[int] = None) -> List[Dict]:
-        """Filter games based on playtime criteria"""
+    def filter_games(self, min_playtime: int = 0, max_playtime: Optional[int] = None, 
+                     genres: Optional[List[str]] = None, favorites_only: bool = False) -> List[Dict]:
+        """Filter games based on various criteria"""
         filtered = self.games
         
+        # Filter by playtime
         if min_playtime > 0:
             filtered = [g for g in filtered if g.get('playtime_forever', 0) >= min_playtime]
         
         if max_playtime is not None:
             filtered = [g for g in filtered if g.get('playtime_forever', 0) <= max_playtime]
+        
+        # Filter by favorites
+        if favorites_only:
+            filtered = [g for g in filtered if g.get('appid') in self.favorites]
+        
+        # Filter by genres (requires fetching details)
+        if genres:
+            genre_filtered = []
+            genres_lower = [g.lower() for g in genres]
+            
+            for game in filtered:
+                app_id = game.get('appid')
+                if app_id:
+                    details = self.steam_client.get_game_details(app_id)
+                    if details and 'genres' in details:
+                        game_genres = [g['description'].lower() for g in details['genres']]
+                        # Check if any requested genre matches
+                        if any(genre in game_genres for genre in genres_lower):
+                            genre_filtered.append(game)
+            
+            filtered = genre_filtered
         
         return filtered
     
@@ -172,15 +270,18 @@ class GamePicker:
         
         return game
     
-    def display_game_info(self, game: Dict, detailed: bool = True):
+    def display_game_info(self, game: Dict, detailed: bool = True, show_favorite_prompt: bool = True):
         """Display information about a game"""
         app_id = game.get('appid')
         name = game.get('name', 'Unknown Game')
         playtime_minutes = game.get('playtime_forever', 0)
         playtime_hours = playtime_minutes / 60
+        is_favorite = app_id in self.favorites if app_id else False
         
         print(f"\n{Fore.GREEN}{'='*60}")
         print(f"{Fore.CYAN}{Style.BRIGHT}🎮 {name}")
+        if is_favorite:
+            print(f"{Fore.YELLOW}⭐ FAVORITE")
         print(f"{Fore.GREEN}{'='*60}")
         print(f"{Fore.YELLOW}App ID: {Fore.WHITE}{app_id}")
         print(f"{Fore.YELLOW}Playtime: {Fore.WHITE}{playtime_hours:.1f} hours")
@@ -209,6 +310,19 @@ class GamePicker:
         print(f"\n{Fore.YELLOW}Steam Store: {Fore.WHITE}https://store.steampowered.com/app/{app_id}/")
         print(f"{Fore.YELLOW}SteamDB: {Fore.WHITE}https://steamdb.info/app/{app_id}/")
         print(f"{Fore.GREEN}{'='*60}\n")
+        
+        # Prompt to add/remove from favorites in interactive mode
+        if show_favorite_prompt and app_id:
+            if is_favorite:
+                choice = input(f"{Fore.YELLOW}Remove from favorites? (y/n): {Fore.WHITE}").strip().lower()
+                if choice == 'y':
+                    self.remove_favorite(app_id)
+                    print(f"{Fore.GREEN}Removed from favorites!")
+            else:
+                choice = input(f"{Fore.YELLOW}Add to favorites? (y/n): {Fore.WHITE}").strip().lower()
+                if choice == 'y':
+                    self.add_favorite(app_id)
+                    print(f"{Fore.GREEN}Added to favorites!")
     
     def interactive_mode(self):
         """Run in interactive mode"""
@@ -222,7 +336,11 @@ class GamePicker:
             print(f"{Fore.YELLOW}2. {Fore.WHITE}Pick from unplayed games")
             print(f"{Fore.YELLOW}3. {Fore.WHITE}Pick from barely played games (< 2 hours)")
             print(f"{Fore.YELLOW}4. {Fore.WHITE}Pick from well-played games (> 10 hours)")
-            print(f"{Fore.YELLOW}5. {Fore.WHITE}Show library stats")
+            print(f"{Fore.YELLOW}5. {Fore.WHITE}Pick by genre/tag")
+            print(f"{Fore.YELLOW}6. {Fore.WHITE}Pick from favorites")
+            print(f"{Fore.YELLOW}7. {Fore.WHITE}Show library stats")
+            print(f"{Fore.YELLOW}8. {Fore.WHITE}Manage favorites")
+            print(f"{Fore.YELLOW}9. {Fore.WHITE}Export/Import history")
             print(f"{Fore.YELLOW}q. {Fore.WHITE}Quit")
             print(f"{Fore.WHITE}{'='*40}")
             
@@ -260,7 +378,15 @@ class GamePicker:
                 else:
                     print(f"{Fore.YELLOW}No well-played games found!")
             elif choice == '5':
+                self.pick_by_genre()
+            elif choice == '6':
+                self.pick_from_favorites()
+            elif choice == '7':
                 self.show_stats()
+            elif choice == '8':
+                self.manage_favorites_menu()
+            elif choice == '9':
+                self.export_import_menu()
             else:
                 print(f"{Fore.RED}Invalid choice. Please try again.")
     
@@ -281,7 +407,138 @@ class GamePicker:
         print(f"{Fore.YELLOW}Played Games: {Fore.WHITE}{total_games - unplayed}")
         print(f"{Fore.YELLOW}Total Playtime: {Fore.WHITE}{total_playtime:.1f} hours")
         print(f"{Fore.YELLOW}Average Playtime: {Fore.WHITE}{total_playtime/total_games:.1f} hours per game")
+        print(f"{Fore.YELLOW}Favorite Games: {Fore.WHITE}{len(self.favorites)}")
         print(f"{Fore.GREEN}{'='*40}\n")
+    
+    def pick_by_genre(self):
+        """Interactive genre selection and game picking"""
+        genre_input = input(f"\n{Fore.GREEN}Enter genre(s) separated by commas (e.g., Action, RPG): {Fore.WHITE}").strip()
+        
+        if not genre_input:
+            print(f"{Fore.YELLOW}No genre specified.")
+            return
+        
+        genres = [g.strip() for g in genre_input.split(',')]
+        print(f"\n{Fore.CYAN}Searching for games with genres: {', '.join(genres)}...")
+        print(f"{Fore.YELLOW}This may take a moment as we fetch game details...")
+        
+        filtered = self.filter_games(genres=genres)
+        
+        if filtered:
+            print(f"{Fore.GREEN}Found {len(filtered)} games matching the genre(s).")
+            game = self.pick_random_game(filtered)
+            self.display_game_info(game)
+        else:
+            print(f"{Fore.YELLOW}No games found with the specified genre(s)!")
+    
+    def pick_from_favorites(self):
+        """Pick a random game from favorites"""
+        if not self.favorites:
+            print(f"{Fore.YELLOW}No favorite games yet! Add some favorites first.")
+            return
+        
+        filtered = self.filter_games(favorites_only=True)
+        
+        if filtered:
+            print(f"{Fore.GREEN}Picking from {len(filtered)} favorite games...")
+            game = self.pick_random_game(filtered, avoid_recent=False)
+            self.display_game_info(game)
+        else:
+            print(f"{Fore.YELLOW}None of your favorite games are in your library anymore.")
+    
+    def manage_favorites_menu(self):
+        """Manage favorite games"""
+        while True:
+            print(f"\n{Fore.CYAN}{Style.BRIGHT}Manage Favorites")
+            print(f"{Fore.WHITE}{'='*40}")
+            print(f"{Fore.YELLOW}1. {Fore.WHITE}List all favorites")
+            print(f"{Fore.YELLOW}2. {Fore.WHITE}Remove a favorite")
+            print(f"{Fore.YELLOW}3. {Fore.WHITE}Clear all favorites")
+            print(f"{Fore.YELLOW}b. {Fore.WHITE}Back to main menu")
+            print(f"{Fore.WHITE}{'='*40}")
+            
+            choice = input(f"\n{Fore.GREEN}Enter your choice: {Fore.WHITE}").strip().lower()
+            
+            if choice == 'b':
+                break
+            elif choice == '1':
+                self.list_favorites()
+            elif choice == '2':
+                self.remove_favorite_interactive()
+            elif choice == '3':
+                confirm = input(f"{Fore.RED}Clear all favorites? (y/n): {Fore.WHITE}").strip().lower()
+                if confirm == 'y':
+                    self.favorites = []
+                    self.save_favorites()
+                    print(f"{Fore.GREEN}All favorites cleared!")
+            else:
+                print(f"{Fore.RED}Invalid choice.")
+    
+    def list_favorites(self):
+        """List all favorite games"""
+        if not self.favorites:
+            print(f"\n{Fore.YELLOW}No favorite games yet!")
+            return
+        
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}⭐ Your Favorite Games ({len(self.favorites)})")
+        print(f"{Fore.GREEN}{'='*60}")
+        
+        for app_id in self.favorites:
+            game = next((g for g in self.games if g.get('appid') == app_id), None)
+            if game:
+                name = game.get('name', 'Unknown')
+                playtime = game.get('playtime_forever', 0) / 60
+                print(f"{Fore.YELLOW}{app_id}: {Fore.WHITE}{name} {Fore.CYAN}({playtime:.1f} hours)")
+            else:
+                print(f"{Fore.YELLOW}{app_id}: {Fore.RED}(Not in library)")
+        
+        print(f"{Fore.GREEN}{'='*60}\n")
+    
+    def remove_favorite_interactive(self):
+        """Remove a favorite game interactively"""
+        if not self.favorites:
+            print(f"{Fore.YELLOW}No favorites to remove.")
+            return
+        
+        self.list_favorites()
+        app_id_str = input(f"\n{Fore.GREEN}Enter App ID to remove: {Fore.WHITE}").strip()
+        
+        try:
+            app_id = int(app_id_str)
+            if self.remove_favorite(app_id):
+                print(f"{Fore.GREEN}Removed from favorites!")
+            else:
+                print(f"{Fore.YELLOW}Game not found in favorites.")
+        except ValueError:
+            print(f"{Fore.RED}Invalid App ID.")
+    
+    def export_import_menu(self):
+        """Export/Import history menu"""
+        while True:
+            print(f"\n{Fore.CYAN}{Style.BRIGHT}Export/Import")
+            print(f"{Fore.WHITE}{'='*40}")
+            print(f"{Fore.YELLOW}1. {Fore.WHITE}Export history")
+            print(f"{Fore.YELLOW}2. {Fore.WHITE}Import history")
+            print(f"{Fore.YELLOW}b. {Fore.WHITE}Back to main menu")
+            print(f"{Fore.WHITE}{'='*40}")
+            
+            choice = input(f"\n{Fore.GREEN}Enter your choice: {Fore.WHITE}").strip().lower()
+            
+            if choice == 'b':
+                break
+            elif choice == '1':
+                filepath = input(f"{Fore.GREEN}Enter export file path (default: history_export.json): {Fore.WHITE}").strip()
+                if not filepath:
+                    filepath = 'history_export.json'
+                self.export_history(filepath)
+            elif choice == '2':
+                filepath = input(f"{Fore.GREEN}Enter import file path: {Fore.WHITE}").strip()
+                if filepath:
+                    self.import_history(filepath)
+                else:
+                    print(f"{Fore.YELLOW}No file path specified.")
+            else:
+                print(f"{Fore.RED}Invalid choice.")
 
 
 def main():
@@ -344,6 +601,33 @@ Examples:
         action='store_true',
         help='Skip fetching detailed game information'
     )
+    parser.add_argument(
+        '--genre',
+        type=str,
+        help='Filter by genre(s), comma-separated (e.g., "Action,RPG")'
+    )
+    parser.add_argument(
+        '--favorites',
+        action='store_true',
+        help='Pick from favorite games only'
+    )
+    parser.add_argument(
+        '--export-history',
+        type=str,
+        metavar='FILE',
+        help='Export game history to a file'
+    )
+    parser.add_argument(
+        '--import-history',
+        type=str,
+        metavar='FILE',
+        help='Import game history from a file'
+    )
+    parser.add_argument(
+        '--list-favorites',
+        action='store_true',
+        help='List all favorite games and exit'
+    )
     
     args = parser.parse_args()
     
@@ -367,8 +651,30 @@ Examples:
             print(f"{Fore.RED}Error: --max-hours must be non-negative")
             sys.exit(1)
         
+        # Handle export/import operations
+        if args.export_history:
+            if not picker.fetch_games():
+                sys.exit(1)
+            picker.export_history(args.export_history)
+            return
+        
+        if args.import_history:
+            picker.import_history(args.import_history)
+            return
+        
+        if args.list_favorites:
+            if not picker.fetch_games():
+                sys.exit(1)
+            picker.list_favorites()
+            return
+        
+        # Parse genres if provided
+        genres = None
+        if args.genre:
+            genres = [g.strip() for g in args.genre.split(',')]
+        
         # Non-interactive modes
-        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None:
+        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None or args.favorites or genres:
             if not picker.fetch_games():
                 sys.exit(1)
             
@@ -379,25 +685,34 @@ Examples:
             # Determine which filter to use
             filtered_games = None
             
-            if args.unplayed:
-                filtered_games = picker.filter_games(max_playtime=0)
+            if args.favorites:
+                filtered_games = picker.filter_games(favorites_only=True)
+                print(f"{Fore.GREEN}Filtering to favorite games...")
+            elif args.unplayed:
+                filtered_games = picker.filter_games(max_playtime=0, genres=genres)
                 print(f"{Fore.GREEN}Filtering to unplayed games...")
             elif args.barely_played:
-                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES)
+                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, genres=genres)
                 print(f"{Fore.GREEN}Filtering to barely played games (< 2 hours)...")
             elif args.well_played:
-                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES)
+                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, genres=genres)
                 print(f"{Fore.GREEN}Filtering to well-played games (> 10 hours)...")
             elif args.min_hours is not None or args.max_hours is not None:
                 min_minutes = int(args.min_hours * 60) if args.min_hours is not None else 0
                 max_minutes = int(args.max_hours * 60) if args.max_hours is not None else None
-                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes)
+                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes, genres=genres)
                 filter_desc = []
                 if args.min_hours is not None:
                     filter_desc.append(f">= {args.min_hours} hours")
                 if args.max_hours is not None:
                     filter_desc.append(f"<= {args.max_hours} hours")
                 print(f"{Fore.GREEN}Filtering to games with {' and '.join(filter_desc)}...")
+            elif genres:
+                filtered_games = picker.filter_games(genres=genres)
+                print(f"{Fore.GREEN}Filtering to games with genres: {', '.join(genres)}...")
+            
+            if genres:
+                print(f"{Fore.YELLOW}Fetching game details for genre filtering, this may take a moment...")
             
             if filtered_games is not None and not filtered_games:
                 print(f"{Fore.RED}No games found matching the filter criteria.")
@@ -405,7 +720,7 @@ Examples:
             
             game = picker.pick_random_game(filtered_games)
             if game:
-                picker.display_game_info(game, detailed=not args.no_details)
+                picker.display_game_info(game, detailed=not args.no_details, show_favorite_prompt=False)
             else:
                 print(f"{Fore.RED}No games available to pick from.")
                 sys.exit(1)

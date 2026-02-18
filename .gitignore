@@ -47,5 +47,11 @@ config.json
 # History
 .gapi_history.json
 
+# Favorites
+.gapi_favorites.json
+
+# Export files
+history_export.json
+
 # Logs
 *.log
