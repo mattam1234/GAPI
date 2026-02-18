@@ -1,23 +1,24 @@
-# 🎮 GAPI - Game Picker with SteamDB Integration
+# 🎮 GAPI - Multi-Platform Game Picker
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
 
-GAPI is a game picker tool that helps you decide what to play from your Steam library. It randomly picks games based on various filters and displays detailed information from Steam Store and SteamDB. Available in both **Web GUI** and **CLI** modes!
+GAPI is a multi-platform game picker tool that helps you decide what to play from your Steam, Epic Games, and GOG libraries. It randomly picks games based on various filters and displays detailed information. Available in both **Web GUI** and **CLI** modes!
 
 ## 📋 Table of Contents
 
+- 🌐 **Multi-Platform Support**: Steam, Epic Games Store, and GOG Galaxy integration
 - 🌐 **Modern Web GUI**: Beautiful browser-based interface with tabs for game picking, library browsing, favorites, statistics, and multi-user management
-- 👥 **Multi-User Support**: Link multiple Steam accounts and find common games among friends
+- 👥 **Multi-User Support**: Link multiple accounts across platforms and find common games among friends
 - 🎮 **Co-op Game Finder**: Automatically filter and pick co-op/multiplayer games for your group
 - 🤖 **Discord Bot Integration**: Pick games with friends directly from Discord with voting and auto-selection
-- 🎲 **Random Game Selection**: Pick a random game from your entire Steam library
+- 🎲 **Random Game Selection**: Pick a random game from all your game libraries
 - 🎯 **Smart Filters**: Filter by playtime (unplayed, barely played, well-played games)
 - 🎨 **Genre Filtering**: Filter games by genre/tags (Action, RPG, Strategy, etc.)
 - ⭐ **Favorites System**: Mark games as favorites and pick from your favorite games
 - 📊 **Library Statistics**: View stats about your game collection including top played games
 - 🔍 **Detailed Game Info**: Fetch descriptions, genres, release dates, and Metacritic scores
-- 🔗 **Direct Links**: Quick access to Steam Store and SteamDB pages
+- 🔗 **Direct Links**: Quick access to game store pages
 - 🎨 **Colorful Interface**: Easy-to-read colored terminal output (CLI mode)
 - 💾 **Smart History**: Avoids suggesting recently picked games
 - 📤 **Export/Import**: Export and import your game picking history
@@ -29,12 +30,14 @@ GAPI is a game picker tool that helps you decide what to play from your Steam li
 - Python 3.6 or higher
 - Steam API Key (get one at https://steamcommunity.com/dev/apikey)
 - Your Steam ID (find it at https://steamid.io/)
+- (Optional) Epic Games account
+- (Optional) GOG account
 - (Optional) Discord Bot Token for Discord integration (get one at https://discord.com/developers/applications)
 
 ## ✨ Features
 
 ### Core Features
-- 🎮 **Random Game Selection** - Pick from your entire Steam library
+- 🎮 **Multi-Platform Support** - Pick from Steam, Epic Games, and GOG libraries
 - 🎯 **Smart Filters** - Filter by playtime, genre, and more
 - 💾 **Smart History** - Avoids suggesting recently picked games
 - 🔍 **Rich Game Information** - Descriptions, genres, release dates, Metacritic scores
@@ -350,29 +353,41 @@ SteamDB: https://steamdb.info/app/620/
 
 ## ⚙️ Configuration
 
-The `config.json` file contains your Steam credentials:
+The `config.json` file contains your platform credentials:
 
 ```json
 {
   "steam_api_key": "YOUR_ACTUAL_API_KEY",
-  "steam_id": "YOUR_STEAM_ID"
+  "steam_id": "YOUR_STEAM_ID",
+  "epic_enabled": false,
+  "epic_id": "YOUR_EPIC_ID_HERE",
+  "gog_enabled": false,
+  "gog_id": "YOUR_GOG_ID_HERE",
+  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE"
 }
 ```
 
 **Configuration Options:**
-- `steam_api_key` - Your Steam Web API key *(required)*
-- `steam_id` - Your Steam ID in 64-bit format *(required)*
+- `steam_api_key` - Your Steam Web API key *(required for Steam)*
+- `steam_id` - Your Steam ID in 64-bit format *(required for Steam)*
+- `epic_enabled` - Set to `true` to enable Epic Games Store integration *(optional)*
+- `epic_id` - Your Epic Games account ID or email *(optional)*
+- `gog_enabled` - Set to `true` to enable GOG integration *(optional)*
+- `gog_id` - Your GOG account ID *(optional)*
+- `discord_bot_token` - Discord bot token for Discord integration *(optional)*
 
-## 🔑 Getting Your Steam Credentials
+## 🔑 Getting Your Credentials
 
-### Steam API Key
+### Steam Credentials
+
+#### Steam API Key
 
 1. Go to https://steamcommunity.com/dev/apikey
 2. Log in with your Steam account
 3. Enter a domain name (can be anything, e.g., "localhost")
 4. Copy the generated API key
 
-### Steam ID
+#### Steam ID
 
 **Option 1 - Using SteamID.io (Easiest):**
 1. Go to https://steamid.io/
@@ -386,6 +401,62 @@ The `config.json` file contains your Steam credentials:
 4. Use the URL at https://steamid.io/ to get your steamID64
 
 **Important:** Your Steam profile must be set to **Public** for GAPI to access your game library.
+
+### Epic Games Account (Optional)
+
+**Note:** Epic Games integration currently has limited support due to API restrictions. Epic Games does not provide a public API for accessing user game libraries without OAuth authentication. 
+
+To enable Epic Games Store support:
+1. Set `epic_enabled` to `true` in your config.json
+2. Add your Epic Games account email or ID to `epic_id`
+
+**Current Limitations:**
+- Library access requires OAuth authentication (not yet implemented)
+- Only store browsing functionality is available
+- Full library integration coming in future updates
+
+### GOG Account (Optional)
+
+**Note:** GOG integration currently has limited support. GOG's Galaxy API is primarily designed for Galaxy plugin development and requires authentication.
+
+To enable GOG support:
+1. Set `gog_enabled` to `true` in your config.json
+2. Add your GOG account information to `gog_id`
+
+**Current Limitations:**
+- Library access requires Galaxy plugin authentication (not yet implemented)
+- Full library integration coming in future updates
+
+### Multi-User Configuration
+
+For multi-user setups, edit `users.json` with platform information for each user:
+
+```json
+{
+  "users": [
+    {
+      "name": "User1",
+      "email": "user1@example.com",
+      "platforms": {
+        "steam": "YOUR_STEAM_ID_1",
+        "epic": "",
+        "gog": ""
+      },
+      "discord_id": "YOUR_DISCORD_ID_1"
+    },
+    {
+      "name": "User2",
+      "email": "user2@example.com",
+      "platforms": {
+        "steam": "YOUR_STEAM_ID_2",
+        "epic": "",
+        "gog": ""
+      },
+      "discord_id": "YOUR_DISCORD_ID_2"
+    }
+  ]
+}
+```
 
 ## ❓ FAQ
 
@@ -424,6 +495,26 @@ Yes! Create multiple config files (e.g., `config1.json`, `config2.json`) and use
 python3 gapi.py --config config1.json
 python3 gapi.py --config config2.json
 ```
+
+For multi-user game picking with friends, use the `users.json` file to configure multiple users and their platform accounts. See the Multi-User Configuration section above.
+</details>
+
+<details>
+<summary><strong>Does GAPI support Epic Games and GOG?</strong></summary>
+
+Yes! GAPI has initial support for Epic Games Store and GOG platforms. However, there are current limitations:
+
+**Epic Games:**
+- Store browsing is available
+- Full library access requires OAuth authentication (not yet implemented)
+- Enable by setting `epic_enabled: true` in config.json
+
+**GOG:**
+- GOG's API requires Galaxy plugin authentication
+- Full library integration is planned for future updates
+- Enable by setting `gog_enabled: true` in config.json
+
+Steam remains fully supported with complete library access. Epic and GOG support will be enhanced in future updates.
 </details>
 
 <details>
@@ -441,6 +532,12 @@ Yes! GAPI is written in Python and works on all major platforms. On Windows, use
 - ✅ Ensure your Steam ID is in the correct 64-bit format (17-digit number)
 - ✅ Check that your Steam profile is set to **Public** (not Private or Friends Only)
 - ✅ Make sure you have games in your Steam library
+- ✅ If using Epic or GOG, ensure the platforms are enabled in config and IDs are correct
+
+**"epicstore-api not installed" warning**
+- ✅ This is expected if you don't want Epic Games support
+- ✅ Install with `pip install epicstore-api` to enable Epic Games integration
+- ✅ The warning can be safely ignored if you only use Steam
 
 **"Config file not found"**
 - ✅ Ensure you've created `config.json` from `config_template.json`
@@ -456,6 +553,11 @@ Yes! GAPI is written in Python and works on all major platforms. On Windows, use
 - ✅ Make sure you've installed dependencies: `pip install -r requirements.txt`
 - ✅ Consider using a virtual environment
 - ✅ Try running with `python3` instead of `python` (or vice versa)
+
+**Platform-specific issues**
+- ✅ Epic Games and GOG integration are currently limited - see FAQ for details
+- ✅ Only Steam provides full library access at this time
+- ✅ Future updates will enhance Epic and GOG support
 
 **Games not being filtered correctly**
 - ✅ Check your filter settings match your expectations
