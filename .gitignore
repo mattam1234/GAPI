@@ -43,6 +43,7 @@ config.json
 
 # Demo
 .demo_config.json
+.demo_config_gui.json
 
 # History
 .gapi_history.json
