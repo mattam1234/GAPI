@@ -621,10 +621,10 @@ def create_templates():
         <div class="status-bar" id="status">Loading...</div>
         
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('picker')">Pick a Game</button>
-            <button class="tab" onclick="switchTab('library')">Library</button>
-            <button class="tab" onclick="switchTab('favorites')">Favorites</button>
-            <button class="tab" onclick="switchTab('stats')">Statistics</button>
+            <button class="tab active" onclick="switchTab('picker', event)">Pick a Game</button>
+            <button class="tab" onclick="switchTab('library', event)">Library</button>
+            <button class="tab" onclick="switchTab('favorites', event)">Favorites</button>
+            <button class="tab" onclick="switchTab('stats', event)">Statistics</button>
         </div>
         
         <!-- Picker Tab -->
@@ -721,7 +721,7 @@ def create_templates():
             }
         }
         
-        function switchTab(tabName) {
+        function switchTab(tabName, event) {
             // Update tab buttons
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             event.target.classList.add('active');
@@ -1034,8 +1034,6 @@ def create_templates():
 
 def main():
     """Main entry point for GUI"""
-    import sys
-    
     config_path = 'config.json'
     demo_mode = False
     
