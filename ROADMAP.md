@@ -2,29 +2,39 @@
 
 This document outlines the planned features and improvements for GAPI (Game Picker with Multi-Platform Integration).
 
-## ✅ Recently Completed (Current Release)
+## ✅ Recently Completed (Current Release - v2.1.0)
 
 ### Configuration & Code Quality
 - ✅ Configurable playtime thresholds (barely played, well played hours)
 - ✅ Configurable history size
 - ✅ Configurable API timeout
 - ✅ Helper function for playtime conversion (DRY principle)
+- ✅ Helper function for Steam ID validation
 - ✅ Improved code maintainability
+- ✅ Environment variable support for sensitive credentials (STEAM_API_KEY, STEAM_ID, etc.)
+- ✅ Steam ID format validation (17-digit, starts with 7656119)
+- ✅ Configuration validation with helpful error messages
+
+### User Experience
+- ✅ Batch game picking - Pick multiple games at once with `--count N` (up to 10)
+- ✅ Genre exclusion filter - Exclude specific genres with `--exclude-genre`
+- ✅ Better error messages with actionable suggestions
+
+### Documentation
+- ✅ Comprehensive ROADMAP.md file
+- ✅ Updated CHANGELOG.md
+- ✅ .env.example for environment variables
 
 ## 🚀 Upcoming Features
 
-### 📅 Next Release (v2.1.0)
+### 📅 Next Release (v2.2.0)
 
 #### High Priority - User Experience
-- [ ] **Environment Variable Support** - Support for sensitive credentials via environment variables (STEAM_API_KEY, STEAM_ID, etc.)
 - [ ] **Advanced Filtering Options**
   - [ ] Filter by release date (e.g., games from 2020-2023)
   - [ ] Filter by Metacritic score (e.g., score > 80)
-  - [ ] Exclude specific tags/genres (e.g., exclude "Horror")
-  - [ ] Exclude specific games from picker
-- [ ] **Batch Game Picker** - Pick multiple games at once (e.g., "pick 5 games")
+  - [ ] Exclude specific games by name or ID from picker
 - [ ] **Loading Indicators** - Visual feedback in Web GUI for long operations
-- [ ] **Better Error Messages** - Actionable suggestions when errors occur
 
 #### High Priority - Performance
 - [ ] **Enhanced Caching System** - Persist game details cache between sessions
@@ -32,12 +42,10 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Optimized Genre Filtering** - Use cached data instead of refetching details
 
 #### Medium Priority - Data & Configuration
-- [ ] **Steam ID Validation** - Validate 64-bit format before API calls
 - [ ] **Atomic File Writes** - Prevent data corruption on crashes
 - [ ] **Logging Framework** - Replace print statements with proper logging (configurable levels)
-- [ ] **Configuration Validation** - Validate config values on startup with helpful error messages
 
-### 📅 Future Release (v2.2.0)
+### 📅 Future Release (v2.3.0)
 
 #### Platform Integration
 - [ ] **Epic Games OAuth** - Full library access with OAuth authentication
