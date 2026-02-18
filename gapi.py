@@ -1041,10 +1041,12 @@ Examples:
                 print(f"{Fore.GREEN}Filtering to unplayed games...")
             elif args.barely_played:
                 filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
-                print(f"{Fore.GREEN}Filtering to barely played games (< 2 hours)...")
+                barely_played_hours = minutes_to_hours(picker.BARELY_PLAYED_THRESHOLD_MINUTES)
+                print(f"{Fore.GREEN}Filtering to barely played games (< {barely_played_hours} hours)...")
             elif args.well_played:
                 filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
-                print(f"{Fore.GREEN}Filtering to well-played games (> 10 hours)...")
+                well_played_hours = minutes_to_hours(picker.WELL_PLAYED_THRESHOLD_MINUTES)
+                print(f"{Fore.GREEN}Filtering to well-played games (> {well_played_hours} hours)...")
             elif args.min_hours is not None or args.max_hours is not None:
                 min_minutes = int(args.min_hours * 60) if args.min_hours is not None else 0
                 max_minutes = int(args.max_hours * 60) if args.max_hours is not None else None
