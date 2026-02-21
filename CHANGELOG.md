@@ -4,6 +4,49 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.1.0] - 2026-02-18
+
+### Added
+- **Batch Game Picking**: New `--count N` CLI option to pick multiple games at once
+  - Pick up to 10 games in a single command
+  - Ensures no duplicate picks in the same batch
+  - Works with all filter combinations
+  - Example: `python3 gapi.py --genre "RPG" --count 5`
+- **Genre Exclusion Filter**: New `--exclude-genre` CLI option to exclude games with specific genres
+  - Combine with `--genre` for precise filtering (e.g., "Action games but not Horror")
+  - Works with all filter combinations (playtime, favorites, etc.)
+- **Environment Variable Support**: Securely configure credentials via environment variables
+  - `STEAM_API_KEY`, `STEAM_ID`, `DISCORD_BOT_TOKEN`, `EPIC_ID`, `GOG_ID`
+  - Environment variables override config.json values
+  - `.env.example` file provided as a template
+- **Configurable Settings**: New configuration options in config.json
+  - `barely_played_hours` - Customize threshold for barely played games (default: 2 hours)
+  - `well_played_hours` - Customize threshold for well-played games (default: 10 hours)
+  - `max_history_size` - Configure how many recent picks to remember (default: 20)
+  - `api_timeout_seconds` - Set API request timeout (default: 10 seconds)
+- **Steam ID Validation**: Automatic validation of Steam ID format (17-digit, starting with 7656119)
+  - Helpful error messages with link to steamid.io
+- **ROADMAP.md** - Comprehensive roadmap for future features and improvements
+- Helper function `minutes_to_hours()` for consistent playtime conversion
+- Helper function `is_valid_steam_id()` for Steam ID validation
+
+### Changed
+- Improved code maintainability by extracting hardcoded values to configuration
+- Refactored playtime conversion to use centralized helper function (DRY principle)
+- Steam API client now respects configurable timeout value
+- Enhanced error messages with actionable suggestions
+
+### Security
+- Environment variable support for sensitive credentials (recommended over config.json)
+- Steam ID format validation prevents invalid API calls
+- `.env` added to `.gitignore` to prevent credential leaks
+
+### Developer Experience
+- Reduced code duplication with reusable helper functions
+- More flexible configuration system for easier customization
+- Better separation of concerns (configuration vs. constants)
+- Improved input validation and error messages
+
 ## [Unreleased]
 
 ### Added

@@ -31,6 +31,43 @@ def is_placeholder_value(value: str) -> bool:
     return value.startswith('YOUR_')
 
 
+def minutes_to_hours(minutes: int) -> float:
+    """Convert playtime from minutes to hours
+    
+    Args:
+        minutes: Playtime in minutes
+        
+    Returns:
+        Playtime in hours, rounded to 1 decimal place
+    """
+    return round(minutes / 60, 1)
+
+
+def is_valid_steam_id(steam_id: str) -> bool:
+    """Validate Steam ID format (64-bit SteamID)
+    
+    Args:
+        steam_id: Steam ID to validate
+        
+    Returns:
+        True if valid 64-bit Steam ID format, False otherwise
+    """
+    if not steam_id or not isinstance(steam_id, str):
+        return False
+    
+    # Steam 64-bit IDs are 17-digit numbers starting with 7656119
+    if not steam_id.isdigit():
+        return False
+    
+    if len(steam_id) != 17:
+        return False
+    
+    if not steam_id.startswith('7656119'):
+        return False
+    
+    return True
+
+
 class GamePlatformClient(ABC):
     """Abstract base class for game platform API clients"""
     
@@ -65,9 +102,10 @@ class SteamAPIClient(GamePlatformClient):
     
     BASE_URL = "https://api.steampowered.com"
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, timeout: int = 10):
         super().__init__()
         self.api_key = api_key
+        self.timeout = timeout
     
     def get_platform_name(self) -> str:
         return "steam"
@@ -84,7 +122,7 @@ class SteamAPIClient(GamePlatformClient):
         }
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
+            response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
             
@@ -115,7 +153,7 @@ class SteamAPIClient(GamePlatformClient):
         params = {'appids': app_id_int}
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
+            response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
             
@@ -226,19 +264,28 @@ class GamePicker:
     
     HISTORY_FILE = '.gapi_history.json'
     FAVORITES_FILE = '.gapi_favorites.json'
-    MAX_HISTORY = 20
-    BARELY_PLAYED_THRESHOLD_MINUTES = 120  # 2 hours
-    WELL_PLAYED_THRESHOLD_MINUTES = 600    # 10 hours
+    
+    # Default values (can be overridden by config)
+    DEFAULT_MAX_HISTORY = 20
+    DEFAULT_BARELY_PLAYED_HOURS = 2
+    DEFAULT_WELL_PLAYED_HOURS = 10
+    DEFAULT_API_TIMEOUT = 10
     
     def __init__(self, config_path: str = 'config.json'):
         self.config = self.load_config(config_path)
+        
+        # Load configurable values from config or use defaults
+        self.MAX_HISTORY = self.config.get('max_history_size', self.DEFAULT_MAX_HISTORY)
+        self.BARELY_PLAYED_THRESHOLD_MINUTES = self.config.get('barely_played_hours', self.DEFAULT_BARELY_PLAYED_HOURS) * 60
+        self.WELL_PLAYED_THRESHOLD_MINUTES = self.config.get('well_played_hours', self.DEFAULT_WELL_PLAYED_HOURS) * 60
+        self.API_TIMEOUT = self.config.get('api_timeout_seconds', self.DEFAULT_API_TIMEOUT)
         
         # Initialize platform clients
         self.clients: Dict[str, GamePlatformClient] = {}
         
         # Always try to initialize Steam if API key is available
         if self.config.get('steam_api_key') and self.config['steam_api_key'] != 'YOUR_STEAM_API_KEY_HERE':
-            self.clients['steam'] = SteamAPIClient(self.config['steam_api_key'])
+            self.clients['steam'] = SteamAPIClient(self.config['steam_api_key'], timeout=self.API_TIMEOUT)
         
         # Initialize Epic Games client if enabled
         if self.config.get('epic_enabled', False):
@@ -358,7 +405,15 @@ class GamePicker:
             print(f"{Fore.RED}Error importing history: {e}")
     
     def load_config(self, config_path: str) -> Dict:
-        """Load configuration from JSON file"""
+        """Load configuration from JSON file with environment variable support
+        
+        Environment variables take precedence over config file values:
+        - STEAM_API_KEY overrides steam_api_key
+        - STEAM_ID overrides steam_id
+        - DISCORD_BOT_TOKEN overrides discord_bot_token
+        - EPIC_ID overrides epic_id
+        - GOG_ID overrides gog_id
+        """
         if not os.path.exists(config_path):
             print(f"{Fore.RED}Error: Config file '{config_path}' not found!")
             print(f"{Fore.YELLOW}Please copy 'config_template.json' to 'config.json' and add your Steam API key and ID.")
@@ -368,12 +423,34 @@ class GamePicker:
             with open(config_path, 'r') as f:
                 config = json.load(f)
             
-            if config.get('steam_api_key') == 'YOUR_STEAM_API_KEY_HERE':
-                print(f"{Fore.RED}Error: Please configure your Steam API key in config.json")
+            # Override with environment variables if present
+            if os.getenv('STEAM_API_KEY'):
+                config['steam_api_key'] = os.getenv('STEAM_API_KEY')
+            if os.getenv('STEAM_ID'):
+                config['steam_id'] = os.getenv('STEAM_ID')
+            if os.getenv('DISCORD_BOT_TOKEN'):
+                config['discord_bot_token'] = os.getenv('DISCORD_BOT_TOKEN')
+            if os.getenv('EPIC_ID'):
+                config['epic_id'] = os.getenv('EPIC_ID')
+            if os.getenv('GOG_ID'):
+                config['gog_id'] = os.getenv('GOG_ID')
+            
+            # Validate required Steam credentials
+            if config.get('steam_api_key') == 'YOUR_STEAM_API_KEY_HERE' or not config.get('steam_api_key'):
+                print(f"{Fore.RED}Error: Please configure your Steam API key in config.json or set STEAM_API_KEY environment variable")
                 sys.exit(1)
             
-            if config.get('steam_id') == 'YOUR_STEAM_ID_HERE':
-                print(f"{Fore.RED}Error: Please configure your Steam ID in config.json")
+            if config.get('steam_id') == 'YOUR_STEAM_ID_HERE' or not config.get('steam_id'):
+                print(f"{Fore.RED}Error: Please configure your Steam ID in config.json or set STEAM_ID environment variable")
+                sys.exit(1)
+            
+            # Validate Steam ID format (unless in demo mode)
+            steam_id = config.get('steam_id', '')
+            if steam_id not in ['DEMO_MODE', 'DEMO_ID'] and not is_valid_steam_id(steam_id):
+                print(f"{Fore.RED}Error: Invalid Steam ID format!")
+                print(f"{Fore.YELLOW}Steam IDs should be 17-digit numbers starting with 7656119")
+                print(f"{Fore.YELLOW}Find your Steam ID at: https://steamid.io/")
+                print(f"{Fore.YELLOW}Your provided ID: {steam_id}")
                 sys.exit(1)
             
             return config
@@ -421,8 +498,20 @@ class GamePicker:
         return True
     
     def filter_games(self, min_playtime: int = 0, max_playtime: Optional[int] = None, 
-                     genres: Optional[List[str]] = None, favorites_only: bool = False) -> List[Dict]:
-        """Filter games based on various criteria"""
+                     genres: Optional[List[str]] = None, exclude_genres: Optional[List[str]] = None,
+                     favorites_only: bool = False) -> List[Dict]:
+        """Filter games based on various criteria
+        
+        Args:
+            min_playtime: Minimum playtime in minutes
+            max_playtime: Maximum playtime in minutes (None for no max)
+            genres: List of genres to include (OR logic - game must have at least one)
+            exclude_genres: List of genres to exclude (game must not have any of these)
+            favorites_only: Only include favorite games
+            
+        Returns:
+            List of filtered games
+        """
         filtered = self.games
         
         # Filter by playtime
@@ -437,9 +526,10 @@ class GamePicker:
             filtered = [g for g in filtered if g.get('game_id') in self.favorites]
         
         # Filter by genres (requires fetching details)
-        if genres:
+        if genres or exclude_genres:
             genre_filtered = []
-            genres_lower = [g.lower() for g in genres]
+            genres_lower = [g.lower() for g in genres] if genres else []
+            exclude_lower = [g.lower() for g in exclude_genres] if exclude_genres else []
             
             for game in filtered:
                 platform = game.get('platform', 'steam')
@@ -449,8 +539,17 @@ class GamePicker:
                     details = self.clients[platform].get_game_details(str(game_id))
                     if details and 'genres' in details:
                         game_genres = [g['description'].lower() for g in details['genres']]
-                        # Check if any requested genre matches
-                        if any(genre in game_genres for genre in genres_lower):
+                        
+                        # Check if game should be excluded
+                        if exclude_lower and any(genre in game_genres for genre in exclude_lower):
+                            continue
+                        
+                        # Check if game matches included genres (if specified)
+                        if genres_lower:
+                            if any(genre in game_genres for genre in genres_lower):
+                                genre_filtered.append(game)
+                        else:
+                            # No include filter, just exclude filter
                             genre_filtered.append(game)
             
             filtered = genre_filtered
@@ -489,7 +588,7 @@ class GamePicker:
         name = game.get('name', 'Unknown Game')
         platform = game.get('platform', 'steam')
         playtime_minutes = game.get('playtime_forever', 0)
-        playtime_hours = playtime_minutes / 60
+        playtime_hours = minutes_to_hours(playtime_minutes)
         is_favorite = game_id in self.favorites if game_id else False
         
         print(f"\n{Fore.GREEN}{'='*60}")
@@ -620,7 +719,7 @@ class GamePicker:
         
         total_games = len(self.games)
         unplayed = len([g for g in self.games if g.get('playtime_forever', 0) == 0])
-        total_playtime = sum(g.get('playtime_forever', 0) for g in self.games) / 60  # Convert to hours
+        total_playtime = minutes_to_hours(sum(g.get('playtime_forever', 0) for g in self.games))
         
         print(f"\n{Fore.CYAN}{Style.BRIGHT}📊 Library Statistics")
         print(f"{Fore.GREEN}{'='*40}")
@@ -711,7 +810,7 @@ class GamePicker:
             if game:
                 name = game.get('name', 'Unknown')
                 platform = game.get('platform', 'unknown')
-                playtime = game.get('playtime_forever', 0) / 60
+                playtime = minutes_to_hours(game.get('playtime_forever', 0))
                 print(f"{Fore.YELLOW}{game_id}: {Fore.WHITE}{name} {Fore.MAGENTA}[{platform}] {Fore.CYAN}({playtime:.1f} hours)")
             else:
                 print(f"{Fore.YELLOW}{game_id}: {Fore.RED}(Not in library)")
@@ -827,6 +926,11 @@ Examples:
         help='Filter by genre(s), comma-separated (e.g., "Action,RPG")'
     )
     parser.add_argument(
+        '--exclude-genre',
+        type=str,
+        help='Exclude games with these genre(s), comma-separated (e.g., "Horror,Puzzle")'
+    )
+    parser.add_argument(
         '--favorites',
         action='store_true',
         help='Pick from favorite games only'
@@ -847,6 +951,13 @@ Examples:
         '--list-favorites',
         action='store_true',
         help='List all favorite games and exit'
+    )
+    parser.add_argument(
+        '--count',
+        type=int,
+        default=1,
+        metavar='N',
+        help='Number of games to pick (default: 1, max: 10)'
     )
     
     args = parser.parse_args()
@@ -871,6 +982,14 @@ Examples:
             print(f"{Fore.RED}Error: --max-hours must be non-negative")
             sys.exit(1)
         
+        # Validate count argument
+        if args.count < 1:
+            print(f"{Fore.RED}Error: --count must be at least 1")
+            sys.exit(1)
+        if args.count > 10:
+            print(f"{Fore.RED}Error: --count cannot exceed 10 (to avoid overwhelming output)")
+            sys.exit(1)
+        
         # Handle export/import operations
         if args.export_history:
             if not picker.fetch_games():
@@ -893,12 +1012,16 @@ Examples:
         if args.genre:
             genres = [g.strip() for g in args.genre.split(',')]
         
+        exclude_genres = None
+        if args.exclude_genre:
+            exclude_genres = [g.strip() for g in args.exclude_genre.split(',')]
+        
         # Show genre filtering message early if genres are specified
-        if genres:
+        if genres or exclude_genres:
             print(f"{Fore.YELLOW}Note: Genre filtering may take a moment as we fetch game details...")
         
         # Non-interactive modes
-        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None or args.favorites or genres:
+        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None or args.favorites or genres or exclude_genres:
             if not picker.fetch_games():
                 sys.exit(1)
             
@@ -911,41 +1034,84 @@ Examples:
             
             if args.favorites:
                 # Favorites filter should also respect genre parameter
-                filtered_games = picker.filter_games(favorites_only=True, genres=genres)
+                filtered_games = picker.filter_games(favorites_only=True, genres=genres, exclude_genres=exclude_genres)
                 print(f"{Fore.GREEN}Filtering to favorite games...")
             elif args.unplayed:
-                filtered_games = picker.filter_games(max_playtime=0, genres=genres)
+                filtered_games = picker.filter_games(max_playtime=0, genres=genres, exclude_genres=exclude_genres)
                 print(f"{Fore.GREEN}Filtering to unplayed games...")
             elif args.barely_played:
-                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, genres=genres)
-                print(f"{Fore.GREEN}Filtering to barely played games (< 2 hours)...")
+                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
+                barely_played_hours = minutes_to_hours(picker.BARELY_PLAYED_THRESHOLD_MINUTES)
+                print(f"{Fore.GREEN}Filtering to barely played games (< {barely_played_hours} hours)...")
             elif args.well_played:
-                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, genres=genres)
-                print(f"{Fore.GREEN}Filtering to well-played games (> 10 hours)...")
+                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
+                well_played_hours = minutes_to_hours(picker.WELL_PLAYED_THRESHOLD_MINUTES)
+                print(f"{Fore.GREEN}Filtering to well-played games (> {well_played_hours} hours)...")
             elif args.min_hours is not None or args.max_hours is not None:
                 min_minutes = int(args.min_hours * 60) if args.min_hours is not None else 0
                 max_minutes = int(args.max_hours * 60) if args.max_hours is not None else None
-                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes, genres=genres)
+                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes, genres=genres, exclude_genres=exclude_genres)
                 filter_desc = []
                 if args.min_hours is not None:
                     filter_desc.append(f">= {args.min_hours} hours")
                 if args.max_hours is not None:
                     filter_desc.append(f"<= {args.max_hours} hours")
                 print(f"{Fore.GREEN}Filtering to games with {' and '.join(filter_desc)}...")
-            elif genres:
-                filtered_games = picker.filter_games(genres=genres)
-                print(f"{Fore.GREEN}Filtering to games with genres: {', '.join(genres)}...")
+            elif genres or exclude_genres:
+                filtered_games = picker.filter_games(genres=genres, exclude_genres=exclude_genres)
+                if genres:
+                    print(f"{Fore.GREEN}Filtering to games with genres: {', '.join(genres)}...")
+                if exclude_genres:
+                    print(f"{Fore.GREEN}Excluding games with genres: {', '.join(exclude_genres)}...")
             
             if filtered_games is not None and not filtered_games:
                 print(f"{Fore.RED}No games found matching the filter criteria.")
                 sys.exit(1)
             
-            game = picker.pick_random_game(filtered_games)
-            if game:
-                picker.display_game_info(game, detailed=not args.no_details, show_favorite_prompt=False)
+            # Pick multiple games if count > 1
+            if args.count == 1:
+                game = picker.pick_random_game(filtered_games)
+                if game:
+                    picker.display_game_info(game, detailed=not args.no_details, show_favorite_prompt=False)
+                else:
+                    print(f"{Fore.RED}No games available to pick from.")
+                    sys.exit(1)
             else:
-                print(f"{Fore.RED}No games available to pick from.")
-                sys.exit(1)
+                # Pick multiple games
+                games_pool = filtered_games if filtered_games is not None else picker.games
+                if len(games_pool) < args.count:
+                    print(f"{Fore.YELLOW}Warning: Only {len(games_pool)} games available, picking all of them.")
+                    count_to_pick = len(games_pool)
+                else:
+                    count_to_pick = args.count
+                
+                print(f"{Fore.CYAN}Picking {count_to_pick} games...\n")
+                picked_games = []
+                
+                for i in range(count_to_pick):
+                    game = picker.pick_random_game(games_pool, avoid_recent=True)
+                    if game:
+                        picked_games.append(game)
+                        # Add to history to avoid in next picks
+                        game_id = game.get('game_id')
+                        if game_id and game_id not in picker.history:
+                            picker.history.append(game_id)
+                        # Remove from pool to avoid duplicate picks
+                        games_pool = [g for g in games_pool if g.get('game_id') != game_id]
+                
+                # Display all picked games
+                for i, game in enumerate(picked_games, 1):
+                    print(f"\n{Fore.MAGENTA}{'='*60}")
+                    print(f"{Fore.MAGENTA}Game {i} of {count_to_pick}")
+                    print(f"{Fore.MAGENTA}{'='*60}")
+                    picker.display_game_info(game, detailed=not args.no_details, show_favorite_prompt=False)
+                
+                if picked_games:
+                    picker.save_history()
+                    print(f"\n{Fore.GREEN}✅ Successfully picked {len(picked_games)} games!")
+                else:
+                    print(f"{Fore.RED}No games available to pick from.")
+                    sys.exit(1)
         else:
             # Interactive mode
             picker.interactive_mode()
