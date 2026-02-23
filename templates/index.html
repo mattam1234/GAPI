@@ -476,6 +476,7 @@
             <button class="tab" onclick="switchTab('stats', event)">Statistics</button>
             <button class="tab" onclick="switchTab('users', event)">Users</button>
             <button class="tab" onclick="switchTab('multiuser', event)">Multi-User</button>
+            <button class="tab" onclick="switchTab('schedule', event)">📅 Schedule</button>
         </div>        
         <!-- Picker Tab -->
         <div id="picker-tab" class="tab-content active">
@@ -702,6 +703,53 @@
                 </button>
             </div>
         </div>
+
+        <!-- Schedule Tab -->
+        <div id="schedule-tab" class="tab-content">
+            <h2>📅 Game Night Scheduler</h2>
+
+            <!-- Create / Edit Form -->
+            <div id="schedule-form-panel" style="background:var(--list-hover); padding:20px; border-radius:10px; margin-bottom:20px;">
+                <h3 id="schedule-form-title">➕ New Event</h3>
+                <input type="hidden" id="schedule-edit-id" value="">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:15px;">
+                    <div>
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Title *</label>
+                        <input type="text" id="sch-title" class="search-input" placeholder="Game Night" style="margin-bottom:0;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Game (optional)</label>
+                        <input type="text" id="sch-game" class="search-input" placeholder="Picked game" style="margin-bottom:0;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Date</label>
+                        <input type="date" id="sch-date" class="search-input" style="margin-bottom:0;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Time</label>
+                        <input type="time" id="sch-time" class="search-input" style="margin-bottom:0;">
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Attendees (comma-separated)</label>
+                        <input type="text" id="sch-attendees" class="search-input" placeholder="Alice, Bob, Charlie" style="margin-bottom:0;">
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Notes</label>
+                        <input type="text" id="sch-notes" class="search-input" placeholder="Optional notes…" style="margin-bottom:0;">
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <button onclick="submitScheduleForm()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">💾 Save Event</button>
+                    <button onclick="clearScheduleForm()" style="padding:10px 18px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer;">✕ Clear</button>
+                </div>
+            </div>
+
+            <!-- Events List -->
+            <h3>Upcoming Events</h3>
+            <div id="schedule-list" class="list-container" style="margin-top:10px;">
+                <div class="loading">Loading schedule…</div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -781,6 +829,7 @@
                 document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
             }
             if (tabName === 'stats') loadStats();
+            if (tabName === 'schedule') loadSchedule();
         }
         
         async function pickGame() {
@@ -1044,6 +1093,17 @@
                     
                     if (details.metacritic_score) {
                         detailsHtml += `<p><strong>Metacritic Score:</strong> ${details.metacritic_score}</p>`;
+                    }
+
+                    if (details.protondb) {
+                        const tier = details.protondb.tier || 'unknown';
+                        const tierColors = {
+                            platinum: '#ace0fb', gold: '#ffd700', silver: '#c0c0c0',
+                            bronze: '#cd7f32', borked: '#e74c3c', pending: '#95a5a6'
+                        };
+                        const bg = tierColors[tier] || '#aaa';
+                        const total = details.protondb.total || 0;
+                        detailsHtml += `<p><strong>ProtonDB:</strong> <span style="display:inline-block;padding:2px 10px;border-radius:10px;background:${bg};color:#1a1a2e;font-weight:700;font-size:0.9em;">${tier.charAt(0).toUpperCase()+tier.slice(1)}</span> <span style="color:var(--text-secondary);font-size:0.85em;">(${total} report${total!==1?'s':''})</span></p>`;
                     }
                     
                     detailsHtml += '</div>';
@@ -1761,6 +1821,111 @@
 
         // Initialize on page load
         init();
+
+        // ---- Game Night Scheduler ----
+
+        async function loadSchedule() {
+            const listDiv = document.getElementById('schedule-list');
+            if (!listDiv) return;
+            listDiv.innerHTML = '<div class="loading">Loading schedule…</div>';
+            try {
+                const resp = await fetch('/api/schedule');
+                if (!resp.ok) { listDiv.innerHTML = '<div class="error">Could not load schedule</div>'; return; }
+                const data = await resp.json();
+                if (!data.events || data.events.length === 0) {
+                    listDiv.innerHTML = '<div style="color:var(--text-secondary);padding:20px;">No events scheduled yet. Add one above!</div>';
+                    return;
+                }
+                listDiv.innerHTML = data.events.map(ev => renderEventCard(ev)).join('');
+            } catch (e) {
+                listDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+            }
+        }
+
+        function renderEventCard(ev) {
+            const attendees = (ev.attendees || []).join(', ') || '—';
+            const safeTitle = (ev.title||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const safeGame  = (ev.game_name||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const safeNotes = (ev.notes||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const safeAttendees = attendees.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return `<div style="padding:15px 20px; border:1px solid var(--card-border); border-radius:10px; margin-bottom:10px; background:var(--card-bg);">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <strong style="font-size:1.1em;">${safeTitle}</strong>
+                        ${safeGame ? `<span style="margin-left:8px; padding:2px 8px; background:var(--list-hover); border-radius:10px; font-size:0.85em;">🎮 ${safeGame}</span>` : ''}
+                    </div>
+                    <div style="color:var(--text-secondary); font-size:0.9em;">${ev.date||''} ${ev.time||''}</div>
+                </div>
+                <div style="margin-top:6px; color:var(--text-secondary); font-size:0.9em;">
+                    👥 ${safeAttendees}
+                    ${safeNotes ? `<span style="margin-left:12px;">📝 ${safeNotes}</span>` : ''}
+                </div>
+                <div style="margin-top:10px; display:flex; gap:8px;">
+                    <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
+                    <button onclick="deleteScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
+                </div>
+            </div>`;
+        }
+
+        async function submitScheduleForm() {
+            const editId = document.getElementById('schedule-edit-id').value;
+            const title = document.getElementById('sch-title').value.trim();
+            if (!title) { alert('Title is required'); return; }
+            const body = {
+                title,
+                date: document.getElementById('sch-date').value,
+                time: document.getElementById('sch-time').value,
+                attendees: document.getElementById('sch-attendees').value,
+                game_name: document.getElementById('sch-game').value.trim(),
+                notes: document.getElementById('sch-notes').value.trim(),
+            };
+            try {
+                let resp;
+                if (editId) {
+                    resp = await fetch(`/api/schedule/${editId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                } else {
+                    resp = await fetch('/api/schedule', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                }
+                if (!resp.ok) { const d=await resp.json(); alert(d.error||'Failed to save event'); return; }
+                clearScheduleForm();
+                loadSchedule();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function deleteScheduleEvent(id) {
+            if (!confirm('Delete this event?')) return;
+            try {
+                const resp = await fetch(`/api/schedule/${id}`, {method:'DELETE'});
+                if (resp.ok) loadSchedule();
+                else { const d=await resp.json(); alert(d.error||'Failed to delete'); }
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function editScheduleEvent(id) {
+            try {
+                const resp = await fetch('/api/schedule');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const ev = (data.events||[]).find(e => e.id === id);
+                if (!ev) return;
+                document.getElementById('schedule-edit-id').value = ev.id;
+                document.getElementById('schedule-form-title').textContent = '✏️ Edit Event';
+                document.getElementById('sch-title').value = ev.title || '';
+                document.getElementById('sch-date').value = ev.date || '';
+                document.getElementById('sch-time').value = ev.time || '';
+                document.getElementById('sch-attendees').value = (ev.attendees||[]).join(', ');
+                document.getElementById('sch-game').value = ev.game_name || '';
+                document.getElementById('sch-notes').value = ev.notes || '';
+                document.getElementById('schedule-form-panel').scrollIntoView({behavior:'smooth'});
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        function clearScheduleForm() {
+            document.getElementById('schedule-edit-id').value = '';
+            document.getElementById('schedule-form-title').textContent = '➕ New Event';
+            ['sch-title','sch-date','sch-time','sch-attendees','sch-game','sch-notes']
+                .forEach(id => { document.getElementById(id).value = ''; });
+        }
     </script>
 </body>
 </html>

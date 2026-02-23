@@ -159,6 +159,20 @@ def api_pick_game():
 
         threading.Thread(target=fetch_details, daemon=True).start()
 
+        # Fire webhook if one is configured (non-blocking, best-effort)
+        webhook_url = picker.config.get('webhook_url', '').strip()
+        if webhook_url and not gapi.is_placeholder_value(webhook_url):
+            wh_payload = {
+                'content': f"🎮 **Game pick:** {name} ({round(playtime_hours, 1)}h played)\n"
+                           f"{response.get('steam_url', '')}",
+                'game': response,
+            }
+            threading.Thread(
+                target=gapi.send_webhook,
+                args=(webhook_url, wh_payload),
+                daemon=True,
+            ).start()
+
         return jsonify(response)
 
 
@@ -189,7 +203,13 @@ def api_game_details(app_id):
         
         if 'metacritic' in details:
             response['metacritic_score'] = details['metacritic'].get('score')
-        
+
+        # ProtonDB Linux compatibility rating (best-effort, non-blocking cache)
+        if picker.steam_client:
+            protondb = picker.steam_client.get_protondb_rating(app_id)
+            if protondb:
+                response['protondb'] = protondb
+
         return jsonify(response)
 
 
@@ -771,6 +791,78 @@ def api_library_by_tag(tag: str):
         ]
 
     return jsonify({'tag': tag, 'games': result, 'count': len(result)})
+
+
+# ---------------------------------------------------------------------------
+# Game Night Scheduler endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/schedule', methods=['GET'])
+def api_get_schedule():
+    """Return all game night events sorted by date/time."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        events = picker.get_events()
+    return jsonify({'events': events, 'count': len(events)})
+
+
+@app.route('/api/schedule', methods=['POST'])
+def api_create_event():
+    """Create a new game night event."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    title = str(data.get('title', '')).strip()
+    if not title:
+        return jsonify({'error': 'title is required'}), 400
+    date = str(data.get('date', '')).strip()
+    time_str = str(data.get('time', '')).strip()
+    attendees_raw = data.get('attendees', '')
+    if isinstance(attendees_raw, str):
+        attendees = [a.strip() for a in attendees_raw.split(',') if a.strip()]
+    else:
+        attendees = [str(a).strip() for a in (attendees_raw or []) if str(a).strip()]
+    game_name = str(data.get('game_name', '')).strip()
+    notes = str(data.get('notes', '')).strip()
+    with picker_lock:
+        event = picker.add_event(title, date, time_str, attendees, game_name, notes)
+    return jsonify(event), 201
+
+
+@app.route('/api/schedule/<event_id>', methods=['PUT'])
+def api_update_event(event_id: str):
+    """Update a game night event."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    safe: Dict = {}
+    for k in ('title', 'date', 'time', 'game_name', 'notes'):
+        if k in data:
+            safe[k] = str(data[k]).strip()
+    if 'attendees' in data:
+        raw = data['attendees']
+        if isinstance(raw, str):
+            safe['attendees'] = [a.strip() for a in raw.split(',') if a.strip()]
+        else:
+            safe['attendees'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
+    with picker_lock:
+        event = picker.update_event(event_id, **safe)
+    if event is None:
+        return jsonify({'error': 'Event not found'}), 404
+    return jsonify(event)
+
+
+@app.route('/api/schedule/<event_id>', methods=['DELETE'])
+def api_delete_event(event_id: str):
+    """Delete a game night event."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        removed = picker.remove_event(event_id)
+    if not removed:
+        return jsonify({'error': 'Event not found'}), 404
+    return jsonify({'success': True, 'id': event_id})
 
 
 def create_templates():

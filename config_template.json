@@ -10,5 +10,6 @@
   "well_played_hours": 10,
   "max_history_size": 20,
   "api_timeout_seconds": 10,
-  "log_level": "WARNING"
+  "log_level": "WARNING",
+  "webhook_url": ""
 }

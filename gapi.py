@@ -13,6 +13,7 @@ import random
 import argparse
 import datetime
 import tempfile
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
@@ -93,6 +94,31 @@ def is_placeholder_value(value: str) -> bool:
     if not value or not isinstance(value, str):
         return True
     return value.startswith('YOUR_') or value in _PLACEHOLDER_VALUES
+
+
+def send_webhook(url: str, payload: Dict, timeout: int = 5) -> bool:
+    """POST *payload* as JSON to *url* (Discord / Slack / IFTTT webhook).
+
+    Discord-compatible: the payload includes a ``content`` key with a plain-text
+    summary; all other webhook services receive the full JSON body.
+
+    Args:
+        url: Webhook URL to POST to.
+        payload: JSON-serialisable dict.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        True on a 2xx response, False on any network or HTTP error.
+    """
+    _wh_log = logging.getLogger('gapi.webhook')
+    try:
+        resp = requests.post(url, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        _wh_log.info("Webhook delivered to %s (HTTP %s)", url, resp.status_code)
+        return True
+    except requests.RequestException as e:
+        _wh_log.warning("Webhook delivery failed (%s): %s", url, e)
+        return False
 
 
 def minutes_to_hours(minutes: int) -> float:
@@ -182,6 +208,7 @@ class SteamAPIClient(GamePlatformClient):
         self.api_key = api_key
         self.timeout = timeout
         self._log = logging.getLogger('gapi.steam')
+        self._protondb_cache: Dict = {}
 
     def get_platform_name(self) -> str:
         return "steam"
@@ -242,8 +269,39 @@ class SteamAPIClient(GamePlatformClient):
             self._log.warning("Could not fetch details for app %s: %s", app_id, e)
             return None
 
+    def get_protondb_rating(self, app_id: str) -> Optional[Dict]:
+        """Fetch ProtonDB Linux compatibility tier for a Steam game.
 
-class EpicAPIClient(GamePlatformClient):
+        Returns a dict with ``tier``, ``score``, and ``total`` (report count),
+        or ``None`` if no data is available or the fetch fails.
+        Tier values: platinum, gold, silver, bronze, borked, pending.
+        Results are cached in memory for the lifetime of the client instance.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return None
+
+        if app_id_int in self._protondb_cache:
+            return self._protondb_cache[app_id_int]
+
+        url = f"https://www.protondb.com/api/v1/reports/summaries/{app_id_int}.json"
+        try:
+            resp = self.session.get(url, timeout=self.timeout)
+            if resp.status_code == 200:
+                data = resp.json()
+                result: Optional[Dict] = {
+                    'tier': data.get('tier', 'unknown'),
+                    'score': data.get('score'),
+                    'total': data.get('total', 0),
+                }
+                self._protondb_cache[app_id_int] = result
+                return result
+            # Cache the miss (404 = no reports yet) so we don't retry
+            self._protondb_cache[app_id_int] = None
+        except requests.RequestException as e:
+            self._log.debug("ProtonDB fetch failed for %s: %s", app_id, e)
+        return None
     """Client for interacting with Epic Games Store API"""
 
     def __init__(self):
@@ -343,6 +401,7 @@ class GamePicker:
     CACHE_FILE = '.gapi_details_cache.json'
     REVIEWS_FILE = '.gapi_reviews.json'
     TAGS_FILE = '.gapi_tags.json'
+    SCHEDULE_FILE = '.gapi_schedule.json'
 
     # Default values (can be overridden by config)
     DEFAULT_MAX_HISTORY = 20
@@ -393,6 +452,7 @@ class GamePicker:
         self.favorites: List[str] = self.load_favorites()  # Now stores composite IDs
         self.reviews: Dict[str, Dict] = self.load_reviews()  # game_id -> review dict
         self.tags: Dict[str, List[str]] = self.load_tags()  # game_id -> [tag, ...]
+        self.schedule: Dict[str, Dict] = self.load_schedule()  # event_id -> event dict
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -591,7 +651,93 @@ class GamePicker:
             if tag in self.tags.get(str(g.get('game_id', g.get('appid', ''))), [])
         ]
 
-    def load_history(self) -> List[str]:
+    # ------------------------------------------------------------------
+    # Game Night Scheduler
+    # ------------------------------------------------------------------
+
+    def load_schedule(self) -> Dict[str, Dict]:
+        """Load game night events from disk."""
+        if os.path.exists(self.SCHEDULE_FILE):
+            try:
+                with open(self.SCHEDULE_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self._log.warning("Could not load schedule: %s", e)
+        return {}
+
+    def save_schedule(self) -> None:
+        """Persist game night events to disk (atomic write)."""
+        _atomic_write_json(self.SCHEDULE_FILE, self.schedule)
+
+    def add_event(self, title: str, date: str, time_str: str,
+                  attendees: Optional[List[str]] = None,
+                  game_name: str = '', notes: str = '') -> Dict:
+        """Create a new game night event and persist it.
+
+        Args:
+            title:     Short event title (required).
+            date:      ISO date string, e.g. ``"2026-03-01"``.
+            time_str:  Time string, e.g. ``"20:00"``.
+            attendees: List of participant names.
+            game_name: Optional pre-chosen game name.
+            notes:     Free-text notes.
+
+        Returns:
+            The new event dict (includes generated ``id`` and ``created_at``).
+        """
+        event_id = str(uuid.uuid4())[:8]
+        event: Dict = {
+            'id': event_id,
+            'title': title,
+            'date': date,
+            'time': time_str,
+            'attendees': attendees or [],
+            'game_name': game_name,
+            'notes': notes,
+            'created_at': datetime.datetime.utcnow().isoformat(),
+        }
+        self.schedule[event_id] = event
+        self.save_schedule()
+        return event
+
+    def update_event(self, event_id: str, **kwargs) -> Optional[Dict]:
+        """Update an existing event's fields.
+
+        Only ``title``, ``date``, ``time``, ``attendees``, ``game_name``, and
+        ``notes`` are accepted; any other keys in *kwargs* are ignored.
+
+        Returns:
+            Updated event dict, or ``None`` if not found.
+        """
+        if event_id not in self.schedule:
+            return None
+        event = self.schedule[event_id]
+        for key in ('title', 'date', 'time', 'attendees', 'game_name', 'notes'):
+            if key in kwargs:
+                event[key] = kwargs[key]
+        event['updated_at'] = datetime.datetime.utcnow().isoformat()
+        self.save_schedule()
+        return event
+
+    def remove_event(self, event_id: str) -> bool:
+        """Delete an event by ID.
+
+        Returns:
+            True if the event existed and was removed, False if not found.
+        """
+        if event_id in self.schedule:
+            del self.schedule[event_id]
+            self.save_schedule()
+            return True
+        return False
+
+    def get_events(self) -> List[Dict]:
+        """Return all events sorted by date then time (ascending)."""
+        events = list(self.schedule.values())
+        events.sort(key=lambda e: (e.get('date', ''), e.get('time', '')))
+        return events
+
+
         """Load game picking history (supports both old int and new composite ID formats)"""
         if os.path.exists(self.HISTORY_FILE):
             try:
