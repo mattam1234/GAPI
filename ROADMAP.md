@@ -39,7 +39,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### High Priority - Performance
 - [x] **Enhanced Caching System** - Persist game details cache between sessions
 - [x] **Parallel Library Fetching** - Concurrent user-library fetching with ThreadPoolExecutor
-- [ ] **Optimized Genre Filtering** - Use cached data instead of refetching details
+- [x] **Optimized Genre Filtering** - Parallel `ThreadPoolExecutor` detail-fetching inside `filter_games()`
 
 #### Medium Priority - Data & Configuration
 - [x] **Atomic File Writes** - Prevent data corruption on crashes
@@ -48,6 +48,9 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### Social Features
 - [x] **Voting System** – Multi-user emoji-reaction voting via Discord + Web UI
 - [x] **Game Reviews** – Personal rating (1-10) + notes per game, stored in `.gapi_reviews.json`
+- [x] **Custom Game Tags** – Tag games with labels, filter/pick by tag, REST API + Web UI
+- [x] **Dark Mode** – CSS custom properties + toggle button, theme persisted to localStorage
+- [x] **Statistics Charts** – Chart.js doughnut (played/unplayed) + horizontal bar (top 10) in Stats tab
 
 ### 📅 Future Release (v2.3.0)
 

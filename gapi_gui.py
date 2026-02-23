@@ -86,6 +86,7 @@ def api_pick_game():
     max_year = data.get('max_year')
     exclude_ids_raw = data.get('exclude_game_ids', '')
     exclude_game_ids = [s.strip() for s in exclude_ids_raw.split(',') if s.strip()] if exclude_ids_raw else None
+    tag_filter = data.get('tag', '').strip() or None
 
     # Build shared advanced-filter kwargs
     adv = {
@@ -112,7 +113,11 @@ def api_pick_game():
             filtered_games = picker.filter_games(favorites_only=True, **adv)
         elif any(v is not None and v != [] for v in adv.values()):
             filtered_games = picker.filter_games(**adv)
-        
+
+        # Apply tag filter on top of other filters (or on whole library)
+        if tag_filter:
+            filtered_games = picker.filter_by_tag(tag_filter, filtered_games)
+
         if filtered_games is not None and len(filtered_games) == 0:
             return jsonify({'error': 'No games match the selected filters'}), 400
 
@@ -131,6 +136,7 @@ def api_pick_game():
         playtime_hours = playtime_minutes / 60
         is_favorite = app_id in picker.favorites if app_id else False
         review = picker.get_review(game_id) if game_id else None
+        tags = picker.get_tags(game_id) if game_id else []
 
         response = {
             'app_id': app_id,
@@ -139,6 +145,7 @@ def api_pick_game():
             'playtime_hours': round(playtime_hours, 1),
             'is_favorite': is_favorite,
             'review': review,
+            'tags': tags,
             'steam_url': f'https://store.steampowered.com/app/{app_id}/',
             'steamdb_url': f'https://steamdb.info/app/{app_id}/'
         }
@@ -684,8 +691,89 @@ def api_delete_review(game_id: str):
     return jsonify({'success': True})
 
 
+# -----------------------------------------------------------------------
+# Tags endpoints
+# -----------------------------------------------------------------------
+
+@app.route('/api/tags', methods=['GET'])
+def api_get_all_tags():
+    """Return all unique tags and a mapping of game_id → tags."""
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+    with picker_lock:
+        return jsonify({'tags': picker.all_tags(), 'game_tags': picker.tags})
+
+
+@app.route('/api/tags/<game_id>', methods=['GET'])
+def api_get_game_tags(game_id: str):
+    """Return the tags for a specific game."""
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+    with picker_lock:
+        return jsonify({'game_id': game_id, 'tags': picker.get_tags(game_id)})
+
+
+@app.route('/api/tags/<game_id>', methods=['POST'])
+def api_add_tag(game_id: str):
+    """Add a tag to a game.
+
+    Body JSON: {"tag": "cozy"}
+    """
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+
+    data = request.json or {}
+    tag = data.get('tag', '').strip()
+    if not tag:
+        return jsonify({'error': 'tag is required'}), 400
+
+    with picker_lock:
+        added = picker.add_tag(game_id, tag)
+        tags = picker.get_tags(game_id)
+
+    return jsonify({'success': True, 'added': added,
+                    'game_id': game_id, 'tags': tags})
+
+
+@app.route('/api/tags/<game_id>/<tag>', methods=['DELETE'])
+def api_remove_tag(game_id: str, tag: str):
+    """Remove a tag from a game."""
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+
+    with picker_lock:
+        removed = picker.remove_tag(game_id, tag)
+        tags = picker.get_tags(game_id)
+
+    if not removed:
+        return jsonify({'error': 'Tag not found'}), 404
+
+    return jsonify({'success': True, 'game_id': game_id, 'tags': tags})
+
+
+@app.route('/api/library/by-tag/<tag>', methods=['GET'])
+def api_library_by_tag(tag: str):
+    """Return games that have a specific tag."""
+    if not picker or not picker.games:
+        return jsonify({'error': 'No games loaded'}), 400
+
+    with picker_lock:
+        games = picker.filter_by_tag(tag)
+        result = [
+            {
+                'app_id': g.get('appid'),
+                'game_id': g.get('game_id'),
+                'name': g.get('name', 'Unknown'),
+                'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
+                'tags': picker.get_tags(g.get('game_id', str(g.get('appid', '')))),
+            }
+            for g in games
+        ]
+
+    return jsonify({'tag': tag, 'games': result, 'count': len(result)})
+
+
 def create_templates():
-    """Create HTML templates directory and files"""
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)
     

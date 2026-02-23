@@ -13,7 +13,8 @@ import random
 import argparse
 import datetime
 import tempfile
-from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
 import requests
 from colorama import init, Fore, Style
@@ -336,6 +337,7 @@ class GamePicker:
     FAVORITES_FILE = '.gapi_favorites.json'
     CACHE_FILE = '.gapi_details_cache.json'
     REVIEWS_FILE = '.gapi_reviews.json'
+    TAGS_FILE = '.gapi_tags.json'
 
     # Default values (can be overridden by config)
     DEFAULT_MAX_HISTORY = 20
@@ -385,6 +387,7 @@ class GamePicker:
         self.history: List[str] = self.load_history()  # Now stores composite IDs
         self.favorites: List[str] = self.load_favorites()  # Now stores composite IDs
         self.reviews: Dict[str, Dict] = self.load_reviews()  # game_id -> review dict
+        self.tags: Dict[str, List[str]] = self.load_tags()  # game_id -> [tag, ...]
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -494,6 +497,94 @@ class GamePicker:
     def get_review(self, game_id: str) -> Optional[Dict]:
         """Return the review dict for a game, or None if not reviewed."""
         return self.reviews.get(str(game_id))
+
+    # ------------------------------------------------------------------
+    # Custom Game Tags
+    # ------------------------------------------------------------------
+
+    def load_tags(self) -> Dict[str, List[str]]:
+        """Load custom game tags from disk.
+
+        Returns:
+            Dict mapping game_id → list of tag strings.
+        """
+        if os.path.exists(self.TAGS_FILE):
+            try:
+                with open(self.TAGS_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self._log.warning("Could not load tags: %s", e)
+        return {}
+
+    def save_tags(self):
+        """Persist tags to disk (atomic write)."""
+        try:
+            _atomic_write_json(self.TAGS_FILE, self.tags)
+        except IOError as e:
+            self._log.error("Error saving tags: %s", e)
+
+    def add_tag(self, game_id: str, tag: str) -> bool:
+        """Add a tag to a game (case-insensitive, normalised to lower-case).
+
+        Returns:
+            True if the tag was added, False if it was already present.
+        """
+        tag = tag.strip().lower()
+        if not tag:
+            return False
+        gid = str(game_id)
+        if gid not in self.tags:
+            self.tags[gid] = []
+        if tag in self.tags[gid]:
+            return False
+        self.tags[gid].append(tag)
+        self.save_tags()
+        return True
+
+    def remove_tag(self, game_id: str, tag: str) -> bool:
+        """Remove a tag from a game.
+
+        Returns:
+            True if removed, False if it wasn't there.
+        """
+        tag = tag.strip().lower()
+        gid = str(game_id)
+        if gid in self.tags and tag in self.tags[gid]:
+            self.tags[gid].remove(tag)
+            if not self.tags[gid]:
+                del self.tags[gid]
+            self.save_tags()
+            return True
+        return False
+
+    def get_tags(self, game_id: str) -> List[str]:
+        """Return the tag list for a game (empty list if none)."""
+        return self.tags.get(str(game_id), [])
+
+    def all_tags(self) -> List[str]:
+        """Return a sorted list of every unique tag across all games."""
+        seen: set = set()
+        for tags in self.tags.values():
+            seen.update(tags)
+        return sorted(seen)
+
+    def filter_by_tag(self, tag: str,
+                      games: Optional[List[Dict]] = None) -> List[Dict]:
+        """Return games (from ``games`` or the full library) that have the given tag.
+
+        Args:
+            tag: Tag string (case-insensitive).
+            games: Optional pre-filtered game list to further filter.
+
+        Returns:
+            Filtered list of game dicts.
+        """
+        tag = tag.strip().lower()
+        pool = games if games is not None else self.games
+        return [
+            g for g in pool
+            if tag in self.tags.get(str(g.get('game_id', g.get('appid', ''))), [])
+        ]
 
     def load_history(self) -> List[str]:
         """Load game picking history (supports both old int and new composite ID formats)"""
@@ -731,24 +822,45 @@ class GamePicker:
                              or min_release_year is not None or max_release_year is not None)
 
         if needs_details:
-            detail_filtered = []
             genres_lower = [g.lower() for g in genres] if genres else []
             exclude_lower = [g.lower() for g in exclude_genres] if exclude_genres else []
 
+            # Build list of (game, platform, game_id) for games that need details
+            fetchable = []
+            no_details = []
             for game in filtered:
                 platform = game.get('platform', 'steam')
                 game_id = extract_game_id(game)
+                if game_id and platform in self.clients:
+                    fetchable.append((game, platform, game_id))
+                else:
+                    no_details.append(game)
 
-                if not game_id or platform not in self.clients:
-                    # No details available – include only when no positive filter is set
-                    if not genres_lower and min_metacritic is None \
-                            and min_release_year is None and max_release_year is None:
-                        if not exclude_lower:
-                            detail_filtered.append(game)
-                    continue
-
+            # Fetch details in parallel (cache hits are instant, so threads just
+            # fan out the network calls for games not yet cached)
+            def _fetch(item: Tuple) -> Tuple:
+                game, platform, game_id = item
                 details = self.clients[platform].get_game_details(str(game_id))
+                return game, details
 
+            results: Dict[int, Tuple] = {}
+            max_workers = min(len(fetchable), 16) if fetchable else 1
+            with ThreadPoolExecutor(max_workers=max_workers,
+                                    thread_name_prefix='gapi_filter') as executor:
+                future_map = {executor.submit(_fetch, item): idx
+                              for idx, item in enumerate(fetchable)}
+                for future in as_completed(future_map):
+                    idx = future_map[future]
+                    try:
+                        results[idx] = future.result()
+                    except Exception as exc:
+                        self._log.debug("Detail fetch error: %s", exc)
+                        results[idx] = (fetchable[idx][0], None)
+
+            # Preserve original order then apply filters
+            detail_filtered = []
+            for idx in range(len(fetchable)):
+                game, details = results.get(idx, (fetchable[idx][0], None))
                 if details:
                     # --- Genre filter ---
                     if genres_lower or exclude_lower:
@@ -770,7 +882,6 @@ class GamePicker:
                         raw_date = details.get('release_date', {}).get('date', '')
                         year = _parse_release_year(raw_date)
                         if year is None:
-                            # Skip games with no parseable date when year filter is active
                             continue
                         if min_release_year is not None and year < min_release_year:
                             continue
@@ -779,11 +890,17 @@ class GamePicker:
 
                     detail_filtered.append(game)
                 else:
-                    # Details unavailable – apply only non-positive filters
+                    # Details unavailable – include only when no positive filter set
                     if not genres_lower and min_metacritic is None \
                             and min_release_year is None and max_release_year is None:
                         if not exclude_lower:
                             detail_filtered.append(game)
+
+            # Games without a client are included only when no positive filter is active
+            if not genres_lower and min_metacritic is None \
+                    and min_release_year is None and max_release_year is None \
+                    and not exclude_lower:
+                detail_filtered.extend(no_details)
 
             filtered = detail_filtered
 
