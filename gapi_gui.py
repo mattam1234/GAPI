@@ -154,7 +154,7 @@ def api_pick_game():
 
         # Try to get details (non-blocking)
         def fetch_details():
-            if app_id and picker.steam_client:
+            if app_id and picker and picker.steam_client:
                 details = picker.steam_client.get_game_details(app_id)
                 if details:
                     game['_details'] = details

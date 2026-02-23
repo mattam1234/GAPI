@@ -445,7 +445,7 @@ class MultiUserPicker:
     
     def pick_common_game(self, user_names: Optional[List[str]] = None, 
                         coop_only: bool = False, 
-                        max_players: int = None) -> Optional[Dict]:
+                        max_players: Optional[int] = None) -> Optional[Dict]:
         """
         Pick a random game from the common library
         """

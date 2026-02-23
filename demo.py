@@ -55,7 +55,7 @@ try:
         print(f"{Fore.GREEN}Found {len(self.games)} games in the demo library!")
         return True
     
-    def demo_get_details(self, app_id):
+    def demo_get_details(self, game_id):
         # Return None to skip detailed fetching in demo mode
         return None
     
