@@ -4,6 +4,7 @@ GAPI GUI - Web-based Graphical User Interface for Game Picker
 A modern web GUI for randomly picking games from your Steam library.
 """
 
+import logging
 from flask import Flask, render_template, jsonify, request
 import threading
 import json
@@ -15,6 +16,9 @@ import multiuser
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
+
+# Use the shared GAPI logger so level is controlled by config/setup_logging()
+gui_logger = logging.getLogger('gapi.gui')
 
 # Global game picker instance
 picker: Optional[gapi.GamePicker] = None
@@ -1674,8 +1678,11 @@ def create_templates():
 """
     
     index_path = os.path.join(templates_dir, 'index.html')
-    with open(index_path, 'w') as f:
-        f.write(index_html)
+    # Preserve any existing template file (custom or previously written).
+    # Only write the bundled fallback when no file exists at all.
+    if not os.path.exists(index_path):
+        with open(index_path, 'w') as f:
+            f.write(index_html)
 
 
 def main():

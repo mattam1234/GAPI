@@ -5,11 +5,13 @@ A tool to randomly pick a game from your Steam, Epic Games, and GOG libraries wi
 """
 
 import json
+import logging
 import os
 import sys
 import random
 import argparse
 import datetime
+import tempfile
 from typing import Dict, List, Optional
 from abc import ABC, abstractmethod
 import requests
@@ -17,6 +19,61 @@ from colorama import init, Fore, Style
 
 # Initialize colorama for cross-platform colored terminal output
 init(autoreset=True)
+
+# ---------------------------------------------------------------------------
+# Logging setup
+# ---------------------------------------------------------------------------
+
+def setup_logging(level: str = 'WARNING') -> logging.Logger:
+    """Configure the root GAPI logger.
+
+    Args:
+        level: Log level string (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+               Defaults to WARNING so normal use is quiet.
+
+    Returns:
+        Configured logger instance.
+    """
+    numeric = getattr(logging, level.upper(), logging.WARNING)
+    logger = logging.getLogger('gapi')
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('[%(levelname)s] %(name)s: %(message)s'))
+        logger.addHandler(handler)
+    logger.setLevel(numeric)
+    return logger
+
+
+# Module-level logger used throughout gapi.py
+logger = setup_logging()
+
+
+def _atomic_write_json(path: str, data) -> None:
+    """Write *data* as JSON to *path* atomically (write-then-rename).
+
+    Creates a sibling temp file, writes the JSON, then renames it over the
+    target path so the file is never left in a partially-written state.
+
+    Args:
+        path: Destination file path.
+        data: JSON-serialisable Python object.
+
+    Raises:
+        IOError: If the write or rename fails.
+    """
+    dir_name = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, path)
+    except Exception:
+        # Clean up the temp file if anything goes wrong
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def extract_game_id(game: Dict) -> Optional[str]:
@@ -99,17 +156,18 @@ class GamePlatformClient(ABC):
 
 class SteamAPIClient(GamePlatformClient):
     """Client for interacting with Steam Web API"""
-    
+
     BASE_URL = "https://api.steampowered.com"
-    
+
     def __init__(self, api_key: str, timeout: int = 10):
         super().__init__()
         self.api_key = api_key
         self.timeout = timeout
-    
+        self._log = logging.getLogger('gapi.steam')
+
     def get_platform_name(self) -> str:
         return "steam"
-    
+
     def get_owned_games(self, steam_id: str, include_appinfo: bool = True) -> List[Dict]:
         """Get list of games owned by a Steam user"""
         url = f"{self.BASE_URL}/IPlayerService/GetOwnedGames/v0001/"
@@ -120,12 +178,12 @@ class SteamAPIClient(GamePlatformClient):
             'include_played_free_games': 1,
             'format': 'json'
         }
-        
+
         try:
             response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
-            
+
             if 'response' in data and 'games' in data['response']:
                 games = data['response']['games']
                 # Add platform info to each game
@@ -134,9 +192,9 @@ class SteamAPIClient(GamePlatformClient):
                 return games
             return []
         except requests.RequestException as e:
-            print(f"{Fore.RED}Error fetching games from Steam API: {e}")
+            self._log.error("Error fetching games from Steam API: %s", e)
             return []
-    
+
     def get_game_details(self, app_id: str) -> Optional[Dict]:
         """Get detailed information about a specific game"""
         # Convert to int for Steam API
@@ -144,69 +202,68 @@ class SteamAPIClient(GamePlatformClient):
             app_id_int = int(app_id)
         except (ValueError, TypeError):
             return None
-        
+
         # Check cache first
         if app_id_int in self.details_cache:
             return self.details_cache[app_id_int]
-        
+
         url = "https://store.steampowered.com/api/appdetails"
         params = {'appids': app_id_int}
-        
+
         try:
             response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
-            
+
             if str(app_id_int) in data and data[str(app_id_int)]['success']:
                 details = data[str(app_id_int)]['data']
                 self.details_cache[app_id_int] = details
                 return details
             return None
         except requests.RequestException as e:
-            print(f"{Fore.YELLOW}Warning: Could not fetch details for app {app_id}: {e}")
+            self._log.warning("Could not fetch details for app %s: %s", app_id, e)
             return None
 
 
 class EpicAPIClient(GamePlatformClient):
     """Client for interacting with Epic Games Store API"""
-    
+
     def __init__(self):
         super().__init__()
+        self._log = logging.getLogger('gapi.epic')
         try:
             from epicstore_api import EpicGamesStoreAPI
             self.api = EpicGamesStoreAPI()
         except ImportError:
-            print(f"{Fore.YELLOW}Warning: epicstore-api not installed. Epic Games support disabled.")
+            self._log.warning("epicstore-api not installed. Epic Games support disabled.")
             self.api = None
-    
+
     def get_platform_name(self) -> str:
         return "epic"
-    
+
     def get_owned_games(self, user_id: str) -> List[Dict]:
         """
         Get list of games from Epic Games Store.
-        Note: Epic doesn't provide a user library API without OAuth, 
+        Note: Epic doesn't provide a user library API without OAuth,
         so this returns an empty list for now.
         """
         if not self.api:
             return []
-        
+
         # Epic Games Store API doesn't provide user library access without OAuth
-        # This would require the user to authenticate via Epic's OAuth flow
-        # For now, return empty list with a note
-        print(f"{Fore.YELLOW}Note: Epic Games library access requires OAuth authentication.")
-        print(f"{Fore.YELLOW}Epic Games integration currently supports store browsing only.")
+        self._log.info("Epic Games library access requires OAuth authentication. "
+                       "Epic integration currently supports store browsing only.")
         return []
-    
+
     def get_game_details(self, game_id: str) -> Optional[Dict]:
         """Get detailed information about a specific Epic game"""
         if not self.api:
             return None
-        
+
         # Check cache first
         if game_id in self.details_cache:
             return self.details_cache[game_id]
-        
+
         try:
             # Try to get product details
             product = self.api.get_product(game_id)
@@ -221,39 +278,40 @@ class EpicAPIClient(GamePlatformClient):
                 self.details_cache[game_id] = details
                 return details
         except Exception as e:
-            print(f"{Fore.YELLOW}Warning: Could not fetch details for Epic game {game_id}: {e}")
-        
+            self._log.warning("Could not fetch details for Epic game %s: %s", game_id, e)
+
         return None
 
 
 class GOGAPIClient(GamePlatformClient):
     """Client for interacting with GOG Galaxy API"""
-    
+
     def __init__(self):
         super().__init__()
         # GOG Galaxy API is primarily for plugin development
         # Direct library access requires authentication
         self.authenticated = False
-    
+        self._log = logging.getLogger('gapi.gog')
+
     def get_platform_name(self) -> str:
         return "gog"
-    
+
     def get_owned_games(self, user_id: str) -> List[Dict]:
         """
         Get list of games from GOG library.
         Note: GOG's API requires authentication and is meant for Galaxy plugins.
         This returns an empty list for now.
         """
-        print(f"{Fore.YELLOW}Note: GOG library access requires Galaxy plugin authentication.")
-        print(f"{Fore.YELLOW}GOG Games integration currently not fully supported.")
+        self._log.info("GOG library access requires Galaxy plugin authentication. "
+                       "GOG integration is currently not fully supported.")
         return []
-    
+
     def get_game_details(self, game_id: str) -> Optional[Dict]:
         """Get detailed information about a specific GOG game"""
         # Check cache first
         if game_id in self.details_cache:
             return self.details_cache[game_id]
-        
+
         # GOG API requires authentication for most operations
         # For now, return minimal info
         return None
@@ -261,10 +319,11 @@ class GOGAPIClient(GamePlatformClient):
 
 class GamePicker:
     """Main game picker application"""
-    
+
     HISTORY_FILE = '.gapi_history.json'
     FAVORITES_FILE = '.gapi_favorites.json'
-    
+    CACHE_FILE = '.gapi_details_cache.json'
+
     # Default values (can be overridden by config)
     DEFAULT_MAX_HISTORY = 20
     DEFAULT_BARELY_PLAYED_HOURS = 2
@@ -272,42 +331,94 @@ class GamePicker:
     DEFAULT_API_TIMEOUT = 10
     
     def __init__(self, config_path: str = 'config.json'):
+        self._log = logging.getLogger('gapi.picker')
         self.config = self.load_config(config_path)
-        
+
+        # Re-apply log level from config (allows "log_level": "DEBUG" in config.json)
+        log_level = self.config.get('log_level', 'WARNING')
+        setup_logging(log_level)
+
         # Load configurable values from config or use defaults
         self.MAX_HISTORY = self.config.get('max_history_size', self.DEFAULT_MAX_HISTORY)
         self.BARELY_PLAYED_THRESHOLD_MINUTES = self.config.get('barely_played_hours', self.DEFAULT_BARELY_PLAYED_HOURS) * 60
         self.WELL_PLAYED_THRESHOLD_MINUTES = self.config.get('well_played_hours', self.DEFAULT_WELL_PLAYED_HOURS) * 60
         self.API_TIMEOUT = self.config.get('api_timeout_seconds', self.DEFAULT_API_TIMEOUT)
-        
+
         # Initialize platform clients
         self.clients: Dict[str, GamePlatformClient] = {}
-        
+
         # Always try to initialize Steam if API key is available
         if self.config.get('steam_api_key') and self.config['steam_api_key'] != 'YOUR_STEAM_API_KEY_HERE':
             self.clients['steam'] = SteamAPIClient(self.config['steam_api_key'], timeout=self.API_TIMEOUT)
-        
+
         # Initialize Epic Games client if enabled
         if self.config.get('epic_enabled', False):
             try:
                 self.clients['epic'] = EpicAPIClient()
             except Exception as e:
-                print(f"{Fore.YELLOW}Warning: Could not initialize Epic Games client: {e}")
-        
+                self._log.warning("Could not initialize Epic Games client: %s", e)
+
         # Initialize GOG client if enabled
         if self.config.get('gog_enabled', False):
             try:
                 self.clients['gog'] = GOGAPIClient()
             except Exception as e:
-                print(f"{Fore.YELLOW}Warning: Could not initialize GOG client: {e}")
-        
+                self._log.warning("Could not initialize GOG client: %s", e)
+
         # For backward compatibility, keep steam_client reference
         self.steam_client = self.clients.get('steam')
-        
+
         self.games: List[Dict] = []
         self.history: List[str] = self.load_history()  # Now stores composite IDs
         self.favorites: List[str] = self.load_favorites()  # Now stores composite IDs
-    
+
+        # Load persistent details cache and push it into all platform clients
+        self._load_details_cache()
+
+    def _load_details_cache(self):
+        """Load the on-disk details cache and populate all platform clients."""
+        if not os.path.exists(self.CACHE_FILE):
+            return
+        try:
+            with open(self.CACHE_FILE, 'r') as f:
+                data = json.load(f)
+            # Steam cache keys are integers; restore them properly
+            steam_cache = data.get('steam', {})
+            epic_cache = data.get('epic', {})
+            gog_cache = data.get('gog', {})
+            loaded = 0
+            if 'steam' in self.clients:
+                self.clients['steam'].details_cache = {
+                    int(k): v for k, v in steam_cache.items()
+                }
+                loaded += len(steam_cache)
+            if 'epic' in self.clients:
+                self.clients['epic'].details_cache = dict(epic_cache)
+                loaded += len(epic_cache)
+            if 'gog' in self.clients:
+                self.clients['gog'].details_cache = dict(gog_cache)
+                loaded += len(gog_cache)
+            self._log.debug("Loaded %d cached game details from disk.", loaded)
+        except (json.JSONDecodeError, IOError) as e:
+            self._log.warning("Could not load details cache: %s", e)
+
+    def save_details_cache(self):
+        """Persist the in-memory details cache to disk (atomic write)."""
+        data = {
+            'steam': {str(k): v for k, v in self.clients['steam'].details_cache.items()}
+            if 'steam' in self.clients else {},
+            'epic': dict(self.clients['epic'].details_cache)
+            if 'epic' in self.clients else {},
+            'gog': dict(self.clients['gog'].details_cache)
+            if 'gog' in self.clients else {},
+        }
+        try:
+            _atomic_write_json(self.CACHE_FILE, data)
+            self._log.debug("Details cache saved (%d steam entries).",
+                            len(data['steam']))
+        except IOError as e:
+            self._log.warning("Could not save details cache: %s", e)
+
     def load_history(self) -> List[str]:
         """Load game picking history (supports both old int and new composite ID formats)"""
         if os.path.exists(self.HISTORY_FILE):
@@ -319,15 +430,14 @@ class GamePicker:
             except (json.JSONDecodeError, IOError):
                 return []
         return []
-    
+
     def save_history(self):
-        """Save game picking history"""
+        """Save game picking history (atomic write)"""
         try:
-            with open(self.HISTORY_FILE, 'w') as f:
-                json.dump(self.history[-self.MAX_HISTORY:], f)
-        except IOError:
-            pass  # Silently fail if we can't save history
-    
+            _atomic_write_json(self.HISTORY_FILE, self.history[-self.MAX_HISTORY:])
+        except IOError as e:
+            self._log.warning("Could not save history: %s", e)
+
     def load_favorites(self) -> List[str]:
         """Load favorite games list (supports both old int and new composite ID formats)"""
         if os.path.exists(self.FAVORITES_FILE):
@@ -339,14 +449,13 @@ class GamePicker:
             except (json.JSONDecodeError, IOError):
                 return []
         return []
-    
+
     def save_favorites(self):
-        """Save favorite games list"""
+        """Save favorite games list (atomic write)"""
         try:
-            with open(self.FAVORITES_FILE, 'w') as f:
-                json.dump(self.favorites, f, indent=2)
+            _atomic_write_json(self.FAVORITES_FILE, self.favorites)
         except IOError as e:
-            print(f"{Fore.RED}Error saving favorites: {e}")
+            self._log.error("Error saving favorites: %s", e)
     
     def add_favorite(self, game_id: str) -> bool:
         """Add a game to favorites (accepts composite ID like 'steam:620' or int for backward compatibility)"""
@@ -379,18 +488,17 @@ class GamePicker:
                 'history': self.history,
                 'exported_at': datetime.datetime.now().isoformat()
             }
-            with open(filepath, 'w') as f:
-                json.dump(export_data, f, indent=2)
+            _atomic_write_json(filepath, export_data)
             print(f"{Fore.GREEN}History exported to {filepath}")
         except IOError as e:
             print(f"{Fore.RED}Error exporting history: {e}")
-    
+
     def import_history(self, filepath: str):
         """Import game history from a file"""
         try:
             with open(filepath, 'r') as f:
                 data = json.load(f)
-            
+
             if isinstance(data, dict) and 'history' in data:
                 self.history = data['history']
             elif isinstance(data, list):
@@ -398,15 +506,15 @@ class GamePicker:
             else:
                 print(f"{Fore.RED}Invalid history file format")
                 return
-            
+
             self.save_history()
             print(f"{Fore.GREEN}History imported from {filepath}")
         except (IOError, json.JSONDecodeError) as e:
             print(f"{Fore.RED}Error importing history: {e}")
-    
+
     def load_config(self, config_path: str) -> Dict:
         """Load configuration from JSON file with environment variable support
-        
+
         Environment variables take precedence over config file values:
         - STEAM_API_KEY overrides steam_api_key
         - STEAM_ID overrides steam_id
@@ -418,11 +526,11 @@ class GamePicker:
             print(f"{Fore.RED}Error: Config file '{config_path}' not found!")
             print(f"{Fore.YELLOW}Please copy 'config_template.json' to 'config.json' and add your Steam API key and ID.")
             sys.exit(1)
-        
+
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
-            
+
             # Override with environment variables if present
             if os.getenv('STEAM_API_KEY'):
                 config['steam_api_key'] = os.getenv('STEAM_API_KEY')
@@ -434,16 +542,16 @@ class GamePicker:
                 config['epic_id'] = os.getenv('EPIC_ID')
             if os.getenv('GOG_ID'):
                 config['gog_id'] = os.getenv('GOG_ID')
-            
+
             # Validate required Steam credentials
             if config.get('steam_api_key') == 'YOUR_STEAM_API_KEY_HERE' or not config.get('steam_api_key'):
                 print(f"{Fore.RED}Error: Please configure your Steam API key in config.json or set STEAM_API_KEY environment variable")
                 sys.exit(1)
-            
+
             if config.get('steam_id') == 'YOUR_STEAM_ID_HERE' or not config.get('steam_id'):
                 print(f"{Fore.RED}Error: Please configure your Steam ID in config.json or set STEAM_ID environment variable")
                 sys.exit(1)
-            
+
             # Validate Steam ID format (unless in demo mode)
             steam_id = config.get('steam_id', '')
             if steam_id not in ['DEMO_MODE', 'DEMO_ID'] and not is_valid_steam_id(steam_id):
@@ -452,25 +560,25 @@ class GamePicker:
                 print(f"{Fore.YELLOW}Find your Steam ID at: https://steamid.io/")
                 print(f"{Fore.YELLOW}Your provided ID: {steam_id}")
                 sys.exit(1)
-            
+
             return config
         except json.JSONDecodeError as e:
             print(f"{Fore.RED}Error parsing config file: {e}")
             sys.exit(1)
-    
+
     def fetch_games(self) -> bool:
         """Fetch games from all configured platform libraries"""
         self.games = []
         total_games = 0
-        
+
         # Fetch from each platform
         for platform_name, client in self.clients.items():
             user_id_key = f'{platform_name}_id' if platform_name != 'steam' else 'steam_id'
             user_id = self.config.get(user_id_key)
-            
+
             if not user_id or is_placeholder_value(user_id):
                 continue
-            
+
             print(f"{Fore.CYAN}Fetching your {platform_name.title()} library...")
             try:
                 games = client.get_owned_games(user_id)
@@ -483,17 +591,17 @@ class GamePicker:
                         # Ensure appid exists for backward compatibility
                         if 'appid' not in game:
                             game['appid'] = game_id
-                    
+
                     self.games.extend(games)
                     print(f"{Fore.GREEN}Found {len(games)} games on {platform_name.title()}!")
                     total_games += len(games)
             except Exception as e:
-                print(f"{Fore.RED}Error fetching games from {platform_name}: {e}")
-        
+                self._log.error("Error fetching games from %s: %s", platform_name, e)
+
         if not self.games:
             print(f"{Fore.RED}No games found or error fetching games from any platform.")
             return False
-        
+
         print(f"{Fore.GREEN}Total: {total_games} games across all platforms!")
         return True
     

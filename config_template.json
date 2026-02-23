@@ -9,5 +9,6 @@
   "barely_played_hours": 2,
   "well_played_hours": 10,
   "max_history_size": 20,
-  "api_timeout_seconds": 10
+  "api_timeout_seconds": 10,
+  "log_level": "WARNING"
 }

@@ -5,6 +5,7 @@ Handles multiple Steam accounts and finding common games for co-op play.
 """
 
 import json
+import logging
 import os
 import random
 import uuid
@@ -12,6 +13,8 @@ from datetime import datetime
 from typing import Dict, List, Set, Optional, Tuple
 from collections import Counter
 import gapi
+
+logger = logging.getLogger('gapi.multiuser')
 
 
 class VotingSession:
@@ -189,7 +192,7 @@ class MultiUserPicker:
             with open(self.users_file, 'r') as f:
                 data = json.load(f)
                 self.users = data.get('users', [])
-                
+
                 # Convert old format to new format with platforms
                 for user in self.users:
                     if 'steam_id' in user and 'platforms' not in user:
@@ -199,27 +202,26 @@ class MultiUserPicker:
                             'gog': ''
                         }
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Error loading users: {e}")
+            logger.error("Error loading users: %s", e)
             self.users = []
-    
+
     def save_users(self):
-        """Save users to configuration file"""
+        """Save users to configuration file (atomic write)"""
         try:
-            with open(self.users_file, 'w') as f:
-                json.dump({'users': self.users}, f, indent=2)
+            gapi._atomic_write_json(self.users_file, {'users': self.users})
         except IOError as e:
-            print(f"Error saving users: {e}")
-    
-    def add_user(self, name: str, steam_id: str = "", email: str = "", discord_id: str = "", 
+            logger.error("Error saving users: %s", e)
+
+    def add_user(self, name: str, steam_id: str = "", email: str = "", discord_id: str = "",
                  epic_id: str = "", gog_id: str = "", **kwargs) -> bool:
         """Add a new user with platform information"""
         # Check if user already exists by name or discord_id
         for user in self.users:
             if user.get('name') == name:
-                print(f"User with name {name} already exists")
+                logger.warning("User with name %s already exists", name)
                 return False
             if discord_id and user.get('discord_id') == discord_id:
-                print(f"User with Discord ID {discord_id} already exists")
+                logger.warning("User with Discord ID %s already exists", discord_id)
                 return False
         
         user_data = {
@@ -305,9 +307,11 @@ class MultiUserPicker:
                                 if 'appid' not in game:
                                     game['appid'] = game_id
                             all_games.extend(games)
-                            print(f"Loaded {len(games)} games from {platform_name} for {user['name']}")
+                            logger.info("Loaded %d games from %s for %s",
+                                        len(games), platform_name, user['name'])
                     except Exception as e:
-                        print(f"Error fetching {platform_name} games for {user['name']}: {e}")
+                        logger.error("Error fetching %s games for %s: %s",
+                                     platform_name, user['name'], e)
             
             if all_games:
                 libraries[user['name']] = all_games
