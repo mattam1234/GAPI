@@ -52,6 +52,24 @@ config.json
 # Favorites
 .gapi_favorites.json
 
+# Reviews
+.gapi_reviews.json
+
+# Tags
+.gapi_tags.json
+
+# Details cache
+.gapi_details_cache.json
+
+# Schedule
+.gapi_schedule.json
+
+# Playlists
+.gapi_playlists.json
+
+# Backlog
+.gapi_backlog.json
+
 # Users
 users.json
 discord_config.json

@@ -1,6 +1,11 @@
-requests>=2.31.0
+# Core dependencies (Python 3.7+)
+requests>=2.28.0
 colorama>=0.4.6
-flask>=3.0.0
+flask>=2.0.0
+
+# Discord bot (requires Python 3.8+)
 discord.py>=2.3.0
+
+# Optional platform integrations
 epicstore-api>=0.1.7
 galaxy.plugin.api>=0.74

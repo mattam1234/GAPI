@@ -30,20 +30,27 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### 📅 Next Release (v2.2.0)
 
 #### High Priority - User Experience
-- [ ] **Advanced Filtering Options**
-  - [ ] Filter by release date (e.g., games from 2020-2023)
-  - [ ] Filter by Metacritic score (e.g., score > 80)
-  - [ ] Exclude specific games by name or ID from picker
-- [ ] **Loading Indicators** - Visual feedback in Web GUI for long operations
+- [x] **Advanced Filtering Options**
+  - [x] Filter by Metacritic score (e.g., score > 80) – `--min-score` CLI flag + Web GUI
+  - [x] Filter by release date (e.g., games from 2020-2023) – `--min-year`/`--max-year` + Web GUI
+  - [x] Exclude specific games by name or ID from picker – `--exclude-game` CLI flag + Web GUI
+- [x] **Loading Indicators** - Spinner overlay in Web GUI for long operations
 
 #### High Priority - Performance
-- [ ] **Enhanced Caching System** - Persist game details cache between sessions
-- [ ] **Parallel Library Fetching** - Speed up multi-user game loading with async operations
-- [ ] **Optimized Genre Filtering** - Use cached data instead of refetching details
+- [x] **Enhanced Caching System** - Persist game details cache between sessions
+- [x] **Parallel Library Fetching** - Concurrent user-library fetching with ThreadPoolExecutor
+- [x] **Optimized Genre Filtering** - Parallel `ThreadPoolExecutor` detail-fetching inside `filter_games()`
 
 #### Medium Priority - Data & Configuration
-- [ ] **Atomic File Writes** - Prevent data corruption on crashes
-- [ ] **Logging Framework** - Replace print statements with proper logging (configurable levels)
+- [x] **Atomic File Writes** - Prevent data corruption on crashes
+- [x] **Logging Framework** - Replace print statements with proper logging (configurable levels)
+
+#### Social Features
+- [x] **Voting System** – Multi-user emoji-reaction voting via Discord + Web UI
+- [x] **Game Reviews** – Personal rating (1-10) + notes per game, stored in `.gapi_reviews.json`
+- [x] **Custom Game Tags** – Tag games with labels, filter/pick by tag, REST API + Web UI
+- [x] **Dark Mode** – CSS custom properties + toggle button, theme persisted to localStorage
+- [x] **Statistics Charts** – Chart.js doughnut (played/unplayed) + horizontal bar (top 10) in Stats tab
 
 ### 📅 Future Release (v2.3.0)
 
@@ -57,15 +64,15 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### Smart Features
 - [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
 - [ ] **Duplicate Detection** - Identify same games across platforms
-- [ ] **ProtonDB Integration** - Linux compatibility ratings for Windows games
-- [ ] **Achievement Tracking** - Display completion percentage
+- [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
+- [x] **Achievement Tracking** - Display completion percentage
 - [ ] **Friend Activity** - See what friends are playing (Steam API)
 
 #### Social Features
 - [ ] **Discord Rich Presence** - Show currently picked game in Discord status
-- [ ] **Game Night Scheduler** - Schedule game sessions with friends
+- [x] **Game Night Scheduler** - Schedule game sessions with friends
 - [ ] **Voting System Improvements** - Multiple voting rounds, ranked choice
-- [ ] **Game Reviews** - Add personal notes/reviews to games
+- [x] **Game Reviews** - Add personal notes/reviews to games
 - [ ] **Share Picks** - Generate shareable links for game picks
 
 ### 📅 Long-term Vision (v3.0.0+)
@@ -86,11 +93,17 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Sale Alerts** - Notify when wishlist games go on sale
 
 #### API & Integrations
-- [ ] **Public API** - RESTful API for third-party integrations
-- [ ] **Webhook Support** - Trigger external services on game picks
+- [x] **Public API** - RESTful API for third-party integrations (Flask REST API fully implemented)
+- [x] **Webhook Support** - Trigger external services on game picks
 - [ ] **IFTTT Integration** - Connect with IFTTT for automation
 - [ ] **Slack/Teams Bots** - Enterprise communication platform integrations
 - [ ] **Home Assistant** - Smart home integration for game lighting/setup
+
+#### Long-term Backlog Features
+- [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
+- [x] **Game Backlog Manager** - Track want_to_play / playing / completed / dropped per game
+- [ ] **Budget Tracking** - Track game purchases and library value
+- [ ] **Sale Alerts** - Notify when wishlist games go on sale
 
 ## 🔧 Technical Improvements
 

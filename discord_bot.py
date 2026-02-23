@@ -114,39 +114,84 @@ class GAPIBot(discord.Client):
             await interaction.response.send_message(embed=embed)
         
         @self.tree.command(name='vote', description='Start a voting session to play a game')
-        @app_commands.describe(duration='Duration in seconds for voting session (default: 60)')
-        async def start_vote(interaction: discord.Interaction, duration: int = 60):
-            """Start a voting session for picking a co-op game"""
+        @app_commands.describe(
+            duration='Duration in seconds for voting session (default: 60)',
+            candidates='Number of game candidates to vote on (default: 5, max: 10)'
+        )
+        async def start_vote(interaction: discord.Interaction, duration: int = 60,
+                             candidates: int = 5):
+            """Start a game-choice voting session for all linked users"""
             channel_id = interaction.channel_id
-            
+
             if channel_id in self.active_votes:
                 await interaction.response.send_message("❌ A voting session is already active in this channel!")
                 return
-            
-            # Initialize vote
-            self.active_votes[channel_id] = {
-                'participants': set(),
-                'votes': {},
-                'end_time': datetime.now() + timedelta(seconds=duration),
-                'message': None
-            }
-            
+
+            num_candidates = max(2, min(candidates, 10))
+
+            # Gather participants from linked users
+            participants = [u['name'] for u in self.multi_picker.users]
+            if not participants:
+                await interaction.response.send_message(
+                    "❌ No users have linked their Steam accounts. Use `/link` first."
+                )
+                return
+
+            await interaction.response.send_message("🔍 Finding common games for a vote…")
+
+            # Pick candidate games from the common library
+            common_games = self.multi_picker.find_common_games(participants)
+            if not common_games:
+                await interaction.followup.send(
+                    "❌ No common games found among linked users."
+                )
+                return
+
+            import random as _random
+            candidate_games = _random.sample(
+                common_games, min(num_candidates, len(common_games))
+            )
+
+            # Create a voting session
+            session = self.multi_picker.create_voting_session(
+                candidate_games, voters=participants, duration=duration
+            )
+
+            # Build the voting embed
+            NUMBER_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+            description_lines = [
+                f"React with the number of the game you want to play!\n"
+                f"Voting ends in **{duration} seconds**.\n"
+            ]
+            for i, game in enumerate(candidate_games):
+                description_lines.append(f"{NUMBER_EMOJIS[i]}  **{game.get('name', 'Unknown')}**")
+
             embed = discord.Embed(
-                title="🗳️ Vote to Play!",
-                description=f"React with ✅ to join the game picking session!\n"
-                           f"Voting ends in {duration} seconds.",
+                title="🗳️ Vote for a Game!",
+                description="\n".join(description_lines),
                 color=discord.Color.green()
             )
-            
-            await interaction.response.send_message(embed=embed)
+            embed.set_footer(text=f"Session ID: {session.session_id[:8]}")
+
+            await interaction.followup.send(embed=embed)
             vote_msg = await interaction.original_response()
-            await vote_msg.add_reaction('✅')
-            
-            self.active_votes[channel_id]['message'] = vote_msg
-            
+
+            # Add number reactions
+            for i in range(len(candidate_games)):
+                await vote_msg.add_reaction(NUMBER_EMOJIS[i])
+
+            # Store session info
+            self.active_votes[channel_id] = {
+                'session': session,
+                'message': vote_msg,
+                'candidate_games': candidate_games,
+                'emojis': NUMBER_EMOJIS[:len(candidate_games)],
+                'participants': participants,
+            }
+
             # Wait for voting to end
             await asyncio.sleep(duration)
-            
+
             # Process results
             await self.process_vote(interaction.channel)
         
@@ -271,67 +316,85 @@ class GAPIBot(discord.Client):
             await interaction.response.send_message(embed=embed)
     
     async def process_vote(self, channel):
-        """Process voting results and pick a game"""
+        """Process voting results and announce the winning game."""
         channel_id = channel.id
-        
+
         if channel_id not in self.active_votes:
             return
-        
+
         vote_data = self.active_votes[channel_id]
         vote_msg = vote_data['message']
-        
-        # Get users who reacted with ✅
-        if vote_msg:
-            vote_msg = await channel.fetch_message(vote_msg.id)
-            for reaction in vote_msg.reactions:
-                if str(reaction.emoji) == '✅':
-                    async for user in reaction.users():
-                        if not user.bot and user.id in self.user_mappings:
-                            vote_data['participants'].add(user.name)
-        
-        participants = list(vote_data['participants'])
-        
-        # Clean up
+        session = vote_data.get('session')
+        candidate_games = vote_data.get('candidate_games', [])
+        emojis = vote_data.get('emojis', [])
+
+        # Clean up active votes entry early to prevent double-processing
         del self.active_votes[channel_id]
-        
-        if not participants:
-            await channel.send("❌ No participants found! Make sure you've linked your Steam account with `!gapi link`")
+
+        if not session or not candidate_games:
+            await channel.send("❌ Voting session data missing.")
             return
-        
-        await channel.send(f"🎲 Picking a game for {len(participants)} player(s): {', '.join(participants)}")
-        
-        # Pick a game
-        game = self.multi_picker.pick_common_game(participants, coop_only=True, max_players=len(participants))
-        
-        if not game:
-            await channel.send(f"❌ No common co-op games found for the selected players.")
+
+        # Tally reactions from the vote message
+        if vote_msg:
+            try:
+                vote_msg = await channel.fetch_message(vote_msg.id)
+            except Exception:
+                pass
+
+            for reaction in vote_msg.reactions:
+                emoji_str = str(reaction.emoji)
+                if emoji_str in emojis:
+                    game_index = emojis.index(emoji_str)
+                    game = candidate_games[game_index]
+                    app_id = str(game.get('appid') or game.get('app_id') or '')
+                    async for user in reaction.users():
+                        if not user.bot:
+                            # Cast vote on behalf of linked or any reacting user
+                            voter_name = user.name
+                            session.cast_vote(voter_name, app_id)
+
+        # Close session and determine winner
+        session.close()
+        winner = session.get_winner()
+        results = session.get_results()
+
+        # Build results summary
+        results_lines = ["**Vote Results:**"]
+        for i, game in enumerate(candidate_games):
+            app_id = str(game.get('appid') or game.get('app_id') or '')
+            count = results.get(app_id, {}).get('count', 0)
+            voters = results.get(app_id, {}).get('voters', [])
+            voter_str = f" ({', '.join(voters)})" if voters else ""
+            results_lines.append(f"{emojis[i]} **{game.get('name', 'Unknown')}** — {count} vote(s){voter_str}")
+
+        await channel.send("\n".join(results_lines))
+
+        if not winner:
+            await channel.send("❌ Could not determine a winner.")
             return
-        
-        # Display result
+
+        app_id = winner.get('appid') or winner.get('app_id')
+
         embed = discord.Embed(
-            title=f"🎮 Let's play: {game.get('name', 'Unknown Game')}!",
+            title=f"🎮 Let's play: {winner.get('name', 'Unknown Game')}!",
             color=discord.Color.gold()
         )
-        
-        app_id = game.get('appid')
         embed.add_field(name="App ID", value=str(app_id), inline=True)
-        embed.add_field(name="Players", value=str(len(participants)), inline=True)
-        
-        if 'is_coop' in game:
-            mode = "Co-op" if game['is_coop'] else "Multiplayer"
-            embed.add_field(name="Mode", value=mode, inline=True)
-        
-        embed.add_field(
-            name="Steam Store", 
-            value=f"[Open](https://store.steampowered.com/app/{app_id}/)",
-            inline=True
-        )
-        embed.add_field(
-            name="SteamDB", 
-            value=f"[Open](https://steamdb.info/app/{app_id}/)",
-            inline=True
-        )
-        
+        embed.add_field(name="Total Votes", value=str(len(session.votes)), inline=True)
+
+        if app_id:
+            embed.add_field(
+                name="Steam Store",
+                value=f"[Open](https://store.steampowered.com/app/{app_id}/)",
+                inline=True
+            )
+            embed.add_field(
+                name="SteamDB",
+                value=f"[Open](https://steamdb.info/app/{app_id}/)",
+                inline=True
+            )
+
         await channel.send(embed=embed)
 
 
