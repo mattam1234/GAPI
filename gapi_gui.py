@@ -73,71 +73,85 @@ def api_status():
 def api_pick_game():
     """Pick a random game"""
     global picker, current_game
-    
+
     if not picker or not picker.games:
         return jsonify({'error': 'No games loaded'}), 400
-    
+
     data = request.json or {}
     filter_type = data.get('filter', 'all')
     genre_text = data.get('genre', '').strip()
     genres = [g.strip() for g in genre_text.split(',')] if genre_text else None
-    
+    min_metacritic = data.get('min_metacritic')
+    min_year = data.get('min_year')
+    max_year = data.get('max_year')
+    exclude_ids_raw = data.get('exclude_game_ids', '')
+    exclude_game_ids = [s.strip() for s in exclude_ids_raw.split(',') if s.strip()] if exclude_ids_raw else None
+
+    # Build shared advanced-filter kwargs
+    adv = {
+        'genres': genres,
+        'min_metacritic': int(min_metacritic) if min_metacritic is not None else None,
+        'min_release_year': int(min_year) if min_year is not None else None,
+        'max_release_year': int(max_year) if max_year is not None else None,
+        'exclude_game_ids': exclude_game_ids,
+    }
+
     with picker_lock:
         # Apply filters
         filtered_games = None
-        
+
         if filter_type == "unplayed":
-            filtered_games = picker.filter_games(max_playtime=0, genres=genres)
+            filtered_games = picker.filter_games(max_playtime=0, **adv)
         elif filter_type == "barely":
             filtered_games = picker.filter_games(
-                max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES,
-                genres=genres
-            )
+                max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, **adv)
         elif filter_type == "well":
             filtered_games = picker.filter_games(
-                min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES,
-                genres=genres
-            )
+                min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, **adv)
         elif filter_type == "favorites":
-            filtered_games = picker.filter_games(favorites_only=True, genres=genres)
-        elif genres:
-            filtered_games = picker.filter_games(genres=genres)
+            filtered_games = picker.filter_games(favorites_only=True, **adv)
+        elif any(v is not None and v != [] for v in adv.values()):
+            filtered_games = picker.filter_games(**adv)
         
         if filtered_games is not None and len(filtered_games) == 0:
             return jsonify({'error': 'No games match the selected filters'}), 400
-        
+
         # Pick game
         game = picker.pick_random_game(filtered_games)
-        
+
         if not game:
             return jsonify({'error': 'Failed to pick a game'}), 500
-        
+
         current_game = game
-        
+
         app_id = game.get('appid')
+        game_id = game.get('game_id') or (f'steam:{app_id}' if app_id else None)
         name = game.get('name', 'Unknown Game')
         playtime_minutes = game.get('playtime_forever', 0)
         playtime_hours = playtime_minutes / 60
         is_favorite = app_id in picker.favorites if app_id else False
-        
+        review = picker.get_review(game_id) if game_id else None
+
         response = {
             'app_id': app_id,
+            'game_id': game_id,
             'name': name,
             'playtime_hours': round(playtime_hours, 1),
             'is_favorite': is_favorite,
+            'review': review,
             'steam_url': f'https://store.steampowered.com/app/{app_id}/',
             'steamdb_url': f'https://steamdb.info/app/{app_id}/'
         }
-        
+
         # Try to get details (non-blocking)
         def fetch_details():
             if app_id:
                 details = picker.steam_client.get_game_details(app_id)
                 if details:
                     game['_details'] = details
-        
+
         threading.Thread(target=fetch_details, daemon=True).start()
-        
+
         return jsonify(response)
 
 
@@ -598,6 +612,76 @@ def api_voting_close(session_id: str):
         'vote_counts': session_data.get('vote_counts', {}),
         'total_votes': session_data.get('total_votes', 0),
     })
+
+
+# -----------------------------------------------------------------------
+# Reviews endpoints
+# -----------------------------------------------------------------------
+
+@app.route('/api/reviews', methods=['GET'])
+def api_get_reviews():
+    """Return all personal game reviews."""
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+    with picker_lock:
+        return jsonify(picker.reviews)
+
+
+@app.route('/api/reviews/<game_id>', methods=['GET'])
+def api_get_review(game_id: str):
+    """Return the review for a specific game."""
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+    with picker_lock:
+        review = picker.get_review(game_id)
+    if review is None:
+        return jsonify({'error': 'No review found'}), 404
+    return jsonify(review)
+
+
+@app.route('/api/reviews/<game_id>', methods=['POST', 'PUT'])
+def api_save_review(game_id: str):
+    """Add or update a personal review for a game.
+
+    Body JSON: {"rating": 1-10, "notes": "optional text"}
+    """
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+
+    data = request.json or {}
+    rating = data.get('rating')
+    notes = data.get('notes', '')
+
+    if rating is None:
+        return jsonify({'error': 'rating is required (1-10)'}), 400
+
+    try:
+        rating = int(rating)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'rating must be an integer'}), 400
+
+    with picker_lock:
+        success = picker.add_or_update_review(game_id, rating, notes)
+
+    if not success:
+        return jsonify({'error': 'rating must be between 1 and 10'}), 400
+
+    return jsonify({'success': True, 'game_id': game_id, 'rating': rating, 'notes': notes})
+
+
+@app.route('/api/reviews/<game_id>', methods=['DELETE'])
+def api_delete_review(game_id: str):
+    """Delete the review for a game."""
+    if not picker:
+        return jsonify({'error': 'Picker not initialized'}), 400
+
+    with picker_lock:
+        removed = picker.remove_review(game_id)
+
+    if not removed:
+        return jsonify({'error': 'No review found'}), 404
+
+    return jsonify({'success': True})
 
 
 def create_templates():

@@ -7,6 +7,7 @@ A tool to randomly pick a game from your Steam, Epic Games, and GOG libraries wi
 import json
 import logging
 import os
+import re
 import sys
 import random
 import argparse
@@ -90,14 +91,25 @@ def is_placeholder_value(value: str) -> bool:
 
 def minutes_to_hours(minutes: int) -> float:
     """Convert playtime from minutes to hours
-    
+
     Args:
         minutes: Playtime in minutes
-        
+
     Returns:
         Playtime in hours, rounded to 1 decimal place
     """
     return round(minutes / 60, 1)
+
+
+def _parse_release_year(date_str: str) -> Optional[int]:
+    """Extract a 4-digit year from a Steam release date string such as '21 Mar, 2020'.
+
+    Returns the year as an integer, or None if the string cannot be parsed.
+    """
+    if not date_str:
+        return None
+    m = re.search(r'\b(19|20)\d{2}\b', date_str)
+    return int(m.group(0)) if m else None
 
 
 def is_valid_steam_id(steam_id: str) -> bool:
@@ -323,6 +335,7 @@ class GamePicker:
     HISTORY_FILE = '.gapi_history.json'
     FAVORITES_FILE = '.gapi_favorites.json'
     CACHE_FILE = '.gapi_details_cache.json'
+    REVIEWS_FILE = '.gapi_reviews.json'
 
     # Default values (can be overridden by config)
     DEFAULT_MAX_HISTORY = 20
@@ -371,6 +384,7 @@ class GamePicker:
         self.games: List[Dict] = []
         self.history: List[str] = self.load_history()  # Now stores composite IDs
         self.favorites: List[str] = self.load_favorites()  # Now stores composite IDs
+        self.reviews: Dict[str, Dict] = self.load_reviews()  # game_id -> review dict
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -418,6 +432,68 @@ class GamePicker:
                             len(data['steam']))
         except IOError as e:
             self._log.warning("Could not save details cache: %s", e)
+
+    # ------------------------------------------------------------------
+    # Game Reviews
+    # ------------------------------------------------------------------
+
+    def load_reviews(self) -> Dict[str, Dict]:
+        """Load personal game reviews from disk.
+
+        Returns:
+            Dict mapping game_id → {'rating': int, 'notes': str, 'updated_at': str}
+        """
+        if os.path.exists(self.REVIEWS_FILE):
+            try:
+                with open(self.REVIEWS_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self._log.warning("Could not load reviews: %s", e)
+        return {}
+
+    def save_reviews(self):
+        """Persist reviews to disk (atomic write)."""
+        try:
+            _atomic_write_json(self.REVIEWS_FILE, self.reviews)
+        except IOError as e:
+            self._log.error("Error saving reviews: %s", e)
+
+    def add_or_update_review(self, game_id: str, rating: int, notes: str = "") -> bool:
+        """Add or update a personal review for a game.
+
+        Args:
+            game_id: Composite game ID (e.g. 'steam:620') or plain app ID string.
+            rating: Score from 1 to 10.
+            notes: Optional personal notes.
+
+        Returns:
+            True on success, False if rating is out of range.
+        """
+        if not 1 <= rating <= 10:
+            return False
+        self.reviews[str(game_id)] = {
+            'rating': rating,
+            'notes': notes,
+            'updated_at': datetime.datetime.now().isoformat(),
+        }
+        self.save_reviews()
+        return True
+
+    def remove_review(self, game_id: str) -> bool:
+        """Remove a review for a game.
+
+        Returns:
+            True if the review existed and was removed, False otherwise.
+        """
+        if str(game_id) in self.reviews:
+            del self.reviews[str(game_id)]
+            self.save_reviews()
+            return True
+        return False
+
+    def get_review(self, game_id: str) -> Optional[Dict]:
+        """Return the review dict for a game, or None if not reviewed."""
+        return self.reviews.get(str(game_id))
 
     def load_history(self) -> List[str]:
         """Load game picking history (supports both old int and new composite ID formats)"""
@@ -605,63 +681,112 @@ class GamePicker:
         print(f"{Fore.GREEN}Total: {total_games} games across all platforms!")
         return True
     
-    def filter_games(self, min_playtime: int = 0, max_playtime: Optional[int] = None, 
+    def filter_games(self, min_playtime: int = 0, max_playtime: Optional[int] = None,
                      genres: Optional[List[str]] = None, exclude_genres: Optional[List[str]] = None,
-                     favorites_only: bool = False) -> List[Dict]:
+                     favorites_only: bool = False,
+                     min_metacritic: Optional[int] = None,
+                     min_release_year: Optional[int] = None,
+                     max_release_year: Optional[int] = None,
+                     exclude_game_ids: Optional[List[str]] = None) -> List[Dict]:
         """Filter games based on various criteria
-        
+
         Args:
             min_playtime: Minimum playtime in minutes
             max_playtime: Maximum playtime in minutes (None for no max)
             genres: List of genres to include (OR logic - game must have at least one)
             exclude_genres: List of genres to exclude (game must not have any of these)
             favorites_only: Only include favorite games
-            
+            min_metacritic: Minimum Metacritic score (0-100). Requires Steam details fetch.
+            min_release_year: Earliest release year (inclusive)
+            max_release_year: Latest release year (inclusive)
+            exclude_game_ids: List of appids/game IDs to exclude from results
+
         Returns:
             List of filtered games
         """
         filtered = self.games
-        
+
         # Filter by playtime
         if min_playtime > 0:
             filtered = [g for g in filtered if g.get('playtime_forever', 0) >= min_playtime]
-        
+
         if max_playtime is not None:
             filtered = [g for g in filtered if g.get('playtime_forever', 0) <= max_playtime]
-        
+
         # Filter by favorites
         if favorites_only:
             filtered = [g for g in filtered if g.get('game_id') in self.favorites]
-        
-        # Filter by genres (requires fetching details)
-        if genres or exclude_genres:
-            genre_filtered = []
+
+        # Exclude specific games by app/game id
+        if exclude_game_ids:
+            exclude_set = {str(gid) for gid in exclude_game_ids}
+            filtered = [
+                g for g in filtered
+                if str(g.get('appid', '')) not in exclude_set
+                and str(g.get('game_id', '')) not in exclude_set
+            ]
+
+        # Filters that require fetching game details
+        needs_details = bool(genres or exclude_genres or min_metacritic is not None
+                             or min_release_year is not None or max_release_year is not None)
+
+        if needs_details:
+            detail_filtered = []
             genres_lower = [g.lower() for g in genres] if genres else []
             exclude_lower = [g.lower() for g in exclude_genres] if exclude_genres else []
-            
+
             for game in filtered:
                 platform = game.get('platform', 'steam')
                 game_id = extract_game_id(game)
-                
-                if game_id and platform in self.clients:
-                    details = self.clients[platform].get_game_details(str(game_id))
-                    if details and 'genres' in details:
-                        game_genres = [g['description'].lower() for g in details['genres']]
-                        
-                        # Check if game should be excluded
-                        if exclude_lower and any(genre in game_genres for genre in exclude_lower):
+
+                if not game_id or platform not in self.clients:
+                    # No details available – include only when no positive filter is set
+                    if not genres_lower and min_metacritic is None \
+                            and min_release_year is None and max_release_year is None:
+                        if not exclude_lower:
+                            detail_filtered.append(game)
+                    continue
+
+                details = self.clients[platform].get_game_details(str(game_id))
+
+                if details:
+                    # --- Genre filter ---
+                    if genres_lower or exclude_lower:
+                        game_genres = [g['description'].lower()
+                                       for g in details.get('genres', [])]
+                        if exclude_lower and any(eg in game_genres for eg in exclude_lower):
                             continue
-                        
-                        # Check if game matches included genres (if specified)
-                        if genres_lower:
-                            if any(genre in game_genres for genre in genres_lower):
-                                genre_filtered.append(game)
-                        else:
-                            # No include filter, just exclude filter
-                            genre_filtered.append(game)
-            
-            filtered = genre_filtered
-        
+                        if genres_lower and not any(g in game_genres for g in genres_lower):
+                            continue
+
+                    # --- Metacritic filter ---
+                    if min_metacritic is not None:
+                        score = details.get('metacritic', {}).get('score')
+                        if score is None or int(score) < min_metacritic:
+                            continue
+
+                    # --- Release year filter ---
+                    if min_release_year is not None or max_release_year is not None:
+                        raw_date = details.get('release_date', {}).get('date', '')
+                        year = _parse_release_year(raw_date)
+                        if year is None:
+                            # Skip games with no parseable date when year filter is active
+                            continue
+                        if min_release_year is not None and year < min_release_year:
+                            continue
+                        if max_release_year is not None and year > max_release_year:
+                            continue
+
+                    detail_filtered.append(game)
+                else:
+                    # Details unavailable – apply only non-positive filters
+                    if not genres_lower and min_metacritic is None \
+                            and min_release_year is None and max_release_year is None:
+                        if not exclude_lower:
+                            detail_filtered.append(game)
+
+            filtered = detail_filtered
+
         return filtered
     
     def pick_random_game(self, filtered_games: Optional[List[Dict]] = None, avoid_recent: bool = True) -> Optional[Dict]:
@@ -1067,6 +1192,30 @@ Examples:
         metavar='N',
         help='Number of games to pick (default: 1, max: 10)'
     )
+    parser.add_argument(
+        '--min-score',
+        type=int,
+        metavar='SCORE',
+        help='Minimum Metacritic score (0-100). Requires fetching game details.'
+    )
+    parser.add_argument(
+        '--min-year',
+        type=int,
+        metavar='YEAR',
+        help='Earliest release year to include (e.g., 2015)'
+    )
+    parser.add_argument(
+        '--max-year',
+        type=int,
+        metavar='YEAR',
+        help='Latest release year to include (e.g., 2023)'
+    )
+    parser.add_argument(
+        '--exclude-game',
+        type=str,
+        metavar='ID',
+        help='Comma-separated app IDs or game IDs to exclude (e.g., "730,570")'
+    )
     
     args = parser.parse_args()
     
@@ -1119,58 +1268,87 @@ Examples:
         genres = None
         if args.genre:
             genres = [g.strip() for g in args.genre.split(',')]
-        
+
         exclude_genres = None
         if args.exclude_genre:
             exclude_genres = [g.strip() for g in args.exclude_genre.split(',')]
-        
-        # Show genre filtering message early if genres are specified
-        if genres or exclude_genres:
-            print(f"{Fore.YELLOW}Note: Genre filtering may take a moment as we fetch game details...")
-        
+
+        exclude_game_ids = None
+        if args.exclude_game:
+            exclude_game_ids = [gid.strip() for gid in args.exclude_game.split(',')]
+
+        # Show detail-fetch warning early
+        needs_details = bool(genres or exclude_genres or args.min_score is not None
+                             or args.min_year is not None or args.max_year is not None)
+        if needs_details:
+            print(f"{Fore.YELLOW}Note: Advanced filtering may take a moment as we fetch game details...")
+
+        # Common advanced filter kwargs
+        adv_kwargs = {
+            'genres': genres,
+            'exclude_genres': exclude_genres,
+            'min_metacritic': args.min_score,
+            'min_release_year': args.min_year,
+            'max_release_year': args.max_year,
+            'exclude_game_ids': exclude_game_ids,
+        }
+
         # Non-interactive modes
-        if args.stats or args.random or args.unplayed or args.barely_played or args.well_played or args.min_hours is not None or args.max_hours is not None or args.favorites or genres or exclude_genres:
+        if (args.stats or args.random or args.unplayed or args.barely_played or args.well_played
+                or args.min_hours is not None or args.max_hours is not None or args.favorites
+                or needs_details or exclude_game_ids):
             if not picker.fetch_games():
                 sys.exit(1)
-            
+
             if args.stats:
                 picker.show_stats()
                 return
-            
+
             # Determine which filter to use
             filtered_games = None
-            
+
             if args.favorites:
-                # Favorites filter should also respect genre parameter
-                filtered_games = picker.filter_games(favorites_only=True, genres=genres, exclude_genres=exclude_genres)
+                filtered_games = picker.filter_games(favorites_only=True, **adv_kwargs)
                 print(f"{Fore.GREEN}Filtering to favorite games...")
             elif args.unplayed:
-                filtered_games = picker.filter_games(max_playtime=0, genres=genres, exclude_genres=exclude_genres)
+                filtered_games = picker.filter_games(max_playtime=0, **adv_kwargs)
                 print(f"{Fore.GREEN}Filtering to unplayed games...")
             elif args.barely_played:
-                filtered_games = picker.filter_games(max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
+                filtered_games = picker.filter_games(
+                    max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, **adv_kwargs)
                 barely_played_hours = minutes_to_hours(picker.BARELY_PLAYED_THRESHOLD_MINUTES)
                 print(f"{Fore.GREEN}Filtering to barely played games (< {barely_played_hours} hours)...")
             elif args.well_played:
-                filtered_games = picker.filter_games(min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, genres=genres, exclude_genres=exclude_genres)
+                filtered_games = picker.filter_games(
+                    min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, **adv_kwargs)
                 well_played_hours = minutes_to_hours(picker.WELL_PLAYED_THRESHOLD_MINUTES)
                 print(f"{Fore.GREEN}Filtering to well-played games (> {well_played_hours} hours)...")
             elif args.min_hours is not None or args.max_hours is not None:
                 min_minutes = int(args.min_hours * 60) if args.min_hours is not None else 0
                 max_minutes = int(args.max_hours * 60) if args.max_hours is not None else None
-                filtered_games = picker.filter_games(min_playtime=min_minutes, max_playtime=max_minutes, genres=genres, exclude_genres=exclude_genres)
+                filtered_games = picker.filter_games(
+                    min_playtime=min_minutes, max_playtime=max_minutes, **adv_kwargs)
                 filter_desc = []
                 if args.min_hours is not None:
                     filter_desc.append(f">= {args.min_hours} hours")
                 if args.max_hours is not None:
                     filter_desc.append(f"<= {args.max_hours} hours")
                 print(f"{Fore.GREEN}Filtering to games with {' and '.join(filter_desc)}...")
-            elif genres or exclude_genres:
-                filtered_games = picker.filter_games(genres=genres, exclude_genres=exclude_genres)
+            elif needs_details or exclude_game_ids:
+                filtered_games = picker.filter_games(**adv_kwargs)
                 if genres:
                     print(f"{Fore.GREEN}Filtering to games with genres: {', '.join(genres)}...")
                 if exclude_genres:
                     print(f"{Fore.GREEN}Excluding games with genres: {', '.join(exclude_genres)}...")
+                if args.min_score is not None:
+                    print(f"{Fore.GREEN}Filtering to games with Metacritic score >= {args.min_score}...")
+                if args.min_year is not None or args.max_year is not None:
+                    yr_desc = []
+                    if args.min_year:
+                        yr_desc.append(f">= {args.min_year}")
+                    if args.max_year:
+                        yr_desc.append(f"<= {args.max_year}")
+                    print(f"{Fore.GREEN}Filtering by release year: {' and '.join(yr_desc)}...")
             
             if filtered_games is not None and not filtered_games:
                 print(f"{Fore.RED}No games found matching the filter criteria.")

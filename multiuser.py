@@ -9,6 +9,7 @@ import logging
 import os
 import random
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Set, Optional, Tuple
 from collections import Counter
@@ -271,51 +272,85 @@ class MultiUserPicker:
             return True
         return False
     
-    def get_user_libraries(self, user_names: Optional[List[str]] = None) -> Dict[str, List[Dict]]:
+    def _fetch_user_library(self, user: Dict) -> List[Dict]:
+        """Fetch all games for a single user across all their platforms.
+
+        Returns a flat list of game dicts with ``game_id`` and ``platform`` set.
+        This method is thread-safe: it does not mutate shared state.
         """
-        Fetch game libraries for specified users from all platforms
-        Returns dict mapping user names to their game lists
+        all_games: List[Dict] = []
+
+        # Support both new {platforms: {...}} and old {steam_id: ...} formats
+        platforms = user.get('platforms', {})
+        if not platforms and 'steam_id' in user:
+            platforms = {'steam': user['steam_id']}
+
+        for platform_name, user_id in platforms.items():
+            if not user_id or gapi.is_placeholder_value(user_id):
+                continue
+            if platform_name not in self.clients:
+                continue
+            try:
+                games = self.clients[platform_name].get_owned_games(user_id)
+                if games:
+                    for game in games:
+                        game_id = gapi.extract_game_id(game)
+                        game['game_id'] = f"{platform_name}:{game_id}"
+                        game['platform'] = platform_name
+                        if 'appid' not in game:
+                            game['appid'] = game_id
+                    all_games.extend(games)
+                    logger.info("Loaded %d games from %s for %s",
+                                len(games), platform_name, user['name'])
+            except Exception as exc:
+                logger.error("Error fetching %s games for %s: %s",
+                             platform_name, user['name'], exc)
+
+        return all_games
+
+    def get_user_libraries(self, user_names: Optional[List[str]] = None,
+                           parallel: bool = True) -> Dict[str, List[Dict]]:
+        """Fetch game libraries for specified users from all platforms in parallel.
+
+        Args:
+            user_names: Names of users to fetch (all users if None).
+            parallel: Use parallel fetching via a thread pool (default True).
+
+        Returns:
+            Dict mapping user name → list of game dicts.
         """
         users_to_fetch = self.users
         if user_names:
             users_to_fetch = [u for u in self.users if u['name'] in user_names]
-        
-        libraries = {}
-        for user in users_to_fetch:
-            all_games = []
-            
-            # Get platforms for this user (support both old and new format)
-            platforms = user.get('platforms', {})
-            if not platforms and 'steam_id' in user:
-                # Old format - convert to new format
-                platforms = {'steam': user['steam_id']}
-            
-            # Fetch games from each platform
-            for platform_name, user_id in platforms.items():
-                if not user_id or gapi.is_placeholder_value(user_id):
-                    continue
-                
-                if platform_name in self.clients:
+
+        libraries: Dict[str, List[Dict]] = {}
+
+        if parallel and len(users_to_fetch) > 1:
+            # Fetch all users concurrently; max_workers caps at # users to avoid
+            # spawning unnecessary threads when few users are configured.
+            max_workers = min(len(users_to_fetch), 8)
+            with ThreadPoolExecutor(max_workers=max_workers,
+                                    thread_name_prefix='gapi_lib') as executor:
+                future_to_user = {
+                    executor.submit(self._fetch_user_library, user): user
+                    for user in users_to_fetch
+                }
+                for future in as_completed(future_to_user):
+                    user = future_to_user[future]
                     try:
-                        games = self.clients[platform_name].get_owned_games(user_id)
+                        games = future.result()
                         if games:
-                            # Add composite game ID and platform info
-                            for game in games:
-                                game_id = gapi.extract_game_id(game)
-                                game['game_id'] = f"{platform_name}:{game_id}"
-                                game['platform'] = platform_name
-                                if 'appid' not in game:
-                                    game['appid'] = game_id
-                            all_games.extend(games)
-                            logger.info("Loaded %d games from %s for %s",
-                                        len(games), platform_name, user['name'])
-                    except Exception as e:
-                        logger.error("Error fetching %s games for %s: %s",
-                                     platform_name, user['name'], e)
-            
-            if all_games:
-                libraries[user['name']] = all_games
-        
+                            libraries[user['name']] = games
+                    except Exception as exc:
+                        logger.error("Unexpected error fetching library for %s: %s",
+                                     user['name'], exc)
+        else:
+            # Single-user or sequential fallback
+            for user in users_to_fetch:
+                games = self._fetch_user_library(user)
+                if games:
+                    libraries[user['name']] = games
+
         return libraries
     
     def find_common_games(self, user_names: Optional[List[str]] = None) -> List[Dict]:

@@ -310,7 +310,7 @@
             padding: 40px;
             color: #999;
         }
-        
+
         .error {
             background: #f8d7da;
             color: #721c24;
@@ -318,22 +318,56 @@
             border-radius: 8px;
             margin: 10px 0;
         }
-        
+
         .favorite-icon {
             color: #ffc107;
             margin-right: 8px;
         }
+
+        /* ---- Global loading overlay ---- */
+        #loading-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+        }
+        #loading-overlay.active { display: flex; }
+        .spinner {
+            width: 56px;
+            height: 56px;
+            border: 6px solid rgba(255,255,255,0.3);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner-label {
+            color: #ffffff;
+            font-size: 1.05em;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
+    <!-- Global loading overlay -->
+    <div id="loading-overlay" role="status" aria-live="polite">
+        <div class="spinner"></div>
+        <div class="spinner-label" id="spinner-label">Loading…</div>
+    </div>
+
     <div class="container">
         <header>
             <h1>🎮 GAPI</h1>
             <p class="subtitle">Pick your next Steam game to play!</p>
         </header>
-        
+
         <div class="status-bar" id="status">Loading...</div>
-        
+
         <div class="tabs">
             <button class="tab active" onclick="switchTab('picker', event)">Pick a Game</button>
             <button class="tab" onclick="switchTab('library', event)">Library</button>
@@ -341,8 +375,7 @@
             <button class="tab" onclick="switchTab('stats', event)">Statistics</button>
             <button class="tab" onclick="switchTab('users', event)">Users</button>
             <button class="tab" onclick="switchTab('multiuser', event)">Multi-User</button>
-        </div>
-        
+        </div>        
         <!-- Picker Tab -->
         <div id="picker-tab" class="tab-content active">
             <div class="filters">
@@ -359,11 +392,11 @@
                         </div>
                         <div class="radio-option">
                             <input type="radio" id="filter-barely" name="filter" value="barely">
-                            <label for="filter-barely">Barely Played (< 2h)</label>
+                            <label for="filter-barely">Barely Played (&lt; 2h)</label>
                         </div>
                         <div class="radio-option">
                             <input type="radio" id="filter-well" name="filter" value="well">
-                            <label for="filter-well">Well-Played (> 10h)</label>
+                            <label for="filter-well">Well-Played (&gt; 10h)</label>
                         </div>
                         <div class="radio-option">
                             <input type="radio" id="filter-favorites" name="filter" value="favorites">
@@ -371,20 +404,45 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="filter-group">
                     <label class="filter-label" for="genre-filter">Genre (e.g., Action, RPG)</label>
                     <input type="text" id="genre-filter" class="genre-input" placeholder="Leave empty for any genre">
                 </div>
+
+                <!-- Advanced filters toggle -->
+                <div class="filter-group">
+                    <label class="filter-label" style="cursor:pointer;" onclick="toggleAdvancedFilters()">
+                        ⚙️ Advanced Filters <span id="adv-toggle-icon">▾</span>
+                    </label>
+                    <div id="advanced-filters" style="display:none; margin-top:10px; gap:12px; flex-wrap:wrap;">
+                        <label style="font-weight:600;">Min Metacritic:
+                            <input type="number" id="adv-min-score" min="0" max="100" placeholder="e.g. 75"
+                                   style="width:70px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
+                        <label style="font-weight:600;">Release Year ≥
+                            <input type="number" id="adv-min-year" min="1980" max="2099" placeholder="e.g. 2015"
+                                   style="width:80px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
+                        <label style="font-weight:600;">Release Year ≤
+                            <input type="number" id="adv-max-year" min="1980" max="2099" placeholder="e.g. 2023"
+                                   style="width:80px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
+                        <label style="font-weight:600;">Exclude App IDs:
+                            <input type="text" id="adv-exclude-ids" placeholder="730,570"
+                                   style="width:120px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
+                    </div>
+                </div>
             </div>
-            
+
             <button class="pick-button" onclick="pickGame()">🎲 Pick Random Game</button>
-            
+
             <div id="game-result" class="game-display" style="display: none;">
                 <!-- Game info will be displayed here -->
             </div>
         </div>
-        
+
         <!-- Library Tab -->
         <div id="library-tab" class="tab-content">
             <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibrary()">
@@ -392,7 +450,7 @@
                 <div class="loading">Loading library...</div>
             </div>
         </div>
-        
+
         <!-- Favorites Tab -->
         <div id="favorites-tab" class="tab-content">
             <h2>⭐ Your Favorite Games</h2>
@@ -541,13 +599,21 @@
         let activeVoteSession = null;
         let voteTimerInterval = null;
 
+        // ---- Spinner helpers ----
+        function showSpinner(label) {
+            document.getElementById('spinner-label').textContent = label || 'Loading…';
+            document.getElementById('loading-overlay').classList.add('active');
+        }
+        function hideSpinner() {
+            document.getElementById('loading-overlay').classList.remove('active');
+        }
+
         // Initialize
         async function init() {
+            showSpinner('Loading your game library…');
             await updateStatus();
-            loadLibrary();
-            loadFavorites();
-            loadStats();
-            loadUsers();
+            await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers()]);
+            hideSpinner();
         }
         
         async function updateStatus() {
@@ -590,36 +656,67 @@
         async function pickGame() {
             const filterValue = document.querySelector('input[name="filter"]:checked').value;
             const genreValue = document.getElementById('genre-filter').value.trim();
-            
+            const minScore = document.getElementById('adv-min-score').value;
+            const minYear = document.getElementById('adv-min-year').value;
+            const maxYear = document.getElementById('adv-max-year').value;
+            const excludeIds = document.getElementById('adv-exclude-ids').value.trim();
+
+            showSpinner('Picking a game…');
             try {
+                const body = {
+                    filter: filterValue,
+                    genre: genreValue,
+                };
+                if (minScore) body.min_metacritic = parseInt(minScore);
+                if (minYear) body.min_year = parseInt(minYear);
+                if (maxYear) body.max_year = parseInt(maxYear);
+                if (excludeIds) body.exclude_game_ids = excludeIds;
+
                 const response = await fetch('/api/pick', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        filter: filterValue,
-                        genre: genreValue
-                    })
+                    body: JSON.stringify(body)
                 });
-                
+
                 if (!response.ok) {
                     const error = await response.json();
                     alert(error.error || 'Failed to pick game');
                     return;
                 }
-                
+
                 const game = await response.json();
                 currentGame = game;
                 displayGame(game);
-                
+
             } catch (error) {
                 alert('Error: ' + error.message);
+            } finally {
+                hideSpinner();
             }
         }
         
         async function displayGame(game) {
             const resultDiv = document.getElementById('game-result');
             const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
-            
+            const review = game.review;
+            // Clamp rating defensively to [1,10] and escape notes for safe attribute/HTML insertion
+            const safeRating = review ? Math.min(10, Math.max(1, parseInt(review.rating) || 1)) : null;
+            const safeNotes = review && review.notes
+                ? review.notes.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')
+                : '';
+            const reviewHtml = review
+                ? `<div id="review-panel" style="margin-top:12px; padding:12px; background:#f0f4ff; border-radius:8px;">
+                       <strong>⭐ Your Review:</strong>
+                       <span style="font-size:1.1em; margin-left:6px;">${'★'.repeat(safeRating)}${'☆'.repeat(10-safeRating)}</span>
+                       <span style="color:#555; margin-left:6px;">(${safeRating}/10)</span>
+                       ${safeNotes ? `<p style="margin-top:4px; color:#444;">${safeNotes}</p>` : ''}
+                       <button onclick="editReview('${game.game_id}')" style="margin-top:6px; padding:4px 10px; background:#667eea; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
+                       <button onclick="deleteReview('${game.game_id}')" style="margin-top:6px; margin-left:4px; padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
+                   </div>`
+                : `<button onclick="editReview('${game.game_id}')" style="margin-top:8px; padding:6px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">
+                       ✏️ Write a Review
+                   </button>`;
+
             let html = `
                 <div class="game-title">${favoriteIcon}${game.name}</div>
                 <div class="game-info">
@@ -627,7 +724,27 @@
                     <strong>Playtime:</strong> ${game.playtime_hours} hours
                 </div>
                 <div id="game-details">Loading details...</div>
-                <div class="action-buttons">
+                ${reviewHtml}
+                <!-- Inline review editor (hidden by default) -->
+                <div id="review-editor" style="display:none; margin-top:12px; padding:14px; background:#fff8e1; border-radius:8px; border:1px solid #f6d365;">
+                    <strong>Write a Review</strong>
+                    <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                        <label>Rating (1-10):
+                            <input type="number" id="review-rating" min="1" max="10" value="${safeRating || 7}"
+                                   style="width:55px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
+                        <label style="flex:1; min-width:200px;">Notes:
+                            <input type="text" id="review-notes" value="${safeNotes}"
+                                   placeholder="Optional personal notes…"
+                                   style="width:100%; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
+                    </div>
+                    <div style="margin-top:10px; display:flex; gap:8px;">
+                        <button onclick="saveReview('${game.game_id}')" style="padding:6px 16px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer;">💾 Save</button>
+                        <button onclick="document.getElementById('review-editor').style.display='none'" style="padding:6px 14px; background:#aaa; color:white; border:none; border-radius:6px; cursor:pointer;">Cancel</button>
+                    </div>
+                </div>
+                <div class="action-buttons" style="margin-top:12px;">
                     <button class="btn btn-favorite" onclick="toggleFavorite(${game.app_id})">
                         ${game.is_favorite ? '⭐ Remove from Favorites' : '⭐ Add to Favorites'}
                     </button>
@@ -639,12 +756,63 @@
                     </button>
                 </div>
             `;
-            
+
             resultDiv.innerHTML = html;
             resultDiv.style.display = 'block';
-            
+
             // Load details
             loadGameDetails(game.app_id);
+        }
+
+        function editReview(gameId) {
+            document.getElementById('review-editor').style.display = 'block';
+            document.getElementById('review-editor').scrollIntoView({behavior: 'smooth'});
+        }
+
+        async function saveReview(gameId) {
+            const rating = parseInt(document.getElementById('review-rating').value);
+            const notes = document.getElementById('review-notes').value.trim();
+            try {
+                const resp = await fetch(`/api/reviews/${gameId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({rating, notes})
+                });
+                if (resp.ok) {
+                    // Refresh the game display with the updated review
+                    const updated = await resp.json();
+                    if (currentGame) {
+                        currentGame.review = {rating, notes, updated_at: new Date().toISOString()};
+                        displayGame(currentGame);
+                    }
+                } else {
+                    const err = await resp.json();
+                    alert(err.error || 'Failed to save review');
+                }
+            } catch (e) {
+                alert('Error saving review: ' + e.message);
+            }
+        }
+
+        async function deleteReview(gameId) {
+            if (!confirm('Delete this review?')) return;
+            try {
+                const resp = await fetch(`/api/reviews/${gameId}`, {method: 'DELETE'});
+                if (resp.ok && currentGame) {
+                    currentGame.review = null;
+                    displayGame(currentGame);
+                }
+            } catch (e) {
+                alert('Error deleting review: ' + e.message);
+            }
+        }
+
+        function toggleAdvancedFilters() {
+            const panel = document.getElementById('advanced-filters');
+            const icon = document.getElementById('adv-toggle-icon');
+            const isVisible = panel.style.display === 'flex';
+            panel.style.display = isVisible ? 'none' : 'flex';
+            icon.textContent = isVisible ? '▾' : '▴';
         }
         
         async function loadGameDetails(appId) {
@@ -1031,10 +1199,10 @@
             
             const coopOnly = document.getElementById('coop-only').checked;
             const resultDiv = document.getElementById('multiuser-result');
-            
+
             resultDiv.style.display = 'block';
             resultDiv.innerHTML = '<div class="loading">Picking a game...</div>';
-            
+            showSpinner('Fetching common games…');
             try {
                 const response = await fetch('/api/multiuser/pick', {
                     method: 'POST',
@@ -1045,15 +1213,15 @@
                         max_players: selectedUsers.length
                     })
                 });
-                
+
                 if (!response.ok) {
                     const error = await response.json();
                     resultDiv.innerHTML = `<div class="error">${error.error || 'No common games found'}</div>`;
                     return;
                 }
-                
+
                 const game = await response.json();
-                
+
                 let html = `
                     <h3 style="color: #667eea; margin-bottom: 15px;">🎮 ${game.name}</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
@@ -1075,23 +1243,25 @@
                 resultDiv.innerHTML = html;
             } catch (error) {
                 resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            } finally {
+                hideSpinner();
             }
         }
-        
+
         async function showCommonGames() {
             const selectedUsers = getSelectedUsers();
             const listDiv = document.getElementById('common-games-list');
             const countSpan = document.getElementById('common-count');
-            
+
             listDiv.innerHTML = '<div class="loading">Loading...</div>';
-            
+            showSpinner('Loading common games…');
             try {
                 const usersParam = selectedUsers.length > 0 ? selectedUsers.join(',') : '';
                 const response = await fetch(`/api/multiuser/common?users=${encodeURIComponent(usersParam)}`);
                 const data = await response.json();
-                
+
                 countSpan.textContent = `(${data.total_common})`;
-                
+
                 if (data.games && data.games.length > 0) {
                     let html = '';
                     data.games.forEach(game => {
@@ -1111,6 +1281,8 @@
                 }
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading common games</div>';
+            } finally {
+                hideSpinner();
             }
         }
 
@@ -1148,6 +1320,7 @@
             const resultDiv = document.getElementById('multiuser-result');
             resultDiv.style.display = 'block';
             resultDiv.innerHTML = '<div class="loading">Creating voting session…</div>';
+            showSpinner('Finding game candidates…');
 
             try {
                 const response = await fetch('/api/voting/create', {
@@ -1190,6 +1363,8 @@
 
             } catch (error) {
                 resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            } finally {
+                hideSpinner();
             }
         }
 

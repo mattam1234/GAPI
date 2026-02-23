@@ -30,20 +30,24 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### 📅 Next Release (v2.2.0)
 
 #### High Priority - User Experience
-- [ ] **Advanced Filtering Options**
-  - [ ] Filter by release date (e.g., games from 2020-2023)
-  - [ ] Filter by Metacritic score (e.g., score > 80)
-  - [ ] Exclude specific games by name or ID from picker
-- [ ] **Loading Indicators** - Visual feedback in Web GUI for long operations
+- [x] **Advanced Filtering Options**
+  - [x] Filter by Metacritic score (e.g., score > 80) – `--min-score` CLI flag + Web GUI
+  - [x] Filter by release date (e.g., games from 2020-2023) – `--min-year`/`--max-year` + Web GUI
+  - [x] Exclude specific games by name or ID from picker – `--exclude-game` CLI flag + Web GUI
+- [x] **Loading Indicators** - Spinner overlay in Web GUI for long operations
 
 #### High Priority - Performance
-- [ ] **Enhanced Caching System** - Persist game details cache between sessions
-- [ ] **Parallel Library Fetching** - Speed up multi-user game loading with async operations
+- [x] **Enhanced Caching System** - Persist game details cache between sessions
+- [x] **Parallel Library Fetching** - Concurrent user-library fetching with ThreadPoolExecutor
 - [ ] **Optimized Genre Filtering** - Use cached data instead of refetching details
 
 #### Medium Priority - Data & Configuration
-- [ ] **Atomic File Writes** - Prevent data corruption on crashes
-- [ ] **Logging Framework** - Replace print statements with proper logging (configurable levels)
+- [x] **Atomic File Writes** - Prevent data corruption on crashes
+- [x] **Logging Framework** - Replace print statements with proper logging (configurable levels)
+
+#### Social Features
+- [x] **Voting System** – Multi-user emoji-reaction voting via Discord + Web UI
+- [x] **Game Reviews** – Personal rating (1-10) + notes per game, stored in `.gapi_reviews.json`
 
 ### 📅 Future Release (v2.3.0)
 
