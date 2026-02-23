@@ -213,12 +213,12 @@ class SteamAPIClient(GamePlatformClient):
     def get_platform_name(self) -> str:
         return "steam"
 
-    def get_owned_games(self, steam_id: str, include_appinfo: bool = True) -> List[Dict]:
+    def get_owned_games(self, user_id: str, include_appinfo: bool = True) -> List[Dict]:
         """Get list of games owned by a Steam user"""
         url = f"{self.BASE_URL}/IPlayerService/GetOwnedGames/v0001/"
         params = {
             'key': self.api_key,
-            'steamid': steam_id,
+            'steamid': user_id,
             'include_appinfo': 1 if include_appinfo else 0,
             'include_played_free_games': 1,
             'format': 'json'
@@ -240,11 +240,11 @@ class SteamAPIClient(GamePlatformClient):
             self._log.error("Error fetching games from Steam API: %s", e)
             return []
 
-    def get_game_details(self, app_id: str) -> Optional[Dict]:
+    def get_game_details(self, game_id: str) -> Optional[Dict]:
         """Get detailed information about a specific game"""
         # Convert to int for Steam API
         try:
-            app_id_int = int(app_id)
+            app_id_int = int(game_id)
         except (ValueError, TypeError):
             return None
 
@@ -266,7 +266,7 @@ class SteamAPIClient(GamePlatformClient):
                 return details
             return None
         except requests.RequestException as e:
-            self._log.warning("Could not fetch details for app %s: %s", app_id, e)
+            self._log.warning("Could not fetch details for app %s: %s", game_id, e)
             return None
 
     def get_protondb_rating(self, app_id: str) -> Optional[Dict]:
@@ -1362,7 +1362,8 @@ class GamePicker:
                 if filtered:
                     print(f"{Fore.GREEN}Found {len(filtered)} unplayed games.")
                     game = self.pick_random_game(filtered)
-                    self.display_game_info(game)
+                    if game:
+                        self.display_game_info(game)
                 else:
                     print(f"{Fore.YELLOW}No unplayed games found!")
             elif choice == '3':
@@ -1370,7 +1371,8 @@ class GamePicker:
                 if filtered:
                     print(f"{Fore.GREEN}Found {len(filtered)} barely played games.")
                     game = self.pick_random_game(filtered)
-                    self.display_game_info(game)
+                    if game:
+                        self.display_game_info(game)
                 else:
                     print(f"{Fore.YELLOW}No barely played games found!")
             elif choice == '4':
@@ -1378,7 +1380,8 @@ class GamePicker:
                 if filtered:
                     print(f"{Fore.GREEN}Found {len(filtered)} well-played games.")
                     game = self.pick_random_game(filtered)
-                    self.display_game_info(game)
+                    if game:
+                        self.display_game_info(game)
                 else:
                     print(f"{Fore.YELLOW}No well-played games found!")
             elif choice == '5':
@@ -1431,7 +1434,8 @@ class GamePicker:
         if filtered:
             print(f"{Fore.GREEN}Found {len(filtered)} games matching the genre(s).")
             game = self.pick_random_game(filtered)
-            self.display_game_info(game)
+            if game:
+                self.display_game_info(game)
         else:
             print(f"{Fore.YELLOW}No games found with the specified genre(s)!")
     
@@ -1447,7 +1451,8 @@ class GamePicker:
             print(f"{Fore.GREEN}Picking from {len(filtered)} favorite games...")
             # Still avoid recent picks to provide variety
             game = self.pick_random_game(filtered, avoid_recent=True)
-            self.display_game_info(game)
+            if game:
+                self.display_game_info(game)
         else:
             print(f"{Fore.YELLOW}None of your favorite games are in your library anymore.")
     

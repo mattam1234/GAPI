@@ -154,7 +154,7 @@ def api_pick_game():
 
         # Try to get details (non-blocking)
         def fetch_details():
-            if app_id:
+            if app_id and picker.steam_client:
                 details = picker.steam_client.get_game_details(app_id)
                 if details:
                     game['_details'] = details
@@ -186,6 +186,9 @@ def api_game_details(app_id):
     if not picker:
         return jsonify({'error': 'Picker not initialized'}), 400
     
+    if not picker.steam_client:
+        return jsonify({'error': 'Steam client not initialized'}), 400
+    
     with picker_lock:
         details = picker.steam_client.get_game_details(app_id)
         
@@ -207,7 +210,7 @@ def api_game_details(app_id):
             response['metacritic_score'] = details['metacritic'].get('score')
 
         # ProtonDB Linux compatibility rating (best-effort, non-blocking cache)
-        if picker.steam_client:
+        if picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
             protondb = picker.steam_client.get_protondb_rating(app_id)
             if protondb:
                 response['protondb'] = protondb
@@ -469,7 +472,8 @@ def api_multiuser_pick():
     data = request.json or {}
     user_names = data.get('users', [])
     coop_only = data.get('coop_only', False)
-    max_players = data.get('max_players')
+    max_players_raw = data.get('max_players')
+    max_players = int(max_players_raw) if max_players_raw is not None else None
     
     with multi_picker_lock:
         game = multi_picker.pick_common_game(
@@ -1022,6 +1026,10 @@ def api_get_achievements(app_id: int):
     steam_id = picker.config.get('steam_id', '')
     if gapi.is_placeholder_value(steam_id):
         return jsonify({'error': 'Steam ID not configured'}), 503
+    
+    if not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
+        return jsonify({'error': 'Steam client not initialized'}), 400
+    
     with picker_lock:
         stats = picker.steam_client.get_player_achievements(steam_id, app_id)
     if stats is None:
@@ -2159,10 +2167,10 @@ def main():
             self.games = DEMO_GAMES
             return True
         
-        def demo_load_config(self, path):
-            if path == config_path:
+        def demo_load_config(self, config_path):
+            if config_path == config_path:
                 return demo_config
-            return original_load_config(self, path)
+            return original_load_config(self, config_path)
         
         gapi.GamePicker.fetch_games = demo_fetch_games
         gapi.GamePicker.load_config = demo_load_config

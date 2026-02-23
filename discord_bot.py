@@ -68,7 +68,7 @@ class GAPIBot(discord.Client):
             steam_id='Your Steam ID (64-bit format)',
             username='Optional: Custom username (defaults to your Discord name)'
         )
-        async def link_steam(interaction: discord.Interaction, steam_id: str, username: str = None):
+        async def link_steam(interaction: discord.Interaction, steam_id: str, username: Optional[str] = None):
             """Link Discord user to Steam account"""
             user_name = username or interaction.user.name
             
@@ -122,6 +122,10 @@ class GAPIBot(discord.Client):
                              candidates: int = 5):
             """Start a game-choice voting session for all linked users"""
             channel_id = interaction.channel_id
+            
+            if channel_id is None:
+                await interaction.response.send_message("❌ This command must be used in a channel!")
+                return
 
             if channel_id in self.active_votes:
                 await interaction.response.send_message("❌ A voting session is already active in this channel!")
@@ -205,11 +209,11 @@ class GAPIBot(discord.Client):
         )
         async def pick_game(
             interaction: discord.Interaction, 
-            user1: discord.User = None,
-            user2: discord.User = None,
-            user3: discord.User = None,
-            user4: discord.User = None,
-            user5: discord.User = None
+            user1: Optional[discord.User] = None,
+            user2: Optional[discord.User] = None,
+            user3: Optional[discord.User] = None,
+            user4: Optional[discord.User] = None,
+            user5: Optional[discord.User] = None
         ):
             """Pick a random common game for specified users"""
             # Get participants
