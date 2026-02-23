@@ -83,11 +83,16 @@ def extract_game_id(game: Dict) -> Optional[str]:
     return game.get('appid') or game.get('id') or game.get('game_id')
 
 
+_PLACEHOLDER_VALUES = {'DEMO_MODE', 'DEMO_ID', 'DEMO_KEY', 'YOUR_STEAM_API_KEY_HERE',
+                       'YOUR_STEAM_ID_HERE', 'YOUR_EPIC_ID_HERE', 'YOUR_GOG_ID_HERE',
+                       'YOUR_DISCORD_BOT_TOKEN_HERE'}
+
+
 def is_placeholder_value(value: str) -> bool:
-    """Check if a value is a placeholder (starts with YOUR_)"""
+    """Check if a value is a placeholder/demo sentinel that should not be used for real API calls."""
     if not value or not isinstance(value, str):
         return True
-    return value.startswith('YOUR_')
+    return value.startswith('YOUR_') or value in _PLACEHOLDER_VALUES
 
 
 def minutes_to_hours(minutes: int) -> float:
@@ -362,8 +367,8 @@ class GamePicker:
         # Initialize platform clients
         self.clients: Dict[str, GamePlatformClient] = {}
 
-        # Always try to initialize Steam if API key is available
-        if self.config.get('steam_api_key') and self.config['steam_api_key'] != 'YOUR_STEAM_API_KEY_HERE':
+        # Always try to initialize Steam if API key is available and not a placeholder
+        if not is_placeholder_value(self.config.get('steam_api_key', '')):
             self.clients['steam'] = SteamAPIClient(self.config['steam_api_key'], timeout=self.API_TIMEOUT)
 
         # Initialize Epic Games client if enabled
@@ -711,17 +716,19 @@ class GamePicker:
                 config['gog_id'] = os.getenv('GOG_ID')
 
             # Validate required Steam credentials
-            if config.get('steam_api_key') == 'YOUR_STEAM_API_KEY_HERE' or not config.get('steam_api_key'):
+            if is_placeholder_value(config.get('steam_api_key', '')):
                 print(f"{Fore.RED}Error: Please configure your Steam API key in config.json or set STEAM_API_KEY environment variable")
+                print(f"{Fore.YELLOW}Get a free key at: https://steamcommunity.com/dev/apikey")
                 sys.exit(1)
 
-            if config.get('steam_id') == 'YOUR_STEAM_ID_HERE' or not config.get('steam_id'):
+            if is_placeholder_value(config.get('steam_id', '')):
                 print(f"{Fore.RED}Error: Please configure your Steam ID in config.json or set STEAM_ID environment variable")
+                print(f"{Fore.YELLOW}Find your 17-digit Steam ID at: https://steamid.io/")
                 sys.exit(1)
 
-            # Validate Steam ID format (unless in demo mode)
+            # Validate Steam ID format
             steam_id = config.get('steam_id', '')
-            if steam_id not in ['DEMO_MODE', 'DEMO_ID'] and not is_valid_steam_id(steam_id):
+            if not is_valid_steam_id(steam_id):
                 print(f"{Fore.RED}Error: Invalid Steam ID format!")
                 print(f"{Fore.YELLOW}Steam IDs should be 17-digit numbers starting with 7656119")
                 print(f"{Fore.YELLOW}Find your Steam ID at: https://steamid.io/")
