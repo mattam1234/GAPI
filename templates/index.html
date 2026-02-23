@@ -449,31 +449,80 @@
         <!-- Multi-User Tab -->
         <div id="multiuser-tab" class="tab-content">
             <h2>🎮 Multi-User Game Picker</h2>
-            
+
             <!-- User Selection -->
             <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
                 <h3>Select Players</h3>
                 <div id="user-checkboxes" style="margin-top: 15px;">
                     <div class="loading">Loading users...</div>
                 </div>
-                
+
                 <div style="margin-top: 15px;">
                     <label style="display: flex; align-items: center; gap: 10px;">
                         <input type="checkbox" id="coop-only" style="width: 18px; height: 18px;">
                         <span style="font-weight: 600;">Co-op/Multiplayer Games Only</span>
                     </label>
                 </div>
-                
-                <button onclick="pickMultiUserGame()" style="margin-top: 20px; padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
-                    🎲 Pick Common Game
-                </button>
+
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
+                    <button onclick="pickMultiUserGame()" style="padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
+                        🎲 Pick Common Game
+                    </button>
+                    <button onclick="startVote()" style="padding: 15px 40px; background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
+                        🗳️ Start Vote
+                    </button>
+                </div>
+
+                <!-- Vote options (hidden until "Start Vote" is clicked) -->
+                <div id="vote-options" style="display: none; margin-top: 15px; gap: 15px; flex-wrap: wrap; align-items: center;">
+                    <label style="font-weight: 600;">Candidates:
+                        <input type="number" id="vote-candidates" value="5" min="2" max="10"
+                               style="width: 60px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                    <label style="font-weight: 600;">Duration (seconds):
+                        <input type="number" id="vote-duration" value="60" min="10" max="600"
+                               style="width: 80px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                    <button onclick="createVoteSession()" style="padding: 10px 25px; background: #27ae60; color: white; border: none; border-radius: 20px; cursor: pointer; font-weight: bold;">
+                        ✅ Create Vote
+                    </button>
+                    <button onclick="cancelVoteOptions()" style="padding: 10px 20px; background: #aaa; color: white; border: none; border-radius: 20px; cursor: pointer;">
+                        Cancel
+                    </button>
+                </div>
             </div>
-            
+
             <!-- Multi-User Game Result -->
             <div id="multiuser-result" style="display: none; background: #f8f9fa; padding: 25px; border-radius: 10px;">
                 <!-- Result will be displayed here -->
             </div>
-            
+
+            <!-- Active Voting Session -->
+            <div id="voting-section" style="display: none; background: #fff8e1; padding: 25px; border-radius: 10px; margin-top: 20px; border: 2px solid #fda085;">
+                <h3>🗳️ Active Vote</h3>
+                <div id="voting-timer" style="font-size: 1.1em; color: #e67e22; margin-bottom: 10px;"></div>
+                <div id="voting-candidates" style="margin-top: 10px;">
+                    <!-- Candidate cards injected here -->
+                </div>
+                <div id="voting-voter-name" style="margin-top: 15px; display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="voter-name-input" placeholder="Your name (to cast vote)"
+                           style="padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 1em; flex: 1; max-width: 250px;">
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
+                    <button onclick="refreshVoteStatus()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                        🔄 Refresh Results
+                    </button>
+                    <button onclick="closeVote()" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                        🏁 Close Vote &amp; Reveal Winner
+                    </button>
+                </div>
+            </div>
+
+            <!-- Vote Winner Result -->
+            <div id="vote-winner" style="display: none; background: #e8f8e8; padding: 25px; border-radius: 10px; margin-top: 20px; border: 2px solid #2ecc71;">
+                <!-- Winner announced here -->
+            </div>
+
             <!-- Common Games List -->
             <div style="margin-top: 20px;">
                 <h3>Common Games <span id="common-count"></span></h3>
@@ -486,10 +535,12 @@
             </div>
         </div>
     </div>
-    
+
     <script>
         let currentGame = null;
-        
+        let activeVoteSession = null;
+        let voteTimerInterval = null;
+
         // Initialize
         async function init() {
             await updateStatus();
@@ -1062,7 +1113,214 @@
                 listDiv.innerHTML = '<div class="error">Error loading common games</div>';
             }
         }
-        
+
+        // ----------------------------------------------------------------
+        // Voting functions
+        // ----------------------------------------------------------------
+
+        async function startVote() {
+            const selectedUsers = getSelectedUsers();
+            if (selectedUsers.length === 0) {
+                alert('Please select at least one user first!');
+                return;
+            }
+            // Toggle vote options panel
+            const voteOptionsDiv = document.getElementById('vote-options');
+            voteOptionsDiv.style.display = voteOptionsDiv.style.display === 'flex' ? 'none' : 'flex';
+        }
+
+        function cancelVoteOptions() {
+            document.getElementById('vote-options').style.display = 'none';
+        }
+
+        async function createVoteSession() {
+            const selectedUsers = getSelectedUsers();
+            if (selectedUsers.length === 0) {
+                alert('Please select at least one user first!');
+                return;
+            }
+
+            const coopOnly = document.getElementById('coop-only').checked;
+            const numCandidates = parseInt(document.getElementById('vote-candidates').value) || 5;
+            const duration = parseInt(document.getElementById('vote-duration').value) || 60;
+            document.getElementById('vote-options').style.display = 'none';
+
+            const resultDiv = document.getElementById('multiuser-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div class="loading">Creating voting session…</div>';
+
+            try {
+                const response = await fetch('/api/voting/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        users: selectedUsers,
+                        num_candidates: numCandidates,
+                        duration: duration,
+                        coop_only: coopOnly
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    resultDiv.innerHTML = `<div class="error">${err.error || 'Failed to create vote'}</div>`;
+                    return;
+                }
+
+                const session = await response.json();
+                activeVoteSession = session;
+                resultDiv.style.display = 'none';
+                renderVotingSession(session);
+
+                // Start countdown timer
+                if (session.duration) {
+                    let remaining = session.duration;
+                    const timerDiv = document.getElementById('voting-timer');
+                    clearInterval(voteTimerInterval);
+                    voteTimerInterval = setInterval(() => {
+                        remaining -= 1;
+                        if (remaining <= 0) {
+                            clearInterval(voteTimerInterval);
+                            timerDiv.textContent = '⏰ Time is up!';
+                        } else {
+                            timerDiv.textContent = `⏳ ${remaining}s remaining`;
+                        }
+                    }, 1000);
+                }
+
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+
+        function renderVotingSession(session) {
+            const section = document.getElementById('voting-section');
+            const candidatesDiv = document.getElementById('voting-candidates');
+            const timerDiv = document.getElementById('voting-timer');
+
+            section.style.display = 'block';
+            document.getElementById('vote-winner').style.display = 'none';
+
+            if (session.duration) {
+                timerDiv.textContent = `⏳ ${session.duration}s remaining`;
+            } else {
+                timerDiv.textContent = '';
+            }
+
+            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;">';
+            session.candidates.forEach(candidate => {
+                const voteCount = session.vote_counts[candidate.app_id]
+                    ? session.vote_counts[candidate.app_id].count : 0;
+                const voters = session.vote_counts[candidate.app_id]
+                    ? session.vote_counts[candidate.app_id].voters.join(', ') : '';
+                html += `
+                    <div style="background: white; border-radius: 10px; padding: 15px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
+                        <div style="font-weight: bold; margin-bottom: 8px;">${candidate.name}</div>
+                        <div style="color: #666; font-size: 0.9em; margin-bottom: 10px;">${candidate.playtime_hours}h played</div>
+                        <div id="vote-count-${candidate.app_id}" style="font-size: 1.4em; font-weight: bold; color: #667eea; margin-bottom: 6px;">${voteCount} vote${voteCount !== 1 ? 's' : ''}</div>
+                        ${voters ? `<div style="font-size: 0.8em; color: #888; margin-bottom: 8px;">${voters}</div>` : ''}
+                        <button onclick="castVote('${candidate.app_id}')"
+                                style="padding: 8px 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 20px; cursor: pointer; font-size: 0.95em;">
+                            👍 Vote
+                        </button>
+                    </div>`;
+            });
+            html += '</div>';
+            candidatesDiv.innerHTML = html;
+        }
+
+        async function castVote(appId) {
+            if (!activeVoteSession) return;
+            const voterName = document.getElementById('voter-name-input').value.trim();
+            if (!voterName) {
+                alert('Please enter your name before voting!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/voting/${activeVoteSession.session_id}/vote`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_name: voterName, app_id: appId})
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'Failed to cast vote');
+                    return;
+                }
+                // Refresh status
+                await refreshVoteStatus();
+            } catch (error) {
+                alert('Error casting vote: ' + error.message);
+            }
+        }
+
+        async function refreshVoteStatus() {
+            if (!activeVoteSession) return;
+            try {
+                const response = await fetch(`/api/voting/${activeVoteSession.session_id}/status`);
+                if (!response.ok) return;
+                const session = await response.json();
+                activeVoteSession = session;
+                renderVotingSession(session);
+            } catch (error) {
+                console.error('Error refreshing vote status:', error);
+            }
+        }
+
+        async function closeVote() {
+            if (!activeVoteSession) return;
+            clearInterval(voteTimerInterval);
+
+            try {
+                const response = await fetch(`/api/voting/${activeVoteSession.session_id}/close`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'Failed to close vote');
+                    return;
+                }
+
+                // Hide voting section
+                document.getElementById('voting-section').style.display = 'none';
+                activeVoteSession = null;
+
+                // Show winner
+                const winnerDiv = document.getElementById('vote-winner');
+                const winner = data.winner;
+                let html = `
+                    <h3 style="color: #27ae60;">🏆 Winner: ${winner.name}</h3>
+                    <p style="margin-top: 8px; color: #555;">Total votes: <strong>${data.total_votes}</strong></p>
+                    <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">`;
+
+                // Show per-game tallies
+                if (data.vote_counts) {
+                    html += '<div style="width:100%; margin-bottom: 10px;">';
+                    Object.entries(data.vote_counts).forEach(([appId, info]) => {
+                        html += `<div style="margin: 4px 0; color: #444;">App ${appId}: <strong>${info.count}</strong> vote(s)`;
+                        if (info.voters && info.voters.length) html += ` (${info.voters.join(', ')})`;
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                if (winner.steam_url) {
+                    html += `<a href="${winner.steam_url}" target="_blank" class="btn btn-link">🔗 Steam Store</a>`;
+                }
+                if (winner.steamdb_url) {
+                    html += `<a href="${winner.steamdb_url}" target="_blank" class="btn btn-link">📊 SteamDB</a>`;
+                }
+                html += '</div>';
+                winnerDiv.innerHTML = html;
+                winnerDiv.style.display = 'block';
+                winnerDiv.scrollIntoView({behavior: 'smooth'});
+
+            } catch (error) {
+                alert('Error closing vote: ' + error.message);
+            }
+        }
+
         // Initialize on page load
         init();
     </script>

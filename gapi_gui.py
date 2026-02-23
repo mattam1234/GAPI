@@ -452,16 +452,148 @@ def api_multiuser_pick():
 def api_multiuser_stats():
     """Get multi-user library statistics"""
     global multi_picker
-    
+
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
-    
+
     user_names = request.args.get('users', '').split(',')
     user_names = [u.strip() for u in user_names if u.strip()]
-    
+
     with multi_picker_lock:
         stats = multi_picker.get_library_stats(user_names if user_names else None)
         return jsonify(stats)
+
+
+# ---------------------------------------------------------------------------
+# Voting endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/voting/create', methods=['POST'])
+def api_voting_create():
+    """Create a new voting session from common games.
+
+    Expected JSON body:
+        users        – list of user names participating (optional – all users if omitted)
+        num_candidates – number of game candidates to put to a vote (default: 5)
+        duration     – voting window in seconds (optional)
+        coop_only    – filter to co-op games only (default: false)
+    """
+    global multi_picker
+
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    data = request.json or {}
+    user_names = data.get('users') or None
+    num_candidates = min(int(data.get('num_candidates', 5)), 10)
+    duration = data.get('duration')
+    coop_only = data.get('coop_only', False)
+
+    with multi_picker_lock:
+        common_games = multi_picker.find_common_games(user_names)
+
+        if not common_games:
+            return jsonify({'error': 'No common games found for selected users'}), 404
+
+        if coop_only:
+            common_games = multi_picker.filter_coop_games(common_games)
+
+        if not common_games:
+            return jsonify({'error': 'No common co-op games found for selected users'}), 404
+
+        import random as _random
+        candidates = _random.sample(common_games, min(num_candidates, len(common_games)))
+
+        voters = user_names if user_names else [u['name'] for u in multi_picker.users]
+        session = multi_picker.create_voting_session(
+            candidates, voters=voters, duration=duration
+        )
+
+    return jsonify(session.to_dict()), 201
+
+
+@app.route('/api/voting/<session_id>/vote', methods=['POST'])
+def api_voting_cast(session_id: str):
+    """Cast a vote in an active voting session.
+
+    Expected JSON body:
+        user_name – name of the voter
+        app_id    – app ID of the game being voted for
+    """
+    global multi_picker
+
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    data = request.json or {}
+    user_name = data.get('user_name', '').strip()
+    app_id = str(data.get('app_id', '')).strip()
+
+    if not user_name:
+        return jsonify({'error': 'user_name is required'}), 400
+    if not app_id:
+        return jsonify({'error': 'app_id is required'}), 400
+
+    with multi_picker_lock:
+        session = multi_picker.get_voting_session(session_id)
+        if session is None:
+            return jsonify({'error': 'Voting session not found'}), 404
+
+        success, message = session.cast_vote(user_name, app_id)
+
+    if not success:
+        return jsonify({'error': message}), 400
+
+    return jsonify({'success': True, 'message': message})
+
+
+@app.route('/api/voting/<session_id>/status')
+def api_voting_status(session_id: str):
+    """Get the current status and vote tallies for a voting session."""
+    global multi_picker
+
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    with multi_picker_lock:
+        session = multi_picker.get_voting_session(session_id)
+        if session is None:
+            return jsonify({'error': 'Voting session not found'}), 404
+        return jsonify(session.to_dict())
+
+
+@app.route('/api/voting/<session_id>/close', methods=['POST'])
+def api_voting_close(session_id: str):
+    """Close a voting session and return the winner."""
+    global multi_picker
+
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    with multi_picker_lock:
+        session = multi_picker.get_voting_session(session_id)
+        if session is None:
+            return jsonify({'error': 'Voting session not found'}), 404
+
+        winner = multi_picker.close_voting_session(session_id)
+        session_data = session.to_dict()
+
+    if not winner:
+        return jsonify({'error': 'Could not determine a winner'}), 500
+
+    app_id = winner.get('appid') or winner.get('app_id') or winner.get('game_id')
+
+    return jsonify({
+        'winner': {
+            'app_id': app_id,
+            'name': winner.get('name', 'Unknown'),
+            'playtime_hours': round(winner.get('playtime_forever', 0) / 60, 1),
+            'steam_url': f'https://store.steampowered.com/app/{app_id}/' if app_id else None,
+            'steamdb_url': f'https://steamdb.info/app/{app_id}/' if app_id else None,
+        },
+        'vote_counts': session_data.get('vote_counts', {}),
+        'total_votes': session_data.get('total_votes', 0),
+    })
 
 
 def create_templates():

@@ -6,9 +6,140 @@ Handles multiple Steam accounts and finding common games for co-op play.
 
 import json
 import os
-from typing import Dict, List, Set, Optional
+import random
+import uuid
+from datetime import datetime
+from typing import Dict, List, Set, Optional, Tuple
 from collections import Counter
 import gapi
+
+
+class VotingSession:
+    """Manages a multi-user voting session for picking a game"""
+
+    def __init__(self, session_id: str, candidates: List[Dict],
+                 voters: Optional[List[str]] = None,
+                 duration: Optional[int] = None):
+        """
+        Initialize a voting session.
+
+        Args:
+            session_id: Unique identifier for this session
+            candidates: List of game dicts that users can vote for
+            voters: Optional list of eligible voter names. If None, any user may vote.
+            duration: Optional voting duration in seconds. If None, session stays open
+                      until explicitly closed.
+        """
+        self.session_id = session_id
+        self.candidates: List[Dict] = candidates
+        self.votes: Dict[str, str] = {}   # user_name -> app_id
+        self.voters: Set[str] = set(voters) if voters else set()
+        self.created_at: datetime = datetime.now()
+        self.duration: Optional[int] = duration
+        self.closed: bool = False
+
+    def cast_vote(self, user_name: str, app_id: str) -> Tuple[bool, str]:
+        """Cast a vote for a game.
+
+        Args:
+            user_name: Name of the voter
+            app_id: App ID of the game being voted for
+
+        Returns:
+            (success, message) tuple
+        """
+        if self.closed:
+            return False, "Voting session is closed"
+        if self.is_expired():
+            self.closed = True
+            return False, "Voting session has expired"
+        if self.voters and user_name not in self.voters:
+            return False, f"User '{user_name}' is not eligible to vote in this session"
+        # Validate app_id is a valid candidate
+        candidate_ids = {str(c.get('appid') or c.get('app_id') or c.get('game_id', ''))
+                         for c in self.candidates}
+        if str(app_id) not in candidate_ids:
+            return False, f"Game ID '{app_id}' is not a candidate in this session"
+        self.votes[user_name] = str(app_id)
+        return True, "Vote cast successfully"
+
+    def get_results(self) -> Dict[str, Dict]:
+        """Get vote tallies for all candidates.
+
+        Returns:
+            Dict mapping app_id -> {'game': dict, 'count': int, 'voters': list}
+        """
+        tallies: Dict[str, Dict] = {}
+        for candidate in self.candidates:
+            app_id = str(candidate.get('appid') or candidate.get('app_id')
+                         or candidate.get('game_id', ''))
+            tallies[app_id] = {
+                'game': candidate,
+                'count': 0,
+                'voters': []
+            }
+        for user, voted_id in self.votes.items():
+            if voted_id in tallies:
+                tallies[voted_id]['count'] += 1
+                tallies[voted_id]['voters'].append(user)
+        return tallies
+
+    def get_winner(self) -> Optional[Dict]:
+        """Determine the winning game.
+
+        In case of a tie the winner is chosen randomly from the tied games.
+        If nobody voted, a random candidate is returned.
+
+        Returns:
+            The winning game dict, or None if there are no candidates.
+        """
+        if not self.candidates:
+            return None
+        tallies = self.get_results()
+        if not tallies:
+            return None
+        max_votes = max(t['count'] for t in tallies.values())
+        if max_votes == 0:
+            # Nobody voted – pick randomly
+            return random.choice(self.candidates)
+        tied = [app_id for app_id, t in tallies.items() if t['count'] == max_votes]
+        winner_id = random.choice(tied)
+        return tallies[winner_id]['game']
+
+    def is_expired(self) -> bool:
+        """Return True if a timed session has exceeded its duration."""
+        if self.duration is None:
+            return False
+        elapsed = (datetime.now() - self.created_at).total_seconds()
+        return elapsed >= self.duration
+
+    def close(self):
+        """Close the voting session."""
+        self.closed = True
+
+    def to_dict(self) -> Dict:
+        """Serialise session state for API responses."""
+        tallies = self.get_results()
+        return {
+            'session_id': self.session_id,
+            'closed': self.closed or self.is_expired(),
+            'candidates': [
+                {
+                    'app_id': str(c.get('appid') or c.get('app_id') or c.get('game_id', '')),
+                    'name': c.get('name', 'Unknown'),
+                    'playtime_hours': round(c.get('playtime_forever', 0) / 60, 1),
+                }
+                for c in self.candidates
+            ],
+            'vote_counts': {
+                app_id: {'count': t['count'], 'voters': t['voters']}
+                for app_id, t in tallies.items()
+            },
+            'total_votes': len(self.votes),
+            'eligible_voters': sorted(self.voters),
+            'duration': self.duration,
+            'created_at': self.created_at.isoformat(),
+        }
 
 
 class MultiUserPicker:
@@ -20,7 +151,10 @@ class MultiUserPicker:
         self.config = config
         self.users_file = users_file or self.USERS_FILE
         self.users: List[Dict] = []
-        
+
+        # Active voting sessions keyed by session_id
+        self.voting_sessions: Dict[str, VotingSession] = {}
+
         # Initialize platform clients
         self.clients: Dict[str, gapi.GamePlatformClient] = {}
         
@@ -286,8 +420,7 @@ class MultiUserPicker:
         
         if not common_games:
             return None
-        
-        import random
+
         return random.choice(common_games)
     
     def get_library_stats(self, user_names: Optional[List[str]] = None) -> Dict:
@@ -305,9 +438,50 @@ class MultiUserPicker:
             'total_games_per_user': total_games_per_user,
             'common_games_count': len(common_games),
             'total_unique_games': len(set(
-                game.get('appid') 
-                for games in libraries.values() 
-                for game in games 
+                game.get('appid')
+                for games in libraries.values()
+                for game in games
                 if game.get('appid')
             ))
         }
+
+    # ------------------------------------------------------------------
+    # Voting session management
+    # ------------------------------------------------------------------
+
+    def create_voting_session(self, candidates: List[Dict],
+                              voters: Optional[List[str]] = None,
+                              duration: Optional[int] = None) -> VotingSession:
+        """Create a new voting session.
+
+        Args:
+            candidates: List of game dicts that users can vote for.
+            voters: Optional list of eligible voter names. If None, any name is accepted.
+            duration: Optional voting window in seconds.
+
+        Returns:
+            The newly created VotingSession.
+        """
+        session_id = str(uuid.uuid4())
+        session = VotingSession(session_id, candidates, voters=voters, duration=duration)
+        self.voting_sessions[session_id] = session
+        return session
+
+    def get_voting_session(self, session_id: str) -> Optional[VotingSession]:
+        """Return an active voting session by ID, or None if not found."""
+        return self.voting_sessions.get(session_id)
+
+    def close_voting_session(self, session_id: str) -> Optional[Dict]:
+        """Close a voting session and return the winning game.
+
+        Args:
+            session_id: ID of the session to close.
+
+        Returns:
+            The winning game dict, or None if session not found / no candidates.
+        """
+        session = self.voting_sessions.get(session_id)
+        if session is None:
+            return None
+        session.close()
+        return session.get_winner()

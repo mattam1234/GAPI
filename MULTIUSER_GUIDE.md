@@ -114,14 +114,16 @@ Example: `!gapi pick @Alice @Bob`
 
 **Start Vote:**
 ```
-!gapi vote [duration]
+/vote [duration] [candidates]
 ```
-Starts a voting session where users can react to join.
+Starts a game-choice voting session for all linked users.
 - `duration`: Voting time in seconds (default: 60)
-- Users react with ✅ to join
-- After voting ends, picks a game for all participants
+- `candidates`: Number of game options to vote on (default: 5, max: 10)
+- The bot picks N random games from the common library and posts them with number emoji reactions
+- Users react with the number emoji (1️⃣–🔟) of their preferred game
+- After the timer ends, the bot tallies reactions and announces the winning game with a full breakdown
 
-Example: `!gapi vote 120` (2 minute vote)
+Example: `/vote duration:120 candidates:4` (2-minute vote, 4 game options)
 
 **Show Common Games:**
 ```
@@ -184,6 +186,72 @@ if game:
 stats = picker.get_library_stats()
 print(f"Total users: {len(stats['users'])}")
 print(f"Common games: {stats['common_games_count']}")
+```
+
+### Voting System API
+
+```python
+import random
+from multiuser import MultiUserPicker
+
+picker = MultiUserPicker(config)
+
+# Pick candidate games from common library
+common_games = picker.find_common_games()
+candidates = random.sample(common_games, min(5, len(common_games)))
+
+# Create a timed voting session (60-second window)
+session = picker.create_voting_session(
+    candidates=candidates,
+    voters=["Alice", "Bob", "Charlie"],
+    duration=60
+)
+print(f"Session ID: {session.session_id}")
+
+# Users cast votes
+ok, msg = session.cast_vote("Alice", "730")   # vote for CS2 (appid 730)
+ok, msg = session.cast_vote("Bob", "570")     # vote for Dota 2
+ok, msg = session.cast_vote("Charlie", "730")
+
+# Check vote tallies
+results = session.get_results()
+for app_id, data in results.items():
+    print(f"{data['game']['name']}: {data['count']} vote(s)")
+
+# Close the session and get the winner
+winner = picker.close_voting_session(session.session_id)
+if winner:
+    print(f"🏆 Winner: {winner['name']}")
+
+# Retrieve an existing session by ID
+existing = picker.get_voting_session(session.session_id)
+```
+
+### Web GUI Voting API Endpoints
+
+| Method | URL | Description |
+|--------|-----|-------------|
+| `POST` | `/api/voting/create` | Create a voting session |
+| `POST` | `/api/voting/<id>/vote` | Cast a vote |
+| `GET`  | `/api/voting/<id>/status` | Get tallies and session state |
+| `POST` | `/api/voting/<id>/close` | Close session and reveal winner |
+
+**Create session** body:
+```json
+{
+  "users": ["Alice", "Bob"],
+  "num_candidates": 5,
+  "duration": 60,
+  "coop_only": false
+}
+```
+
+**Cast vote** body:
+```json
+{
+  "user_name": "Alice",
+  "app_id": "730"
+}
 ```
 
 ## File Locations
