@@ -302,6 +302,45 @@ class SteamAPIClient(GamePlatformClient):
         except requests.RequestException as e:
             self._log.debug("ProtonDB fetch failed for %s: %s", app_id, e)
         return None
+
+    def get_player_achievements(self, steam_id: str, app_id) -> Optional[Dict]:
+        """Fetch achievement stats for *steam_id* + *app_id*.
+
+        Returns a dict with ``total``, ``achieved``, and ``percent`` keys, or
+        ``None`` if the request fails or achievements are not available.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return None
+
+        url = f"{self.BASE_URL}/ISteamUserStats/GetPlayerAchievements/v0001/"
+        params = {
+            'key': self.api_key,
+            'steamid': steam_id,
+            'appid': app_id_int,
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            achievements = data.get('playerstats', {}).get('achievements', [])
+            if not achievements:
+                return None
+            total = len(achievements)
+            achieved = sum(1 for a in achievements if a.get('achieved'))
+            return {
+                'total': total,
+                'achieved': achieved,
+                'percent': round(achieved / total * 100, 1) if total else 0,
+            }
+        except requests.RequestException as e:
+            self._log.debug("Achievement fetch failed for app %s: %s", app_id, e)
+        return None
+
+
+class EpicAPIClient(GamePlatformClient):
     """Client for interacting with Epic Games Store API"""
 
     def __init__(self):
@@ -402,6 +441,10 @@ class GamePicker:
     REVIEWS_FILE = '.gapi_reviews.json'
     TAGS_FILE = '.gapi_tags.json'
     SCHEDULE_FILE = '.gapi_schedule.json'
+    PLAYLISTS_FILE = '.gapi_playlists.json'
+    BACKLOG_FILE = '.gapi_backlog.json'
+
+    BACKLOG_STATUSES = ('want_to_play', 'playing', 'completed', 'dropped')
 
     # Default values (can be overridden by config)
     DEFAULT_MAX_HISTORY = 20
@@ -453,6 +496,8 @@ class GamePicker:
         self.reviews: Dict[str, Dict] = self.load_reviews()  # game_id -> review dict
         self.tags: Dict[str, List[str]] = self.load_tags()  # game_id -> [tag, ...]
         self.schedule: Dict[str, Dict] = self.load_schedule()  # event_id -> event dict
+        self.playlists: Dict[str, List[str]] = self.load_playlists()  # name -> [game_id, ...]
+        self.backlog: Dict[str, str] = self.load_backlog()  # game_id -> status
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -737,7 +782,142 @@ class GamePicker:
         events.sort(key=lambda e: (e.get('date', ''), e.get('time', '')))
         return events
 
+    # ------------------------------------------------------------------
+    # Custom Playlists
+    # ------------------------------------------------------------------
 
+    def load_playlists(self) -> Dict[str, List[str]]:
+        """Load playlists from disk."""
+        if os.path.exists(self.PLAYLISTS_FILE):
+            try:
+                with open(self.PLAYLISTS_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self._log.warning("Could not load playlists: %s", e)
+        return {}
+
+    def save_playlists(self) -> None:
+        """Persist playlists to disk (atomic write)."""
+        _atomic_write_json(self.PLAYLISTS_FILE, self.playlists)
+
+    def create_playlist(self, name: str) -> bool:
+        """Create a new empty playlist. Returns False if it already exists."""
+        name = name.strip()
+        if not name or name in self.playlists:
+            return False
+        self.playlists[name] = []
+        self.save_playlists()
+        return True
+
+    def delete_playlist(self, name: str) -> bool:
+        """Delete a playlist by name. Returns False if not found."""
+        if name not in self.playlists:
+            return False
+        del self.playlists[name]
+        self.save_playlists()
+        return True
+
+    def add_to_playlist(self, name: str, game_id: str) -> bool:
+        """Add *game_id* to a playlist (creates it if absent). Returns True if added."""
+        name = name.strip()
+        if not name:
+            return False
+        if name not in self.playlists:
+            self.playlists[name] = []
+        if game_id in self.playlists[name]:
+            return False  # already present
+        self.playlists[name].append(game_id)
+        self.save_playlists()
+        return True
+
+    def remove_from_playlist(self, name: str, game_id: str) -> bool:
+        """Remove *game_id* from a playlist. Returns False if not found."""
+        if name not in self.playlists or game_id not in self.playlists[name]:
+            return False
+        self.playlists[name].remove(game_id)
+        self.save_playlists()
+        return True
+
+    def get_playlist_games(self, name: str) -> Optional[List[Dict]]:
+        """Return game dicts for every ID stored in playlist *name*.
+
+        Unknown / stale IDs are silently skipped.  Returns ``None`` if the
+        playlist itself does not exist.
+        """
+        if name not in self.playlists:
+            return None
+        id_set = set(self.playlists[name])
+        return [g for g in self.games if g.get('game_id') in id_set]
+
+    def list_playlists(self) -> List[Dict]:
+        """Return a summary list of all playlists with name and game count."""
+        return [{'name': n, 'count': len(ids)} for n, ids in self.playlists.items()]
+
+    # ------------------------------------------------------------------
+    # Game Backlog / Status Tracker
+    # ------------------------------------------------------------------
+
+    def load_backlog(self) -> Dict[str, str]:
+        """Load backlog statuses from disk."""
+        if os.path.exists(self.BACKLOG_FILE):
+            try:
+                with open(self.BACKLOG_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self._log.warning("Could not load backlog: %s", e)
+        return {}
+
+    def save_backlog(self) -> None:
+        """Persist backlog to disk (atomic write)."""
+        _atomic_write_json(self.BACKLOG_FILE, self.backlog)
+
+    def set_backlog_status(self, game_id: str, status: str) -> bool:
+        """Set the backlog status for a game.
+
+        Args:
+            game_id: Composite game ID (e.g. ``"steam:440"``).
+            status:  One of ``BACKLOG_STATUSES``.
+
+        Returns:
+            True on success, False if *status* is invalid.
+        """
+        if status not in self.BACKLOG_STATUSES:
+            return False
+        self.backlog[game_id] = status
+        self.save_backlog()
+        return True
+
+    def remove_backlog_status(self, game_id: str) -> bool:
+        """Remove a game from the backlog. Returns False if not present."""
+        if game_id not in self.backlog:
+            return False
+        del self.backlog[game_id]
+        self.save_backlog()
+        return True
+
+    def get_backlog_status(self, game_id: str) -> Optional[str]:
+        """Return the backlog status for *game_id*, or ``None`` if not tracked."""
+        return self.backlog.get(game_id)
+
+    def get_backlog_games(self, status: Optional[str] = None) -> List[Dict]:
+        """Return game dicts for all backlog entries, optionally filtered by *status*.
+
+        The returned dicts have an extra ``backlog_status`` key.
+        """
+        id_to_status = dict(self.backlog)
+        if status:
+            id_to_status = {k: v for k, v in id_to_status.items() if v == status}
+        id_set = set(id_to_status)
+        result = []
+        for g in self.games:
+            gid = g.get('game_id')
+            if gid in id_set:
+                entry = dict(g)
+                entry['backlog_status'] = id_to_status[gid]
+                result.append(entry)
+        return result
+
+    def load_history(self):
         """Load game picking history (supports both old int and new composite ID formats)"""
         if os.path.exists(self.HISTORY_FILE):
             try:

@@ -477,6 +477,8 @@
             <button class="tab" onclick="switchTab('users', event)">Users</button>
             <button class="tab" onclick="switchTab('multiuser', event)">Multi-User</button>
             <button class="tab" onclick="switchTab('schedule', event)">📅 Schedule</button>
+            <button class="tab" onclick="switchTab('playlists', event)">📋 Playlists</button>
+            <button class="tab" onclick="switchTab('backlog', event)">📚 Backlog</button>
         </div>        
         <!-- Picker Tab -->
         <div id="picker-tab" class="tab-content active">
@@ -750,6 +752,49 @@
                 <div class="loading">Loading schedule…</div>
             </div>
         </div>
+
+        <!-- Playlists Tab -->
+        <div id="playlists-tab" class="tab-content">
+            <h2>📋 Game Playlists</h2>
+            <div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
+                <input type="text" id="new-playlist-name" class="search-input" placeholder="New playlist name…" style="max-width:260px; margin-bottom:0;">
+                <button onclick="createPlaylist()" style="padding:10px 22px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Create Playlist</button>
+            </div>
+            <div id="playlists-container">
+                <div class="loading">Loading playlists…</div>
+            </div>
+        </div>
+
+        <!-- Backlog Tab -->
+        <div id="backlog-tab" class="tab-content">
+            <h2>📚 Game Backlog</h2>
+            <div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
+                <label style="font-weight:600;">Filter by status:</label>
+                <select id="backlog-filter" onchange="loadBacklog()"
+                        style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:0.95em;">
+                    <option value="">All</option>
+                    <option value="want_to_play">Want to Play</option>
+                    <option value="playing">Playing</option>
+                    <option value="completed">Completed</option>
+                    <option value="dropped">Dropped</option>
+                </select>
+            </div>
+            <div id="backlog-list" class="list-container">
+                <div class="loading">Loading backlog…</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="share-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+        <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:500px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+            <h3 style="margin-top:0;">📤 Share This Pick</h3>
+            <textarea id="share-text" rows="4" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:monospace; font-size:0.9em; resize:vertical; box-sizing:border-box;"></textarea>
+            <div style="display:flex; gap:10px; margin-top:14px; justify-content:flex-end;">
+                <button id="copy-btn" onclick="copyShareText()" style="padding:8px 20px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">📋 Copy</button>
+                <button onclick="closeShareModal()" style="padding:8px 16px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer;">✕ Close</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -830,6 +875,8 @@
             }
             if (tabName === 'stats') loadStats();
             if (tabName === 'schedule') loadSchedule();
+            if (tabName === 'playlists') loadPlaylists();
+            if (tabName === 'backlog') loadBacklog();
         }
         
         async function pickGame() {
@@ -925,6 +972,12 @@
                   ).join('')
                 : '<span style="color:var(--text-secondary); font-size:0.85em;">No tags yet</span>';
 
+            // Backlog status selector
+            const backlogStatuses = ['want_to_play','playing','completed','dropped'];
+            const currentStatus = game.backlog_status || '';
+            const backlogOptions = `<option value="">— none —</option>` +
+                backlogStatuses.map(s => `<option value="${s}" ${currentStatus===s?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('');
+
             let html = `
                 <div class="game-title">${favoriteIcon}${game.name}</div>
                 <div class="game-info">
@@ -932,6 +985,9 @@
                     <strong>Playtime:</strong> ${game.playtime_hours} hours
                 </div>
                 <div id="game-details">Loading details...</div>
+                <div id="achievements-section" style="margin-top:6px; color:var(--text-secondary); font-size:0.9em;">
+                    <span id="achievement-info">🏆 Loading achievements…</span>
+                </div>
                 ${reviewHtml}
                 <!-- Tags section -->
                 <div id="tags-section" style="margin-top:12px;">
@@ -943,6 +999,14 @@
                                onkeydown="if(event.key==='Enter') addTag('${game.game_id}')">
                         <button onclick="addTag('${game.game_id}')" style="padding:3px 10px; background:#27ae60; color:white; border:none; border-radius:12px; font-size:0.8em; cursor:pointer; margin-left:3px;">+</button>
                     </span>
+                </div>
+                <!-- Backlog status -->
+                <div style="margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                    <strong>📚 Backlog:</strong>
+                    <select id="backlog-select" onchange="setBacklogStatus('${game.game_id}', this.value)"
+                            style="padding:5px 10px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:0.9em;">
+                        ${backlogOptions}
+                    </select>
                 </div>
                 <!-- Inline review editor (hidden by default) -->
                 <div id="review-editor" style="display:none; margin-top:12px; padding:14px; background:#fff8e1; border-radius:8px; border:1px solid #f6d365;">
@@ -973,14 +1037,79 @@
                     <button class="btn btn-link" onclick="window.open('${game.steamdb_url}', '_blank')">
                         📊 Open in SteamDB
                     </button>
+                    <button class="btn" onclick="shareGame()" style="background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none;">
+                        📤 Share
+                    </button>
                 </div>
             `;
 
             resultDiv.innerHTML = html;
             resultDiv.style.display = 'block';
 
-            // Load details
+            // Load details and achievements in parallel
             loadGameDetails(game.app_id);
+            loadAchievements(game.app_id);
+        }
+
+        async function loadAchievements(appId) {
+            if (!appId) {
+                document.getElementById('achievement-info').textContent = '';
+                return;
+            }
+            try {
+                const resp = await fetch(`/api/achievements/${appId}`);
+                const el = document.getElementById('achievement-info');
+                if (!el) return;
+                if (resp.ok) {
+                    const d = await resp.json();
+                    el.textContent = `🏆 Achievements: ${d.achieved}/${d.total} (${d.percent}%)`;
+                } else {
+                    el.textContent = '';
+                }
+            } catch (e) { /* silent */ }
+        }
+
+        async function setBacklogStatus(gameId, status) {
+            try {
+                if (!status) {
+                    await fetch(`/api/backlog/${gameId}`, {method:'DELETE'});
+                    if (currentGame) currentGame.backlog_status = null;
+                } else {
+                    await fetch(`/api/backlog/${gameId}`, {
+                        method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({status})
+                    });
+                    if (currentGame) currentGame.backlog_status = status;
+                }
+            } catch (e) { alert('Failed to update backlog: ' + e.message); }
+        }
+
+        function shareGame() {
+            if (!currentGame) return;
+            const r = currentGame.review;
+            const ratingStr = r ? ` | ⭐ ${r.rating}/10` : '';
+            const tagsStr = (currentGame.tags||[]).length ? ` | 🏷️ ${currentGame.tags.join(', ')}` : '';
+            const text = `🎮 **${currentGame.name}** — ${currentGame.playtime_hours}h played${ratingStr}${tagsStr}\n${currentGame.steam_url||''}`;
+            const modal = document.getElementById('share-modal');
+            document.getElementById('share-text').value = text;
+            modal.style.display = 'flex';
+        }
+
+        function closeShareModal() {
+            document.getElementById('share-modal').style.display = 'none';
+        }
+
+        async function copyShareText() {
+            const txt = document.getElementById('share-text').value;
+            try {
+                await navigator.clipboard.writeText(txt);
+                document.getElementById('copy-btn').textContent = '✅ Copied!';
+                setTimeout(() => { document.getElementById('copy-btn').textContent = '📋 Copy'; }, 2000);
+            } catch (e) {
+                document.getElementById('share-text').select();
+                document.execCommand('copy');
+            }
         }
 
         async function addTag(gameId) {
@@ -1925,6 +2054,167 @@
             document.getElementById('schedule-form-title').textContent = '➕ New Event';
             ['sch-title','sch-date','sch-time','sch-attendees','sch-game','sch-notes']
                 .forEach(id => { document.getElementById(id).value = ''; });
+        }
+
+        // =====================================================================
+        // Playlists
+        // =====================================================================
+
+        async function loadPlaylists() {
+            const container = document.getElementById('playlists-container');
+            try {
+                const resp = await fetch('/api/playlists');
+                if (!resp.ok) { container.innerHTML = '<div class="loading">Error loading playlists.</div>'; return; }
+                const data = await resp.json();
+                const playlists = data.playlists || [];
+                if (!playlists.length) {
+                    container.innerHTML = '<div class="loading">No playlists yet. Create one above!</div>';
+                    return;
+                }
+                container.innerHTML = playlists.map(p => `
+                    <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:16px; margin-bottom:12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong style="font-size:1.1em;">📋 ${p.name}</strong>
+                            <span style="color:var(--text-secondary); font-size:0.9em;">${p.count} game(s)</span>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+                            <button onclick="viewPlaylist('${p.name}')" style="padding:5px 14px; background:var(--list-hover); border:1px solid var(--card-border); border-radius:8px; cursor:pointer; color:var(--text-primary);">👁 View</button>
+                            <button onclick="pickFromPlaylist('${p.name}')" style="padding:5px 14px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer;">🎲 Pick</button>
+                            <button onclick="deletePlaylist('${p.name}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer;">🗑️ Delete</button>
+                        </div>
+                        <div id="playlist-games-${CSS.escape(p.name)}" style="margin-top:10px; display:none;"></div>
+                    </div>`).join('');
+            } catch (e) {
+                container.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+            }
+        }
+
+        async function createPlaylist() {
+            const nameInput = document.getElementById('new-playlist-name');
+            const name = nameInput.value.trim();
+            if (!name) { alert('Enter a playlist name.'); return; }
+            try {
+                const resp = await fetch('/api/playlists', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({name})
+                });
+                if (resp.ok) { nameInput.value = ''; loadPlaylists(); }
+                else { const d = await resp.json(); alert(d.error || 'Error'); }
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function deletePlaylist(name) {
+            if (!confirm(`Delete playlist "${name}"?`)) return;
+            try {
+                await fetch(`/api/playlists/${encodeURIComponent(name)}`, {method:'DELETE'});
+                loadPlaylists();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function viewPlaylist(name) {
+            const containerId = `playlist-games-${CSS.escape(name)}`;
+            const div = document.getElementById(containerId);
+            if (!div) return;
+            if (div.style.display === 'block') { div.style.display = 'none'; return; }
+            div.style.display = 'block';
+            div.innerHTML = '<em>Loading…</em>';
+            try {
+                const resp = await fetch(`/api/playlists/${encodeURIComponent(name)}/games`);
+                const data = await resp.json();
+                const games = data.games || [];
+                if (!games.length) { div.innerHTML = '<em style="color:var(--text-secondary)">No games yet. Add from Library tab.</em>'; return; }
+                div.innerHTML = '<ul style="margin:0; padding-left:18px;">' +
+                    games.map(g => `<li>${g.name || g.game_id} <button onclick="removeFromPlaylist('${name}','${g.game_id}')" style="border:none; background:none; cursor:pointer; color:#e74c3c; font-size:0.8em;">✕</button></li>`).join('') +
+                    '</ul>';
+            } catch (e) { div.innerHTML = `<em>Error: ${e.message}</em>`; }
+        }
+
+        async function removeFromPlaylist(name, gameId) {
+            try {
+                await fetch(`/api/playlists/${encodeURIComponent(name)}/games/${encodeURIComponent(gameId)}`, {method:'DELETE'});
+                viewPlaylist(name); loadPlaylists();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function addCurrentGameToPlaylist() {
+            if (!currentGame) { alert('Pick a game first.'); return; }
+            const name = prompt('Playlist name (creates if new):');
+            if (!name) return;
+            try {
+                const resp = await fetch(`/api/playlists/${encodeURIComponent(name)}/games`, {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({game_id: currentGame.game_id})
+                });
+                const d = await resp.json();
+                if (resp.ok) alert(`Added to "${name}"!`);
+                else alert(d.error || 'Error');
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function pickFromPlaylist(name) {
+            try {
+                const resp = await fetch(`/api/playlists/${encodeURIComponent(name)}/games`);
+                const data = await resp.json();
+                const games = data.games || [];
+                if (!games.length) { alert('Playlist is empty.'); return; }
+                const game = games[Math.floor(Math.random() * games.length)];
+                // Redirect to picker tab and show the game
+                document.querySelector('.tab[onclick*="picker"]').click();
+                // Build a minimal game object for display (real data requires a proper pick call)
+                const appId = game.appid || game.app_id;
+                const resp2 = await fetch('/api/pick', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({playlist_game_id: game.game_id})
+                });
+                // Fallback: just display the game info we have
+                currentGame = {
+                    app_id: appId,
+                    game_id: game.game_id,
+                    name: game.name || 'Unknown',
+                    playtime_hours: ((game.playtime_forever||0)/60).toFixed(1),
+                    is_favorite: false,
+                    review: null,
+                    tags: [],
+                    backlog_status: null,
+                    steam_url: `https://store.steampowered.com/app/${appId}/`,
+                    steamdb_url: `https://steamdb.info/app/${appId}/`
+                };
+                displayGame(currentGame);
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        // =====================================================================
+        // Backlog
+        // =====================================================================
+
+        async function loadBacklog() {
+            const list = document.getElementById('backlog-list');
+            const statusFilter = document.getElementById('backlog-filter').value;
+            const url = '/api/backlog' + (statusFilter ? `?status=${statusFilter}` : '');
+            try {
+                const resp = await fetch(url);
+                if (!resp.ok) { list.innerHTML = '<div class="loading">Error loading backlog.</div>'; return; }
+                const data = await resp.json();
+                const games = data.games || [];
+                if (!games.length) {
+                    list.innerHTML = '<div class="loading">No backlog entries. Set a game\'s status from the Pick a Game tab.</div>';
+                    return;
+                }
+                const statusColors = {want_to_play:'#667eea', playing:'#27ae60', completed:'#f39c12', dropped:'#e74c3c'};
+                list.innerHTML = games.map(g => {
+                    const color = statusColors[g.backlog_status] || '#888';
+                    const label = (g.backlog_status || '').replace(/_/g,' ');
+                    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--card-border);">
+                        <span>${g.name || g.game_id}</span>
+                        <span style="background:${color}; color:white; padding:3px 10px; border-radius:12px; font-size:0.82em; font-weight:600;">${label}</span>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+            }
         }
     </script>
 </body>

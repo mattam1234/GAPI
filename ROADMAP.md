@@ -64,15 +64,15 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### Smart Features
 - [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
 - [ ] **Duplicate Detection** - Identify same games across platforms
-- [ ] **ProtonDB Integration** - Linux compatibility ratings for Windows games
-- [ ] **Achievement Tracking** - Display completion percentage
+- [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
+- [x] **Achievement Tracking** - Display completion percentage
 - [ ] **Friend Activity** - See what friends are playing (Steam API)
 
 #### Social Features
 - [ ] **Discord Rich Presence** - Show currently picked game in Discord status
-- [ ] **Game Night Scheduler** - Schedule game sessions with friends
+- [x] **Game Night Scheduler** - Schedule game sessions with friends
 - [ ] **Voting System Improvements** - Multiple voting rounds, ranked choice
-- [ ] **Game Reviews** - Add personal notes/reviews to games
+- [x] **Game Reviews** - Add personal notes/reviews to games
 - [ ] **Share Picks** - Generate shareable links for game picks
 
 ### 📅 Long-term Vision (v3.0.0+)
@@ -93,11 +93,17 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Sale Alerts** - Notify when wishlist games go on sale
 
 #### API & Integrations
-- [ ] **Public API** - RESTful API for third-party integrations
-- [ ] **Webhook Support** - Trigger external services on game picks
+- [x] **Public API** - RESTful API for third-party integrations (Flask REST API fully implemented)
+- [x] **Webhook Support** - Trigger external services on game picks
 - [ ] **IFTTT Integration** - Connect with IFTTT for automation
 - [ ] **Slack/Teams Bots** - Enterprise communication platform integrations
 - [ ] **Home Assistant** - Smart home integration for game lighting/setup
+
+#### Long-term Backlog Features
+- [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
+- [x] **Game Backlog Manager** - Track want_to_play / playing / completed / dropped per game
+- [ ] **Budget Tracking** - Track game purchases and library value
+- [ ] **Sale Alerts** - Notify when wishlist games go on sale
 
 ## 🔧 Technical Improvements
 

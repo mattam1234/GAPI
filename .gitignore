@@ -64,6 +64,12 @@ config.json
 # Schedule
 .gapi_schedule.json
 
+# Playlists
+.gapi_playlists.json
+
+# Backlog
+.gapi_backlog.json
+
 # Users
 users.json
 discord_config.json

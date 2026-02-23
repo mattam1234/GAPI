@@ -137,6 +137,7 @@ def api_pick_game():
         is_favorite = app_id in picker.favorites if app_id else False
         review = picker.get_review(game_id) if game_id else None
         tags = picker.get_tags(game_id) if game_id else []
+        backlog_status = picker.get_backlog_status(game_id) if game_id else None
 
         response = {
             'app_id': app_id,
@@ -146,6 +147,7 @@ def api_pick_game():
             'is_favorite': is_favorite,
             'review': review,
             'tags': tags,
+            'backlog_status': backlog_status,
             'steam_url': f'https://store.steampowered.com/app/{app_id}/',
             'steamdb_url': f'https://steamdb.info/app/{app_id}/'
         }
@@ -863,6 +865,168 @@ def api_delete_event(event_id: str):
     if not removed:
         return jsonify({'error': 'Event not found'}), 404
     return jsonify({'success': True, 'id': event_id})
+
+
+# ---------------------------------------------------------------------------
+# Playlists API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/playlists', methods=['GET'])
+def api_list_playlists():
+    """List all playlists."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        return jsonify({'playlists': picker.list_playlists()})
+
+
+@app.route('/api/playlists', methods=['POST'])
+def api_create_playlist():
+    """Create a new playlist. Expects JSON ``{"name": "..."}``."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    with picker_lock:
+        created = picker.create_playlist(name)
+    if not created:
+        return jsonify({'error': 'Playlist already exists'}), 409
+    return jsonify({'success': True, 'name': name}), 201
+
+
+@app.route('/api/playlists/<name>', methods=['DELETE'])
+def api_delete_playlist(name: str):
+    """Delete a playlist by name."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        deleted = picker.delete_playlist(name)
+    if not deleted:
+        return jsonify({'error': 'Playlist not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/playlists/<name>/games', methods=['GET'])
+def api_get_playlist_games(name: str):
+    """Get all games in a playlist."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        games = picker.get_playlist_games(name)
+    if games is None:
+        return jsonify({'error': 'Playlist not found'}), 404
+    return jsonify({'name': name, 'games': games, 'count': len(games)})
+
+
+@app.route('/api/playlists/<name>/games', methods=['POST'])
+def api_add_to_playlist(name: str):
+    """Add a game to a playlist. Expects JSON ``{"game_id": "..."}``."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    game_id = (data.get('game_id') or '').strip()
+    if not game_id:
+        return jsonify({'error': 'game_id is required'}), 400
+    with picker_lock:
+        added = picker.add_to_playlist(name, game_id)
+    if not added:
+        return jsonify({'error': 'Game already in playlist or invalid playlist'}), 409
+    return jsonify({'success': True})
+
+
+@app.route('/api/playlists/<name>/games/<game_id>', methods=['DELETE'])
+def api_remove_from_playlist(name: str, game_id: str):
+    """Remove a game from a playlist."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        removed = picker.remove_from_playlist(name, game_id)
+    if not removed:
+        return jsonify({'error': 'Game or playlist not found'}), 404
+    return jsonify({'success': True})
+
+
+# ---------------------------------------------------------------------------
+# Backlog / Status Tracker API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/backlog', methods=['GET'])
+def api_list_backlog():
+    """List all backlog entries, optionally filtered by ``?status=``."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    status_filter = request.args.get('status', '').strip() or None
+    if status_filter and status_filter not in gapi.GamePicker.BACKLOG_STATUSES:
+        return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
+    with picker_lock:
+        games = picker.get_backlog_games(status_filter)
+    return jsonify({'games': games, 'count': len(games)})
+
+
+@app.route('/api/backlog/<game_id>', methods=['GET'])
+def api_get_backlog_status(game_id: str):
+    """Get the backlog status for a specific game."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        status = picker.get_backlog_status(game_id)
+    if status is None:
+        return jsonify({'game_id': game_id, 'status': None})
+    return jsonify({'game_id': game_id, 'status': status})
+
+
+@app.route('/api/backlog/<game_id>', methods=['POST', 'PUT'])
+def api_set_backlog_status(game_id: str):
+    """Set the backlog status for a game. Expects JSON ``{"status": "..."}``."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    status = (data.get('status') or '').strip()
+    if not status:
+        return jsonify({'error': 'status is required'}), 400
+    with picker_lock:
+        ok = picker.set_backlog_status(game_id, status)
+    if not ok:
+        return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
+    return jsonify({'success': True, 'game_id': game_id, 'status': status})
+
+
+@app.route('/api/backlog/<game_id>', methods=['DELETE'])
+def api_delete_backlog_status(game_id: str):
+    """Remove a game from the backlog."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        removed = picker.remove_backlog_status(game_id)
+    if not removed:
+        return jsonify({'error': 'Game not in backlog'}), 404
+    return jsonify({'success': True})
+
+
+# ---------------------------------------------------------------------------
+# Achievement Tracking API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/achievements/<int:app_id>')
+def api_get_achievements(app_id: int):
+    """Get achievement completion stats for a Steam game.
+
+    Requires a valid Steam ID to be configured; returns 503 otherwise.
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    if not picker.steam_client:
+        return jsonify({'error': 'Steam client not available'}), 503
+    steam_id = picker.config.get('steam_id', '')
+    if gapi.is_placeholder_value(steam_id):
+        return jsonify({'error': 'Steam ID not configured'}), 503
+    with picker_lock:
+        stats = picker.steam_client.get_player_achievements(steam_id, app_id)
+    if stats is None:
+        return jsonify({'error': 'Achievements unavailable for this game'}), 404
+    return jsonify({'app_id': app_id, **stats})
 
 
 def create_templates():
