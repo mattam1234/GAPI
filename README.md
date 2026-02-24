@@ -60,42 +60,49 @@ GAPI is a multi-platform game picker tool that helps you decide what to play fro
 
 ## 🚀 Quick Start
 
-### Try the Demo (No Setup Required!)
+### Try the Web GUI (Easiest!)
 
-Want to see GAPI in action without any configuration? Run the demo with mock data:
+GAPI now features a modern Web GUI with built-in user authentication. Simply:
 
 ```bash
 git clone https://github.com/mattam1234/GAPI.git
 cd GAPI
 pip install -r requirements.txt
-python3 demo.py
+python3 gapi_gui.py
 ```
 
-This lets you explore all features without needing Steam credentials!
+Then open your browser to **http://127.0.0.1:5000** and:
+1. **Register** with a username and password
+2. **Add your platform IDs** (Steam, Epic, GOG) in the Settings tab - or skip for now!
+3. **Start picking games!**
 
 ### Full Setup (5 minutes)
 
-1. **Get your Steam credentials:**
-   - [Steam API Key](https://steamcommunity.com/dev/apikey) (free, takes 1 minute)
-   - [Steam ID](https://steamid.io/) (find your 64-bit Steam ID)
+**Requirements:**
+- Python 3.6+
+- [Steam API Key](https://steamcommunity.com/dev/apikey) (free, takes 1 minute)
 
-2. **Install GAPI:**
-   ```bash
-   git clone https://github.com/mattam1234/GAPI.git
-   cd GAPI
-   bash setup.sh  # Automated setup
-   ```
+**Installation:**
 
-3. **Configure:**
-   ```bash
-   cp config_template.json config.json
-   # Edit config.json with your Steam API key and Steam ID
-   ```
+```bash
+# 1. Clone the repository
+git clone https://github.com/mattam1234/GAPI.git
+cd GAPI
 
-4. **Run:**
-   ```bash
-   python3 gapi.py
-   ```
+# 2. Install dependencies
+bash setup.sh  # or: pip install -r requirements.txt
+
+# 3. Configure Steam API Key
+cp config_template.json config.json
+# Edit config.json and add your Steam API Key only
+```
+
+**4. Run the Web GUI:**
+```bash
+python3 gapi_gui.py
+```
+
+Open your browser to **http://127.0.0.1:5000**, register an account, and add your Steam ID in Settings!
 
 ## 📦 Installation
 
@@ -103,7 +110,6 @@ This lets you explore all features without needing Steam credentials!
 
 - **Python 3.6+** - [Download Python](https://www.python.org/downloads/)
 - **Steam API Key** - [Get one here](https://steamcommunity.com/dev/apikey) (free, requires Steam account)
-- **Steam ID** - [Find yours here](https://steamid.io/) (64-bit format)
 - **Public Steam Profile** - Your profile must be public for the API to work
 
 ### Step-by-Step Installation
@@ -126,35 +132,65 @@ Option B - Manual installation:
 pip install -r requirements.txt
 ```
 
-**3. Configure your Steam credentials:**
+**3. Configure Steam API Key:**
 ```bash
 cp config_template.json config.json
 ```
 
-**4. Edit `config.json`** with your actual credentials:
+**4. Edit `config.json`** and add your Steam API Key:
 ```json
 {
-  "steam_api_key": "YOUR_ACTUAL_API_KEY",
-  "steam_id": "YOUR_STEAM_ID"
+  "steam_api_key": "YOUR_ACTUAL_API_KEY"
 }
 ```
 
-### Try the Demo
-
-Want to try GAPI without setting up Steam credentials?
-
-**Web GUI Demo:**
+**5. Run the Web GUI:**
 ```bash
-python3 gapi_gui.py --demo
+python3 gapi_gui.py
 ```
-Then open your browser to http://127.0.0.1:5000
 
-**CLI Demo:**
+**6. Create your account:**
+- Open http://127.0.0.1:5000 in your browser
+- Click "Register" and create your account
+- Go to Settings tab and add your **Steam ID** ([find it here](https://steamid.io/))
+- Your games will load automatically!
+
+### Web GUI Features
+
+The Web GUI (`gapi_gui.py`) provides:
+- 🔐 **User Accounts** - Create an account to use GAPI with your unique game library
+- 🎮 **Web Interface** - Beautiful, modern interface accessible from any browser
+- 👥 **Multi-User Support** - Multiple accounts can use the same GAPI instance
+- 📊 **Full Game Management** - Picking, favorites, library browsing, statistics
+- ⚙️ **Settings Management** - Update your platform IDs at any time
+
+### CLI Mode
+
+For command-line users, GAPI also supports CLI mode using the `gapi.py` file:
+
 ```bash
+# Set your Steam ID and API key in config.json
 python3 gapi.py
 ```
 
-Both demos run GAPI with mock game data so you can see how it works.
+## 🔐 Authentication System
+
+GAPI now features a built-in **user authentication system** for the Web GUI:
+
+### How It Works
+1. **Register an Account** - Create a username and password
+2. **Add Platform IDs** (Optional) - Link your Steam, Epic Games, or GOG account IDs
+3. **Pick Games** - Start using GAPI with your game library!
+
+### User Account Storage
+- Accounts are stored in `users_auth.json` (created automatically)
+- Passwords are securely hashed using SHA-256
+- Users can have different platform IDs configured
+
+### Updating Platform IDs
+- Go to the **Settings** tab in the Web GUI
+- Add or update your Steam, Epic, or GOG IDs
+- Your games will reload automatically!
 
 For a cleaner setup, use a virtual environment:
 
@@ -362,55 +398,74 @@ SteamDB: https://steamdb.info/app/620/
 
 ## ⚙️ Configuration
 
-### Configuration File
+### Configuration File (`config.json`)
 
-The `config.json` file contains your platform credentials and settings:
+The `config.json` file contains your API keys and global settings:
 
 ```json
 {
   "steam_api_key": "YOUR_ACTUAL_API_KEY",
-  "steam_id": "YOUR_STEAM_ID",
-  "epic_enabled": false,
-  "epic_id": "YOUR_EPIC_ID_HERE",
-  "gog_enabled": false,
-  "gog_id": "YOUR_GOG_ID_HERE",
   "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
   "barely_played_hours": 2,
   "well_played_hours": 10,
   "max_history_size": 20,
-  "api_timeout_seconds": 10
+  "api_timeout_seconds": 10,
+  "log_level": "WARNING",
+  "webhook_url": ""
 }
 ```
 
 **Configuration Options:**
-- `steam_api_key` - Your Steam Web API key *(required for Steam)*
-- `steam_id` - Your Steam ID in 64-bit format *(required for Steam)*
-- `epic_enabled` - Set to `true` to enable Epic Games Store integration *(optional)*
-- `epic_id` - Your Epic Games account ID or email *(optional)*
-- `gog_enabled` - Set to `true` to enable GOG integration *(optional)*
-- `gog_id` - Your GOG account ID *(optional)*
+- `steam_api_key` - Your Steam Web API key *(required)* - [Get one here](https://steamcommunity.com/dev/apikey)
 - `discord_bot_token` - Discord bot token for Discord integration *(optional)*
 - `barely_played_hours` - Hours threshold for "barely played" games *(default: 2)*
 - `well_played_hours` - Hours threshold for "well-played" games *(default: 10)*
 - `max_history_size` - Number of recent picks to remember *(default: 20)*
 - `api_timeout_seconds` - API request timeout in seconds *(default: 10)*
+- `log_level` - Logging level: DEBUG, INFO, WARNING, ERROR *(default: WARNING)*
+- `webhook_url` - Discord webhook URL for notifications *(optional)*
 
-### Environment Variables (Recommended for Security)
+### User Account Storage (`users_auth.json`)
 
-For better security, you can use environment variables instead of storing credentials in `config.json`:
+The `users_auth.json` file is created automatically and stores:
+- User account credentials (username, hashed password)
+- User's platform IDs (Steam, Epic Games, GOG)
+
+**Example format:**
+```json
+{
+  "users": {
+    "john": {
+      "password": "<hashed_password>",
+      "steam_id": "76561198123639801",
+      "epic_id": "",
+      "gog_id": ""
+    },
+    "jane": {
+      "password": "<hashed_password>",
+      "steam_id": "76561199876543210",
+      "epic_id": "jane_epic_username",
+      "gog_id": ""
+    }
+  }
+}
+```
+
+⚠️ **Note:** Platform IDs are managed through the Web GUI Settings tab, not manually edited.
+
+### Environment Variables (Optional for Security)
+
+For added security, you can use environment variables for sensitive settings:
 
 ```bash
 export STEAM_API_KEY="your_steam_api_key"
-export STEAM_ID="your_steam_id"
-export DISCORD_BOT_TOKEN="your_discord_token"  # Optional
-export EPIC_ID="your_epic_id"                   # Optional
-export GOG_ID="your_gog_id"                     # Optional
+export DISCORD_BOT_TOKEN="your_discord_token"
 ```
 
 **Using .env file:**
-1. Copy `.env.example` to `.env`
-2. Fill in your credentials
-3. Use a tool like [python-dotenv](https://pypi.org/project/python-dotenv/) to load the variables
+1. Create a `.env` file in the GAPI directory
+2. Add your credentials: `STEAM_API_KEY=your_key`
+3. GAPI will automatically load them
 
 Environment variables take precedence over config.json values.
 
@@ -465,16 +520,24 @@ To enable GOG support:
 - Library access requires Galaxy plugin authentication (not yet implemented)
 - Full library integration coming in future updates
 
-### Multi-User Configuration
+### Multi-User Setup
 
-For multi-user setups, edit `users.json` with platform information for each user:
+GAPI now supports multiple users through the Web GUI authentication system:
+
+**For Web GUI (Recommended):**
+1. Each person registers their own account at http://127.0.0.1:5000
+2. Each user adds their Steam/Epic/GOG IDs in the Settings tab
+3. All users can use the same GAPI instance with their own libraries
+4. Use the **Multi-User** tab to find common games across users and vote!
+
+**For CLI Mode (Legacy):**
+For Discord bot and CLI multi-user picking, create a `users.json` file:
 
 ```json
 {
   "users": [
     {
       "name": "User1",
-      "email": "user1@example.com",
       "platforms": {
         "steam": "YOUR_STEAM_ID_1",
         "epic": "",
@@ -484,7 +547,6 @@ For multi-user setups, edit `users.json` with platform information for each user
     },
     {
       "name": "User2",
-      "email": "user2@example.com",
       "platforms": {
         "steam": "YOUR_STEAM_ID_2",
         "epic": "",
@@ -496,18 +558,26 @@ For multi-user setups, edit `users.json` with platform information for each user
 }
 ```
 
+⚠️ **Note:** The Web GUI has a dedicated **Multi-User Game Picker** with advanced filtering options for finding co-op games and voting with friends!
+
 ## ❓ FAQ
 
 <details>
 <summary><strong>Do I need to pay for a Steam API key?</strong></summary>
 
-No! Steam API keys are completely free. You just need a Steam account to generate one.
+No! Steam API keys are completely free. You just need a Steam account to generate one at https://steamcommunity.com/dev/apikey.
 </details>
 
 <details>
 <summary><strong>Can I use GAPI without Steam credentials?</strong></summary>
 
-Yes! Run `python3 demo.py` to try GAPI with mock data and explore all features without setting up credentials.
+Yes! Create an account in the Web GUI - platform IDs are completely optional. You can add them anytime in Settings.
+</details>
+
+<details>
+<summary><strong>Can multiple users share the same GAPI instance?</strong></summary>
+
+Yes! Each person just needs to register their own account with their own password. All accounts can have different Steam IDs configured.
 </details>
 
 <details>
@@ -528,29 +598,28 @@ GAPI keeps track of recently picked games to avoid suggesting them again. The hi
 <details>
 <summary><strong>Can I use GAPI with multiple Steam accounts?</strong></summary>
 
-Yes! Create multiple config files (e.g., `config1.json`, `config2.json`) and use the `--config` flag to switch between them:
-```bash
-python3 gapi.py --config config1.json
-python3 gapi.py --config config2.json
-```
+Yes! GAPI now supports multiple users through the Web GUI authentication system. Each person can:
+1. Register their own account with their own password
+2. Add their Steam ID in the Settings tab
+3. Find common games with friends using the Multi-User tab
 
-For multi-user game picking with friends, use the `users.json` file to configure multiple users and their platform accounts. See the Multi-User Configuration section above.
+For CLI mode (legacy), you can create a `users.json` file with multiple users. See the Multi-User Configuration section above.
 </details>
 
 <details>
 <summary><strong>Does GAPI support Epic Games and GOG?</strong></summary>
 
-Yes! GAPI has initial support for Epic Games Store and GOG platforms. However, there are current limitations:
+Yes! GAPI has initial support for Epic Games Store and GOG platforms. You can configure these in the Settings tab:
 
 **Epic Games:**
 - Store browsing is available
 - Full library access requires OAuth authentication (not yet implemented)
-- Enable by setting `epic_enabled: true` in config.json
+- Add your Epic ID in the Settings tab
 
 **GOG:**
 - GOG's API requires Galaxy plugin authentication
 - Full library integration is planned for future updates
-- Enable by setting `gog_enabled: true` in config.json
+- Add your GOG ID in the Settings tab
 
 Steam remains fully supported with complete library access. Epic and GOG support will be enhanced in future updates.
 </details>
@@ -570,7 +639,7 @@ Yes! GAPI is written in Python and works on all major platforms. On Windows, use
 - ✅ Ensure your Steam ID is in the correct 64-bit format (17-digit number)
 - ✅ Check that your Steam profile is set to **Public** (not Private or Friends Only)
 - ✅ Make sure you have games in your Steam library
-- ✅ If using Epic or GOG, ensure the platforms are enabled in config and IDs are correct
+- ✅ If using Epic or GOG, ensure your IDs are correctly entered in the Settings tab
 
 **"epicstore-api not installed" warning**
 - ✅ This is expected if you don't want Epic Games support
@@ -605,7 +674,7 @@ Yes! GAPI is written in Python and works on all major platforms. On Windows, use
 ### Still Having Issues?
 
 1. Check the [GitHub Issues](https://github.com/mattam1234/GAPI/issues) for similar problems
-2. Run the demo to verify basic functionality: `python3 demo.py`
+2. Create a test account in the Web GUI to verify basic functionality
 3. Create a new issue with:
    - Python version (`python3 --version`)
    - Operating system

@@ -1,0 +1,25 @@
+{
+  "users": {
+    "testuser": {
+      "password": "7e6e0c3079a08c5cc6036789b57e951f65f82383913ba1a49ae992544f1b4b6e",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "admin"
+    },
+    "mattam": {
+      "password": "ef51306214d9a6361ee1d5b452e6d2bb70dc7ebb85bf9e02c3d4747fb57d6bec",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "admin"
+    },
+    "newuser": {
+      "password": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    }
+  }
+}

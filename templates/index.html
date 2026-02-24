@@ -254,6 +254,19 @@
             line-height: 1.8;
         }
 
+        .game-preview {
+            margin: 12px 0 8px;
+        }
+
+        .game-preview img {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border-radius: 10px;
+            display: block;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+        }
+
         .action-buttons {
             display: flex;
             gap: 10px;
@@ -446,6 +459,14 @@
             animation: spin 0.9s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
         .spinner-label {
             color: #ffffff;
             font-size: 1.05em;
@@ -454,6 +475,51 @@
     </style>
 </head>
 <body>
+    <!-- Login/Register Modal -->
+    <div id="auth-modal" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: var(--card-bg); padding: 40px; border-radius: 15px; width: 90%; max-width: 400px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <h2 style="text-align: center; margin-bottom: 30px; color: var(--text-primary);">🎮 GAPI Game Picker</h2>
+            
+            <!-- Login Form -->
+            <div id="login-form-div">
+                <form id="login-form" onsubmit="handleLogin(); return false;">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
+                        <input type="text" id="login-username" placeholder="Enter username" required
+                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Password</label>
+                        <input type="password" id="login-password" placeholder="Enter password" required
+                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    </div>
+                    <div id="login-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
+                    <button type="submit" style="width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1em;">Login</button>
+                </form>
+                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Don't have an account? <a href="#" onclick="switchAuthForm(false); return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Register</a></p>
+            </div>
+            
+            <!-- Register Form -->
+            <div id="register-form-div" style="display: none;">
+                <form id="register-form" onsubmit="handleRegister(); return false;">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
+                        <input type="text" id="register-username" placeholder="Choose username (min 3 chars)" required minlength="3"
+                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Password</label>
+                        <input type="password" id="register-password" placeholder="Choose password (min 6 chars)" required minlength="6"
+                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    </div>
+                    <div id="register-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
+                    <button type="submit" style="width: 100%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1em;">Register</button>
+                </form>
+                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Already have an account? <a href="#" onclick="switchAuthForm(true); return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Login</a></p>
+            </div>
+        </div>
+    </div>
+
     <!-- Global loading overlay -->
     <div id="loading-overlay" role="status" aria-live="polite">
         <div class="spinner"></div>
@@ -462,9 +528,17 @@
 
     <div class="container">
         <header>
-            <h1>🎮 GAPI</h1>
-            <p class="subtitle">Pick your next Steam game to play!</p>
-            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode">🌙 Dark Mode</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div>
+                    <h1>🎮 GAPI</h1>
+                    <p class="subtitle">Pick your next Steam game to play!</p>
+                </div>
+                <div id="user-info" style="display: none; text-align: right;">
+                    <p style="color: #ffffff; margin-bottom: 10px;">Logged in as: <strong id="current-username" style="color: #76ff6f;"></strong></p>
+                    <button onclick="handleLogout()" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Logout</button>
+                </div>
+            </div>
+            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode" style="margin-top: 10px;">🌙 Dark Mode</button>
         </header>
 
         <div class="status-bar" id="status">Loading...</div>
@@ -479,6 +553,7 @@
             <button class="tab" onclick="switchTab('schedule', event)">📅 Schedule</button>
             <button class="tab" onclick="switchTab('playlists', event)">📋 Playlists</button>
             <button class="tab" onclick="switchTab('backlog', event)">📚 Backlog</button>
+            <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
         </div>        
         <!-- Picker Tab -->
         <div id="picker-tab" class="tab-content active">
@@ -584,34 +659,12 @@
         <div id="users-tab" class="tab-content">
             <h2>👥 User Management</h2>
             
-            <!-- Add User Form -->
-            <div class="user-form" style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-                <h3>Add New User</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
-                    <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Name *</label>
-                        <input type="text" id="user-name" class="search-input" placeholder="Enter name" style="margin-bottom: 0;">
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Email</label>
-                        <input type="email" id="user-email" class="search-input" placeholder="Enter email" style="margin-bottom: 0;">
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Steam ID *</label>
-                        <input type="text" id="user-steam-id" class="search-input" placeholder="Enter Steam ID" style="margin-bottom: 0;">
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Discord ID</label>
-                        <input type="text" id="user-discord-id" class="search-input" placeholder="Enter Discord ID" style="margin-bottom: 0;">
-                    </div>
-                </div>
-                <button onclick="addUser()" style="margin-top: 15px; padding: 10px 30px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
-                    ➕ Add User
-                </button>
-            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Manage registered users and their roles. Users can register themselves, and admins can manage roles and permissions.
+            </p>
             
             <!-- Users List -->
-            <h3>Current Users</h3>
+            <h3>Registered Users</h3>
             <div id="users-list" class="list-container">
                 <div class="loading">Loading users...</div>
             </div>
@@ -634,33 +687,108 @@
                         <span style="font-weight: 600;">Co-op/Multiplayer Games Only</span>
                     </label>
                 </div>
+            </div>
 
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
-                    <button onclick="pickMultiUserGame()" style="padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
-                        🎲 Pick Common Game
-                    </button>
-                    <button onclick="startVote()" style="padding: 15px 40px; background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
-                        🗳️ Start Vote
-                    </button>
+            <!-- Game Filters -->
+            <div style="background: #fff9e6; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #f39c12;">
+                <h3 style="margin-top: 0;">🔍 Game Filters (Optional)</h3>
+                
+                <!-- Row 1: Playtime and Metacritic -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Min Playtime (hours)</span>
+                        <input type="number" id="min-playtime" placeholder="0" min="0" step="1"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Max Playtime (hours)</span>
+                        <input type="number" id="max-playtime" placeholder="Unlimited" min="0" step="1"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Min Metacritic Score</span>
+                        <input type="number" id="min-metacritic" placeholder="0" min="0" max="100" step="1"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Min Avg Playtime per Player (hours)</span>
+                        <input type="number" id="min-avg-playtime" placeholder="0" min="0" step="1"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
                 </div>
 
-                <!-- Vote options (hidden until "Start Vote" is clicked) -->
-                <div id="vote-options" style="display: none; margin-top: 15px; gap: 15px; flex-wrap: wrap; align-items: center;">
-                    <label style="font-weight: 600;">Candidates:
-                        <input type="number" id="vote-candidates" value="5" min="2" max="10"
-                               style="width: 60px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                <!-- Row 2: Release Year Range -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Min Release Year</span>
+                        <input type="number" id="min-release-year" placeholder="1980" min="1980" max="2100" step="1"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
                     </label>
-                    <label style="font-weight: 600;">Duration (seconds):
-                        <input type="number" id="vote-duration" value="60" min="10" max="600"
-                               style="width: 80px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Max Release Year</span>
+                        <input type="number" id="max-release-year" placeholder="2100" min="1980" max="2100" step="1"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
                     </label>
-                    <button onclick="createVoteSession()" style="padding: 10px 25px; background: #27ae60; color: white; border: none; border-radius: 20px; cursor: pointer; font-weight: bold;">
-                        ✅ Create Vote
-                    </button>
-                    <button onclick="cancelVoteOptions()" style="padding: 10px 20px; background: #aaa; color: white; border: none; border-radius: 20px; cursor: pointer;">
-                        Cancel
-                    </button>
                 </div>
+
+                <!-- Row 3: Genres and Tags -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Include Genres (comma-separated)</span>
+                        <input type="text" id="include-genres" placeholder="e.g., Action, RPG, Strategy"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Exclude Genres (comma-separated)</span>
+                        <input type="text" id="exclude-genres" placeholder="e.g., Horror, Puzzle"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                </div>
+
+                <!-- Row 4: Tags and Exclusions -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Include Tags (comma-separated)</span>
+                        <input type="text" id="include-tags" placeholder="e.g., Roguelike, Indie, Competitive"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Exclude Game IDs (comma-separated)</span>
+                        <input type="text" id="exclude-game-ids" placeholder="e.g., 570, 620, 440"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+                <button onclick="pickMultiUserGame()" style="padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
+                    🎲 Pick Common Game
+                </button>
+                <button onclick="startVote()" style="padding: 15px 40px; background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
+                    🗳️ Start Vote
+                </button>
+                <button onclick="clearMultiUserFilters()" style="padding: 15px 25px; background: #95a5a6; color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1em;">
+                    Clear Filters
+                </button>
+            </div>
+
+            <!-- Vote options (hidden until "Start Vote" is clicked) -->
+            <div id="vote-options" style="display: none; margin-bottom: 20px; background: #f0f0f0; padding: 15px; border-radius: 10px; gap: 15px; flex-wrap: wrap; align-items: center;">
+                <label style="font-weight: 600;">Candidates:
+                    <input type="number" id="vote-candidates" value="5" min="2" max="10"
+                           style="width: 60px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                </label>
+                <label style="font-weight: 600;">Duration (seconds):
+                    <input type="number" id="vote-duration" value="60" min="10" max="600"
+                           style="width: 80px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                </label>
+                <button onclick="createVoteSession()" style="padding: 10px 25px; background: #27ae60; color: white; border: none; border-radius: 20px; cursor: pointer; font-weight: bold;">
+                    ✅ Create Vote
+                </button>
+                <button onclick="cancelVoteOptions()" style="padding: 10px 20px; background: #aaa; color: white; border: none; border-radius: 20px; cursor: pointer;">
+                    Cancel
+                </button>
             </div>
 
             <!-- Multi-User Game Result -->
@@ -668,7 +796,7 @@
                 <!-- Result will be displayed here -->
             </div>
 
-            <!-- Active Voting Session -->
+            <!-- Active Voting Section -->
             <div id="voting-section" style="display: none; background: #fff8e1; padding: 25px; border-radius: 10px; margin-top: 20px; border: 2px solid #fda085;">
                 <h3>🗳️ Active Vote</h3>
                 <div id="voting-timer" style="font-size: 1.1em; color: #e67e22; margin-bottom: 10px;"></div>
@@ -781,6 +909,46 @@
             </div>
             <div id="backlog-list" class="list-container">
                 <div class="loading">Loading backlog…</div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+            <h2>⚙️ Account Settings</h2>
+            
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>Platform IDs (Optional)</h3>
+                <p style="color: #666; margin-bottom: 15px;">Add your platform IDs to fetch your games. You can add them later if you don't have them yet.</p>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Steam ID</span>
+                        <input type="text" id="settings-steam-id" placeholder="Your Steam ID (e.g., 76561198123639801)"
+                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Epic Games ID</span>
+                        <input type="text" id="settings-epic-id" placeholder="Your Epic Games ID (optional)"
+                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">GOG ID</span>
+                        <input type="text" id="settings-gog-id" placeholder="Your GOG ID (optional)"
+                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </label>
+                </div>
+                
+                <div id="settings-message" style="display: none; margin-bottom: 15px; padding: 10px; border-radius: 8px;"></div>
+                
+                <button onclick="saveSettings()" style="padding: 12px 30px; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    Save Settings
+                </button>
             </div>
         </div>
     </div>
@@ -945,6 +1113,7 @@
         async function displayGame(game) {
             const resultDiv = document.getElementById('game-result');
             const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
+            resultDiv.dataset.gameName = game.name || '';
             const review = game.review;
             // Clamp rating defensively to [1,10] and escape notes for safe attribute/HTML insertion
             const safeRating = review ? Math.min(10, Math.max(1, parseInt(review.rating) || 1)) : null;
@@ -1207,6 +1376,13 @@
                 if (response.ok) {
                     const details = await response.json();
                     let detailsHtml = '<div class="game-description">';
+
+                    const previewUrl = details.header_image || details.capsule_image || `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+                    const previewAlt = currentGame && currentGame.name ? `${currentGame.name} preview` : 'Game preview';
+                    const safeAlt = previewAlt.replace(/"/g, '&quot;');
+                    if (previewUrl) {
+                        detailsHtml += `<div class="game-preview"><img src="${previewUrl}" alt="${safeAlt}" loading="lazy"></div>`;
+                    }
                     
                     if (details.description) {
                         detailsHtml += `<p>${details.description}</p>`;
@@ -1497,115 +1673,146 @@
             listDiv.innerHTML = '<div class="loading">Loading...</div>';
             
             try {
-                const response = await fetch('/api/users');
+                const response = await fetch('/api/users/all');
                 const data = await response.json();
                 
                 if (data.users && data.users.length > 0) {
-                    let html = '';
+                    let html = '<div style="display: grid; gap: 10px;">';
                     data.users.forEach(user => {
+                        const isAdmin = user.role === 'admin';
+                        const roleColor = isAdmin ? '#f39c12' : '#667eea';
+                        const roleIcon = isAdmin ? '👑' : '👤';
+                        
                         html += `
-                            <div class="list-item" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 15px; align-items: center;">
+                            <div class="list-item" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 15px; align-items: center; padding: 15px; background: var(--card-bg); border-radius: 8px;">
                                 <div>
-                                    <strong>${user.name}</strong><br>
-                                    <small style="color: #666;">${user.email || 'No email'}</small>
+                                    <strong style="font-size: 1.1em;">${roleIcon} ${user.username}</strong><br>
+                                    <span style="display: inline-block; margin-top: 5px; padding: 3px 10px; background: ${roleColor}; color: white; border-radius: 12px; font-size: 0.85em; font-weight: 600;">
+                                        ${user.role.toUpperCase()}
+                                    </span>
                                 </div>
                                 <div>
-                                    <small style="color: #666;">Steam ID:</small><br>
-                                    ${user.steam_id}
+                                    <small style="color: var(--text-secondary);">Steam ID:</small><br>
+                                    <span style="font-family: monospace; font-size: 0.9em;">${user.steam_id || '<span style="color: #999;">Not set</span>'}</span>
                                 </div>
                                 <div>
-                                    <small style="color: #666;">Discord ID:</small><br>
-                                    ${user.discord_id || 'Not linked'}
+                                    <small style="color: var(--text-secondary);">Epic ID:</small><br>
+                                    <span style="font-family: monospace; font-size: 0.9em;">${user.epic_id || '<span style="color: #999;">Not set</span>'}</span>
                                 </div>
                                 <div>
-                                    <button onclick="removeUser('${user.name}')" class="btn btn-favorite" style="background: #f38ba8; padding: 5px 15px;">
-                                        Remove
+                                    <small style="color: var(--text-secondary);">GOG ID:</small><br>
+                                    <span style="font-family: monospace; font-size: 0.9em;">${user.gog_id || '<span style="color: #999;">Not set</span>'}</span>
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    ${!isAdmin ? `
+                                        <button onclick="toggleUserRole('${user.username}', 'admin')" 
+                                                style="padding: 6px 12px; background: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                                title="Make Admin">
+                                            👑 Admin
+                                        </button>
+                                    ` : `
+                                        <button onclick="toggleUserRole('${user.username}', 'user')" 
+                                                style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                                title="Make Regular User">
+                                            👤 User
+                                        </button>
+                                    `}
+                                    <button onclick="deleteUser('${user.username}')" 
+                                            style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                            title="Delete User">
+                                        🗑️
                                     </button>
                                 </div>
                             </div>
                         `;
                     });
+                    html += '</div>';
                     listDiv.innerHTML = html;
                 } else {
-                    listDiv.innerHTML = '<div class="loading">No users yet. Add one above!</div>';
+                    listDiv.innerHTML = '<div class="loading">No users yet. Register using the login page!</div>';
                 }
             } catch (error) {
-                listDiv.innerHTML = '<div class="error">Error loading users</div>';
+                listDiv.innerHTML = '<div class="error">Error loading users: ' + error.message + '</div>';
             }
         }
         
-        async function addUser() {
-            const name = document.getElementById('user-name').value.trim();
-            const email = document.getElementById('user-email').value.trim();
-            const steamId = document.getElementById('user-steam-id').value.trim();
-            const discordId = document.getElementById('user-discord-id').value.trim();
-            
-            if (!name) {
-                alert('Name is required!');
-                return;
-            }
-            
-            if (!steamId) {
-                alert('Steam ID is required!');
+        async function toggleUserRole(username, newRole) {
+            if (!confirm(`Change ${username}'s role to ${newRole.toUpperCase()}?`)) {
                 return;
             }
             
             try {
-                const response = await fetch('/api/users/add', {
+                const response = await fetch('/api/users/role', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        name: name,
-                        email: email,
-                        steam_id: steamId,
-                        discord_id: discordId
+                        username: username,
+                        role: newRole
                     })
                 });
                 
                 const data = await response.json();
                 
                 if (response.ok) {
-                    alert(data.message || 'User added successfully!');
-                    // Clear form
-                    document.getElementById('user-name').value = '';
-                    document.getElementById('user-email').value = '';
-                    document.getElementById('user-steam-id').value = '';
-                    document.getElementById('user-discord-id').value = '';
-                    // Reload users list
+                    showMessage('Role updated successfully!', 'success');
                     loadUsers();
                 } else {
-                    alert(data.error || 'Failed to add user');
+                    showMessage(data.error || 'Failed to update role', 'error');
                 }
             } catch (error) {
-                alert('Error adding user: ' + error.message);
+                showMessage('Error updating role: ' + error.message, 'error');
             }
         }
         
-        async function removeUser(name) {
-            if (!confirm(`Are you sure you want to remove ${name}?`)) {
+        async function deleteUser(username) {
+            if (!confirm(`Are you sure you want to delete user "${username}"?\\n\\nThis action cannot be undone!`)) {
                 return;
             }
             
             try {
-                const response = await fetch('/api/users/remove', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({name: name})
+                const response = await fetch(`/api/users/delete/${username}`, {
+                    method: 'DELETE'
                 });
                 
                 const data = await response.json();
                 
                 if (response.ok) {
-                    alert(data.message || 'User removed successfully!');
+                    showMessage('User deleted successfully!', 'success');
                     loadUsers();
-                    loadUsersForMultiUser();
                 } else {
-                    alert(data.error || 'Failed to remove user');
+                    showMessage(data.error || 'Failed to delete user', 'error');
                 }
             } catch (error) {
-                alert('Error removing user: ' + error.message);
+                showMessage('Error deleting user: ' + error.message, 'error');
             }
         }
+        
+        function showMessage(message, type = 'info') {
+            // Create message element
+            const messageDiv = document.createElement('div');
+            messageDiv.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 25px;
+                background: ${type === 'success' ? '#27ae60' : type === 'error' ? '#e74c3c' : '#667eea'};
+                color: white;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 10000;
+                font-weight: 600;
+                animation: slideIn 0.3s ease-out;
+            `;
+            messageDiv.textContent = message;
+            document.body.appendChild(messageDiv);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                messageDiv.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => messageDiv.remove(), 300);
+            }, 3000);
+        }
+        
         
         // Multi-User Functions
         async function loadUsersForMultiUser() {
@@ -1617,22 +1824,26 @@
                 const data = await response.json();
                 
                 if (data.users && data.users.length > 0) {
-                    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">';
+                    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">';
                     data.users.forEach(user => {
+                        const steamBadge = user.steam_id ? '🎮' : '⚠️';
+                        const tooltipText = user.steam_id ? 'Has Steam ID configured' : 'No Steam ID - add in Settings';
+                        
                         html += `
-                            <label style="display: flex; align-items: center; gap: 10px; padding: 10px; background: white; border-radius: 8px; cursor: pointer;">
-                                <input type="checkbox" class="user-checkbox" value="${user.name}" style="width: 18px; height: 18px;">
-                                <span><strong>${user.name}</strong></span>
+                            <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: 8px; cursor: pointer; border: 2px solid ${user.steam_id ? '#667eea' : '#e0e0e0'};" title="${tooltipText}">
+                                <input type="checkbox" class="user-checkbox" value="${user.username}" ${!user.steam_id ? 'disabled' : ''} style="width: 18px; height: 18px;">
+                                <span><strong>${steamBadge} ${user.username}</strong></span>
                             </label>
                         `;
                     });
                     html += '</div>';
+                    html += '<p style="margin-top: 15px; color: var(--text-secondary); font-size: 0.9em;">💡 Tip: Users need to add their Steam ID in Settings to appear in multi-user game picker.</p>';
                     checkboxDiv.innerHTML = html;
                 } else {
-                    checkboxDiv.innerHTML = '<div class="loading">No users found. Add users in the Users tab first.</div>';
+                    checkboxDiv.innerHTML = '<div class="loading">No users with Steam IDs found. Users can add their Steam ID in Settings.</div>';
                 }
             } catch (error) {
-                checkboxDiv.innerHTML = '<div class="error">Error loading users</div>';
+                checkboxDiv.innerHTML = '<div class="error">Error loading users: ' + error.message + '</div>';
             }
         }
         
@@ -1649,21 +1860,47 @@
                 return;
             }
             
+            // Collect all filter inputs
             const coopOnly = document.getElementById('coop-only').checked;
+            const minPlaytime = document.getElementById('min-playtime').value;
+            const maxPlaytime = document.getElementById('max-playtime').value;
+            const minMetacritic = document.getElementById('min-metacritic').value;
+            const minReleaseYear = document.getElementById('min-release-year').value;
+            const maxReleaseYear = document.getElementById('max-release-year').value;
+            const includeGenres = document.getElementById('include-genres').value;
+            const excludeGenres = document.getElementById('exclude-genres').value;
+            const includeTags = document.getElementById('include-tags').value;
+            const excludeGameIds = document.getElementById('exclude-game-ids').value;
+            const minAvgPlaytime = document.getElementById('min-avg-playtime').value;
+            
             const resultDiv = document.getElementById('multiuser-result');
 
             resultDiv.style.display = 'block';
             resultDiv.innerHTML = '<div class="loading">Picking a game...</div>';
             showSpinner('Fetching common games…');
             try {
+                const body = {
+                    users: selectedUsers,
+                    coop_only: coopOnly,
+                    max_players: selectedUsers.length
+                };
+                
+                // Add optional filter parameters
+                if (minPlaytime) body.min_playtime = parseInt(minPlaytime) * 60; // Convert hours to minutes
+                if (maxPlaytime) body.max_playtime = parseInt(maxPlaytime) * 60; // Convert hours to minutes
+                if (minMetacritic) body.min_metacritic = parseInt(minMetacritic);
+                if (minReleaseYear) body.min_release_year = parseInt(minReleaseYear);
+                if (maxReleaseYear) body.max_release_year = parseInt(maxReleaseYear);
+                if (includeGenres) body.genres = includeGenres;
+                if (excludeGenres) body.exclude_genres = excludeGenres;
+                if (includeTags) body.tags = includeTags;
+                if (excludeGameIds) body.exclude_game_ids = excludeGameIds;
+                if (minAvgPlaytime) body.min_avg_playtime = parseInt(minAvgPlaytime) * 60; // Convert hours to minutes
+                
                 const response = await fetch('/api/multiuser/pick', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        users: selectedUsers,
-                        coop_only: coopOnly,
-                        max_players: selectedUsers.length
-                    })
+                    body: JSON.stringify(body)
                 });
 
                 if (!response.ok) {
@@ -1698,6 +1935,20 @@
             } finally {
                 hideSpinner();
             }
+        }
+
+        function clearMultiUserFilters() {
+            document.getElementById('min-playtime').value = '';
+            document.getElementById('max-playtime').value = '';
+            document.getElementById('min-metacritic').value = '';
+            document.getElementById('min-release-year').value = '';
+            document.getElementById('max-release-year').value = '';
+            document.getElementById('include-genres').value = '';
+            document.getElementById('exclude-genres').value = '';
+            document.getElementById('include-tags').value = '';
+            document.getElementById('exclude-game-ids').value = '';
+            document.getElementById('min-avg-playtime').value = '';
+            document.getElementById('coop-only').checked = false;
         }
 
         async function showCommonGames() {
@@ -2216,6 +2467,214 @@
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
             }
         }
+        
+        // ==============================================================================================
+        // Authentication Functions
+        // ==============================================================================================
+        
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch('/api/auth/current');
+                const data = await response.json();
+                
+                if (data.username) {
+                    // User is logged in
+                    document.getElementById('auth-modal').style.display = 'none';
+                    document.getElementById('user-info').style.display = 'block';
+                    document.getElementById('current-username').textContent = data.username;
+                    
+                    // Store user role for UI controls
+                    window.currentUserRole = data.role || 'user';
+                    
+                    // Show/hide admin-only tabs
+                    const usersTab = document.querySelector('[data-tab=\"users-tab\"]');
+                    if (usersTab) {
+                        usersTab.style.display = data.role === 'admin' ? 'inline-block' : 'none';
+                    }
+                    
+                    loadSettings();
+                    updateStatus();
+                } else {
+                    // User is not logged in
+                    document.getElementById('auth-modal').style.display = 'flex';
+                    document.getElementById('user-info').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error checking auth status:', error);
+            }
+        }
+        
+        function switchAuthForm(showLogin) {
+            document.getElementById('login-form-div').style.display = showLogin ? 'block' : 'none';
+            document.getElementById('register-form-div').style.display = showLogin ? 'none' : 'block';
+            document.getElementById('login-error').style.display = 'none';
+            document.getElementById('register-error').style.display = 'none';
+        }
+        
+        async function handleLogin() {
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value.trim();
+            const errorDiv = document.getElementById('login-error');
+            
+            // Clear previous errors
+            errorDiv.style.display = 'none';
+            
+            if (!username || !password) {
+                errorDiv.textContent = 'Username and password required';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    errorDiv.textContent = data.error || 'Login failed';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                // Successful login - clear form and check auth status
+                document.getElementById('login-password').value = '';
+                checkAuthStatus();
+            } catch (error) {
+                errorDiv.textContent = 'Error: ' + error.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+        
+        async function handleRegister() {
+            const username = document.getElementById('register-username').value.trim();
+            const password = document.getElementById('register-password').value.trim();
+            const errorDiv = document.getElementById('register-error');
+            
+            // Clear previous errors
+            errorDiv.style.display = 'none';
+            
+            if (!username || !password) {
+                errorDiv.textContent = 'Username and password required';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            if (username.length < 3) {
+                errorDiv.textContent = 'Username must be at least 3 characters';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            if (password.length < 6) {
+                errorDiv.textContent = 'Password must be at least 6 characters';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    errorDiv.textContent = data.error || 'Registration failed';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                // Successful registration, switch to login form
+                document.getElementById('register-username').value = '';
+                document.getElementById('register-password').value = '';
+                switchAuthForm(true);
+                document.getElementById('login-username').value = username;
+                document.getElementById('login-password').focus();
+            } catch (error) {
+                errorDiv.textContent = 'Error: ' + error.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+        
+        async function handleLogout() {
+            if (!confirm('Are you sure you want to logout?')) {
+                return;
+            }
+            
+            try {
+                await fetch('/api/auth/logout', {method: 'POST'});
+                document.getElementById('login-username').value = '';
+                document.getElementById('login-password').value = '';
+                checkAuthStatus();
+            } catch (error) {
+                alert('Error logging out: ' + error.message);
+            }
+        }
+        
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/auth/get-ids');
+                
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                document.getElementById('settings-steam-id').value = data.steam_id || '';
+                document.getElementById('settings-epic-id').value = data.epic_id || '';
+                document.getElementById('settings-gog-id').value = data.gog_id || '';
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+        }
+        
+        async function saveSettings() {
+            const steamId = document.getElementById('settings-steam-id').value.trim();
+            const epicId = document.getElementById('settings-epic-id').value.trim();
+            const gogId = document.getElementById('settings-gog-id').value.trim();
+            const messageDiv = document.getElementById('settings-message');
+            
+            try {
+                const response = await fetch('/api/auth/update-ids', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        steam_id: steamId,
+                        epic_id: epicId,
+                        gog_id: gogId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                messageDiv.style.display = 'block';
+                if (response.ok) {
+                    messageDiv.style.background = '#d4edda';
+                    messageDiv.style.color = '#155724';
+                    messageDiv.textContent = '✅ Settings saved! Games are loading...';
+                    setTimeout(() => {
+                        messageDiv.style.display = 'none';
+                        updateStatus();
+                    }, 2000);
+                } else {
+                    messageDiv.style.background = '#f8d7da';
+                    messageDiv.style.color = '#721c24';
+                    messageDiv.textContent = '❌ ' + (data.error || 'Failed to save settings');
+                }
+            } catch (error) {
+                messageDiv.style.display = 'block';
+                messageDiv.style.background = '#f8d7da';
+                messageDiv.style.color = '#721c24';
+                messageDiv.textContent = '❌ Error: ' + error.message;
+            }
+        }
+        
+        // Initialize auth status on page load
+        document.addEventListener('DOMContentLoaded', checkAuthStatus);
     </script>
 </body>
 </html>

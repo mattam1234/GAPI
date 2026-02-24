@@ -1,24 +1,18 @@
 {
-  "users": [
-    {
-      "name": "User1",
-      "email": "user1@example.com",
-      "platforms": {
-        "steam": "YOUR_STEAM_ID_1",
-        "epic": "",
-        "gog": ""
-      },
-      "discord_id": "YOUR_DISCORD_ID_1"
+  "users": {
+    "username1": {
+      "password": "<hashed_by_system>",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "admin"
     },
-    {
-      "name": "User2",
-      "email": "user2@example.com",
-      "platforms": {
-        "steam": "YOUR_STEAM_ID_2",
-        "epic": "",
-        "gog": ""
-      },
-      "discord_id": "YOUR_DISCORD_ID_2"
+    "username2": {
+      "password": "<hashed_by_system>",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
     }
-  ]
+  }
 }

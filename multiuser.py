@@ -151,7 +151,7 @@ class MultiUserPicker:
     
     USERS_FILE = 'users.json'
     
-    def __init__(self, config: Dict, users_file: str = None):
+    def __init__(self, config: Dict, users_file: Optional[str] = None):
         self.config = config
         self.users_file = users_file or self.USERS_FILE
         self.users: List[Dict] = []
@@ -397,7 +397,7 @@ class MultiUserPicker:
         
         return common_games
     
-    def filter_coop_games(self, games: List[Dict], max_players: int = None) -> List[Dict]:
+    def filter_coop_games(self, games: List[Dict], max_players: Optional[int] = None) -> List[Dict]:
         """
         Filter games to only include co-op/multiplayer games
         Optionally filter by maximum player count
@@ -443,19 +443,191 @@ class MultiUserPicker:
         
         return coop_games
     
+    def filter_games(self, games: List[Dict], 
+                     min_playtime: int = 0, 
+                     max_playtime: Optional[int] = None,
+                     min_metacritic: Optional[int] = None,
+                     min_release_year: Optional[int] = None,
+                     max_release_year: Optional[int] = None,
+                     genres: Optional[List[str]] = None,
+                     exclude_genres: Optional[List[str]] = None,
+                     tags: Optional[List[str]] = None,
+                     exclude_game_ids: Optional[List[str]] = None,
+                     min_avg_playtime: Optional[int] = None) -> List[Dict]:
+        """
+        Filter games by various criteria.
+        
+        Args:
+            games: List of game dicts to filter
+            min_playtime: Minimum playtime in minutes for the game
+            max_playtime: Maximum playtime in minutes for the game
+            min_metacritic: Minimum Metacritic score (0-100)
+            min_release_year: Minimum release year
+            max_release_year: Maximum release year
+            genres: List of genres to include (OR logic)
+            exclude_genres: List of genres to exclude
+            tags: List of Steam tags to include (OR logic)
+            exclude_game_ids: Game IDs to exclude
+            min_avg_playtime: Minimum average playtime per player in minutes
+        
+        Returns:
+            Filtered list of games
+        """
+        if not games:
+            return []
+        
+        # Build set of game IDs to exclude
+        exclude_ids = set(str(gid) for gid in (exclude_game_ids or []))
+        
+        # Check if we need to fetch game details
+        needs_details = bool(
+            genres or exclude_genres or min_metacritic is not None
+            or min_release_year is not None or max_release_year is not None
+            or tags
+        )
+        
+        filtered = []
+        genres_lower = [g.lower() for g in genres] if genres else []
+        exclude_lower = [g.lower() for g in exclude_genres] if exclude_genres else []
+        tags_lower = [t.lower() for t in tags] if tags else []
+        
+        for game in games:
+            # Basic exclusions
+            app_id = str(game.get('appid') or game.get('app_id') or game.get('game_id', ''))
+            if app_id in exclude_ids:
+                continue
+            
+            playtime = game.get('playtime_forever', 0)
+            if playtime < min_playtime:
+                continue
+            if max_playtime is not None and playtime > max_playtime:
+                continue
+            
+            # Check average playtime per owner if specified
+            if min_avg_playtime is not None:
+                owners = game.get('owners', [])
+                # Use min_avg_playtime for approximate filtering
+                if playtime > 0 and owners:
+                    avg_playtime = playtime / len(owners) if len(owners) > 0 else 0
+                    if avg_playtime < min_avg_playtime:
+                        continue
+            
+            # If details are needed, fetch them
+            if needs_details:
+                platform = game.get('platform', 'steam')
+                if not app_id or platform not in self.clients:
+                    continue
+                
+                details = self.clients[platform].get_game_details(app_id)
+                if not details:
+                    continue
+                
+                # Check year filters
+                if min_release_year or max_release_year:
+                    release_date = details.get('release_date', {})
+                    date_str = release_date.get('date', '') if isinstance(release_date, dict) else str(release_date)
+                    try:
+                        # Extract year from date string (format: "DD MMM, YYYY")
+                        year = int(date_str.split(',')[-1].strip())
+                        if min_release_year and year < min_release_year:
+                            continue
+                        if max_release_year and year > max_release_year:
+                            continue
+                    except (ValueError, IndexError):
+                        # If we can't parse the year, skip this filter for this game
+                        pass
+                
+                # Check metacritic score
+                if min_metacritic is not None:
+                    metacritic = details.get('metacritic', {})
+                    score = metacritic.get('score', 0) if isinstance(metacritic, dict) else 0
+                    if score < min_metacritic:
+                        continue
+                
+                # Check genres
+                if genres_lower or exclude_lower:
+                    game_genres = [g.get('description', '').lower() for g in details.get('genres', [])]
+                    
+                    if genres_lower:
+                        # Must have at least one of the included genres
+                        if not any(gen in game_genres for gen in genres_lower):
+                            continue
+                    
+                    if exclude_lower:
+                        # Must not have any of the excluded genres
+                        if any(gen in game_genres for gen in exclude_lower):
+                            continue
+                
+                # Check tags
+                if tags_lower:
+                    game_tags = [t.get('name', '').lower() for t in details.get('tags', [])]
+                    if not any(tag in game_tags for tag in tags_lower):
+                        continue
+            
+            filtered.append(game)
+        
+        return filtered
+    
     def pick_common_game(self, user_names: Optional[List[str]] = None, 
                         coop_only: bool = False, 
-                        max_players: Optional[int] = None) -> Optional[Dict]:
+                        max_players: Optional[int] = None,
+                        min_playtime: int = 0,
+                        max_playtime: Optional[int] = None,
+                        min_metacritic: Optional[int] = None,
+                        min_release_year: Optional[int] = None,
+                        max_release_year: Optional[int] = None,
+                        genres: Optional[List[str]] = None,
+                        exclude_genres: Optional[List[str]] = None,
+                        tags: Optional[List[str]] = None,
+                        exclude_game_ids: Optional[List[str]] = None,
+                        min_avg_playtime: Optional[int] = None) -> Optional[Dict]:
         """
-        Pick a random game from the common library
+        Pick a random game from the common library with optional filters
+        
+        Args:
+            user_names: List of user names to consider (all users if None)
+            coop_only: Filter to co-op/multiplayer games only
+            max_players: Maximum players for co-op filter
+            min_playtime: Minimum playtime in minutes
+            max_playtime: Maximum playtime in minutes
+            min_metacritic: Minimum Metacritic score
+            min_release_year: Minimum release year
+            max_release_year: Maximum release year
+            genres: List of genres to include (OR logic)
+            exclude_genres: List of genres to exclude
+            tags: List of Steam tags to include (OR logic)
+            exclude_game_ids: Game IDs to exclude
+            min_avg_playtime: Minimum average playtime per player
+        
+        Returns:
+            A randomly selected game dict, or None if no games match filters
         """
         common_games = self.find_common_games(user_names)
         
         if not common_games:
             return None
         
+        # Apply co-op filter first if requested
         if coop_only:
             common_games = self.filter_coop_games(common_games, max_players)
+        
+        if not common_games:
+            return None
+        
+        # Apply additional filters
+        common_games = self.filter_games(
+            common_games,
+            min_playtime=min_playtime,
+            max_playtime=max_playtime,
+            min_metacritic=min_metacritic,
+            min_release_year=min_release_year,
+            max_release_year=max_release_year,
+            genres=genres,
+            exclude_genres=exclude_genres,
+            tags=tags,
+            exclude_game_ids=exclude_game_ids,
+            min_avg_playtime=min_avg_playtime
+        )
         
         if not common_games:
             return None

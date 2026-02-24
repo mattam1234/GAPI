@@ -5,12 +5,15 @@ A modern web GUI for randomly picking games from your Steam library.
 """
 
 import logging
-from flask import Flask, render_template, jsonify, request
+import argparse
+from flask import Flask, render_template, jsonify, request, session
 import threading
 import json
 import os
 import sys
-from typing import Optional, List, Dict
+import hashlib
+from typing import Optional, List, Dict, Tuple
+from functools import wraps
 import gapi
 import multiuser
 
@@ -28,6 +31,210 @@ current_game: Optional[Dict] = None
 # Multi-user picker instance
 multi_picker: Optional[multiuser.MultiUserPicker] = None
 multi_picker_lock = threading.Lock()
+
+# User authentication
+USERS_AUTH_FILE = 'users_auth.json'
+current_user: Optional[str] = None
+current_user_lock = threading.Lock()
+
+DEMO_GAMES = [
+    {"appid": 620, "name": "Portal 2", "playtime_forever": 2720},
+    {"appid": 440, "name": "Team Fortress 2", "playtime_forever": 15430},
+    {"appid": 570, "name": "Dota 2", "playtime_forever": 0},
+    {"appid": 730, "name": "Counter-Strike: Global Offensive", "playtime_forever": 4560},
+    {"appid": 72850, "name": "The Elder Scrolls V: Skyrim", "playtime_forever": 890},
+    {"appid": 8930, "name": "Sid Meier's Civilization V", "playtime_forever": 0},
+    {"appid": 292030, "name": "The Witcher 3: Wild Hunt", "playtime_forever": 85},
+    {"appid": 4000, "name": "Garry's Mod", "playtime_forever": 320},
+]
+
+
+class UserManager:
+    """Manages user authentication and platform IDs"""
+    
+    def __init__(self, users_file: str = USERS_AUTH_FILE):
+        self.users_file = users_file
+        self.users: Dict = {}
+        self.load_users()
+    
+    def load_users(self):
+        """Load users from file"""
+        if os.path.exists(self.users_file):
+            try:
+                with open(self.users_file, 'r') as f:
+                    data = json.load(f)
+                    self.users = data.get('users', {})
+            except (json.JSONDecodeError, IOError) as e:
+                gui_logger.error("Error loading users: %s", e)
+                self.users = {}
+    
+    def save_users(self):
+        """Save users to file"""
+        try:
+            gapi._atomic_write_json(self.users_file, {'users': self.users})
+        except Exception as e:
+            gui_logger.error("Error saving users: %s", e)
+    
+    def hash_password(self, password: str) -> str:
+        """Hash a password"""
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    def register(self, username: str, password: str, role: str = "None") -> Tuple[bool, str]:
+        """Register a new user"""
+        if username in self.users:
+            return False, "Username already exists"
+        if len(username) < 3:
+            return False, "Username must be at least 3 characters"
+        if len(password) < 6:
+            return False, "Password must be at least 6 characters"
+        
+        # First user becomes admin, rest are regular users
+        if role is None:
+            role = 'admin' if len(self.users) == 0 else 'user'
+        
+        self.users[username] = {
+            'password': self.hash_password(password),
+            'steam_id': '',
+            'epic_id': '',
+            'gog_id': '',
+            'role': role
+        }
+        self.save_users()
+        return True, "User registered successfully"
+    
+    def login(self, username: str, password: str) -> Tuple[bool, str]:
+        """Verify user credentials"""
+        if username not in self.users:
+            return False, "Invalid username or password"
+        
+        if self.users[username]['password'] != self.hash_password(password):
+            return False, "Invalid username or password"
+        
+        return True, "Login successful"
+    
+    def get_user_ids(self, username: str) -> Dict:
+        """Get user's platform IDs"""
+        if username not in self.users:
+            return {}
+        
+        user = self.users[username]
+        return {
+            'steam_id': user.get('steam_id', ''),
+            'epic_id': user.get('epic_id', ''),
+            'gog_id': user.get('gog_id', '')
+        }
+    
+    def update_user_ids(self, username: str, steam_id: str = '', epic_id: str = '', gog_id: str = '') -> bool:
+        """Update user's platform IDs"""
+        if username not in self.users:
+            return False
+        
+        self.users[username]['steam_id'] = steam_id
+        self.users[username]['epic_id'] = epic_id
+        self.users[username]['gog_id'] = gog_id
+        self.save_users()
+        return True
+    
+    def get_user_role(self, username: str) -> str:
+        """Get user's role"""
+        if username not in self.users:
+            return 'user'
+        return self.users[username].get('role', 'user')
+    
+    def is_admin(self, username: str) -> bool:
+        """Check if user is admin"""
+        return self.get_user_role(username) == 'admin'
+    
+    def get_all_users(self) -> List[Dict]:
+        """Get all users with their info (excluding passwords)"""
+        users_list = []
+        for username, user_data in self.users.items():
+            users_list.append({
+                'username': username,
+                'steam_id': user_data.get('steam_id', ''),
+                'epic_id': user_data.get('epic_id', ''),
+                'gog_id': user_data.get('gog_id', ''),
+                'role': user_data.get('role', 'user')
+            })
+        return users_list
+    
+    def delete_user(self, username: str, requesting_user: str) -> Tuple[bool, str]:
+        """Delete a user (admin only)"""
+        if not self.is_admin(requesting_user):
+            return False, "Only admins can delete users"
+        
+        if username not in self.users:
+            return False, "User not found"
+        
+        if username == requesting_user:
+            return False, "Cannot delete yourself"
+        
+        del self.users[username]
+        self.save_users()
+        return True, "User deleted successfully"
+    
+    def update_user_role(self, username: str, role: str, requesting_user: str) -> Tuple[bool, str]:
+        """Update user's role (admin only)"""
+        if not self.is_admin(requesting_user):
+            return False, "Only admins can change roles"
+        
+        if username not in self.users:
+            return False, "User not found"
+        
+        if role not in ['admin', 'user']:
+            return False, "Invalid role"
+        
+        self.users[username]['role'] = role
+        self.save_users()
+        return True, "Role updated successfully"
+
+
+# Global user manager
+user_manager = UserManager()
+
+
+def load_base_config(config_path: str = 'config.json') -> Dict:
+    """Load base config without enforcing Steam ID requirements.
+
+    The GUI uses per-user Steam IDs, so only the API key is required here.
+    """
+    if not os.path.exists(config_path):
+        return {}
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    if os.getenv('STEAM_API_KEY'):
+        config['steam_api_key'] = os.getenv('STEAM_API_KEY')
+    return config
+
+
+def require_login(f):
+    """Decorator to require user to be logged in"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        global current_user
+        with current_user_lock:
+            if not current_user:
+                return jsonify({'error': 'Not logged in'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def require_admin(f):
+    """Decorator to require admin privileges"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        global current_user
+        with current_user_lock:
+            if not current_user:
+                return jsonify({'error': 'Not logged in'}), 401
+            if not user_manager.is_admin(current_user):
+                return jsonify({'error': 'Admin privileges required'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def initialize_picker(config_path: str = 'config.json'):
@@ -55,18 +262,204 @@ def index():
 @app.route('/api/status')
 def api_status():
     """Get application status"""
-    global picker
-    with picker_lock:
-        if picker is None:
+    global picker, current_user
+    
+    # Check if user is logged in
+    with current_user_lock:
+        if not current_user:
             return jsonify({
                 'ready': False,
-                'message': 'Initializing...'
+                'logged_in': False,
+                'message': 'Please log in'
             })
+    
+    if picker is None:
         return jsonify({
-            'ready': True,
-            'total_games': len(picker.games) if picker.games else 0,
-            'favorites': len(picker.favorites) if picker.favorites else 0
+            'ready': False,
+            'logged_in': True,
+            'message': 'Loading games...'
         })
+    
+    return jsonify({
+        'ready': True,
+        'logged_in': True,
+        'current_user': current_user,
+        'is_admin': user_manager.is_admin(current_user),
+        'total_games': len(picker.games) if picker.games else 0,
+        'favorites': len(picker.favorites) if picker.favorites else 0
+    })
+
+
+# ===========================================================================================
+# Authentication Endpoints
+# ===========================================================================================
+
+@app.route('/api/auth/current', methods=['GET'])
+def api_auth_current():
+    """Get current logged-in user"""
+    with current_user_lock:
+        if current_user:
+            return jsonify({
+                'username': current_user,
+                'role': user_manager.get_user_role(current_user)
+            })
+    return jsonify({'username': None}), 401
+
+
+@app.route('/api/auth/register', methods=['POST'])
+def api_auth_register():
+    """Register a new user"""
+    data = request.json or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    success, message = user_manager.register(username, password)
+    
+    if not success:
+        return jsonify({'error': message}), 400
+    
+    return jsonify({'message': message})
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """Log in a user"""
+    global current_user, picker, multi_picker
+    
+    data = request.json or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    success, message = user_manager.login(username, password)
+    
+    if not success:
+        return jsonify({'error': message}), 401
+    
+    # Set current user
+    with current_user_lock:
+        current_user = username
+    
+    # Initialize picker for this user
+    user_ids = user_manager.get_user_ids(username)
+    
+    # Create a temporary config with user's IDs
+    if user_ids.get('steam_id'):
+        base_config = load_base_config()
+        temp_config = {
+            'steam_api_key': base_config.get('steam_api_key', ''),
+            'steam_id': user_ids['steam_id'],
+            'epic_enabled': user_ids.get('epic_id') != '',
+            'epic_id': user_ids.get('epic_id', ''),
+            'gog_enabled': user_ids.get('gog_id') != '',
+            'gog_id': user_ids.get('gog_id', '')
+        }
+        
+        # Initialize picker in background
+        def init_picker_async():
+            try:
+                with picker_lock:
+                    global picker
+                    picker = gapi.GamePicker()
+                    picker.config = temp_config
+                    picker.fetch_games()
+                    with multi_picker_lock:
+                        global multi_picker
+                        multi_picker = multiuser.MultiUserPicker(temp_config)
+            except Exception as e:
+                gui_logger.error("Error initializing picker: %s", e)
+        
+        threading.Thread(target=init_picker_async, daemon=True).start()
+    
+    return jsonify({'message': 'Login successful', 'username': username})
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    """Log out the current user"""
+    global current_user, picker, multi_picker
+    
+    with current_user_lock:
+        current_user = None
+    
+    with picker_lock:
+        picker = None
+    
+    with multi_picker_lock:
+        multi_picker = None
+    
+    return jsonify({'message': 'Logged out successfully'})
+
+
+@app.route('/api/auth/update-ids', methods=['POST'])
+def api_auth_update_ids():
+    """Update user's platform IDs"""
+    global current_user
+    
+    with current_user_lock:
+        if not current_user:
+            return jsonify({'error': 'Not logged in'}), 401
+        username = current_user
+    
+    data = request.json or {}
+    steam_id = data.get('steam_id', '').strip()
+    epic_id = data.get('epic_id', '').strip()
+    gog_id = data.get('gog_id', '').strip()
+    
+    success = user_manager.update_user_ids(username, steam_id, epic_id, gog_id)
+    
+    if not success:
+        return jsonify({'error': 'Failed to update IDs'}), 400
+    
+    # Reinitialize picker with new IDs
+    user_ids = user_manager.get_user_ids(username)
+    
+    if user_ids.get('steam_id'):
+        base_config = load_base_config()
+        temp_config = {
+            'steam_api_key': base_config.get('steam_api_key', ''),
+            'steam_id': user_ids['steam_id'],
+            'epic_enabled': user_ids.get('epic_id') != '',
+            'epic_id': user_ids.get('epic_id', ''),
+            'gog_enabled': user_ids.get('gog_id') != '',
+            'gog_id': user_ids.get('gog_id', '')
+        }
+        
+        def init_picker_async():
+            try:
+                with picker_lock:
+                    global picker
+                    picker = gapi.GamePicker()
+                    picker.config = temp_config
+                    picker.fetch_games()
+                    with multi_picker_lock:
+                        global multi_picker
+                        multi_picker = multiuser.MultiUserPicker(temp_config)
+            except Exception as e:
+                gui_logger.error("Error initializing picker: %s", e)
+        
+        threading.Thread(target=init_picker_async, daemon=True).start()
+    
+    return jsonify({'message': 'Platform IDs updated successfully'})
+
+
+@app.route('/api/auth/get-ids', methods=['GET'])
+def api_auth_get_ids():
+    """Get current user's platform IDs"""
+    global current_user
+    
+    with current_user_lock:
+        if not current_user:
+            return jsonify({'error': 'Not logged in'}), 401
+        username = current_user
+    
+    user_ids = user_manager.get_user_ids(username)
+    return jsonify(user_ids)
 
 
 @app.route('/api/pick', methods=['POST'])
@@ -196,6 +589,12 @@ def api_game_details(app_id):
             return jsonify({'error': 'Could not fetch details'}), 404
         
         response = {}
+
+        if 'header_image' in details:
+            response['header_image'] = details['header_image']
+
+        if 'capsule_image' in details:
+            response['capsule_image'] = details['capsule_image']
         
         if 'short_description' in details:
             response['description'] = details['short_description']
@@ -337,8 +736,73 @@ def api_stats():
 
 
 @app.route('/api/users')
+@require_login
 def api_users_list():
-    """Get all users"""
+    """Get all registered users (for multi-user game picker)"""
+    users = user_manager.get_all_users()
+    # Filter to only users with Steam IDs for game picking
+    users_with_games = [u for u in users if u['steam_id']]
+    return jsonify({'users': users_with_games})
+
+
+@app.route('/api/users/all')
+@require_admin
+def api_users_all():
+    """Get all users with full details (admin only)"""
+    users = user_manager.get_all_users()
+    return jsonify({'users': users})
+
+
+@app.route('/api/users/delete/<username>', methods=['DELETE'])
+@require_admin
+def api_users_delete(username):
+    """Delete a user (admin only)"""
+    with current_user_lock:
+        requesting_user = current_user
+    
+    if not requesting_user:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    success, message = user_manager.delete_user(username, requesting_user)
+    
+    if not success:
+        return jsonify({'error': message}), 400
+    
+    return jsonify({'message': message})
+
+
+@app.route('/api/users/role', methods=['POST'])
+@require_admin
+def api_users_update_role():
+    """Update user role (admin only)"""
+    with current_user_lock:
+        requesting_user = current_user
+    
+    if not requesting_user:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    data = request.json or {}
+    username = data.get('username', '').strip()
+    role = data.get('role', '').strip()
+    
+    if not username or not role:
+        return jsonify({'error': 'Username and role required'}), 400
+    
+    success, message = user_manager.update_user_role(username, role, requesting_user)
+    
+    if not success:
+        return jsonify({'error': message}), 400
+    
+    return jsonify({'message': message})
+
+
+# ===========================================================================================
+# Legacy Multi-User Endpoints (deprecated - use authenticated users instead)
+# ===========================================================================================
+
+@app.route('/api/users/legacy')
+def api_users_list_legacy():
+    """Get all users from multi-picker (legacy)"""
     global multi_picker
     
     if not multi_picker:
@@ -377,7 +841,17 @@ def api_users_add():
         )
         
         if success:
-            return jsonify({'success': True, 'message': f'User {name} added successfully'})
+            # Reload from disk to ensure we have the latest data
+            multi_picker.load_users()
+            # Return the newly added user data to confirm it was saved
+            new_user = next((u for u in multi_picker.users if u['name'] == name), None)
+            if new_user:
+                print(f'DEBUG: Added user {name} with steam_id={new_user.get("platforms", {}).get("steam")}')
+            return jsonify({
+                'success': True, 
+                'message': f'User {name} added successfully',
+                'user': new_user
+            })
         else:
             return jsonify({'error': 'User already exists'}), 400
 
@@ -463,7 +937,7 @@ def api_multiuser_common():
 
 @app.route('/api/multiuser/pick', methods=['POST'])
 def api_multiuser_pick():
-    """Pick a common game for multiple users"""
+    """Pick a common game for multiple users with optional filters"""
     global multi_picker
     
     if not multi_picker:
@@ -475,15 +949,51 @@ def api_multiuser_pick():
     max_players_raw = data.get('max_players')
     max_players = int(max_players_raw) if max_players_raw is not None else None
     
+    # Parse filter parameters
+    min_playtime = int(data.get('min_playtime', 0)) if data.get('min_playtime') else 0
+    max_playtime_val = data.get('max_playtime')
+    max_playtime = int(max_playtime_val) if max_playtime_val is not None else None
+    min_metacritic_val = data.get('min_metacritic')
+    min_metacritic = int(min_metacritic_val) if min_metacritic_val is not None else None
+    min_release_year_val = data.get('min_release_year')
+    min_release_year = int(min_release_year_val) if min_release_year_val is not None else None
+    max_release_year_val = data.get('max_release_year')
+    max_release_year = int(max_release_year_val) if max_release_year_val is not None else None
+    min_avg_playtime_val = data.get('min_avg_playtime')
+    min_avg_playtime = int(min_avg_playtime_val) if min_avg_playtime_val is not None else None
+    
+    # Parse comma-separated lists
+    genre_text = data.get('genres', '').strip()
+    genres = [g.strip() for g in genre_text.split(',')] if genre_text else None
+    
+    exclude_genre_text = data.get('exclude_genres', '').strip()
+    exclude_genres = [g.strip() for g in exclude_genre_text.split(',')] if exclude_genre_text else None
+    
+    tag_text = data.get('tags', '').strip()
+    tags = [t.strip() for t in tag_text.split(',')] if tag_text else None
+    
+    exclude_ids_raw = data.get('exclude_game_ids', '')
+    exclude_game_ids = [s.strip() for s in exclude_ids_raw.split(',')] if exclude_ids_raw else None
+    
     with multi_picker_lock:
         game = multi_picker.pick_common_game(
             user_names if user_names else None,
             coop_only=coop_only,
-            max_players=max_players
+            max_players=max_players,
+            min_playtime=min_playtime,
+            max_playtime=max_playtime,
+            min_metacritic=min_metacritic,
+            min_release_year=min_release_year,
+            max_release_year=max_release_year,
+            genres=genres,
+            exclude_genres=exclude_genres,
+            tags=tags,
+            exclude_game_ids=exclude_game_ids,
+            min_avg_playtime=min_avg_playtime
         )
         
         if not game:
-            return jsonify({'error': 'No common games found'}), 404
+            return jsonify({'error': 'No common games found matching filters'}), 404
         
         app_id = game.get('appid')
         
@@ -1239,6 +1749,19 @@ def create_templates():
             color: #444;
             line-height: 1.8;
         }
+
+        .game-preview {
+            margin: 12px 0 8px;
+        }
+
+        .game-preview img {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border-radius: 10px;
+            display: block;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+        }
         
         .action-buttons {
             display: flex;
@@ -1367,6 +1890,95 @@ def create_templates():
             color: #ffc107;
             margin-right: 8px;
         }
+        
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            }
+            
+            .tab-content {
+                background: #2a2a3e;
+                color: #e0e0e0;
+            }
+            
+            .filters {
+                background: #3a3a4e !important;
+            }
+            
+            .user-form {
+                background: #3a3a4e !important;
+            }
+            
+            .game-display {
+                background: #3a3a4e !important;
+            }
+            
+            .game-title {
+                color: #e0e0e0;
+            }
+            
+            .game-info {
+                color: #b0b0b0;
+            }
+            
+            .game-description {
+                color: #c0c0c0;
+            }
+            
+            .filter-label {
+                color: #e0e0e0;
+            }
+            
+            .radio-option label {
+                color: #c0c0c0;
+            }
+            
+            .list-item {
+                border-bottom-color: #444;
+            }
+            
+            .list-item:hover {
+                background: #3a3a4e;
+            }
+            
+            .list-container {
+                border-color: #444;
+            }
+            
+            .search-input {
+                background: #2a2a3e;
+                color: #e0e0e0;
+                border-color: #555;
+            }
+            
+            .search-input:focus {
+                border-color: #667eea;
+            }
+            
+            .genre-input {
+                background: #2a2a3e;
+                color: #e0e0e0;
+                border-color: #555;
+            }
+            
+            .genre-input:focus {
+                border-color: #667eea;
+            }
+            
+            .error {
+                background: #3a2a2a;
+                color: #ff9999;
+            }
+            
+            .loading {
+                color: #888;
+            }
+            
+            .top-games h3 {
+                color: #e0e0e0;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1458,7 +2070,7 @@ def create_templates():
             <h2>👥 User Management</h2>
             
             <!-- Add User Form -->
-            <div class="user-form" style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div class="user-form" style="padding: 20px; border-radius: 10px; margin-bottom: 20px;">
                 <h3>Add New User</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
                     <div>
@@ -1495,8 +2107,8 @@ def create_templates():
             <h2>🎮 Multi-User Game Picker</h2>
             
             <!-- User Selection -->
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-                <h3>Select Players</h3>
+            <div style="padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3 style="margin-bottom: 15px;">Select Players</h3>
                 <div id="user-checkboxes" style="margin-top: 15px;">
                     <div class="loading">Loading users...</div>
                 </div>
@@ -1514,7 +2126,7 @@ def create_templates():
             </div>
             
             <!-- Multi-User Game Result -->
-            <div id="multiuser-result" style="display: none; background: #f8f9fa; padding: 25px; border-radius: 10px;">
+            <div id="multiuser-result" style="display: none; padding: 25px; border-radius: 10px;">
                 <!-- Result will be displayed here -->
             </div>
             
@@ -1611,6 +2223,7 @@ def create_templates():
         async function displayGame(game) {
             const resultDiv = document.getElementById('game-result');
             const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
+            resultDiv.dataset.gameName = game.name || '';
             
             let html = `
                 <div class="game-title">${favoriteIcon}${game.name}</div>
@@ -1645,6 +2258,13 @@ def create_templates():
                 if (response.ok) {
                     const details = await response.json();
                     let detailsHtml = '<div class="game-description">';
+
+                    const previewUrl = details.header_image || details.capsule_image || `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+                    const previewAlt = currentGame && currentGame.name ? `${currentGame.name} preview` : 'Game preview';
+                    const safeAlt = previewAlt.replace(/"/g, '&quot;');
+                    if (previewUrl) {
+                        detailsHtml += `<div class="game-preview"><img src="${previewUrl}" alt="${safeAlt}" loading="lazy"></div>`;
+                    }
                     
                     if (details.description) {
                         detailsHtml += `<p>${details.description}</p>`;
@@ -1879,14 +2499,14 @@ def create_templates():
                             <div class="list-item" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 15px; align-items: center;">
                                 <div>
                                     <strong>${user.name}</strong><br>
-                                    <small style="color: #666;">${user.email || 'No email'}</small>
+                                    <small style="opacity: 0.7;">${user.email || 'No email'}</small>
                                 </div>
                                 <div>
-                                    <small style="color: #666;">Steam ID:</small><br>
-                                    ${user.steam_id}
+                                    <small style="opacity: 0.7;">Steam ID:</small><br>
+                                    <strong>${user.platforms?.steam || 'Not set'}</strong>
                                 </div>
                                 <div>
-                                    <small style="color: #666;">Discord ID:</small><br>
+                                    <small style="opacity: 0.7;">Discord ID:</small><br>
                                     ${user.discord_id || 'Not linked'}
                                 </div>
                                 <div>
@@ -1923,6 +2543,7 @@ def create_templates():
             }
             
             try {
+                console.log('Adding user:', {name, steamId, email, discordId});
                 const response = await fetch('/api/users/add', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -1935,6 +2556,7 @@ def create_templates():
                 });
                 
                 const data = await response.json();
+                console.log('Server response:', data);
                 
                 if (response.ok) {
                     alert(data.message || 'User added successfully!');
@@ -1949,6 +2571,10 @@ def create_templates():
                     alert(data.error || 'Failed to add user');
                 }
             } catch (error) {
+                alert('Error adding user: ' + error.message);
+                console.error('Error adding user:', error);
+            }
+        }
                 alert('Error adding user: ' + error.message);
             }
         }
@@ -2123,70 +2749,51 @@ def create_templates():
 
 def main():
     """Main entry point for GUI"""
-    config_path = 'config.json'
-    demo_mode = False
-    
-    # Check for demo mode
-    if len(sys.argv) > 1 and sys.argv[1] == '--demo':
-        demo_mode = True
-        print("\n" + "="*60)
-        print("GAPI WEB GUI - DEMO MODE")
-        print("="*60)
-        print("\nRunning with demo data...")
-        
-        # Create demo config
+    parser = argparse.ArgumentParser(description='GAPI Web GUI')
+    parser.add_argument('--config', default='config.json', help='Path to config file')
+    parser.add_argument('--demo', action='store_true', help='Run with demo data')
+    args = parser.parse_args()
+
+    demo_mode = args.demo
+    config_path = args.config
+
+    if demo_mode:
+        demo_config_path = '.demo_config.json'
+        config_path = demo_config_path
         demo_config = {
-            "steam_api_key": "DEMO_MODE",
-            "steam_id": "DEMO_MODE"
+            'steam_api_key': 'DEMO_MODE',
+            'steam_id': 'DEMO_MODE'
         }
-        
-        config_path = '.demo_config_gui.json'
-        with open(config_path, 'w') as f:
+        with open(demo_config_path, 'w') as f:
             json.dump(demo_config, f)
-        
-        # Monkey-patch for demo mode
-        DEMO_GAMES = [
-            {"appid": 620, "name": "Portal 2", "playtime_forever": 2720},
-            {"appid": 440, "name": "Team Fortress 2", "playtime_forever": 15430},
-            {"appid": 570, "name": "Dota 2", "playtime_forever": 0},
-            {"appid": 730, "name": "Counter-Strike: Global Offensive", "playtime_forever": 4560},
-            {"appid": 72850, "name": "The Elder Scrolls V: Skyrim", "playtime_forever": 890},
-            {"appid": 8930, "name": "Sid Meier's Civilization V", "playtime_forever": 0},
-            {"appid": 292030, "name": "The Witcher 3: Wild Hunt", "playtime_forever": 85},
-            {"appid": 4000, "name": "Garry's Mod", "playtime_forever": 320},
-            {"appid": 271590, "name": "Grand Theft Auto V", "playtime_forever": 5670},
-            {"appid": 4920, "name": "Natural Selection 2", "playtime_forever": 125},
-            {"appid": 203160, "name": "Tomb Raider", "playtime_forever": 1250},
-            {"appid": 550, "name": "Left 4 Dead 2", "playtime_forever": 3420},
-        ]
-        
+
         original_fetch = gapi.GamePicker.fetch_games
+        original_get_details = gapi.SteamAPIClient.get_game_details
         original_load_config = gapi.GamePicker.load_config
-        
+
         def demo_fetch_games(self):
             self.games = DEMO_GAMES
             return True
-        
-        def demo_load_config(self, config_path):
-            if config_path == config_path:
+
+        def demo_get_details(self, game_id):
+            return None
+
+        def demo_load_config(self, config_path: str):
+            if config_path == demo_config_path:
                 return demo_config
             return original_load_config(self, config_path)
-        
+
         gapi.GamePicker.fetch_games = demo_fetch_games
+        gapi.SteamAPIClient.get_game_details = demo_get_details
         gapi.GamePicker.load_config = demo_load_config
-    
+
+        initialize_picker(config_path=config_path)
+        with current_user_lock:
+            global current_user
+            current_user = 'demo'
+
     # Create templates
     create_templates()
-    
-    # Initialize picker in background
-    def init_async():
-        success, message = initialize_picker(config_path)
-        if success:
-            print(f"✅ {message}")
-        else:
-            print(f"❌ Error: {message}")
-    
-    threading.Thread(target=init_async, daemon=True).start()
     
     # Run Flask app
     print("\n" + "="*60)
@@ -2199,8 +2806,11 @@ def main():
     
     try:
         app.run(host='127.0.0.1', port=5000, debug=False)
+    except KeyboardInterrupt:
+        print("\n\n" + "="*60)
+        print("🛑 GAPI Web GUI stopped")
+        print("="*60 + "\n")
     finally:
-        # Cleanup demo config
         if demo_mode and os.path.exists(config_path):
             os.remove(config_path)
 
