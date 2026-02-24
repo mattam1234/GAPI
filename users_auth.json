@@ -9,14 +9,42 @@
     },
     "mattam": {
       "password": "ef51306214d9a6361ee1d5b452e6d2bb70dc7ebb85bf9e02c3d4747fb57d6bec",
-      "steam_id": "",
+      "steam_id": "76561198123639801",
       "epic_id": "",
       "gog_id": "",
-      "role": "admin"
+      "role": "user"
     },
     "newuser": {
       "password": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
       "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "firstadmin": {
+      "password": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "testuser_1771960233": {
+      "password": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "testuser_1771960308": {
+      "password": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "testuser_1771960339": {
+      "password": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+      "steam_id": "76561198123639801",
       "epic_id": "",
       "gog_id": "",
       "role": "user"

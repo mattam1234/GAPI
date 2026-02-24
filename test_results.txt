@@ -1,0 +1,25 @@
+============================================================
+TESTING NEW DATABASE ENDPOINTS
+============================================================
+Traceback (most recent call last):
+  File "C:\Users\matta\source\repos\GAPI\test_endpoints.py", line 106, in <module>
+    test_endpoints()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\matta\source\repos\GAPI\test_endpoints.py", line 22, in test_endpoints
+    print("\n1\ufe0f\u20e3  REGISTER USER")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\matta\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 3-4: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\matta\source\repos\GAPI\test_endpoints.py", line 108, in <module>
+    print(f"\u274c Error: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\matta\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>

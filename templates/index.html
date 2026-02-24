@@ -70,9 +70,9 @@
 
         /* Dark mode toggle button */
         #dark-mode-btn {
-            position: absolute;
-            top: 0;
-            right: 0;
+            position: fixed;
+            top: 15px;
+            right: 15px;
             background: rgba(255,255,255,0.18);
             border: none;
             border-radius: 20px;
@@ -81,6 +81,7 @@
             font-size: 0.95em;
             cursor: pointer;
             transition: background 0.2s;
+            z-index: 10000;
         }
         #dark-mode-btn:hover { background: rgba(255,255,255,0.32); }
 
@@ -485,12 +486,12 @@
                 <form id="login-form" onsubmit="handleLogin(); return false;">
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
-                        <input type="text" id="login-username" placeholder="Enter username" required
+                        <input type="text" id="login-username" placeholder="Enter username" required autocomplete="username"
                                style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
                     </div>
                     <div style="margin-bottom: 20px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Password</label>
-                        <input type="password" id="login-password" placeholder="Enter password" required
+                        <input type="password" id="login-password" placeholder="Enter password" required autocomplete="current-password"
                                style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
                     </div>
                     <div id="login-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
@@ -504,12 +505,12 @@
                 <form id="register-form" onsubmit="handleRegister(); return false;">
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
-                        <input type="text" id="register-username" placeholder="Choose username (min 3 chars)" required minlength="3"
+                        <input type="text" id="register-username" placeholder="Choose username (min 3 chars)" required minlength="3" autocomplete="username"
                                style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
                     </div>
                     <div style="margin-bottom: 20px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Password</label>
-                        <input type="password" id="register-password" placeholder="Choose password (min 6 chars)" required minlength="6"
+                        <input type="password" id="register-password" placeholder="Choose password (min 6 chars)" required minlength="6" autocomplete="new-password"
                                style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
                     </div>
                     <div id="register-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
@@ -538,7 +539,7 @@
                     <button onclick="handleLogout()" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Logout</button>
                 </div>
             </div>
-            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode" style="margin-top: 10px;">🌙 Dark Mode</button>
+            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode">🌙 Dark Mode</button>
         </header>
 
         <div class="status-bar" id="status">Loading...</div>
@@ -553,6 +554,8 @@
             <button class="tab" onclick="switchTab('schedule', event)">📅 Schedule</button>
             <button class="tab" onclick="switchTab('playlists', event)">📋 Playlists</button>
             <button class="tab" onclick="switchTab('backlog', event)">📚 Backlog</button>
+            <button class="tab" onclick="switchTab('ignored', event)">No-Play List</button>
+            <button class="tab" onclick="switchTab('achievements', event)">Achievements</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
         </div>        
         <!-- Picker Tab -->
@@ -607,9 +610,19 @@
                             <input type="number" id="adv-max-year" min="1980" max="2099" placeholder="e.g. 2023"
                                    style="width:80px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
                         </label>
+                        <label style="font-weight:600;">Max Price $:
+                            <input type="number" id="adv-max-price" min="0" max="100" step="0.01" placeholder="e.g. 20"
+                                   style="width:70px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
                         <label style="font-weight:600;">Exclude App IDs:
                             <input type="text" id="adv-exclude-ids" placeholder="730,570"
                                    style="width:120px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                        </label>
+                        <label style="font-weight:600;">Multiplayer Only:
+                            <input type="checkbox" id="adv-multiplayer" style="margin-left:5px; width:18px; height:18px;">
+                        </label>
+                        <label style="font-weight:600;">Single Player Only:
+                            <input type="checkbox" id="adv-singleplayer" style="margin-left:5px; width:18px; height:18px;">
                         </label>
                     </div>
                 </div>
@@ -633,7 +646,7 @@
 
         <!-- Library Tab -->
         <div id="library-tab" class="tab-content">
-            <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibrary()">
+            <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibraryDebounced()">
             <div id="library-list" class="list-container">
                 <div class="loading">Loading library...</div>
             </div>
@@ -650,6 +663,36 @@
         <!-- Stats Tab -->
         <div id="stats-tab" class="tab-content">
             <h2>📊 Library Statistics</h2>
+            
+            <!-- User Selection for Comparison -->
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>👥 Compare Users (Optional)</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 0.95em;">Select multiple users to compare statistics side-by-side</p>
+                
+                <div id="comparison-user-checkboxes" style="margin-top: 15px; margin-bottom: 15px;">
+                    <div class="loading">Loading users...</div>
+                </div>
+                
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button id="compare-btn" style="display: none; padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                        📊 Compare Selected Users
+                    </button>
+                    <button id="clear-compare-btn" style="display: none; padding: 10px 20px; background: #e0e0e0; color: #333; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                        Clear Comparison
+                    </button>
+                </div>
+            </div>
+            
+            <!-- View Mode Toggle -->
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <button id="view-single-btn" style="padding: 10px 16px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                    📈 Single User View
+                </button>
+                <button id="view-compare-btn" style="padding: 10px 16px; background: transparent; color: var(--text-secondary); border: 2px solid var(--text-secondary); border-radius: 5px; cursor: pointer; font-weight: 600; display: none;">
+                    🔀 Comparison View
+                </button>
+            </div>
+            
             <div id="stats-content">
                 <div class="loading">Loading statistics...</div>
             </div>
@@ -729,6 +772,11 @@
                         <input type="number" id="max-release-year" placeholder="2100" min="1980" max="2100" step="1"
                                style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
                     </label>
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Max Price ($)</span>
+                        <input type="number" id="max-game-price" placeholder="Unlimited" min="0" max="500" step="0.01"
+                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
                 </div>
 
                 <!-- Row 3: Genres and Tags -->
@@ -756,6 +804,18 @@
                         <span style="font-weight: 600;">Exclude Game IDs (comma-separated)</span>
                         <input type="text" id="exclude-game-ids" placeholder="e.g., 570, 620, 440"
                                style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                </div>
+
+                <!-- Row 5: Multiplayer/Singleplayer Options -->
+                <div style="display: flex; gap: 15px; margin-top: 15px; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="require-multiplayer" style="width: 18px; height: 18px;">
+                        <span style="font-weight: 600;">Multiplayer Games Only</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="require-singleplayer" style="width: 18px; height: 18px;">
+                        <span style="font-weight: 600;">Single Player Games Only</span>
                     </label>
                 </div>
             </div>
@@ -912,6 +972,52 @@
             </div>
         </div>
 
+        <!-- Ignored Games Tab -->
+        <div id="ignored-tab" class="tab-content">
+            <h2>No-Play List</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">Games you don't want to play</p>
+            
+            <div style="background: var(--card-bg); padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid var(--card-border);">
+                <h3>Add a game to ignore</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; margin-top: 10px;">
+                    <input type="number" id="ignore-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                    <input type="text" id="ignore-game-name" placeholder="Game name" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                    <input type="text" id="ignore-reason" placeholder="Reason (optional)" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                    <button onclick="addIgnoredGame()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">Add</button>
+                </div>
+            </div>
+            
+            <div id="ignored-games-list" style="background: var(--card-bg); padding: 20px; border-radius: 10px; border: 1px solid var(--card-border);">
+                <div class="loading">Loading ignored games...</div>
+            </div>
+        </div>
+
+        <!-- Achievements Tab -->
+        <div id="achievements-tab" class="tab-content">
+            <h2>Achievements</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">Track your achievement hunting progress</p>
+            
+            <div style="background: var(--card-bg); padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid var(--card-border);">
+                <h3>Start a new achievement hunt</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 10px; margin-top: 10px;">
+                    <input type="number" id="hunt-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                    <input type="text" id="hunt-game-name" placeholder="Game name" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                    <select id="hunt-difficulty" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                        <option value="easy">Easy</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="hard">Hard</option>
+                        <option value="extreme">Extreme</option>
+                    </select>
+                    <input type="number" id="hunt-targets" placeholder="Target count" min="0" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                    <button onclick="startAchievementHunt()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">Start Hunt</button>
+                </div>
+            </div>
+            
+            <div id="achievements-list" style="background: var(--card-bg); padding: 20px; border-radius: 10px; border: 1px solid var(--card-border);">
+                <div class="loading">Loading achievements...</div>
+            </div>
+        </div>
+
         <!-- Settings Tab -->
         <div id="settings-tab" class="tab-content">
             <h2>⚙️ Account Settings</h2>
@@ -961,6 +1067,52 @@
             <div style="display:flex; gap:10px; margin-top:14px; justify-content:flex-end;">
                 <button id="copy-btn" onclick="copyShareText()" style="padding:8px 20px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">📋 Copy</button>
                 <button onclick="closeShareModal()" style="padding:8px 16px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer;">✕ Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Details Modal -->
+    <div id="game-details-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center; overflow-y:auto;">
+        <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:700px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
+            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:20px;">
+                <h3 id="game-details-name" style="margin:0; font-size:1.5em;">Game Name</h3>
+                <button onclick="closeGameDetailsModal()" style="padding:6px 12px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-size:1.2em;">✕</button>
+            </div>
+            <div id="game-details-content" style="display:grid; gap:15px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+                    <div>
+                        <small style="color:var(--text-secondary);">Playtime</small><br>
+                        <span id="game-details-playtime" style="font-size:1.1em; font-weight:600;">0 hours</span>
+                    </div>
+                    <div>
+                        <small style="color:var(--text-secondary);">Release Year</small><br>
+                        <span id="game-details-year" style="font-size:1.1em; font-weight:600;">—</span>
+                    </div>
+                </div>
+                <div>
+                    <small style="color:var(--text-secondary);">Tags</small><br>
+                    <div id="game-details-tags" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;"></div>
+                </div>
+                <div id="game-details-metacritic-section" style="display:none;">
+                    <small style="color:var(--text-secondary);">Metacritic Score</small><br>
+                    <span id="game-details-metacritic" style="font-size:1.1em; font-weight:600;">—</span>
+                </div>
+                <div id="game-details-protondb-section" style="display:none;">
+                    <small style="color:var(--text-secondary);">ProtonDB (Linux)</small><br>
+                    <span id="game-details-protondb" style="font-size:1.1em; font-weight:600;">—</span>
+                </div>
+                <div>
+                    <small style="color:var(--text-secondary);">Links & Pricing</small><br>
+                    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
+                        <a id="game-details-steam" href="#" target="_blank" style="padding:8px 16px; background:#000; color:white; text-decoration:none; border-radius:6px; font-size:0.9em; font-weight:600;">🔗 Steam Store</a>
+                        <a id="game-details-keyshop" href="#" target="_blank" style="padding:8px 16px; background:#1F1F1F; color:#FFD700; text-decoration:none; border-radius:6px; font-size:0.9em; font-weight:600;">💰 AllKeyShop</a>
+                        <a id="game-details-steamdb" href="#" target="_blank" style="padding:8px 16px; background:#213956; color:white; text-decoration:none; border-radius:6px; font-size:0.9em; font-weight:600;">📊 SteamDB</a>
+                    </div>
+                </div>
+                <div id="game-details-description" style="padding:15px; background:var(--list-hover); border-radius:8px; max-height:200px; overflow-y:auto; color:var(--text-secondary);"><em>Loading details...</em></div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px; justify-content:flex-end;">
+                <button onclick="closeGameDetailsModal()" style="padding:10px 20px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
             </div>
         </div>
     </div>
@@ -1022,6 +1174,71 @@
                 document.getElementById('status').textContent = '❌ Error loading data';
             }
         }
+
+        // ============ GAME DETAILS CACHING SYSTEM ============
+        const gameDetailsCache = new Map();
+        const detailsLoadingQueue = new Map();
+
+        /**
+         * Fetch and cache game details from API
+         * Returns immediately if cached, loads async otherwise
+         */
+        async function loadGameDetailsAsync(appId) {
+            // Return if already cached
+            if (gameDetailsCache.has(appId)) {
+                return gameDetailsCache.get(appId);
+            }
+            
+            // Return cached promise if already loading
+            if (detailsLoadingQueue.has(appId)) {
+                return detailsLoadingQueue.get(appId);
+            }
+            
+            // Start async fetch
+            const fetchPromise = fetch(`/api/game/${appId}/details`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data && !data.error) {
+                        gameDetailsCache.set(appId, data);
+                        detailsLoadingQueue.delete(appId);
+                        return data;
+                    } else {
+                        detailsLoadingQueue.delete(appId);
+                        return null;
+                    }
+                })
+                .catch(err => {
+                    console.error(`Failed to load details for ${appId}:`, err);
+                    detailsLoadingQueue.delete(appId);
+                    return null;
+                });
+            
+            detailsLoadingQueue.set(appId, fetchPromise);
+            return fetchPromise;
+        }
+
+        /**
+         * Get cached game details (synchronous, returns null if not cached)
+         */
+        function getGameDetailsFromCache(appId) {
+            return gameDetailsCache.get(appId) || null;
+        }
+
+        /**
+         * Clear game cache (useful for manual refresh)
+         */
+        function clearGameDetailsCache() {
+            gameDetailsCache.clear();
+            detailsLoadingQueue.clear();
+            console.log('Game details cache cleared');
+        }
+
+        /**
+         * Pre-load details for multiple games (batch async loading)
+         */
+        async function preloadGameDetails(appIds) {
+            return Promise.allSettled(appIds.map(id => loadGameDetailsAsync(id)));
+        }
         
         function switchTab(tabName, event) {
             // Update tab buttons
@@ -1035,16 +1252,20 @@
             // Reload data for the tab
             if (tabName === 'library') loadLibrary();
             if (tabName === 'favorites') loadFavorites();
-            if (tabName === 'stats') loadStats();
+            if (tabName === 'stats') {
+                loadStats();
+                loadStatsUsers();
+            }
             if (tabName === 'users') loadUsers();
             if (tabName === 'multiuser') {
                 loadUsersForMultiUser();
                 document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
             }
-            if (tabName === 'stats') loadStats();
             if (tabName === 'schedule') loadSchedule();
             if (tabName === 'playlists') loadPlaylists();
             if (tabName === 'backlog') loadBacklog();
+            if (tabName === 'ignored') loadIgnoredGames();
+            if (tabName === 'achievements') loadAchievements();
         }
         
         async function pickGame() {
@@ -1053,8 +1274,11 @@
             const minScore = document.getElementById('adv-min-score').value;
             const minYear = document.getElementById('adv-min-year').value;
             const maxYear = document.getElementById('adv-max-year').value;
+            const maxPrice = document.getElementById('adv-max-price').value;
             const excludeIds = document.getElementById('adv-exclude-ids').value.trim();
             const tagFilter = document.getElementById('tag-filter').value;
+            const multiplayerOnly = document.getElementById('adv-multiplayer').checked;
+            const singleplayerOnly = document.getElementById('adv-singleplayer').checked;
 
             showSpinner('Picking a game…');
             try {
@@ -1065,8 +1289,11 @@
                 if (minScore) body.min_metacritic = parseInt(minScore);
                 if (minYear) body.min_year = parseInt(minYear);
                 if (maxYear) body.max_year = parseInt(maxYear);
+                if (maxPrice) body.max_price = parseFloat(maxPrice);
                 if (excludeIds) body.exclude_game_ids = excludeIds;
                 if (tagFilter) body.tag = tagFilter;
+                if (multiplayerOnly) body.multiplayer_only = true;
+                if (singleplayerOnly) body.singleplayer_only = true;
 
                 const response = await fetch('/api/pick', {
                     method: 'POST',
@@ -1457,15 +1684,24 @@
                     data.games.forEach(game => {
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
                         html += `
-                            <div class="list-item" onclick="selectGame(${game.app_id})">
+                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${game.name.replace(/'/g, "\\'")}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                                 <div>
                                     ${favoriteIcon}<strong>${game.name}</strong>
                                 </div>
-                                <div>${game.playtime_hours}h</div>
+                                <div style="display:flex; gap:10px; align-items:center;">
+                                    <span>${game.playtime_hours}h</span>
+                                    <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
+                                        ${game.is_favorite ? '⭐' : '☆'}
+                                    </span>
+                                </div>
                             </div>
                         `;
                     });
                     listDiv.innerHTML = html;
+                    
+                    // Pre-load details for all games in background
+                    const appIds = data.games.map(g => g.app_id);
+                    preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
                 } else {
                     listDiv.innerHTML = '<div class="loading">No games found</div>';
                 }
@@ -1474,34 +1710,142 @@
             }
         }
         
-        async function searchLibrary() {
-            const searchText = document.getElementById('library-search').value;
+        // Helper function for debouncing user input
+        function createDebounce(func, delay) {
+            let timeoutId = null;
+            return function(...args) {
+                if (timeoutId) clearTimeout(timeoutId);
+                timeoutId = setTimeout(() => func(...args), delay);
+            };
+        }
+        
+        // Debounced search to prevent excessive API calls
+        const debouncedSearch = createDebounce(async (searchText) => {
+            if (!searchText || searchText.trim().length === 0) {
+                loadLibrary();
+                return;
+            }
+            
             const listDiv = document.getElementById('library-list');
             listDiv.innerHTML = '<div class="loading">Searching...</div>';
             
             try {
-                const response = await fetch(`/api/library?search=${encodeURIComponent(searchText)}`);
+                const response = await fetch(`/api/library?search=${encodeURIComponent(searchText.trim())}`);
                 const data = await response.json();
                 
                 if (data.games && data.games.length > 0) {
                     let html = '';
+                    const appIds = [];
                     data.games.forEach(game => {
+                        appIds.push(game.app_id);
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
                         html += `
-                            <div class="list-item" onclick="selectGame(${game.app_id})">
+                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${game.name.replace(/'/g, "\\'")}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                                 <div>
                                     ${favoriteIcon}<strong>${game.name}</strong>
                                 </div>
-                                <div>${game.playtime_hours}h</div>
+                                <div style="display:flex; gap:10px; align-items:center;">
+                                    <span>${game.playtime_hours}h</span>
+                                    <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
+                                        ${game.is_favorite ? '⭐' : '☆'}
+                                    </span>
+                                </div>
                             </div>
                         `;
                     });
                     listDiv.innerHTML = html;
+                    
+                    // Pre-load details for all search results in background
+                    preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
                 } else {
                     listDiv.innerHTML = '<div class="loading">No games found</div>';
                 }
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error searching library</div>';
+            }
+        }, 300);
+        
+        function searchLibraryDebounced() {
+            const searchText = document.getElementById('library-search').value;
+            debouncedSearch(searchText);
+        }
+
+        function showGameDetails(appId, gameName, playtimeHours, tags) {
+            const modal = document.getElementById('game-details-modal');
+            document.getElementById('game-details-name').textContent = gameName;
+            document.getElementById('game-details-playtime').textContent = `${playtimeHours} hours`;
+            
+            // Set up links
+            document.getElementById('game-details-steam').href = `https://store.steampowered.com/app/${appId}/`;
+            document.getElementById('game-details-keyshop').href = `https://www.allkeyshop.com/blog/catalogue/search/${encodeURIComponent(gameName)}/?results=50`;
+            document.getElementById('game-details-steamdb').href = `https://steamdb.info/app/${appId}/`;
+            
+            // Tags
+            const tagsDiv = document.getElementById('game-details-tags');
+            if (tags && tags.trim()) {
+                tagsDiv.innerHTML = tags.split(',').map(t => 
+                    `<span style="padding:4px 10px; background:var(--list-hover); border-radius:6px; font-size:0.85em;">${t.trim()}</span>`
+                ).join('');
+            } else {
+                tagsDiv.innerHTML = '<span style="color:var(--text-secondary);">No tags</span>';
+            }
+            
+            // Hide additional details sections initially
+            document.getElementById('game-details-metacritic-section').style.display = 'none';
+            document.getElementById('game-details-protondb-section').style.display = 'none';
+            
+            // Show loading state
+            document.getElementById('game-details-description').innerHTML = `<em>Loading details...</em>`;
+            
+            modal.style.display = 'flex';
+            
+            // Load details asynchronously and update modal when ready
+            loadGameDetailsAsync(appId).then(details => {
+                if (details && modal.style.display === 'flex') {
+                    // Update release year/date
+                    if (details.release_date) {
+                        const year = details.release_date.split(', ').pop().trim();
+                        document.getElementById('game-details-year').textContent = year || '—';
+                    }
+                    
+                    // Update description
+                    if (details.description) {
+                        document.getElementById('game-details-description').textContent = details.description;
+                    } else {
+                        document.getElementById('game-details-description').innerHTML = '<em style="color:var(--text-secondary);">No description available</em>';
+                    }
+                    
+                    // Show Metacritic score if available
+                    if (details.metacritic_score) {
+                        document.getElementById('game-details-metacritic-section').style.display = 'block';
+                        document.getElementById('game-details-metacritic').textContent = `${details.metacritic_score}/100`;
+                    }
+                    
+                    // Show ProtonDB rating if available
+                    if (details.protondb) {
+                        document.getElementById('game-details-protondb-section').style.display = 'block';
+                        document.getElementById('game-details-protondb').textContent = details.protondb;
+                    }
+                }
+            });
+        }
+
+        function closeGameDetailsModal() {
+            document.getElementById('game-details-modal').style.display = 'none';
+        }
+
+        async function toggleFavorite(appId) {
+            try {
+                const response = await fetch('/api/favorites/toggle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({app_id: appId})
+                });
+                if (response.ok) {
+                    loadLibrary();
+                }
+            } catch (error) {
+                console.error('Error toggling favorite:', error);
             }
         }
         
@@ -1557,6 +1901,42 @@
                 alert('Error removing favorite: ' + error.message);
             }
         }
+        
+        async function loadStatsUsers() {
+            const checkboxDiv = document.getElementById('comparison-user-checkboxes');
+            
+            try {
+                const response = await fetch('/api/users');
+                const data = await response.json();
+                
+                if (data.users && data.users.length > 1) {
+                    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">';
+                    data.users.forEach((user, index) => {
+                        // Always enable - let user compare themselves too
+                        html += `
+                            <label style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--card-bg); border-radius: 8px; cursor: pointer; border: 2px solid var(--card-border);" title="Select to compare">
+                                <input type="checkbox" class="compare-user-checkbox" value="${user.username}" style="width: 18px; height: 18px;">
+                                <span><strong>${user.username}</strong></span>
+                            </label>
+                        `;
+                    });
+                    html += '</div>';
+                    checkboxDiv.innerHTML = html;
+                    
+                    // Show compare buttons
+                    document.getElementById('compare-btn').style.display = 'inline-block';
+                    document.getElementById('clear-compare-btn').style.display = 'inline-block';
+                } else {
+                    checkboxDiv.innerHTML = '<p style="color: var(--text-secondary);">Need at least 2 users to compare</p>';
+                    document.getElementById('compare-btn').style.display = 'none';
+                    document.getElementById('clear-compare-btn').style.display = 'none';
+                }
+            } catch (error) {
+                checkboxDiv.innerHTML = '<div class="error">Error loading users: ' + error.message + '</div>';
+            }
+        }
+
+        // Debounce helper for search
         
         async function loadStats() {
             const statsDiv = document.getElementById('stats-content');
@@ -1619,53 +1999,315 @@
                 `;
                 statsDiv.innerHTML = html;
 
-                // Build Played vs Unplayed pie chart
-                new Chart(document.getElementById('pie-chart'), {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['Played', 'Unplayed'],
-                        datasets: [{
-                            data: [data.played_games, data.unplayed_games],
-                            backgroundColor: ['#667eea', '#e0e0e0'],
-                            borderWidth: 0,
-                        }],
-                    },
-                    options: {
-                        plugins: { legend: { position: 'bottom' } },
-                        cutout: '60%',
-                    },
-                });
+                // Defer chart rendering to next frame to avoid blocking UI
+                requestAnimationFrame(() => {
+                    // Build Played vs Unplayed pie chart
+                    if (document.getElementById('pie-chart')) {
+                        new Chart(document.getElementById('pie-chart'), {
+                            type: 'doughnut',
+                            data: {
+                                labels: ['Played', 'Unplayed'],
+                                datasets: [{
+                                    data: [data.played_games, data.unplayed_games],
+                                    backgroundColor: ['#667eea', '#e0e0e0'],
+                                    borderWidth: 0,
+                                }],
+                            },
+                            options: {
+                                plugins: { legend: { position: 'bottom' } },
+                                cutout: '60%',
+                                animation: { duration: 300 },
+                            },
+                        });
+                    }
 
-                // Build Top 10 bar chart
-                const MAX_CHART_LABEL_LENGTH = 18;
-                const barLabels = data.top_games.map(g =>
-                    g.name.length > MAX_CHART_LABEL_LENGTH
-                        ? g.name.slice(0, MAX_CHART_LABEL_LENGTH - 1) + '…'
-                        : g.name
-                );
-                const barData = data.top_games.map(g => g.playtime_hours);
-                new Chart(document.getElementById('bar-chart'), {
-                    type: 'bar',
-                    data: {
-                        labels: barLabels,
-                        datasets: [{
-                            label: 'Hours played',
-                            data: barData,
-                            backgroundColor: '#764ba2',
-                            borderRadius: 5,
-                        }],
-                    },
-                    options: {
-                        indexAxis: 'y',
-                        plugins: { legend: { display: false } },
-                        scales: { x: { beginAtZero: true } },
-                    },
+                    // Build Top 10 bar chart (deferred further to avoid simultaneous rendering)
+                    requestAnimationFrame(() => {
+                        if (document.getElementById('bar-chart')) {
+                            const MAX_CHART_LABEL_LENGTH = 18;
+                            const barLabels = data.top_games.map(g =>
+                                g.name.length > MAX_CHART_LABEL_LENGTH
+                                    ? g.name.slice(0, MAX_CHART_LABEL_LENGTH - 1) + '…'
+                                    : g.name
+                            );
+                            const barData = data.top_games.map(g => g.playtime_hours);
+                            new Chart(document.getElementById('bar-chart'), {
+                                type: 'bar',
+                                data: {
+                                    labels: barLabels,
+                                    datasets: [{
+                                        label: 'Hours played',
+                                        data: barData,
+                                        backgroundColor: '#764ba2',
+                                        borderRadius: 5,
+                                    }],
+                                },
+                                options: {
+                                    indexAxis: 'y',
+                                    plugins: { legend: { display: false } },
+                                    scales: { x: { beginAtZero: true } },
+                                    animation: { duration: 300 },
+                                },
+                            });
+                        }
+                    });
                 });
 
             } catch (error) {
                 statsDiv.innerHTML = '<div class="error">Error loading statistics</div>';
             }
         }
+
+        async function loadStatsComparison() {
+            const statsDiv = document.getElementById('stats-content');
+            
+            const selectedUsers = Array.from(document.querySelectorAll('.compare-user-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            if (selectedUsers.length < 2) {
+                alert('Please select at least 2 users to compare');
+                return;
+            }
+            
+            statsDiv.innerHTML = '<div class="loading">Loading comparison...</div>';
+            
+            try {
+                const response = await fetch(`/api/stats/compare?users=${selectedUsers.join(',')}`);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    statsDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load comparison'}</div>`;
+                    return;
+                }
+                
+                let html = `
+                    <!-- User stats cards -->
+                    <div style="margin-bottom: 30px;">
+                        <h3 style="margin-bottom: 15px;">📊 User Statistics</h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+                `;
+                
+                const colors = ['#667eea', '#764ba2', '#f39c12', '#e74c3c', '#27ae60'];
+                
+                data.users.forEach((user, idx) => {
+                    if (user.error) {
+                        html += `
+                            <div class="stat-card" style="background: #fff5f5; border: 2px solid #ffcccc;">
+                                <div class="stat-label">${user.username}</div>
+                                <div class="error" style="margin-top: 10px;">Error: ${user.error}</div>
+                            </div>
+                        `;
+                    } else {
+                        const color = colors[idx % colors.length];
+                        html += `
+                            <div class="stat-card" style="border-left: 4px solid ${color};">
+                                <div style="color: ${color}; font-weight: 700; margin-bottom: 15px; font-size: 1.1em;">${user.username}</div>
+                                <div style="display: grid; gap: 10px; font-size: 0.95em;">
+                                    <div><strong>Total Games:</strong> ${user.total_games}</div>
+                                    <div><strong>Played:</strong> ${user.played_games}</div>
+                                    <div><strong>Unplayed:</strong> ${user.unplayed_games} (${user.unplayed_percentage}%)</div>
+                                    <div><strong>Total Playtime:</strong> ${user.total_playtime} hrs</div>
+                                    <div><strong>Avg per Game:</strong> ${user.average_playtime} hrs</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+                
+                html += `</div></div>`;
+                
+                // Comparison metrics
+                if (data.comparison_metrics) {
+                    html += `
+                        <div style="margin-bottom: 30px;">
+                            <h3 style="margin-bottom: 15px;">📈 Comparison Metrics</h3>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #667eea;">
+                                    <div style="color: var(--text-secondary); font-size: 0.9em;">Most Games</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #667eea;">${data.comparison_metrics.most_games}</div>
+                                </div>
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #764ba2;">
+                                    <div style="color: var(--text-secondary); font-size: 0.9em;">Least Games</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #764ba2;">${data.comparison_metrics.least_games}</div>
+                                </div>
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #f39c12;">
+                                    <div style="color: var(--text-secondary); font-size: 0.9em;">Average Games</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #f39c12;">${data.comparison_metrics.avg_games}</div>
+                                </div>
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #27ae60;">
+                                    <div style="color: var(--text-secondary); font-size: 0.9em;">Total Unique Games</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #27ae60;">${data.comparison_metrics.total_unique_games}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                // Comparison charts
+                html += `
+                    <div class="charts-row">
+                        <div class="chart-card">
+                            <h3>📊 Games Count Comparison</h3>
+                            <canvas id="comparison-bar-chart" height="220"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h3>⏱️ Total Playtime Comparison</h3>
+                            <canvas id="comparison-playtime-chart" height="220"></canvas>
+                        </div>
+                    </div>
+                `;
+                
+                statsDiv.innerHTML = html;
+                
+                // Defer chart rendering to avoid blocking UI
+                requestAnimationFrame(() => {
+                    // Build comparison bar chart (games count)
+                    if (document.getElementById('comparison-bar-chart')) {
+                        const userNames = data.users.map(u => u.username);
+                        const totalGames = data.users.map(u => u.total_games || 0);
+                        const playedGames = data.users.map(u => u.played_games || 0);
+                        
+                        new Chart(document.getElementById('comparison-bar-chart'), {
+                            type: 'bar',
+                            data: {
+                                labels: userNames,
+                                datasets: [
+                                    {
+                                        label: 'Played',
+                                        data: playedGames,
+                                        backgroundColor: '#667eea',
+                                    },
+                                    {
+                                        label: 'Unplayed',
+                                        data: data.users.map(u => u.unplayed_games || 0),
+                                        backgroundColor: '#e0e0e0',
+                                    }
+                                ]
+                            },
+                            options: {
+                                indexAxis: 'y',
+                                plugins: { legend: { position: 'bottom' } },
+                                scales: { x: { stacked: true, beginAtZero: true } },
+                                animation: { duration: 300 },
+                            }
+                        });
+                    }
+                    
+                    // Build playtime comparison chart (deferred further)
+                    requestAnimationFrame(() => {
+                        if (document.getElementById('comparison-playtime-chart')) {
+                            const playtimes = data.users.map(u => u.total_playtime || 0);
+                            
+                            new Chart(document.getElementById('comparison-playtime-chart'), {
+                                type: 'bar',
+                                data: {
+                                    labels: data.users.map(u => u.username),
+                                    datasets: [{
+                                        label: 'Hours',
+                                        data: playtimes,
+                                        backgroundColor: colors.slice(0, data.users.length),
+                                        borderRadius: 5,
+                                    }]
+                                },
+                                options: {
+                                    indexAxis: 'y',
+                                    plugins: { legend: { display: false } },
+                                    scales: { x: { beginAtZero: true } },
+                                    animation: { duration: 300 },
+                                }
+                            });
+                        }
+                    });
+                });
+                
+            } catch (error) {
+                statsDiv.innerHTML = `<div class="error">Error loading comparison: ${error.message}</div>`;
+            }
+        }
+
+        // Add event listeners for stats controls
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load stats data and users on page load
+            if (document.getElementById('stats-tab')) {
+                loadStats();
+                loadStatsUsers();
+                
+                // Compare button
+                const compareBtn = document.getElementById('compare-btn');
+                if (compareBtn) {
+                    compareBtn.addEventListener('click', async function() {
+                        const selectedUsers = Array.from(document.querySelectorAll('.compare-user-checkbox:checked'))
+                            .map(cb => cb.value);
+                        
+                        if (selectedUsers.length < 2) {
+                            alert('Please select at least 2 users to compare');
+                            return;
+                        }
+                        
+                        document.getElementById('view-single-btn').style.background = 'transparent';
+                        document.getElementById('view-single-btn').style.color = 'var(--text-secondary)';
+                        document.getElementById('view-single-btn').style.border = '2px solid var(--text-secondary)';
+                        
+                        document.getElementById('view-compare-btn').style.background = '#667eea';
+                        document.getElementById('view-compare-btn').style.color = 'white';
+                        document.getElementById('view-compare-btn').style.border = '2px solid #667eea';
+                        
+                        await loadStatsComparison();
+                    });
+                }
+                
+                // Clear comparison button
+                const clearBtn = document.getElementById('clear-compare-btn');
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', function() {
+                        document.querySelectorAll('.compare-user-checkbox').forEach(cb => cb.checked = false);
+                        
+                        document.getElementById('view-single-btn').style.background = '#667eea';
+                        document.getElementById('view-single-btn').style.color = 'white';
+                        document.getElementById('view-single-btn').style.border = '2px solid #667eea';
+                        
+                        document.getElementById('view-compare-btn').style.background = 'transparent';
+                        document.getElementById('view-compare-btn').style.color = 'var(--text-secondary)';
+                        document.getElementById('view-compare-btn').style.border = '2px solid var(--text-secondary)';
+                        
+                        loadStats();
+                    });
+                }
+                
+                // View mode buttons
+                const singleBtn = document.getElementById('view-single-btn');
+                const compareBtn2 = document.getElementById('view-compare-btn');
+                
+                if (singleBtn) {
+                    singleBtn.addEventListener('click', function() {
+                        singleBtn.style.background = '#667eea';
+                        singleBtn.style.color = 'white';
+                        singleBtn.style.border = '2px solid #667eea';
+                        
+                        compareBtn2.style.background = 'transparent';
+                        compareBtn2.style.color = 'var(--text-secondary)';
+                        compareBtn2.style.border = '2px solid var(--text-secondary)';
+                        
+                        loadStats();
+                    });
+                }
+                
+                if (compareBtn2) {
+                    compareBtn2.addEventListener('click', async function() {
+                        const selectedUsers = Array.from(document.querySelectorAll('.compare-user-checkbox:checked'))
+                            .map(cb => cb.value);
+                        
+                        if (selectedUsers.length < 2) {
+                            alert('Please select at least 2 users to compare');
+                            return;
+                        }
+                        
+                        await loadStatsComparison();
+                    });
+                }
+            }
+        });
+
         
         // User Management Functions
         async function loadUsers() {
@@ -1675,6 +2317,11 @@
             try {
                 const response = await fetch('/api/users/all');
                 const data = await response.json();
+                
+                if (response.status === 403) {
+                    listDiv.innerHTML = '<div class="error">Admin access required to view user management.</div>';
+                    return;
+                }
                 
                 if (data.users && data.users.length > 0) {
                     let html = '<div style="display: grid; gap: 10px;">';
@@ -1826,21 +2473,22 @@
                 if (data.users && data.users.length > 0) {
                     let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">';
                     data.users.forEach(user => {
-                        const steamBadge = user.steam_id ? '🎮' : '⚠️';
-                        const tooltipText = user.steam_id ? 'Has Steam ID configured' : 'No Steam ID - add in Settings';
+                        const hasAnyId = !!(user.steam_id || user.epic_id || user.gog_id);
+                        const badge = hasAnyId ? '🎮' : '⚠️';
+                        const tooltipText = hasAnyId ? 'Has platform IDs configured' : 'No platform IDs - add in Settings';
                         
                         html += `
-                            <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: 8px; cursor: pointer; border: 2px solid ${user.steam_id ? '#667eea' : '#e0e0e0'};" title="${tooltipText}">
-                                <input type="checkbox" class="user-checkbox" value="${user.username}" ${!user.steam_id ? 'disabled' : ''} style="width: 18px; height: 18px;">
-                                <span><strong>${steamBadge} ${user.username}</strong></span>
+                            <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: 8px; cursor: pointer; border: 2px solid ${hasAnyId ? '#667eea' : '#e0e0e0'};" title="${tooltipText}">
+                                <input type="checkbox" class="user-checkbox" value="${user.username}" ${!hasAnyId ? 'disabled' : ''} style="width: 18px; height: 18px;">
+                                <span><strong>${badge} ${user.username}</strong></span>
                             </label>
                         `;
                     });
                     html += '</div>';
-                    html += '<p style="margin-top: 15px; color: var(--text-secondary); font-size: 0.9em;">💡 Tip: Users need to add their Steam ID in Settings to appear in multi-user game picker.</p>';
+                    html += '<p style="margin-top: 15px; color: var(--text-secondary); font-size: 0.9em;">💡 Tip: Users need at least one platform ID in Settings to appear in multi-user game picker.</p>';
                     checkboxDiv.innerHTML = html;
                 } else {
-                    checkboxDiv.innerHTML = '<div class="loading">No users with Steam IDs found. Users can add their Steam ID in Settings.</div>';
+                    checkboxDiv.innerHTML = '<div class="loading">No users with platform IDs found. Users can add their IDs in Settings.</div>';
                 }
             } catch (error) {
                 checkboxDiv.innerHTML = '<div class="error">Error loading users: ' + error.message + '</div>';
@@ -1867,11 +2515,14 @@
             const minMetacritic = document.getElementById('min-metacritic').value;
             const minReleaseYear = document.getElementById('min-release-year').value;
             const maxReleaseYear = document.getElementById('max-release-year').value;
+            const maxPrice = document.getElementById('max-game-price').value;
             const includeGenres = document.getElementById('include-genres').value;
             const excludeGenres = document.getElementById('exclude-genres').value;
             const includeTags = document.getElementById('include-tags').value;
             const excludeGameIds = document.getElementById('exclude-game-ids').value;
             const minAvgPlaytime = document.getElementById('min-avg-playtime').value;
+            const requireMultiplayer = document.getElementById('require-multiplayer').checked;
+            const requireSingleplayer = document.getElementById('require-singleplayer').checked;
             
             const resultDiv = document.getElementById('multiuser-result');
 
@@ -1891,11 +2542,14 @@
                 if (minMetacritic) body.min_metacritic = parseInt(minMetacritic);
                 if (minReleaseYear) body.min_release_year = parseInt(minReleaseYear);
                 if (maxReleaseYear) body.max_release_year = parseInt(maxReleaseYear);
+                if (maxPrice) body.max_price = parseFloat(maxPrice);
                 if (includeGenres) body.genres = includeGenres;
                 if (excludeGenres) body.exclude_genres = excludeGenres;
                 if (includeTags) body.tags = includeTags;
                 if (excludeGameIds) body.exclude_game_ids = excludeGameIds;
                 if (minAvgPlaytime) body.min_avg_playtime = parseInt(minAvgPlaytime) * 60; // Convert hours to minutes
+                if (requireMultiplayer) body.multiplayer_only = true;
+                if (requireSingleplayer) body.singleplayer_only = true;
                 
                 const response = await fetch('/api/multiuser/pick', {
                     method: 'POST',
@@ -2454,15 +3108,35 @@
                     list.innerHTML = '<div class="loading">No backlog entries. Set a game\'s status from the Pick a Game tab.</div>';
                     return;
                 }
+                
                 const statusColors = {want_to_play:'#667eea', playing:'#27ae60', completed:'#f39c12', dropped:'#e74c3c'};
-                list.innerHTML = games.map(g => {
-                    const color = statusColors[g.backlog_status] || '#888';
-                    const label = (g.backlog_status || '').replace(/_/g,' ');
-                    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--card-border);">
-                        <span>${g.name || g.game_id}</span>
-                        <span style="background:${color}; color:white; padding:3px 10px; border-radius:12px; font-size:0.82em; font-weight:600;">${label}</span>
-                    </div>`;
-                }).join('');
+                const BATCH_SIZE = 10; // Render 10 items at a time for backlog
+                let allHtml = '';
+                
+                const renderBatch = (startIdx) => {
+                    const endIdx = Math.min(startIdx + BATCH_SIZE, games.length);
+                    let batchHtml = '';
+                    
+                    for (let i = startIdx; i < endIdx; i++) {
+                        const g = games[i];
+                        const color = statusColors[g.backlog_status] || '#888';
+                        const label = (g.backlog_status || '').replace(/_/g,' ');
+                        batchHtml += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--card-border);">
+                            <span>${g.name || g.game_id}</span>
+                            <span style="background:${color}; color:white; padding:3px 10px; border-radius:12px; font-size:0.82em; font-weight:600;">${label}</span>
+                        </div>`;
+                    }
+                    
+                    allHtml += batchHtml;
+                    list.innerHTML = allHtml;
+                    
+                    // Schedule next batch
+                    if (endIdx < games.length) {
+                        requestAnimationFrame(() => renderBatch(endIdx));
+                    }
+                };
+                
+                renderBatch(0);
             } catch (e) {
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
             }
@@ -2522,10 +3196,12 @@
             if (!username || !password) {
                 errorDiv.textContent = 'Username and password required';
                 errorDiv.style.display = 'block';
+                console.warn('Login: Missing username or password');
                 return;
             }
             
             try {
+                console.log('Attempting login for user:', username);
                 const response = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -2533,17 +3209,21 @@
                 });
                 
                 const data = await response.json();
+                console.log('Login response:', response.status, data);
                 
                 if (!response.ok) {
                     errorDiv.textContent = data.error || 'Login failed';
                     errorDiv.style.display = 'block';
+                    console.error('Login failed:', data.error);
                     return;
                 }
                 
                 // Successful login - clear form and check auth status
+                console.log('Login successful');
                 document.getElementById('login-password').value = '';
-                checkAuthStatus();
+                await checkAuthStatus();
             } catch (error) {
+                console.error('Login error:', error);
                 errorDiv.textContent = 'Error: ' + error.message;
                 errorDiv.style.display = 'block';
             }
@@ -2576,6 +3256,7 @@
             }
             
             try {
+                console.log('Attempting registration for user:', username);
                 const response = await fetch('/api/auth/register', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -2583,20 +3264,25 @@
                 });
                 
                 const data = await response.json();
+                console.log('Register response:', response.status, data);
                 
                 if (!response.ok) {
                     errorDiv.textContent = data.error || 'Registration failed';
                     errorDiv.style.display = 'block';
+                    console.error('Registration failed:', data.error);
                     return;
                 }
                 
                 // Successful registration, switch to login form
+                console.log('Registration successful');
                 document.getElementById('register-username').value = '';
                 document.getElementById('register-password').value = '';
                 switchAuthForm(true);
                 document.getElementById('login-username').value = username;
                 document.getElementById('login-password').focus();
+                alert('✅ Registration successful! Please log in.');
             } catch (error) {
+                console.error('Registration error:', error);
                 errorDiv.textContent = 'Error: ' + error.message;
                 errorDiv.style.display = 'block';
             }
@@ -2670,6 +3356,196 @@
                 messageDiv.style.background = '#f8d7da';
                 messageDiv.style.color = '#721c24';
                 messageDiv.textContent = '❌ Error: ' + error.message;
+            }
+        }
+        
+        // ==============================================================================================
+        // Ignored Games Functions
+        // ==============================================================================================
+        
+        async function loadIgnoredGames() {
+            const listDiv = document.getElementById('ignored-games-list');
+            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch('/api/ignored-games');
+                const data = await response.json();
+                
+                if (data.ignored_games && data.ignored_games.length > 0) {
+                    let html = '';
+                    data.ignored_games.forEach(game => {
+                        html += `
+                            <div class="list-item" style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 15px; align-items: center; padding: 15px; background: var(--list-hover); border-radius: 8px; margin-bottom: 10px;">
+                                <div>
+                                    <strong>${game.game_name}</strong><br>
+                                    <small style="color: var(--text-secondary);">App ID: ${game.app_id}</small>
+                                </div>
+                                <div>
+                                    <small style="color: var(--text-secondary);">Reason:</small><br>
+                                    <span>${game.reason || '(none)'}</span>
+                                </div>
+                                <button onclick="removeIgnoredGame(${game.app_id})" style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em;">Remove</button>
+                            </div>
+                        `;
+                    });
+                    listDiv.innerHTML = html;
+                } else {
+                    listDiv.innerHTML = '<div style="padding: 20px; color: var(--text-secondary);">No ignored games yet. Add one above!</div>';
+                }
+            } catch (error) {
+                listDiv.innerHTML = '<div class="error">Error loading ignored games: ' + error.message + '</div>';
+            }
+        }
+        
+        async function addIgnoredGame() {
+            const appId = document.getElementById('ignore-app-id').value.trim();
+            const gameName = document.getElementById('ignore-game-name').value.trim();
+            const reason = document.getElementById('ignore-reason').value.trim();
+            
+            if (!appId || !gameName) {
+                alert('App ID and game name are required');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/ignored-games', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        app_id: parseInt(appId),
+                        game_name: gameName,
+                        reason: reason
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('ignore-app-id').value = '';
+                    document.getElementById('ignore-game-name').value = '';
+                    document.getElementById('ignore-reason').value = '';
+                    loadIgnoredGames();
+                } else {
+                    alert(data.error || 'Failed to add game');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function removeIgnoredGame(appId) {
+            if (!confirm('Remove this game from your no-play list?')) return;
+            
+            try {
+                const response = await fetch('/api/ignored-games', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        app_id: appId,
+                        game_name: '',
+                        reason: ''
+                    })
+                });
+                
+                if (response.ok) {
+                    loadIgnoredGames();
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        // ==============================================================================================
+        // Achievements Functions
+        // ==============================================================================================
+        
+        async function loadAchievements() {
+            const listDiv = document.getElementById('achievements-list');
+            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch('/api/achievements');
+                const data = await response.json();
+                
+                if (data.achievements && data.achievements.length > 0) {
+                    const achievements = data.achievements;
+                    const BATCH_SIZE = 5; // Render 5 items at a time
+                    let allHtml = '';
+                    
+                    const renderBatch = (startIdx) => {
+                        const endIdx = Math.min(startIdx + BATCH_SIZE, achievements.length);
+                        let batchHtml = '';
+                        
+                        for (let i = startIdx; i < endIdx; i++) {
+                            const game = achievements[i];
+                            const unlockedCount = (game.achievements || []).filter(a => a.unlocked).length;
+                            const totalCount = (game.achievements || []).length;
+                            
+                            batchHtml += `
+                                <div style="padding: 15px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; margin-bottom: 10px;">
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 10px;">
+                                        <div>
+                                            <strong>${game.game_name}</strong><br>
+                                            <small style="color: var(--text-secondary);">App ID: ${game.app_id}</small>
+                                        </div>
+                                        <div>
+                                            <small style="color: var(--text-secondary);">Progress:</small><br>
+                                            <div style="background: var(--list-hover); border-radius: 8px; height: 20px; overflow: hidden; margin-top: 5px;">
+                                                <div style="background: linear-gradient(90deg, #667eea, #764ba2); height: 100%; width: ${totalCount > 0 ? (unlockedCount / totalCount * 100) : 0}%; transition: width 0.3s;"></div>
+                                            </div>
+                                        </div>
+                                        <div style="text-align: center;">
+                                            <strong style="font-size: 1.2em; color: #667eea;">${unlockedCount}/${totalCount}</strong><br>
+                                            <small style="color: var(--text-secondary);">Unlocked</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;\n                        }\n                        \n                        allHtml += batchHtml;\n                        listDiv.innerHTML = allHtml;
+                        \n                        // Schedule next batch\n                        if (endIdx < achievements.length) {\n                            requestAnimationFrame(() => renderBatch(endIdx));\n                        }\n                    };\n                    \n                    renderBatch(0);
+                } else {
+                    listDiv.innerHTML = '<div style="padding: 20px; color: var(--text-secondary);">No achievement hunts yet. Start one above!</div>';
+                }
+            } catch (error) {
+                listDiv.innerHTML = '<div class="error">Error loading achievements: ' + error.message + '</div>';
+            }
+        }
+        
+        async function startAchievementHunt() {
+            const appId = document.getElementById('hunt-app-id').value.trim();
+            const gameName = document.getElementById('hunt-game-name').value.trim();
+            const difficulty = document.getElementById('hunt-difficulty').value;
+            const targets = document.getElementById('hunt-targets').value.trim();
+            
+            if (!appId || !gameName) {
+                alert('App ID and game name are required');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/achievement-hunt', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        app_id: parseInt(appId),
+                        game_name: gameName,
+                        difficulty: difficulty,
+                        target_achievements: targets ? parseInt(targets) : 0
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('hunt-app-id').value = '';
+                    document.getElementById('hunt-game-name').value = '';
+                    document.getElementById('hunt-targets').value = '';
+                    alert('Achievement hunt started!');
+                    loadAchievements();
+                } else {
+                    alert(data.error || 'Failed to start hunt');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
             }
         }
         

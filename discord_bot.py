@@ -318,6 +318,185 @@ class GAPIBot(discord.Client):
             embed.add_field(name="Total Unique Games", value=str(stats['total_unique_games']), inline=True)
             
             await interaction.response.send_message(embed=embed)
+        
+        @self.tree.command(name='ignore', description='Manage your ignore list')
+        @app_commands.describe(
+            action='add, list, or remove',
+            app_id='Steam app ID (for add/remove)',
+            game_name='Game name (for add)'
+        )
+        async def manage_ignore(
+            interaction: discord.Interaction,
+            action: str = 'list',
+            app_id: Optional[str] = None,
+            game_name: Optional[str] = None
+        ):
+            """Manage ignored games"""
+            import requests
+            
+            user_name = interaction.user.name
+            api_url = 'http://localhost:5000'
+            
+            try:
+                if action.lower() == 'add':
+                    if not app_id or not game_name:
+                        await interaction.response.send_message("❌ app_id and game_name required for add")
+                        return
+                    
+                    response = requests.post(
+                        f'{api_url}/api/ignored-games',
+                        json={
+                            'app_id': int(app_id),
+                            'game_name': game_name,
+                            'reason': f'Added via Discord by {interaction.user.name}'
+                        },
+                        headers={'Authorization': f'Bearer {user_name}'}
+                    )
+                    
+                    if response.status_code == 200:
+                        await interaction.response.send_message(f"✅ Added {game_name} to your ignore list")
+                    else:
+                        await interaction.response.send_message(f"❌ Failed to add game: {response.text}")
+                
+                elif action.lower() == 'list':
+                    response = requests.get(
+                        f'{api_url}/api/ignored-games',
+                        headers={'Authorization': f'Bearer {user_name}'}
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        games = data.get('ignored_games', [])
+                        
+                        if not games:
+                            await interaction.response.send_message("No games in your ignore list")
+                            return
+                        
+                        embed = discord.Embed(
+                            title="🚫 Your Ignore List",
+                            color=discord.Color.red()
+                        )
+                        
+                        for game in games[:25]:  # Discord has 25 field limit
+                            reason = game.get('reason', 'No reason')
+                            embed.add_field(
+                                name=f"{game['game_name']} (ID: {game['app_id']})",
+                                value=f"*{reason}*",
+                                inline=False
+                            )
+                        
+                        await interaction.response.send_message(embed=embed)
+                    else:
+                        await interaction.response.send_message("❌ Failed to load ignore list")
+                
+                elif action.lower() == 'remove':
+                    if not app_id:
+                        await interaction.response.send_message("❌ app_id required for remove")
+                        return
+                    
+                    response = requests.post(
+                        f'{api_url}/api/ignored-games',
+                        json={'app_id': int(app_id), 'game_name': '', 'reason': ''},
+                        headers={'Authorization': f'Bearer {user_name}'}
+                    )
+                    
+                    if response.status_code == 200:
+                        await interaction.response.send_message(f"✅ Removed game {app_id} from your ignore list")
+                    else:
+                        await interaction.response.send_message(f"❌ Failed to remove game")
+                else:
+                    await interaction.response.send_message("❌ Unknown action. Use: add, list, or remove")
+                    
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error: {str(e)}")
+        
+        @self.tree.command(name='hunt', description='Start or manage achievement hunts')
+        @app_commands.describe(
+            action='start or progress',
+            app_id='Steam app ID',
+            game_name='Game name (for start)',
+            difficulty='Difficulty: easy, medium, hard, extreme (for start)'
+        )
+        async def manage_hunt(
+            interaction: discord.Interaction,
+            action: str = 'progress',
+            app_id: Optional[str] = None,
+            game_name: Optional[str] = None,
+            difficulty: Optional[str] = 'medium'
+        ):
+            """Start or check achievement hunts"""
+            import requests
+            
+            user_name = interaction.user.name
+            api_url = 'http://localhost:5000'
+            
+            try:
+                if action.lower() == 'start':
+                    if not app_id or not game_name:
+                        await interaction.response.send_message("❌ app_id and game_name required for start")
+                        return
+                    
+                    response = requests.post(
+                        f'{api_url}/api/achievement-hunt',
+                        json={
+                            'app_id': int(app_id),
+                            'game_name': game_name,
+                            'difficulty': difficulty or 'medium'
+                        },
+                        headers={'Authorization': f'Bearer {user_name}'}
+                    )
+                    
+                    if response.status_code == 201:
+                        data = response.json()
+                        embed = discord.Embed(
+                            title=f"🏆 Started Achievement Hunt",
+                            description=f"Game: {game_name}",
+                            color=discord.Color.gold()
+                        )
+                        embed.add_field(name="Difficulty", value=difficulty or "medium", inline=True)
+                        embed.add_field(name="Hunt ID", value=str(data.get('hunt_id', 'N/A')), inline=True)
+                        await interaction.response.send_message(embed=embed)
+                    else:
+                        await interaction.response.send_message(f"❌ Failed to start hunt: {response.text}")
+                
+                elif action.lower() == 'progress':
+                    response = requests.get(
+                        f'{api_url}/api/achievements',
+                        headers={'Authorization': f'Bearer {user_name}'}
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        achievements = data.get('achievements', [])
+                        
+                        if not achievements:
+                            await interaction.response.send_message("No active achievement hunts")
+                            return
+                        
+                        embed = discord.Embed(
+                            title="🏆 Your Achievement Hunts",
+                            color=discord.Color.gold()
+                        )
+                        
+                        for game in achievements[:10]:  # Show top 10
+                            unlocked = sum(1 for a in game.get('achievements', []) if a.get('unlocked'))
+                            total = len(game.get('achievements', []))
+                            progress = f"{unlocked}/{total}" if total > 0 else "0/0"
+                            
+                            embed.add_field(
+                                name=game['game_name'],
+                                value=f"Progress: {progress}",
+                                inline=False
+                            )
+                        
+                        await interaction.response.send_message(embed=embed)
+                    else:
+                        await interaction.response.send_message("❌ Failed to load achievements")
+                else:
+                    await interaction.response.send_message("❌ Unknown action. Use: start or progress")
+                    
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error: {str(e)}")
     
     async def process_vote(self, channel):
         """Process voting results and announce the winning game."""

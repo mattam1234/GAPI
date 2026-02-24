@@ -12,10 +12,18 @@ import json
 import os
 import sys
 import hashlib
+import tempfile
+from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from functools import wraps
 import gapi
 import multiuser
+
+try:
+    import database
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -64,6 +72,17 @@ class UserManager:
                 with open(self.users_file, 'r') as f:
                     data = json.load(f)
                     self.users = data.get('users', {})
+                # Backfill roles for existing users
+                updated = False
+                has_admin = any(u.get('role') == 'admin' for u in self.users.values())
+                for username, user_data in self.users.items():
+                    if 'role' not in user_data:
+                        # If no admin exists, make first user admin
+                        user_data['role'] = 'admin' if not has_admin else 'user'
+                        has_admin = True
+                        updated = True
+                if updated:
+                    self.save_users()
             except (json.JSONDecodeError, IOError) as e:
                 gui_logger.error("Error loading users: %s", e)
                 self.users = {}
@@ -79,7 +98,7 @@ class UserManager:
         """Hash a password"""
         return hashlib.sha256(password.encode()).hexdigest()
     
-    def register(self, username: str, password: str, role: str = "None") -> Tuple[bool, str]:
+    def register(self, username: str, password: str, role: str = None) -> Tuple[bool, str]:
         """Register a new user"""
         if username in self.users:
             return False, "Username already exists"
@@ -237,6 +256,45 @@ def require_admin(f):
     return decorated_function
 
 
+def _build_auth_users_for_multi() -> List[Dict]:
+    """Build multi-user picker user list from authenticated users."""
+    users = user_manager.get_all_users()
+    formatted = []
+    for user in users:
+        formatted.append({
+            'name': user['username'],
+            'platforms': {
+                'steam': user.get('steam_id', ''),
+                'epic': user.get('epic_id', ''),
+                'gog': user.get('gog_id', '')
+            }
+        })
+    return formatted
+
+
+def _ensure_multi_picker() -> None:
+    """Ensure multi-user picker is initialized and synced with auth users."""
+    global multi_picker
+    users = _build_auth_users_for_multi()
+    base_config = load_base_config()
+    config = {
+        'steam_api_key': base_config.get('steam_api_key', ''),
+        'epic_enabled': any(u['platforms'].get('epic') for u in users),
+        'gog_enabled': any(u['platforms'].get('gog') for u in users)
+    }
+
+    with multi_picker_lock:
+        needs_rebuild = (
+            multi_picker is None or
+            multi_picker.config.get('steam_api_key') != config['steam_api_key'] or
+            multi_picker.config.get('epic_enabled') != config['epic_enabled'] or
+            multi_picker.config.get('gog_enabled') != config['gog_enabled']
+        )
+        if needs_rebuild:
+            multi_picker = multiuser.MultiUserPicker(config)
+        multi_picker.users = users
+
+
 def initialize_picker(config_path: str = 'config.json'):
     """Initialize the game picker"""
     global picker, multi_picker
@@ -360,19 +418,38 @@ def api_auth_login():
             'gog_id': user_ids.get('gog_id', '')
         }
         
-        # Initialize picker in background
+        # Initialize picker in background with proper GamePicker initialization
         def init_picker_async():
             try:
+                # Write temporary config to a file for GamePicker to load
+                temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_user_{username}_config.json')
+                
+                with open(temp_config_path, 'w') as f:
+                    json.dump(temp_config, f)
+                
                 with picker_lock:
                     global picker
-                    picker = gapi.GamePicker()
-                    picker.config = temp_config
+                    picker = gapi.GamePicker(config_path=temp_config_path)
                     picker.fetch_games()
+                    
+                    # Initialize multi-user picker with config
                     with multi_picker_lock:
                         global multi_picker
-                        multi_picker = multiuser.MultiUserPicker(temp_config)
+                        multi_picker = multiuser.MultiUserPicker(picker.config)
+                
+                # Clean up temp config after initialization
+                if os.path.exists(temp_config_path):
+                    os.remove(temp_config_path)
+                    
             except Exception as e:
                 gui_logger.error("Error initializing picker: %s", e)
+                # Clean up on error
+                temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_user_{username}_config.json')
+                if os.path.exists(temp_config_path):
+                    try:
+                        os.remove(temp_config_path)
+                    except:
+                        pass
         
         threading.Thread(target=init_picker_async, daemon=True).start()
     
@@ -421,6 +498,8 @@ def api_auth_update_ids():
     
     if user_ids.get('steam_id'):
         base_config = load_base_config()
+        
+        # Create temporary config for this user
         temp_config = {
             'steam_api_key': base_config.get('steam_api_key', ''),
             'steam_id': user_ids['steam_id'],
@@ -430,18 +509,37 @@ def api_auth_update_ids():
             'gog_id': user_ids.get('gog_id', '')
         }
         
+        # Write temp config to a file for GamePicker to load
+        temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_user_{username}_config.json')
+        
         def init_picker_async():
             try:
+                # Write temporary config
+                with open(temp_config_path, 'w') as f:
+                    json.dump(temp_config, f)
+                
                 with picker_lock:
                     global picker
-                    picker = gapi.GamePicker()
-                    picker.config = temp_config
+                    picker = gapi.GamePicker(config_path=temp_config_path)
                     picker.fetch_games()
+                    
+                    # Initialize multi-user picker with config
                     with multi_picker_lock:
                         global multi_picker
-                        multi_picker = multiuser.MultiUserPicker(temp_config)
+                        multi_picker = multiuser.MultiUserPicker(picker.config)
+                
+                # Clean up temp config after initialization
+                if os.path.exists(temp_config_path):
+                    os.remove(temp_config_path)
+                    
             except Exception as e:
                 gui_logger.error("Error initializing picker: %s", e)
+                # Clean up on error
+                if os.path.exists(temp_config_path):
+                    try:
+                        os.remove(temp_config_path)
+                    except:
+                        pass
         
         threading.Thread(target=init_picker_async, daemon=True).start()
     
@@ -463,12 +561,20 @@ def api_auth_get_ids():
 
 
 @app.route('/api/pick', methods=['POST'])
+@require_login
 def api_pick_game():
     """Pick a random game"""
-    global picker, current_game
+    global picker, current_game, current_user
 
+    # Ensure picker is initialized for logged-in user
     if not picker or not picker.games:
-        return jsonify({'error': 'No games loaded'}), 400
+        # Initialize with demo games if not loaded
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
+        if not picker.games:
+            picker.games = DEMO_GAMES
 
     data = request.json or {}
     filter_type = data.get('filter', 'all')
@@ -480,6 +586,21 @@ def api_pick_game():
     exclude_ids_raw = data.get('exclude_game_ids', '')
     exclude_game_ids = [s.strip() for s in exclude_ids_raw.split(',') if s.strip()] if exclude_ids_raw else None
     tag_filter = data.get('tag', '').strip() or None
+
+    # Get ignored games from database
+    with current_user_lock:
+        username = current_user
+    
+    if DB_AVAILABLE:
+        try:
+            ignored_games = database.get_ignored_games(database.SessionLocal(), username)
+            if ignored_games:
+                if exclude_game_ids:
+                    exclude_game_ids.extend(ignored_games)
+                else:
+                    exclude_game_ids = ignored_games
+        except Exception as e:
+            gui_logger.warning(f"Could not fetch ignored games: {e}")
 
     # Build shared advanced-filter kwargs
     adv = {
@@ -572,6 +693,7 @@ def api_pick_game():
 
 
 @app.route('/api/game/<int:app_id>/details')
+@require_login
 def api_game_details(app_id):
     """Get detailed game information"""
     global picker
@@ -618,12 +740,16 @@ def api_game_details(app_id):
 
 
 @app.route('/api/favorite/<int:app_id>', methods=['POST', 'DELETE'])
+@require_login
 def api_toggle_favorite(app_id):
     """Add or remove a game from favorites"""
     global picker
     
+    # Ensure picker is initialized for logged-in user
     if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+        with picker_lock:
+            picker = gapi.GamePicker()
+            picker.games = DEMO_GAMES
     
     with picker_lock:
         if request.method == 'POST':
@@ -635,12 +761,20 @@ def api_toggle_favorite(app_id):
 
 
 @app.route('/api/library')
+@require_login
 def api_library():
     """Get all games in library"""
     global picker
     
+    # Ensure picker is initialized for logged-in user
     if not picker or not picker.games:
-        return jsonify({'error': 'No games loaded'}), 400
+        # Initialize with demo games if not loaded
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
+        if not picker.games:
+            picker.games = DEMO_GAMES
     
     search = request.args.get('search', '').lower()
     
@@ -668,12 +802,16 @@ def api_library():
 
 
 @app.route('/api/favorites')
+@require_login
 def api_favorites():
     """Get all favorite games"""
     global picker
     
+    # Ensure picker is initialized for logged-in user
     if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+        with picker_lock:
+            picker = gapi.GamePicker()
+            picker.games = DEMO_GAMES
     
     with picker_lock:
         favorites = []
@@ -697,12 +835,20 @@ def api_favorites():
 
 
 @app.route('/api/stats')
+@require_login
 def api_stats():
     """Get library statistics"""
     global picker
     
+    # Ensure picker is initialized for logged-in user
     if not picker or not picker.games:
-        return jsonify({'error': 'No games loaded'}), 400
+        # Initialize with demo games if not loaded
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
+        if not picker.games:
+            picker.games = DEMO_GAMES
     
     with picker_lock:
         total_games = len(picker.games)
@@ -735,14 +881,405 @@ def api_stats():
         })
 
 
+@app.route('/api/stats/compare')
+@require_login
+def api_stats_compare():
+    """Compare statistics across multiple users"""
+    # Get list of usernames to compare
+    users_param = request.args.get('users', '')
+    if not users_param:
+        return jsonify({'error': 'No users specified'}), 400
+    
+    usernames = [u.strip() for u in users_param.split(',') if u.strip()]
+    if not usernames:
+        return jsonify({'error': 'Invalid users parameter'}), 400
+    
+    comparison_data = {
+        'users': [],
+        'comparison_metrics': {}
+    }
+    
+    try:
+        # Load base config
+        base_config = load_base_config()
+        
+        # Gather stats for each user
+        for username in usernames:
+            try:
+                # Get user's platform IDs
+                user_ids = user_manager.get_user_ids(username)
+                
+                # Create temporary config with user's IDs
+                user_config = {
+                    'steam_api_key': base_config.get('steam_api_key', ''),
+                    'steam_id': user_ids.get('steam_id', ''),
+                    'epic_enabled': user_ids.get('epic_id') != '',
+                    'epic_id': user_ids.get('epic_id', ''),
+                    'gog_enabled': user_ids.get('gog_id') != '',
+                    'gog_id': user_ids.get('gog_id', '')
+                }
+                
+                # Load user's games using GamePicker
+                try:
+                    # Write temporary config to a file for GamePicker to load
+                    temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_compare_{username}_config.json')
+                    with open(temp_config_path, 'w') as f:
+                        json.dump(user_config, f)
+                    
+                    # Create picker for this user
+                    user_picker = gapi.GamePicker(config_path=temp_config_path)
+                    user_picker.fetch_games()
+                    games = user_picker.games if user_picker.games else []
+                    
+                    # Clean up temp file
+                    try:
+                        os.remove(temp_config_path)
+                    except:
+                        pass
+                except Exception as e:
+                    gui_logger.warning(f"Failed to load games for user {username}: {e}")
+                    games = []
+                
+                # If no games loaded, use demo games for demo purposes
+                if not games:
+                    games = DEMO_GAMES
+                
+                # Calculate stats
+                total = len(games)
+                unplayed = len([g for g in games if g.get('playtime_forever', 0) == 0])
+                total_playtime = sum(g.get('playtime_forever', 0) for g in games) / 60
+                avg_playtime = total_playtime / total if total > 0 else 0
+                
+                # Top 5 games
+                top_games = sorted(
+                    games,
+                    key=lambda g: g.get('playtime_forever', 0),
+                    reverse=True
+                )[:5]
+                
+                user_stats = {
+                    'username': username,
+                    'total_games': total,
+                    'unplayed_games': unplayed,
+                    'played_games': total - unplayed,
+                    'unplayed_percentage': round(unplayed / total * 100, 1) if total > 0 else 0,
+                    'total_playtime': round(total_playtime, 1),
+                    'average_playtime': round(avg_playtime, 1),
+                    'top_games': [
+                        {
+                            'name': g.get('name', 'Unknown'),
+                            'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1)
+                        }
+                        for g in top_games
+                    ]
+                }
+                
+                comparison_data['users'].append(user_stats)
+                
+            except Exception as e:
+                gui_logger.warning(f"Error loading stats for user {username}: {e}")
+                # Still include user with error indicator
+                comparison_data['users'].append({
+                    'username': username,
+                    'error': str(e),
+                    'total_games': 0,
+                    'unplayed_games': 0,
+                    'played_games': 0
+                })
+        
+        # Calculate comparison metrics
+        if comparison_data['users']:
+            valid_users = [u for u in comparison_data['users'] if 'error' not in u]
+            
+            if valid_users:
+                total_games_list = [u['total_games'] for u in valid_users]
+                playtime_list = [u['total_playtime'] for u in valid_users]
+                
+                comparison_data['comparison_metrics'] = {
+                    'most_games': max(total_games_list) if total_games_list else 0,
+                    'least_games': min(total_games_list) if total_games_list else 0,
+                    'avg_games': round(sum(total_games_list) / len(total_games_list), 1) if total_games_list else 0,
+                    'most_playtime': max(playtime_list) if playtime_list else 0,
+                    'least_playtime': min(playtime_list) if playtime_list else 0,
+                    'avg_playtime': round(sum(playtime_list) / len(playtime_list), 1) if playtime_list else 0,
+                    'total_unique_games': len(set(
+                        g.get('app_id') for user in valid_users 
+                        for g in user.get('games', [])
+                    ))
+                }
+        
+        return jsonify(comparison_data), 200
+        
+    except Exception as e:
+        gui_logger.error(f"Error comparing stats: {e}")
+        return jsonify({'error': 'Failed to compare statistics'}), 500
+
+
 @app.route('/api/users')
 @require_login
 def api_users_list():
     """Get all registered users (for multi-user game picker)"""
     users = user_manager.get_all_users()
-    # Filter to only users with Steam IDs for game picking
-    users_with_games = [u for u in users if u['steam_id']]
+    # Filter to users with at least one platform ID
+    users_with_games = [
+        u for u in users
+        if u.get('steam_id') or u.get('epic_id') or u.get('gog_id')
+    ]
     return jsonify({'users': users_with_games})
+
+
+# ===========================================================================================
+# Ignored Games Endpoints
+# ===========================================================================================
+
+@app.route('/api/ignored-games')
+@require_login
+def api_get_ignored_games():
+    """Get current user's ignored games list"""
+    global current_user
+    
+    with current_user_lock:
+        username = current_user
+    
+    if not DB_AVAILABLE:
+        return jsonify({'ignored_games': []}), 200
+    
+    try:
+        db = database.SessionLocal()
+        user = database.get_user_by_username(db, username)
+        
+        if not user:
+            return jsonify({'ignored_games': []}), 200
+        
+        ignored = [
+            {
+                'app_id': ig.app_id,
+                'game_name': ig.game_name,
+                'reason': ig.reason,
+                'created_at': ig.created_at.isoformat() if ig.created_at else None
+            }
+            for ig in user.ignored_games
+        ]
+        
+        db.close()
+        return jsonify({'ignored_games': ignored}), 200
+    except Exception as e:
+        gui_logger.error(f"Error getting ignored games: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ignored-games', methods=['POST'])
+@require_login
+def api_toggle_ignored_game():
+    """Toggle game ignore status for current user"""
+    global current_user
+    
+    with current_user_lock:
+        username = current_user
+    
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    
+    data = request.json or {}
+    app_id = data.get('app_id')
+    game_name = data.get('game_name', '').strip() if isinstance(data.get('game_name'), str) else ''
+    reason = data.get('reason', '').strip() if isinstance(data.get('reason'), str) else ''
+    
+    if not app_id:
+        return jsonify({'error': 'app_id required'}), 400
+    
+    # Convert app_id to int
+    try:
+        app_id = int(app_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'app_id must be an integer'}), 400
+    
+    try:
+        db = database.SessionLocal()
+        
+        # Ensure user exists in database
+        user = database.get_user_by_username(db, username)
+        if not user:
+            user = database.create_or_update_user(db, username)
+        
+        success = database.toggle_ignore_game(db, username, app_id, game_name, reason)
+        db.close()
+        
+        if success:
+            return jsonify({'message': f'Game ignore status toggled'}), 200
+        else:
+            return jsonify({'error': 'Failed to toggle ignore'}), 400
+    except Exception as e:
+        gui_logger.error(f"Error toggling ignore game: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ===========================================================================================
+# Achievement Hunting Endpoints
+# ===========================================================================================
+
+@app.route('/api/achievements')
+@require_login
+def api_get_achievements():
+    """Get achievements for current user"""
+    global current_user
+    
+    with current_user_lock:
+        username = current_user
+    
+    if not DB_AVAILABLE:
+        return jsonify({'achievements': []}), 200
+    
+    try:
+        db = database.SessionLocal()
+        user = database.get_user_by_username(db, username)
+        
+        if not user:
+            return jsonify({'achievements': []}), 200
+        
+        # Group achievements by game
+        achievements_by_game = {}
+        for achievement in user.achievements:
+            if achievement.app_id not in achievements_by_game:
+                achievements_by_game[achievement.app_id] = {
+                    'app_id': achievement.app_id,
+                    'game_name': achievement.game_name,
+                    'achievements': []
+                }
+            
+            achievements_by_game[achievement.app_id]['achievements'].append({
+                'achievement_id': achievement.achievement_id,
+                'name': achievement.achievement_name,
+                'description': achievement.achievement_description,
+                'unlocked': achievement.unlocked,
+                'unlock_time': achievement.unlock_time.isoformat() if achievement.unlock_time else None,
+                'rarity': achievement.rarity
+            })
+        
+        db.close()
+        return jsonify({'achievements': list(achievements_by_game.values())}), 200
+    except Exception as e:
+        gui_logger.error(f"Error getting achievements: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/achievement-hunt', methods=['POST'])
+@require_login
+def api_start_achievement_hunt():
+    """Start tracking an achievement hunting session"""
+    global current_user
+    
+    with current_user_lock:
+        username = current_user
+    
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    
+    data = request.json or {}
+    app_id = data.get('app_id')
+    game_name = data.get('game_name', '').strip() if isinstance(data.get('game_name'), str) else ''
+    difficulty = data.get('difficulty', 'medium')  # easy, medium, hard, extreme
+    target_achievements = data.get('target_achievements', 0)
+    
+    if not app_id or not game_name:
+        return jsonify({'error': 'app_id and game_name required'}), 400
+    
+    # Convert app_id to int
+    try:
+        app_id = int(app_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'app_id must be an integer'}), 400
+    
+    try:
+        db = database.SessionLocal()
+        user = database.get_user_by_username(db, username)
+        
+        if not user:
+            user = database.create_or_update_user(db, username)
+        
+        hunt = database.AchievementHunt(
+            user_id=user.id,
+            app_id=app_id,
+            game_name=game_name,
+            difficulty=difficulty,
+            target_achievements=target_achievements
+        )
+        db.add(hunt)
+        db.commit()
+        
+        result = {
+            'hunt_id': hunt.id,
+            'app_id': hunt.app_id,
+            'game_name': hunt.game_name,
+            'difficulty': hunt.difficulty,
+            'target_achievements': hunt.target_achievements,
+            'unlocked_achievements': hunt.unlocked_achievements,
+            'progress_percent': hunt.progress_percent,
+            'status': hunt.status,
+            'started_at': hunt.started_at.isoformat()
+        }
+        
+        db.close()
+        return jsonify(result), 201
+    except Exception as e:
+        gui_logger.error(f"Error starting achievement hunt: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/achievement-hunt/<hunt_id>', methods=['PUT'])
+@require_login
+def api_update_achievement_hunt(hunt_id: str):
+    """Update achievement hunt progress"""
+    global current_user
+    
+    with current_user_lock:
+        username = current_user
+    
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    
+    data = request.json or {}
+    unlocked_achievements = data.get('unlocked_achievements')
+    status = data.get('status')
+    
+    try:
+        db = database.SessionLocal()
+        hunt = db.query(database.AchievementHunt).filter(database.AchievementHunt.id == hunt_id).first()
+        
+        if not hunt:
+            return jsonify({'error': 'Hunt not found'}), 404
+        
+        if unlocked_achievements is not None:
+            hunt.unlocked_achievements = unlocked_achievements
+            if hunt.target_achievements > 0:
+                hunt.progress_percent = (unlocked_achievements / hunt.target_achievements) * 100
+        
+        if status:
+            hunt.status = status
+            if status == 'completed':
+                hunt.completed_at = datetime.utcnow()
+        
+        hunt.updated_at = datetime.utcnow()
+        db.commit()
+        
+        result = {
+            'hunt_id': hunt.id,
+            'app_id': hunt.app_id,
+            'game_name': hunt.game_name,
+            'difficulty': hunt.difficulty,
+            'target_achievements': hunt.target_achievements,
+            'unlocked_achievements': hunt.unlocked_achievements,
+            'progress_percent': hunt.progress_percent,
+            'status': hunt.status,
+            'started_at': hunt.started_at.isoformat(),
+            'completed_at': hunt.completed_at.isoformat() if hunt.completed_at else None
+        }
+        
+        db.close()
+        return jsonify(result), 200
+    except Exception as e:
+        gui_logger.error(f"Error updating achievement hunt: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/users/all')
@@ -801,6 +1338,7 @@ def api_users_update_role():
 # ===========================================================================================
 
 @app.route('/api/users/legacy')
+@require_admin
 def api_users_list_legacy():
     """Get all users from multi-picker (legacy)"""
     global multi_picker
@@ -813,6 +1351,7 @@ def api_users_list_legacy():
 
 
 @app.route('/api/users/add', methods=['POST'])
+@require_admin
 def api_users_add():
     """Add a new user"""
     global multi_picker
@@ -857,6 +1396,7 @@ def api_users_add():
 
 
 @app.route('/api/users/update', methods=['POST'])
+@require_admin
 def api_users_update():
     """Update user information"""
     global multi_picker
@@ -884,6 +1424,7 @@ def api_users_update():
 
 
 @app.route('/api/users/remove', methods=['POST'])
+@require_admin
 def api_users_remove():
     """Remove a user"""
     global multi_picker
@@ -907,10 +1448,12 @@ def api_users_remove():
 
 
 @app.route('/api/multiuser/common')
+@require_login
 def api_multiuser_common():
     """Get common games for selected users"""
     global multi_picker
     
+    _ensure_multi_picker()
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
     
@@ -936,10 +1479,12 @@ def api_multiuser_common():
 
 
 @app.route('/api/multiuser/pick', methods=['POST'])
+@require_login
 def api_multiuser_pick():
     """Pick a common game for multiple users with optional filters"""
     global multi_picker
     
+    _ensure_multi_picker()
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
     
@@ -1010,10 +1555,12 @@ def api_multiuser_pick():
 
 
 @app.route('/api/multiuser/stats')
+@require_login
 def api_multiuser_stats():
     """Get multi-user library statistics"""
     global multi_picker
 
+    _ensure_multi_picker()
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
 
@@ -1030,6 +1577,7 @@ def api_multiuser_stats():
 # ---------------------------------------------------------------------------
 
 @app.route('/api/voting/create', methods=['POST'])
+@require_login
 def api_voting_create():
     """Create a new voting session from common games.
 
@@ -1041,6 +1589,7 @@ def api_voting_create():
     """
     global multi_picker
 
+    _ensure_multi_picker()
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
 
@@ -1074,6 +1623,7 @@ def api_voting_create():
 
 
 @app.route('/api/voting/<session_id>/vote', methods=['POST'])
+@require_login
 def api_voting_cast(session_id: str):
     """Cast a vote in an active voting session.
 
@@ -1083,6 +1633,7 @@ def api_voting_cast(session_id: str):
     """
     global multi_picker
 
+    _ensure_multi_picker()
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
 
@@ -1109,10 +1660,12 @@ def api_voting_cast(session_id: str):
 
 
 @app.route('/api/voting/<session_id>/status')
+@require_login
 def api_voting_status(session_id: str):
     """Get the current status and vote tallies for a voting session."""
     global multi_picker
 
+    _ensure_multi_picker()
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
 
@@ -1124,10 +1677,12 @@ def api_voting_status(session_id: str):
 
 
 @app.route('/api/voting/<session_id>/close', methods=['POST'])
+@require_login
 def api_voting_close(session_id: str):
     """Close a voting session and return the winner."""
     global multi_picker
 
+    _ensure_multi_picker()
     if not multi_picker:
         return jsonify({'error': 'Multi-user picker not initialized'}), 400
 
@@ -1162,19 +1717,29 @@ def api_voting_close(session_id: str):
 # -----------------------------------------------------------------------
 
 @app.route('/api/reviews', methods=['GET'])
+@require_login
 def api_get_reviews():
     """Return all personal game reviews."""
+    global picker
+    
     if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+        with picker_lock:
+            picker = gapi.GamePicker()
+            picker.games = DEMO_GAMES
     with picker_lock:
         return jsonify(picker.reviews)
 
 
 @app.route('/api/reviews/<game_id>', methods=['GET'])
+@require_login
 def api_get_review(game_id: str):
     """Return the review for a specific game."""
+    global picker
+    
     if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+        with picker_lock:
+            picker = gapi.GamePicker()
+            picker.games = DEMO_GAMES
     with picker_lock:
         review = picker.get_review(game_id)
     if review is None:
@@ -1183,13 +1748,18 @@ def api_get_review(game_id: str):
 
 
 @app.route('/api/reviews/<game_id>', methods=['POST', 'PUT'])
+@require_login
 def api_save_review(game_id: str):
     """Add or update a personal review for a game.
 
     Body JSON: {"rating": 1-10, "notes": "optional text"}
     """
+    global picker
+    
     if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+        with picker_lock:
+            picker = gapi.GamePicker()
+            picker.games = DEMO_GAMES
 
     data = request.json or {}
     rating = data.get('rating')
@@ -1213,10 +1783,15 @@ def api_save_review(game_id: str):
 
 
 @app.route('/api/reviews/<game_id>', methods=['DELETE'])
+@require_login
 def api_delete_review(game_id: str):
     """Delete the review for a game."""
+    global picker
+    
     if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+        with picker_lock:
+            picker = gapi.GamePicker()
+            picker.games = DEMO_GAMES
 
     with picker_lock:
         removed = picker.remove_review(game_id)
@@ -1232,10 +1807,19 @@ def api_delete_review(game_id: str):
 # -----------------------------------------------------------------------
 
 @app.route('/api/tags', methods=['GET'])
+@require_login
 def api_get_all_tags():
     """Return all unique tags and a mapping of game_id → tags."""
+    global picker
+    
+    # Ensure picker is initialized for logged-in user
     if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+        with picker_lock:
+            picker = gapi.GamePicker()
+            picker.games = DEMO_GAMES
+    if not picker.games:
+        picker.games = DEMO_GAMES
+        
     with picker_lock:
         return jsonify({'tags': picker.all_tags(), 'game_tags': picker.tags})
 
@@ -1288,10 +1872,20 @@ def api_remove_tag(game_id: str, tag: str):
 
 
 @app.route('/api/library/by-tag/<tag>', methods=['GET'])
+@require_login
 def api_library_by_tag(tag: str):
     """Return games that have a specific tag."""
+    global picker
+    
+    # Ensure picker is initialized for logged-in user
     if not picker or not picker.games:
-        return jsonify({'error': 'No games loaded'}), 400
+        # Initialize with demo games if not loaded
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
+        if not picker.games:
+            picker.games = DEMO_GAMES
 
     with picker_lock:
         games = picker.filter_by_tag(tag)
@@ -1524,7 +2118,7 @@ def api_delete_backlog_status(game_id: str):
 # ---------------------------------------------------------------------------
 
 @app.route('/api/achievements/<int:app_id>')
-def api_get_achievements(app_id: int):
+def api_get_steam_achievements(app_id: int):
     """Get achievement completion stats for a Steam game.
 
     Requires a valid Steam ID to be configured; returns 503 otherwise.

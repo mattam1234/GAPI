@@ -3,6 +3,10 @@ requests>=2.28.0
 colorama>=0.4.6
 flask>=2.0.0
 
+# Database support
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
 # Discord bot (requires Python 3.8+)
 discord.py>=2.3.0
 
