@@ -1241,15 +1241,27 @@
         }
         
         function switchTab(tabName, event) {
+            // Ensure we're working with the button element
+            const button = event.target.closest('.tab') || event.target;
+            
             // Update tab buttons
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-            event.target.classList.add('active');
+            button.classList.add('active');
             
             // Update tab content
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            document.getElementById(tabName + '-tab').classList.add('active');
+            const tabContent = document.getElementById(tabName + '-tab');
+            if (tabContent) {
+                tabContent.classList.add('active');
+            } else {
+                console.error('Tab content not found: ' + tabName + '-tab');
+                return;
+            }
             
             // Reload data for the tab
+            if (tabName === 'picker') {
+                // Picker tab - no special loading needed
+            }
             if (tabName === 'library') loadLibrary();
             if (tabName === 'favorites') loadFavorites();
             if (tabName === 'stats') {
@@ -1259,13 +1271,19 @@
             if (tabName === 'users') loadUsers();
             if (tabName === 'multiuser') {
                 loadUsersForMultiUser();
-                document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
+                const commonGamesList = document.getElementById('common-games-list');
+                if (commonGamesList) {
+                    commonGamesList.innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
+                }
             }
             if (tabName === 'schedule') loadSchedule();
             if (tabName === 'playlists') loadPlaylists();
             if (tabName === 'backlog') loadBacklog();
             if (tabName === 'ignored') loadIgnoredGames();
             if (tabName === 'achievements') loadAchievements();
+            if (tabName === 'settings') {
+                loadSettings();
+            }
         }
         
         async function pickGame() {
