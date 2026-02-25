@@ -6,12 +6,14 @@ A modern web GUI for randomly picking games from your Steam library.
 
 import logging
 import argparse
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, Response
 import threading
 import json
 import os
 import sys
+import csv
 import hashlib
+import io
 import tempfile
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
@@ -2139,6 +2141,317 @@ def api_get_steam_achievements(app_id: int):
     if stats is None:
         return jsonify({'error': 'Achievements unavailable for this game'}), 404
     return jsonify({'app_id': app_id, **stats})
+
+
+# ---------------------------------------------------------------------------
+# Friend Activity API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/friends')
+@require_login
+def api_get_friends():
+    """Return the current user's Steam friends and their recent activity.
+
+    Response JSON::
+
+        {
+          "friends": [
+            {
+              "steamid": "...",
+              "personaname": "...",
+              "avatarfull": "...",
+              "personastate": 1,
+              "current_game": "...",    // present if in-game
+              "current_gameid": "...",  // present if in-game
+              "recently_played": [      // up to 5 games
+                {"appid": 620, "name": "Portal 2",
+                 "playtime_2weeks": 60, "playtime_forever": 2400}
+              ]
+            }
+          ]
+        }
+
+    Returns 503 if Steam is not configured or the profile is private.
+    """
+    username = session.get('username')
+    user_ids = user_manager.get_user_ids(username)
+    steam_id = user_ids.get('steam_id', '')
+
+    if not steam_id or gapi.is_placeholder_value(steam_id):
+        return jsonify({'error': 'Steam ID not configured'}), 503
+
+    if not picker or not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
+        return jsonify({'error': 'Steam client not available'}), 503
+
+    steam_client: gapi.SteamAPIClient = picker.steam_client
+
+    # Fetch friend list
+    friends_raw = steam_client.get_friend_list(steam_id)
+    if not friends_raw:
+        return jsonify({'friends': []}), 200
+
+    friend_ids = [f['steamid'] for f in friends_raw]
+
+    # Fetch profile summaries (names, avatars, current game)
+    summaries = steam_client.get_player_summaries(friend_ids)
+    summary_map = {s['steamid']: s for s in summaries}
+
+    # Build response, fetching recently-played for online/in-game friends first
+    result = []
+    for fid in friend_ids:
+        summary = summary_map.get(fid, {})
+        entry: Dict = {
+            'steamid': fid,
+            'personaname': summary.get('personaname', fid),
+            'avatarfull': summary.get('avatarfull', ''),
+            'personastate': summary.get('personastate', 0),
+        }
+        if summary.get('gameextrainfo'):
+            entry['current_game'] = summary['gameextrainfo']
+        if summary.get('gameid'):
+            entry['current_gameid'] = summary['gameid']
+
+        # Fetch recently played (best-effort)
+        try:
+            recent = steam_client.get_recently_played(fid, count=5)
+            entry['recently_played'] = [
+                {
+                    'appid': g['appid'],
+                    'name': g.get('name', ''),
+                    'playtime_2weeks': g.get('playtime_2weeks', 0),
+                    'playtime_forever': g.get('playtime_forever', 0),
+                }
+                for g in recent
+            ]
+        except Exception:
+            entry['recently_played'] = []
+
+        result.append(entry)
+
+    # Sort: in-game first, then online, then offline
+    def _sort_key(f):
+        if f.get('current_game'):
+            return 0
+        state = f.get('personastate', 0)
+        return 1 if state > 0 else 2
+
+    result.sort(key=_sort_key)
+    return jsonify({'friends': result})
+
+
+# ---------------------------------------------------------------------------
+# Recommendations API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/recommendations')
+@require_login
+def api_get_recommendations():
+    """Return personalised game recommendations for the current user.
+
+    Uses ``GamePicker.get_recommendations()`` which scores unplayed / barely-played
+    games based on the user's genre affinity derived from their well-played games.
+
+    Query params:
+        count (int, default 10): Maximum number of recommendations to return.
+
+    Response JSON::
+
+        {
+          "recommendations": [
+            {
+              "appid": 620,
+              "name": "Portal 2",
+              "playtime_hours": 0.0,
+              "recommendation_score": 5.2,
+              "recommendation_reason": "Unplayed. Matches your Puzzle, Action preference",
+              ...
+            }
+          ]
+        }
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized. Please log in and ensure your Steam ID is set.'}), 400
+
+    try:
+        count = min(int(request.args.get('count', 10)), 50)
+    except (ValueError, TypeError):
+        count = 10
+
+    with picker_lock:
+        recs = picker.get_recommendations(count=count)
+
+    return jsonify({'recommendations': recs})
+
+
+# ---------------------------------------------------------------------------
+# HowLongToBeat API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/hltb/<path:game_name>')
+@require_login
+def api_get_hltb(game_name: str):
+    """Return HowLongToBeat completion-time estimates for *game_name*.
+
+    Uses the ``howlongtobeatpy`` library (optional).  If the library is not
+    installed or the HLTB website is unreachable, returns HTTP 503.
+
+    Response JSON::
+
+        {
+          "game_name": "Portal 2",
+          "similarity": 0.95,
+          "main": 8.5,
+          "main_extra": 13.0,
+          "completionist": 17.5
+        }
+
+    ``main``, ``main_extra``, and ``completionist`` are floats (hours) or
+    ``null`` when HLTB has no data for that category.
+    """
+    data = gapi.get_hltb_data(game_name)
+    if data is None:
+        return jsonify({'error': 'No HLTB data available for this game'}), 503
+    return jsonify(data)
+
+
+# ---------------------------------------------------------------------------
+# Duplicate Detection API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/duplicates')
+@require_login
+def api_get_duplicates():
+    """Return games that appear on more than one platform.
+
+    Each entry has ``name``, ``platforms`` (list), and ``games`` (list of
+    minimal game dicts).  Returns an empty list when only one platform is
+    configured or no duplicates are found.
+    """
+    global picker
+    if not picker or not picker.games:
+        return jsonify({'duplicates': []}), 200
+
+    with picker_lock:
+        raw = picker.find_duplicates()
+
+    # Slim down each game dict to what the UI needs
+    result = []
+    for group in raw:
+        slim_games = [
+            {
+                'app_id': g.get('appid'),
+                'game_id': g.get('game_id'),
+                'name': g.get('name', ''),
+                'platform': g.get('platform', 'steam'),
+                'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
+            }
+            for g in group['games']
+        ]
+        result.append({
+            'name': group['name'],
+            'platforms': group['platforms'],
+            'games': slim_games,
+        })
+
+    result.sort(key=lambda g: g['name'].lower())
+    return jsonify({'duplicates': result})
+
+
+# ---------------------------------------------------------------------------
+# Export Library / Favorites as CSV
+# ---------------------------------------------------------------------------
+
+def _make_csv_response(rows: List[Dict], fieldnames: List[str], filename: str) -> Response:
+    """Build a streaming CSV download response."""
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore',
+                            lineterminator='\n')
+    writer.writeheader()
+    writer.writerows(rows)
+    csv_bytes = output.getvalue().encode('utf-8')
+    return Response(
+        csv_bytes,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route('/api/export/library')
+@require_login
+def api_export_library():
+    """Download the full game library as a CSV file.
+
+    Columns: ``app_id``, ``name``, ``platform``, ``playtime_hours``,
+    ``is_favorite``, ``backlog_status``, ``tags``, ``review_rating``,
+    ``review_notes``.
+    """
+    global picker
+    if not picker or not picker.games:
+        return jsonify({'error': 'Library not loaded'}), 400
+
+    with picker_lock:
+        rows = []
+        for game in sorted(picker.games, key=lambda g: g.get('name', '').lower()):
+            app_id = game.get('appid') or game.get('id') or ''
+            game_id = game.get('game_id', f"steam:{app_id}")
+            review = picker.get_review(game_id) or {}
+            rows.append({
+                'app_id': app_id,
+                'name': game.get('name', ''),
+                'platform': game.get('platform', 'steam'),
+                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
+                'is_favorite': 'yes' if game_id in picker.favorites else 'no',
+                'backlog_status': picker.get_backlog_status(game_id) or '',
+                'tags': ','.join(picker.get_tags(game_id)),
+                'review_rating': review.get('rating', ''),
+                'review_notes': review.get('notes', ''),
+            })
+
+    return _make_csv_response(
+        rows,
+        ['app_id', 'name', 'platform', 'playtime_hours', 'is_favorite',
+         'backlog_status', 'tags', 'review_rating', 'review_notes'],
+        'gapi_library.csv',
+    )
+
+
+@app.route('/api/export/favorites')
+@require_login
+def api_export_favorites():
+    """Download the favorites list as a CSV file.
+
+    Columns: ``app_id``, ``name``, ``platform``, ``playtime_hours``,
+    ``tags``, ``review_rating``, ``review_notes``.
+    """
+    global picker
+    if not picker or not picker.games:
+        return jsonify({'error': 'Library not loaded'}), 400
+
+    with picker_lock:
+        rows = []
+        for game in picker.games:
+            game_id = game.get('game_id', '')
+            app_id = game.get('appid') or game.get('id') or ''
+            if game_id not in picker.favorites:
+                continue
+            review = picker.get_review(game_id) or {}
+            rows.append({
+                'app_id': app_id,
+                'name': game.get('name', ''),
+                'platform': game.get('platform', 'steam'),
+                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
+                'tags': ','.join(picker.get_tags(game_id)),
+                'review_rating': review.get('rating', ''),
+                'review_notes': review.get('notes', ''),
+            })
+        rows.sort(key=lambda r: r['name'].lower())
+
+    return _make_csv_response(
+        rows,
+        ['app_id', 'name', 'platform', 'playtime_hours', 'tags',
+         'review_rating', 'review_notes'],
+        'gapi_favorites.csv',
+    )
 
 
 def create_templates():

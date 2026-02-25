@@ -13,3 +13,6 @@ discord.py>=2.3.0
 # Optional platform integrations
 epicstore-api>=0.1.7
 galaxy.plugin.api>=0.74
+
+# Optional: HowLongToBeat completion-time data
+howlongtobeatpy>=1.0.0

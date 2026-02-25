@@ -4,6 +4,55 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.3.0] - 2026-02-25
+
+### Added
+- **Comprehensive Unit Test Suite** (`tests/test_gapi.py`)
+  - 106 tests covering all core `GamePicker` functionality
+  - Helper function tests: `minutes_to_hours`, `is_valid_steam_id`, `is_placeholder_value`,
+    `_parse_release_year`, `extract_game_id`, `_atomic_write_json`
+  - `GamePicker` state tests: favorites, tags, reviews, backlog, playlists
+  - `filter_games()` tests including genre/metacritic/release-year filters via cached details
+  - `pick_random_game()` tests including history-avoidance behaviour
+  - `VotingSession` tests: vote casting, eligibility, results tallying, expiry
+  - `get_recommendations()` tests with mock library and genre affinity
+  - Runnable with `python -m pytest tests/` or `python -m unittest discover tests/`
+- **Smart Recommendations** (`/api/recommendations` endpoint + 💡 For You tab)
+  - Scores every unplayed / barely-played game in the user's library
+  - Genre affinity built from the user's most-played games using cached Steam details
+  - Applies a recency penalty for games picked recently (history list)
+  - New `GamePicker.get_recommendations(count)` method in `gapi.py`
+  - `GET /api/recommendations?count=N` Flask endpoint (login required)
+  - **💡 For You** tab in the Web GUI with configurable result count (5 / 10 / 20)
+  - Each recommendation shows name, playtime, explanation, Steam link, favourite ☆, and quick-ignore 🚫
+- **HowLongToBeat Integration** (`/api/hltb/<game_name>` endpoint + game-details modal)
+  - Shows Main Story, Main + Extra, and Completionist completion times
+  - Optional dependency (`howlongtobeatpy>=1.0.0`); feature degrades gracefully if not installed
+  - New `gapi.get_hltb_data(game_name)` helper with in-process caching
+  - HLTB pills rendered in the game-details modal alongside Metacritic / ProtonDB
+- **Cross-Platform Duplicate Detection** (`/api/duplicates` endpoint + Library tab section)
+  - Detects games you own on more than one platform (Steam, Epic, GOG) by normalised name
+  - New `GamePicker.find_duplicates()` method in `gapi.py`
+  - Duplicate groups appear at the bottom of the Library tab, each showing platform badges and per-platform playtime
+- **Export Library / Favorites as CSV** (`/api/export/library` and `/api/export/favorites`)
+  - One-click "⬇️ Export CSV" buttons in the Library and Favorites tabs
+  - Exports: app_id, name, platform, playtime_hours, is_favorite, backlog_status, tags, review_rating, review_notes
+  - Favorites export: app_id, name, platform, playtime_hours, tags, review_rating, review_notes
+
+## [2.2.0] - 2026-02-25
+
+### Added
+- **Steam Friend Activity** (`/api/friends` endpoint + 👥 Friends tab in Web GUI)
+  - View all Steam friends with their online status (Online, Offline, Busy, Away…)
+  - See which friends are currently in-game, including the game name
+  - Per-friend recently-played list (last 2 weeks) with links to Steam store pages
+  - Sorted by activity: in-game friends first, then online, then offline
+  - New `SteamAPIClient.get_friend_list()`, `get_player_summaries()`, and
+    `get_recently_played()` methods in `gapi.py`
+- **Quick-Ignore button in Library view** (🚫 button on each game row)
+  - One-click to add any library game to the No-Play List without leaving the Library tab
+  - Available in both the full library view and the search results
+
 ## [2.1.0] - 2026-02-18
 
 ### Added

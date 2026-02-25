@@ -63,17 +63,18 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 
 #### Smart Features
 - [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
-- [ ] **Duplicate Detection** - Identify same games across platforms
+- [x] **Smart Recommendations** - Genre-affinity based recommendations from user's own library
+- [x] **Duplicate Detection** - Identify same games across platforms
 - [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
 - [x] **Achievement Tracking** - Display completion percentage
-- [ ] **Friend Activity** - See what friends are playing (Steam API)
+- [x] **Friend Activity** - See what friends are playing (Steam API)
 
 #### Social Features
 - [ ] **Discord Rich Presence** - Show currently picked game in Discord status
 - [x] **Game Night Scheduler** - Schedule game sessions with friends
 - [ ] **Voting System Improvements** - Multiple voting rounds, ranked choice
 - [x] **Game Reviews** - Add personal notes/reviews to games
-- [ ] **Share Picks** - Generate shareable links for game picks
+- [x] **Export game recommendations** - Export library / favorites as CSV
 
 ### 📅 Long-term Vision (v3.0.0+)
 
@@ -108,7 +109,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ## 🔧 Technical Improvements
 
 ### Code Quality
-- [ ] Comprehensive test suite (unit, integration, e2e)
+- [x] Comprehensive test suite (unit, integration, e2e)
 - [ ] CI/CD pipeline with automated testing
 - [ ] Code coverage reports (target: 80%+)
 - [ ] Type checking with mypy
@@ -138,8 +139,8 @@ Features requested by the community will be tracked here. Please open an issue w
 - Dark mode support
 - Game statistics visualization (charts, graphs)
 - Import game lists from other services
-- Export game recommendations
-- Integration with HowLongToBeat API
+- ~~Export game recommendations~~ ✅ (see v2.3.0)
+- ~~Integration with HowLongToBeat API~~ ✅ (see v2.3.0)
 - VR game filtering
 - Controller support for desktop app
 - Voice commands for game picking

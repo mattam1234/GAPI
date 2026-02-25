@@ -556,6 +556,8 @@
             <button class="tab" onclick="switchTab('backlog', event)">📚 Backlog</button>
             <button class="tab" onclick="switchTab('ignored', event)">No-Play List</button>
             <button class="tab" onclick="switchTab('achievements', event)">Achievements</button>
+            <button class="tab" onclick="switchTab('friends', event)">👥 Friends</button>
+            <button class="tab" onclick="switchTab('recommendations', event)">💡 For You</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
         </div>        
         <!-- Picker Tab -->
@@ -646,15 +648,27 @@
 
         <!-- Library Tab -->
         <div id="library-tab" class="tab-content">
-            <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibraryDebounced()">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+                <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibraryDebounced()" style="margin-bottom:0; flex:1; min-width:180px;">
+                <a href="/api/export/library" download="gapi_library.csv" style="padding:9px 18px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.9em; white-space:nowrap;">⬇️ Export CSV</a>
+            </div>
             <div id="library-list" class="list-container">
                 <div class="loading">Loading library...</div>
+            </div>
+            <!-- Cross-platform duplicates section -->
+            <div id="duplicates-section" style="margin-top:24px; display:none;">
+                <h3 style="margin-bottom:12px;">🔁 Cross-Platform Duplicates</h3>
+                <p style="color:var(--text-secondary); font-size:0.9em; margin-bottom:12px;">Games you own on more than one platform.</p>
+                <div id="duplicates-list"></div>
             </div>
         </div>
 
         <!-- Favorites Tab -->
         <div id="favorites-tab" class="tab-content">
-            <h2>⭐ Your Favorite Games</h2>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="margin:0;">⭐ Your Favorite Games</h2>
+                <a href="/api/export/favorites" download="gapi_favorites.csv" style="padding:9px 18px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.9em; white-space:nowrap;">⬇️ Export CSV</a>
+            </div>
             <div id="favorites-list" class="list-container">
                 <div class="loading">Loading favorites...</div>
             </div>
@@ -1018,6 +1032,36 @@
             </div>
         </div>
 
+        <!-- Friends Activity Tab -->
+        <div id="friends-tab" class="tab-content">
+            <h2>👥 Steam Friends Activity</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">See what your Steam friends are playing recently. Requires a public Steam profile and a configured Steam ID.</p>
+            <button onclick="loadFriends()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:20px;">🔄 Refresh</button>
+            <div id="friends-list">
+                <div class="loading">Click Refresh to load your friends…</div>
+            </div>
+        </div>
+
+        <!-- Recommendations Tab -->
+        <div id="recommendations-tab" class="tab-content">
+            <h2>💡 Recommended For You</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Games from your library that you haven't played (or barely played), ranked by how well they match the genres of your most-played games.
+            </p>
+            <div style="display:flex; gap:12px; align-items:center; margin-bottom:20px; flex-wrap:wrap;">
+                <label style="font-weight:600; color:var(--text-primary);">Number of suggestions:</label>
+                <select id="rec-count" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                </select>
+                <button onclick="loadRecommendations()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
+            </div>
+            <div id="recommendations-list">
+                <div class="loading">Click Refresh to generate recommendations…</div>
+            </div>
+        </div>
+
         <!-- Settings Tab -->
         <div id="settings-tab" class="tab-content">
             <h2>⚙️ Account Settings</h2>
@@ -1100,6 +1144,10 @@
                 <div id="game-details-protondb-section" style="display:none;">
                     <small style="color:var(--text-secondary);">ProtonDB (Linux)</small><br>
                     <span id="game-details-protondb" style="font-size:1.1em; font-weight:600;">—</span>
+                </div>
+                <div id="game-details-hltb-section" style="display:none;">
+                    <small style="color:var(--text-secondary);">⏱️ How Long to Beat</small><br>
+                    <div id="game-details-hltb" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px;"></div>
                 </div>
                 <div>
                     <small style="color:var(--text-secondary);">Links & Pricing</small><br>
@@ -1284,6 +1332,8 @@
             if (tabName === 'backlog') loadBacklog();
             if (tabName === 'ignored') loadIgnoredGames();
             if (tabName === 'achievements') loadAchievements();
+            if (tabName === 'friends') loadFriends();
+            if (tabName === 'recommendations') loadRecommendations();
             if (tabName === 'settings') {
                 loadSettings();
             }
@@ -1714,6 +1764,7 @@
                                     <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
+                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
                                 </div>
                             </div>
                         `;
@@ -1729,6 +1780,42 @@
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading library</div>';
             }
+
+            // Load cross-platform duplicates section
+            loadDuplicates();
+        }
+
+        async function loadDuplicates() {
+            try {
+                const resp = await fetch('/api/duplicates');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const section = document.getElementById('duplicates-section');
+                const listDiv = document.getElementById('duplicates-list');
+                if (!data.duplicates || data.duplicates.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+                section.style.display = 'block';
+                let html = '';
+                data.duplicates.forEach(group => {
+                    const platformBadges = group.platforms.map(p =>
+                        `<span style="padding:2px 8px; border-radius:10px; font-size:0.8em; background:var(--list-hover); margin-right:4px;">${p}</span>`
+                    ).join('');
+                    const gameRows = group.games.map(g =>
+                        `<div style="padding:6px 0; font-size:0.9em; color:var(--text-secondary);">&nbsp;&nbsp;• ${g.platform}: ${g.playtime_hours}h played</div>`
+                    ).join('');
+                    html += `
+                        <div style="padding:12px; background:var(--list-hover); border-radius:10px; margin-bottom:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                                <strong>${group.name}</strong>
+                                <span>${platformBadges}</span>
+                            </div>
+                            ${gameRows}
+                        </div>`;
+                });
+                listDiv.innerHTML = html;
+            } catch (_) {}
         }
         
         // Helper function for debouncing user input
@@ -1770,6 +1857,7 @@
                                     <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
+                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
                                 </div>
                             </div>
                         `;
@@ -1814,6 +1902,7 @@
             // Hide additional details sections initially
             document.getElementById('game-details-metacritic-section').style.display = 'none';
             document.getElementById('game-details-protondb-section').style.display = 'none';
+            document.getElementById('game-details-hltb-section').style.display = 'none';
             
             // Show loading state
             document.getElementById('game-details-description').innerHTML = `<em>Loading details...</em>`;
@@ -1849,6 +1938,22 @@
                     }
                 }
             });
+
+            // Fetch HLTB data asynchronously (best-effort, non-blocking)
+            fetch(`/api/hltb/${encodeURIComponent(gameName)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(hltb => {
+                    if (!hltb || modal.style.display !== 'flex') return;
+                    const pills = [];
+                    if (hltb.main != null)          pills.push(`<span style="padding:4px 10px; background:var(--list-hover); border-radius:6px; font-size:0.85em;">🎯 Main: ${hltb.main}h</span>`);
+                    if (hltb.main_extra != null)     pills.push(`<span style="padding:4px 10px; background:var(--list-hover); border-radius:6px; font-size:0.85em;">➕ Main+Extra: ${hltb.main_extra}h</span>`);
+                    if (hltb.completionist != null)  pills.push(`<span style="padding:4px 10px; background:var(--list-hover); border-radius:6px; font-size:0.85em;">🏆 Completionist: ${hltb.completionist}h</span>`);
+                    if (pills.length) {
+                        document.getElementById('game-details-hltb-section').style.display = 'block';
+                        document.getElementById('game-details-hltb').innerHTML = pills.join('');
+                    }
+                })
+                .catch(() => {});  // silently ignore network errors
         }
 
         function closeGameDetailsModal() {
@@ -3571,6 +3676,135 @@
         
         // Initialize auth status on page load
         document.addEventListener('DOMContentLoaded', checkAuthStatus);
+
+        // ==============================================================================================
+        // Friends Activity Functions
+        // ==============================================================================================
+
+        const PERSONA_STATE = ['Offline', 'Online', 'Busy', 'Away', 'Snooze', 'Looking to trade', 'Looking to play'];
+
+        async function loadFriends() {
+            const listDiv = document.getElementById('friends-list');
+            listDiv.innerHTML = '<div class="loading">Loading friends…</div>';
+            try {
+                const response = await fetch('/api/friends');
+                if (response.status === 503) {
+                    const data = await response.json();
+                    listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Steam not configured. Add your Steam ID in ⚙️ Settings.'}</div>`;
+                    return;
+                }
+                const data = await response.json();
+                if (!data.friends || data.friends.length === 0) {
+                    listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No friends found, or your friend list is private.</div>';
+                    return;
+                }
+                let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${data.friends.length} friend${data.friends.length !== 1 ? 's' : ''}</p>`;
+                data.friends.forEach(friend => {
+                    const stateLabel = PERSONA_STATE[friend.personastate] || 'Offline';
+                    const stateColor = friend.personastate > 0 ? '#27ae60' : '#7f8c8d';
+                    const avatar = friend.avatarfull
+                        ? `<img src="${friend.avatarfull}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;margin-right:12px;" loading="lazy">`
+                        : `<span style="width:40px;height:40px;border-radius:6px;background:var(--card-border);display:inline-block;margin-right:12px;"></span>`;
+                    const inGame = friend.current_game
+                        ? `<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#1b2838;color:#c7d5e0;font-size:0.8em;">🎮 ${friend.current_game}</span>`
+                        : '';
+                    let recentHtml = '';
+                    if (friend.recently_played && friend.recently_played.length > 0) {
+                        recentHtml = '<div style="margin-top:8px; font-size:0.85em; color:var(--text-secondary);">'
+                            + '<span style="font-weight:600;">Recently played: </span>'
+                            + friend.recently_played.map(g => {
+                                const hrs = (g.playtime_2weeks / 60).toFixed(1);
+                                return `<a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" style="color:var(--tab-active-color); text-decoration:none;">${g.name}</a> (${hrs}h this week)`;
+                            }).join(', ')
+                            + '</div>';
+                    }
+                    html += `
+                        <div class="list-item" style="display:flex; align-items:flex-start; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:10px; cursor:default;">
+                            ${avatar}
+                            <div style="flex:1;">
+                                <div>
+                                    <strong>${friend.personaname}</strong>
+                                    <span style="margin-left:8px; font-size:0.82em; color:${stateColor}; font-weight:600;">${stateLabel}</span>
+                                    ${inGame}
+                                </div>
+                                ${recentHtml}
+                            </div>
+                        </div>`;
+                });
+                listDiv.innerHTML = html;
+            } catch (error) {
+                listDiv.innerHTML = `<div class="error">Error loading friends: ${error.message}</div>`;
+            }
+        }
+
+        async function quickIgnoreGame(appId, gameName) {
+            if (!confirm(`Add "${gameName}" to your No-Play List?`)) return;
+            try {
+                const response = await fetch('/api/ignored-games', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({app_id: appId, game_name: gameName, reason: ''})
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    alert(`"${gameName}" added to No-Play List.`);
+                } else {
+                    alert(data.error || 'Failed to ignore game');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // ==============================================================================================
+        // Recommendations Functions
+        // ==============================================================================================
+
+        async function loadRecommendations() {
+            const listDiv = document.getElementById('recommendations-list');
+            const count = document.getElementById('rec-count').value;
+            listDiv.innerHTML = '<div class="loading">Generating recommendations…</div>';
+            try {
+                const response = await fetch(`/api/recommendations?count=${count}`);
+                const data = await response.json();
+                if (response.status === 400) {
+                    listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Not initialized. Add your Steam ID in ⚙️ Settings.'}</div>`;
+                    return;
+                }
+                const recs = data.recommendations || [];
+                if (recs.length === 0) {
+                    listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No recommendations yet. Play some games and come back!</div>';
+                    return;
+                }
+                let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${recs.length} recommendation${recs.length !== 1 ? 's' : ''}</p>`;
+                recs.forEach((game, idx) => {
+                    const safeName = game.name.replace(/'/g, "\\'");
+                    const scoreStars = '⭐'.repeat(Math.min(Math.round(game.recommendation_score), 5));
+                    html += `
+                        <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:10px;"
+                             onclick="showGameDetails(${game.appid}, '${safeName}', ${game.playtime_hours || 0}, '')">
+                            <div style="flex:1;">
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <span style="background:linear-gradient(135deg,#667eea,#764ba2); color:white; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9em; flex-shrink:0;">${idx + 1}</span>
+                                    <strong>${game.name}</strong>
+                                    <span style="font-size:0.85em; color:var(--text-secondary);">${game.playtime_hours > 0 ? game.playtime_hours + 'h played' : 'Never played'}</span>
+                                </div>
+                                <div style="margin-top:6px; font-size:0.85em; color:var(--text-secondary); padding-left:38px;">
+                                    💡 ${game.recommendation_reason || 'Unplayed game'}
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
+                                <a href="https://store.steampowered.com/app/${game.appid}/" target="_blank" onclick="event.stopPropagation()" style="font-size:0.8em; color:var(--tab-active-color); text-decoration:none;">Steam →</a>
+                                <span onclick="event.stopPropagation(); toggleFavorite(${game.appid})" style="cursor:pointer; font-size:1.1em;" title="Add to favorites">☆</span>
+                                <span onclick="event.stopPropagation(); quickIgnoreGame(${game.appid}, '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Ignore">🚫</span>
+                            </div>
+                        </div>`;
+                });
+                listDiv.innerHTML = html;
+            } catch (error) {
+                listDiv.innerHTML = `<div class="error">Error loading recommendations: ${error.message}</div>`;
+            }
+        }
     </script>
 </body>
 </html>

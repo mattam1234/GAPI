@@ -169,6 +169,54 @@ def is_valid_steam_id(steam_id: str) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# HowLongToBeat integration
+# ---------------------------------------------------------------------------
+
+_HLTB_CACHE: Dict[str, Optional[Dict]] = {}
+
+
+def get_hltb_data(game_name: str) -> Optional[Dict]:
+    """Fetch HowLongToBeat completion times for *game_name*.
+
+    Returns a dict with keys ``main``, ``main_extra``, and ``completionist``
+    (each a float representing hours, or ``None`` if not available), plus
+    ``game_name`` (the best-matching title on HLTB) and ``similarity`` (float
+    0-1).  Returns ``None`` if the library is not installed, the query
+    produces no results, or any network error occurs.
+
+    Results are cached in-process so repeated calls for the same name are
+    cheap.
+    """
+    _log = logging.getLogger('gapi.hltb')
+    key = game_name.strip().lower()
+    if key in _HLTB_CACHE:
+        return _HLTB_CACHE[key]
+
+    try:
+        from howlongtobeatpy import HowLongToBeat  # optional dependency
+        results = HowLongToBeat().search(game_name)
+        if not results:
+            _HLTB_CACHE[key] = None
+            return None
+        best = max(results, key=lambda r: r.similarity)
+        data: Dict = {
+            'game_name': best.game_name,
+            'similarity': round(best.similarity, 3),
+            'main': best.main_story,
+            'main_extra': best.main_extra,
+            'completionist': best.completionist,
+        }
+        _HLTB_CACHE[key] = data
+        return data
+    except ImportError:
+        _log.debug("howlongtobeatpy not installed; HLTB data unavailable.")
+    except Exception as e:
+        _log.debug("HLTB lookup failed for '%s': %s", game_name, e)
+    _HLTB_CACHE[key] = None
+    return None
+
+
 class GamePlatformClient(ABC):
     """Abstract base class for game platform API clients"""
     
@@ -338,6 +386,78 @@ class SteamAPIClient(GamePlatformClient):
         except requests.RequestException as e:
             self._log.debug("Achievement fetch failed for app %s: %s", app_id, e)
         return None
+
+    def get_friend_list(self, steam_id: str) -> List[Dict]:
+        """Return the friend list for *steam_id*.
+
+        Each entry is a dict with at least ``steamid`` and ``friend_since``
+        keys (epoch timestamp).  Returns an empty list on error or if the
+        profile is private.
+        """
+        url = f"{self.BASE_URL}/ISteamUser/GetFriendList/v0001/"
+        params = {
+            'key': self.api_key,
+            'steamid': steam_id,
+            'relationship': 'friend',
+            'format': 'json',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            return data.get('friendslist', {}).get('friends', [])
+        except requests.RequestException as e:
+            self._log.debug("Friend list fetch failed for %s: %s", steam_id, e)
+        return []
+
+    def get_player_summaries(self, steam_ids: List[str]) -> List[Dict]:
+        """Return basic profile info for up to 100 Steam IDs.
+
+        Each entry contains ``steamid``, ``personaname``, ``avatarfull``,
+        ``personastate`` (0=offline…6), ``gameextrainfo`` (current game name,
+        if any) and ``gameid`` (current game app id, if any).
+        """
+        if not steam_ids:
+            return []
+        # Steam API accepts up to 100 IDs per request
+        chunk = steam_ids[:100]
+        url = f"{self.BASE_URL}/ISteamUser/GetPlayerSummaries/v0002/"
+        params = {
+            'key': self.api_key,
+            'steamids': ','.join(chunk),
+            'format': 'json',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get('response', {}).get('players', [])
+        except requests.RequestException as e:
+            self._log.debug("Player summaries fetch failed: %s", e)
+        return []
+
+    def get_recently_played(self, steam_id: str, count: int = 10) -> List[Dict]:
+        """Return recently played games for *steam_id*.
+
+        Each entry has ``appid``, ``name``, ``playtime_2weeks`` (minutes),
+        and ``playtime_forever`` (minutes).
+        """
+        url = f"{self.BASE_URL}/IPlayerService/GetRecentlyPlayedGames/v0001/"
+        params = {
+            'key': self.api_key,
+            'steamid': steam_id,
+            'count': count,
+            'format': 'json',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get('response', {}).get('games', [])
+        except requests.RequestException as e:
+            self._log.debug("Recently played fetch failed for %s: %s", steam_id, e)
+        return []
 
 
 class EpicAPIClient(GamePlatformClient):
@@ -916,6 +1036,179 @@ class GamePicker:
                 entry['backlog_status'] = id_to_status[gid]
                 result.append(entry)
         return result
+
+    def get_recommendations(self, count: int = 10) -> List[Dict]:
+        """Recommend games from the user's library based on playtime and genre patterns.
+
+        The algorithm:
+        1. Builds a *genre affinity score* from well-played games (> WELL_PLAYED threshold)
+           using cached Steam details (no new API calls).
+        2. Scores every unplayed / barely-played game by how closely its genres match
+           the affinity profile.
+        3. Applies a small penalty for games picked recently (history).
+        4. Returns the top *count* candidates sorted by score, with a human-readable
+           ``recommendation_reason`` field.
+
+        If no genre data is cached the algorithm falls back to returning unplayed games
+        sorted by total community playtime (playtime_forever field is absent for
+        unplayed games, so they rank equally and a shuffle provides variety).
+
+        Args:
+            count: Maximum number of recommendations to return.
+
+        Returns:
+            List of game dicts enriched with ``recommendation_score`` (float) and
+            ``recommendation_reason`` (str) fields.
+        """
+        if not self.games:
+            return []
+
+        # ------------------------------------------------------------------
+        # Step 1: build genre affinity from well-played games
+        # ------------------------------------------------------------------
+        genre_weights: Dict[str, float] = {}
+        for game in self.games:
+            playtime = game.get('playtime_forever', 0)
+            if playtime < self.WELL_PLAYED_THRESHOLD_MINUTES:
+                continue
+            app_id = extract_game_id(game)
+            platform = game.get('platform', 'steam')
+            client = self.clients.get(platform)
+            if app_id is None or client is None:
+                continue
+            try:
+                cache_key = int(app_id)
+            except (ValueError, TypeError):
+                cache_key = app_id  # type: ignore[assignment]
+            details = client.details_cache.get(cache_key)
+            if not details:
+                continue
+            hours = minutes_to_hours(playtime)
+            for genre_entry in details.get('genres', []):
+                g = genre_entry.get('description', '').lower()
+                if g:
+                    genre_weights[g] = genre_weights.get(g, 0.0) + hours
+
+        # ------------------------------------------------------------------
+        # Step 2: candidates = unplayed or barely-played games
+        # ------------------------------------------------------------------
+        candidates = [
+            g for g in self.games
+            if g.get('playtime_forever', 0) <= self.BARELY_PLAYED_THRESHOLD_MINUTES
+        ]
+        if not candidates:
+            candidates = list(self.games)
+
+        recent_ids: set = set(self.history[-min(len(self.history), 10):])
+
+        # ------------------------------------------------------------------
+        # Step 3: score each candidate
+        # ------------------------------------------------------------------
+        scored: List[Dict] = []
+        for game in candidates:
+            score = 0.0
+            reasons: List[str] = []
+
+            playtime = game.get('playtime_forever', 0)
+            game_id_str = game.get('game_id', '')
+
+            # Base score: unplayed > barely-played
+            if playtime == 0:
+                score += 3.0
+                reasons.append('Unplayed')
+            else:
+                score += 1.5
+                reasons.append(f'Barely played ({minutes_to_hours(playtime):.1f}h)')
+
+            # History penalty
+            if game_id_str in recent_ids:
+                score -= 2.0
+
+            # Genre affinity boost
+            if genre_weights:
+                app_id = extract_game_id(game)
+                platform = game.get('platform', 'steam')
+                client = self.clients.get(platform)
+                if app_id is not None and client is not None:
+                    try:
+                        cache_key = int(app_id)
+                    except (ValueError, TypeError):
+                        cache_key = app_id  # type: ignore[assignment]
+                    details = client.details_cache.get(cache_key)
+                    if details:
+                        matched_genres: List[str] = []
+                        for genre_entry in details.get('genres', []):
+                            g = genre_entry.get('description', '').lower()
+                            if g in genre_weights:
+                                boost = min(genre_weights[g] / 20.0, 2.0)
+                                score += boost
+                                matched_genres.append(genre_entry['description'])
+                        if matched_genres:
+                            reasons.append(
+                                'Matches your ' + ', '.join(matched_genres[:2]) + ' preference'
+                            )
+
+            scored.append({
+                'game': game,
+                'score': score,
+                'reasons': reasons,
+            })
+
+        scored.sort(key=lambda x: x['score'], reverse=True)
+
+        # ------------------------------------------------------------------
+        # Step 4: build return list
+        # ------------------------------------------------------------------
+        result: List[Dict] = []
+        for item in scored[:count]:
+            entry = dict(item['game'])
+            entry['recommendation_score'] = round(item['score'], 2)
+            entry['recommendation_reason'] = '. '.join(item['reasons'][:2])
+            entry['playtime_hours'] = minutes_to_hours(entry.get('playtime_forever', 0))
+            result.append(entry)
+        return result
+
+    # ------------------------------------------------------------------
+    # Duplicate detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalise_game_name(name: str) -> str:
+        """Lowercase, strip punctuation/articles for fuzzy name matching."""
+        name = name.lower()
+        name = re.sub(r"[^a-z0-9\s]", "", name)
+        name = re.sub(r"\b(the|a|an)\b", "", name)
+        return re.sub(r"\s+", " ", name).strip()
+
+    def find_duplicates(self) -> List[Dict]:
+        """Return groups of games that appear on more than one platform.
+
+        Each entry in the returned list represents a group::
+
+            {
+              "name": "Portal 2",          # display name (from first seen)
+              "platforms": ["steam", "epic"],
+              "games": [ {...}, {...} ]     # original game dicts
+            }
+
+        Matching is done by normalised name (case-insensitive, ignoring
+        punctuation and leading articles).  Only groups with ≥ 2 entries
+        (i.e. genuinely duplicated across platforms) are returned.
+        """
+        buckets: Dict[str, Dict] = {}
+        for game in self.games:
+            platform = game.get('platform', 'steam')
+            name = game.get('name', '')
+            if not name:
+                continue
+            key = self._normalise_game_name(name)
+            if key not in buckets:
+                buckets[key] = {'name': name, 'platforms': [], 'games': []}
+            if platform not in buckets[key]['platforms']:
+                buckets[key]['platforms'].append(platform)
+            buckets[key]['games'].append(game)
+
+        return [v for v in buckets.values() if len(v['platforms']) > 1]
 
     def load_history(self):
         """Load game picking history (supports both old int and new composite ID formats)"""
