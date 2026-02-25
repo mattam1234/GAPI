@@ -6,6 +6,7 @@
     <title>GAPI - Game Picker</title>
     <!-- Chart.js for statistics visualizations -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Toastr removed (use built-in showMessage fallback instead) -->
     <style>
         /* ── CSS Custom Properties (light + dark theme) ───────────────── */
         :root {
@@ -483,7 +484,7 @@
             
             <!-- Login Form -->
             <div id="login-form-div">
-                <form id="login-form" onsubmit="handleLogin(); return false;">
+                <form id="login-form">
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
                         <input type="text" id="login-username" placeholder="Enter username" required autocomplete="username"
@@ -497,12 +498,12 @@
                     <div id="login-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
                     <button type="submit" style="width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1em;">Login</button>
                 </form>
-                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Don't have an account? <a href="#" onclick="switchAuthForm(false); return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Register</a></p>
+                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Don't have an account? <a href="javascript:void(0)" id="show-register-link" onclick="try{ switchAuthForm(false); }catch(e){ console.error('switchAuthForm error (register):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Register</a></p>
             </div>
             
             <!-- Register Form -->
             <div id="register-form-div" style="display: none;">
-                <form id="register-form" onsubmit="handleRegister(); return false;">
+                <form id="register-form">
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
                         <input type="text" id="register-username" placeholder="Choose username (min 3 chars)" required minlength="3" autocomplete="username"
@@ -516,7 +517,7 @@
                     <div id="register-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
                     <button type="submit" style="width: 100%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1em;">Register</button>
                 </form>
-                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Already have an account? <a href="#" onclick="switchAuthForm(true); return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Login</a></p>
+                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Already have an account? <a href="javascript:void(0)" id="show-login-link" onclick="try{ switchAuthForm(true); }catch(e){ console.error('switchAuthForm error (login):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Login</a></p>
             </div>
         </div>
     </div>
@@ -1166,6 +1167,16 @@
     </div>
 
     <script>
+        // Debug: surface runtime errors to alert/console for easier diagnosis
+        window.addEventListener('error', function (ev) {
+            try { console.error('Runtime error caught:', ev && ev.error ? ev.error : ev.message); } catch(e){}
+            try { alert('JS runtime error: ' + (ev && ev.message ? ev.message : 'unknown')); } catch(e){}
+        });
+        window.addEventListener('unhandledrejection', function (ev) {
+            try { console.error('Unhandled promise rejection:', ev.reason); } catch(e){}
+            try { alert('Unhandled promise rejection: ' + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason))); } catch(e){}
+        });
+
         let currentGame = null;
         let activeVoteSession = null;
         let voteTimerInterval = null;
@@ -3309,8 +3320,11 @@
             document.getElementById('login-error').style.display = 'none';
             document.getElementById('register-error').style.display = 'none';
         }
+        // Ensure inline onclick handlers can call this even if script is evaluated in a module/closure
+        try { window.switchAuthForm = switchAuthForm; } catch (e) { /* ignore in non-browser tests */ }
         
-        async function handleLogin() {
+        async function handleLogin(event) {
+            if (event && event.preventDefault) event.preventDefault();
             const username = document.getElementById('login-username').value.trim();
             const password = document.getElementById('login-password').value.trim();
             const errorDiv = document.getElementById('login-error');
@@ -3340,21 +3354,25 @@
                     errorDiv.textContent = data.error || 'Login failed';
                     errorDiv.style.display = 'block';
                     console.error('Login failed:', data.error);
+                    toastr.error(data.error || 'Login failed');
                     return;
                 }
                 
                 // Successful login - clear form and check auth status
                 console.log('Login successful');
                 document.getElementById('login-password').value = '';
+                toastr.success('Login successful');
                 await checkAuthStatus();
             } catch (error) {
                 console.error('Login error:', error);
                 errorDiv.textContent = 'Error: ' + error.message;
                 errorDiv.style.display = 'block';
+                toastr.error('Server error: ' + error.message);
             }
         }
         
-        async function handleRegister() {
+        async function handleRegister(event) {
+            if (event && event.preventDefault) event.preventDefault();
             const username = document.getElementById('register-username').value.trim();
             const password = document.getElementById('register-password').value.trim();
             const errorDiv = document.getElementById('register-error');
@@ -3395,6 +3413,7 @@
                     errorDiv.textContent = data.error || 'Registration failed';
                     errorDiv.style.display = 'block';
                     console.error('Registration failed:', data.error);
+                    toastr.error(data.error || 'Registration failed');
                     return;
                 }
                 
@@ -3405,11 +3424,12 @@
                 switchAuthForm(true);
                 document.getElementById('login-username').value = username;
                 document.getElementById('login-password').focus();
-                alert('✅ Registration successful! Please log in.');
+                toastr.success('✅ Registration successful! Please log in.');
             } catch (error) {
                 console.error('Registration error:', error);
                 errorDiv.textContent = 'Error: ' + error.message;
                 errorDiv.style.display = 'block';
+                toastr.error('Server error: ' + error.message);
             }
         }
         
@@ -3422,9 +3442,10 @@
                 await fetch('/api/auth/logout', {method: 'POST'});
                 document.getElementById('login-username').value = '';
                 document.getElementById('login-password').value = '';
+                toastr.success('Logged out');
                 checkAuthStatus();
             } catch (error) {
-                alert('Error logging out: ' + error.message);
+                toastr.error('Error logging out: ' + error.message);
             }
         }
         
@@ -3467,6 +3488,7 @@
                     messageDiv.style.background = '#d4edda';
                     messageDiv.style.color = '#155724';
                     messageDiv.textContent = '✅ Settings saved! Games are loading...';
+                    toastr.success('Settings saved — games are loading');
                     setTimeout(() => {
                         messageDiv.style.display = 'none';
                         updateStatus();
@@ -3475,12 +3497,14 @@
                     messageDiv.style.background = '#f8d7da';
                     messageDiv.style.color = '#721c24';
                     messageDiv.textContent = '❌ ' + (data.error || 'Failed to save settings');
+                    toastr.error(data.error || 'Failed to save settings');
                 }
             } catch (error) {
                 messageDiv.style.display = 'block';
                 messageDiv.style.background = '#f8d7da';
                 messageDiv.style.color = '#721c24';
                 messageDiv.textContent = '❌ Error: ' + error.message;
+                toastr.error('Error saving settings: ' + error.message);
             }
         }
         
@@ -3625,8 +3649,19 @@
                                         </div>
                                     </div>
                                 </div>
-                            `;\n                        }\n                        \n                        allHtml += batchHtml;\n                        listDiv.innerHTML = allHtml;
-                        \n                        // Schedule next batch\n                        if (endIdx < achievements.length) {\n                            requestAnimationFrame(() => renderBatch(endIdx));\n                        }\n                    };\n                    \n                    renderBatch(0);
+                            `;
+                        }
+
+                        allHtml += batchHtml;
+                        listDiv.innerHTML = allHtml;
+
+                        // Schedule next batch
+                        if (endIdx < achievements.length) {
+                            requestAnimationFrame(() => renderBatch(endIdx));
+                        }
+                    };
+
+                    renderBatch(0);
                 } else {
                     listDiv.innerHTML = '<div style="padding: 20px; color: var(--text-secondary);">No achievement hunts yet. Start one above!</div>';
                 }
@@ -3675,7 +3710,65 @@
         }
         
         // Initialize auth status on page load
-        document.addEventListener('DOMContentLoaded', checkAuthStatus);
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAuthStatus();
+
+            const loginForm = document.getElementById('login-form');
+            if (loginForm) loginForm.addEventListener('submit', handleLogin);
+
+            const registerForm = document.getElementById('register-form');
+            if (registerForm) registerForm.addEventListener('submit', handleRegister);
+
+            const showRegisterLink = document.getElementById('show-register-link');
+            if (showRegisterLink) showRegisterLink.addEventListener('click', (e) => { e.preventDefault(); switchAuthForm(false); });
+
+            const showLoginLink = document.getElementById('show-login-link');
+            if (showLoginLink) showLoginLink.addEventListener('click', (e) => { e.preventDefault(); switchAuthForm(true); });
+        });
+
+        // Configure toastr defaults if toastr is present; otherwise rely on showMessage fallback
+        try {
+            if (window.toastr && typeof window.toastr === 'object') {
+                window.toastr.options = {
+                    "closeButton": true,
+                    "debug": false,
+                    "newestOnTop": true,
+                    "progressBar": true,
+                    "positionClass": "toast-bottom-right",
+                    "preventDuplicates": true,
+                    "onclick": null,
+                    "showDuration": "300",
+                    "hideDuration": "1000",
+                    "timeOut": "5000",
+                    "extendedTimeOut": "1000",
+                    "showEasing": "swing",
+                    "hideEasing": "linear",
+                    "showMethod": "fadeIn",
+                    "hideMethod": "fadeOut"
+                };
+            }
+        } catch (e) { console.warn('toastr config skipped:', e); }
+
+        // Ensure toastr calls won't break if the CDN version requires jQuery or is otherwise faulty.
+        (function(){
+            const original = window.toastr;
+            function isWorking() {
+                try {
+                    if (!original) return false;
+                    if (typeof original.success !== 'function') return false;
+                    // try a harmless call path check
+                    return true;
+                } catch (e) { return false; }
+            }
+            if (!isWorking()) {
+                window.toastr = {
+                    success: (msg) => showMessage(msg, 'success'),
+                    error: (msg) => showMessage(msg, 'error'),
+                    info: (msg) => showMessage(msg, 'info'),
+                    warning: (msg) => showMessage(msg, 'warning')
+                };
+            }
+        })();
 
         // ==============================================================================================
         // Friends Activity Functions

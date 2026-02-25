@@ -55,6 +55,41 @@
       "epic_id": "",
       "gog_id": "",
       "role": "user"
+    },
+    "autotest_d0b82995": {
+      "password": "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "autotest_ui_b1505c19": {
+      "password": "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "autotest_ui_8fb11126": {
+      "password": "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "autotest_ui_0eaf269d": {
+      "password": "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
+    },
+    "mattam1234": {
+      "password": "ef51306214d9a6361ee1d5b452e6d2bb70dc7ebb85bf9e02c3d4747fb57d6bec",
+      "steam_id": "76561198123639801",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
     }
   }
 }

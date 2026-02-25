@@ -27,6 +27,32 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+# Initialize logging early so database module logs are captured
+log_level = os.getenv('GAPI_LOG_LEVEL', 'INFO')
+gapi_logger = gapi.setup_logging(log_level)
+gui_logger = logging.getLogger('gapi.gui')
+gui_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+try:
+    os.makedirs('logs', exist_ok=True)
+    fh = logging.FileHandler('logs/gapi_gui.log')
+    fh.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s %(name)s: %(message)s'))
+    fh.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    gui_logger.addHandler(fh)
+except Exception:
+    gui_logger = logging.getLogger('gapi.gui')
+    gui_logger.warning('Could not create log file handler')
+
+# If database is available, try initializing tables and log result
+if DB_AVAILABLE:
+    try:
+        ok = database.init_db()
+        if ok:
+            gui_logger.info('Database initialized successfully')
+        else:
+            gui_logger.warning('Database initialization reported failure')
+    except Exception as e:
+        gui_logger.exception('Database init failed: %s', e)
+
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
@@ -88,6 +114,35 @@ class UserManager:
             except (json.JSONDecodeError, IOError) as e:
                 gui_logger.error("Error loading users: %s", e)
                 self.users = {}
+
+        # If DB is available, merge platform IDs from DB for existing users
+        if DB_AVAILABLE:
+            try:
+                db = database.SessionLocal()
+                db_users = db.query(database.User).all()
+                merged = False
+                for dbu in db_users:
+                    uname = getattr(dbu, 'username', None)
+                    if uname and uname in self.users:
+                        u = self.users[uname]
+                        # copy platform IDs and role from DB when present
+                        if getattr(dbu, 'steam_id', None):
+                            u['steam_id'] = dbu.steam_id
+                            merged = True
+                        if getattr(dbu, 'epic_id', None):
+                            u['epic_id'] = dbu.epic_id
+                            merged = True
+                        if getattr(dbu, 'gog_id', None):
+                            u['gog_id'] = dbu.gog_id
+                            merged = True
+                        if getattr(dbu, 'role', None):
+                            u['role'] = dbu.role
+                            merged = True
+                if merged:
+                    self.save_users()
+                db.close()
+            except Exception as e:
+                gui_logger.exception('Failed to merge users from DB: %s', e)
     
     def save_users(self):
         """Save users to file"""
@@ -121,6 +176,15 @@ class UserManager:
             'role': role
         }
         self.save_users()
+        # Also persist to database if available
+        if DB_AVAILABLE:
+            try:
+                db = database.SessionLocal()
+                database.create_or_update_user(db, username, '', '', '', role)
+                db.close()
+                gui_logger.info('Persisted new user to database: %s', username)
+            except Exception as e:
+                gui_logger.exception('Failed to persist user to database: %s', e)
         return True, "User registered successfully"
     
     def login(self, username: str, password: str) -> Tuple[bool, str]:
@@ -154,6 +218,17 @@ class UserManager:
         self.users[username]['epic_id'] = epic_id
         self.users[username]['gog_id'] = gog_id
         self.save_users()
+        # Persist to DB when available
+        if DB_AVAILABLE:
+            try:
+                db = database.SessionLocal()
+                # preserve role if present in JSON store
+                role = self.users.get(username, {}).get('role', 'user')
+                database.create_or_update_user(db, username, steam_id, epic_id, gog_id, role)
+                db.close()
+                gui_logger.info('Persisted updated IDs for user %s to DB', username)
+            except Exception as e:
+                gui_logger.exception('Failed to persist updated IDs for %s: %s', username, e)
         return True
     
     def get_user_role(self, username: str) -> str:
@@ -192,6 +267,18 @@ class UserManager:
         
         del self.users[username]
         self.save_users()
+        # Remove from DB if available
+        if DB_AVAILABLE:
+            try:
+                db = database.SessionLocal()
+                user_obj = database.get_user_by_username(db, username)
+                if user_obj:
+                    db.delete(user_obj)
+                    db.commit()
+                db.close()
+                gui_logger.info('Deleted user %s from DB', username)
+            except Exception as e:
+                gui_logger.exception('Failed to delete user %s from DB: %s', username, e)
         return True, "User deleted successfully"
     
     def update_user_role(self, username: str, role: str, requesting_user: str) -> Tuple[bool, str]:
@@ -207,6 +294,22 @@ class UserManager:
         
         self.users[username]['role'] = role
         self.save_users()
+        # Persist role change to DB
+        if DB_AVAILABLE:
+            try:
+                db = database.SessionLocal()
+                user_obj = database.get_user_by_username(db, username)
+                if user_obj:
+                    user_obj.role = role
+                    user_obj.updated_at = datetime.utcnow()
+                    db.commit()
+                else:
+                    # create if missing
+                    database.create_or_update_user(db, username, self.users[username].get('steam_id',''), self.users[username].get('epic_id',''), self.users[username].get('gog_id',''), role)
+                db.close()
+                gui_logger.info('Updated role for user %s to %s in DB', username, role)
+            except Exception as e:
+                gui_logger.exception('Failed to persist role change for %s: %s', username, e)
         return True, "Role updated successfully"
 
 
@@ -372,15 +475,25 @@ def api_auth_register():
     data = request.json or {}
     username = data.get('username', '').strip()
     password = data.get('password', '').strip()
+    gui_logger.info('Register endpoint called for username=%s', username)
     
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
     
     success, message = user_manager.register(username, password)
-    
     if not success:
         return jsonify({'error': message}), 400
-    
+    gui_logger.info('Register result for username=%s: %s', username, 'success' if success else 'failure')
+    # Ensure the user is persisted to the database (do this in request context)
+    if DB_AVAILABLE:
+        try:
+            db = database.SessionLocal()
+            database.create_or_update_user(db, username, '', '', '', user_manager.get_user_role(username))
+            db.close()
+            gui_logger.info('Persisted user to DB (via endpoint): %s', username)
+        except Exception as e:
+            gui_logger.exception('Failed to persist user to DB from register endpoint: %s', e)
+
     return jsonify({'message': message})
 
 
@@ -392,6 +505,7 @@ def api_auth_login():
     data = request.json or {}
     username = data.get('username', '').strip()
     password = data.get('password', '').strip()
+    gui_logger.info('Login endpoint called for username=%s', username)
     
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
@@ -404,9 +518,26 @@ def api_auth_login():
     # Set current user
     with current_user_lock:
         current_user = username
+    gui_logger.info('User logged in: %s', username)
     
     # Initialize picker for this user
     user_ids = user_manager.get_user_ids(username)
+    # If DB is available prefer IDs from DB (keep JSON store as cache)
+    if DB_AVAILABLE:
+        try:
+            db = database.SessionLocal()
+            db_user = database.get_user_by_username(db, username)
+            if db_user:
+                # override with DB values when present
+                if getattr(db_user, 'steam_id', None):
+                    user_ids['steam_id'] = db_user.steam_id
+                if getattr(db_user, 'epic_id', None):
+                    user_ids['epic_id'] = db_user.epic_id
+                if getattr(db_user, 'gog_id', None):
+                    user_ids['gog_id'] = db_user.gog_id
+            db.close()
+        except Exception as e:
+            gui_logger.exception('Failed to read user IDs from DB for %s: %s', username, e)
     
     # Create a temporary config with user's IDs
     if user_ids.get('steam_id'):
@@ -464,6 +595,7 @@ def api_auth_logout():
     global current_user, picker, multi_picker
     
     with current_user_lock:
+        gui_logger.info('User logged out: %s', current_user)
         current_user = None
     
     with picker_lock:
@@ -559,6 +691,20 @@ def api_auth_get_ids():
         username = current_user
     
     user_ids = user_manager.get_user_ids(username)
+    if DB_AVAILABLE:
+        try:
+            db = database.SessionLocal()
+            db_user = database.get_user_by_username(db, username)
+            if db_user:
+                if getattr(db_user, 'steam_id', None):
+                    user_ids['steam_id'] = db_user.steam_id
+                if getattr(db_user, 'epic_id', None):
+                    user_ids['epic_id'] = db_user.epic_id
+                if getattr(db_user, 'gog_id', None):
+                    user_ids['gog_id'] = db_user.gog_id
+            db.close()
+        except Exception as e:
+            gui_logger.exception('Failed to read IDs from DB for %s: %s', username, e)
     return jsonify(user_ids)
 
 
