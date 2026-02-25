@@ -647,15 +647,27 @@
 
         <!-- Library Tab -->
         <div id="library-tab" class="tab-content">
-            <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibraryDebounced()">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+                <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibraryDebounced()" style="margin-bottom:0; flex:1; min-width:180px;">
+                <a href="/api/export/library" download="gapi_library.csv" style="padding:9px 18px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.9em; white-space:nowrap;">⬇️ Export CSV</a>
+            </div>
             <div id="library-list" class="list-container">
                 <div class="loading">Loading library...</div>
+            </div>
+            <!-- Cross-platform duplicates section -->
+            <div id="duplicates-section" style="margin-top:24px; display:none;">
+                <h3 style="margin-bottom:12px;">🔁 Cross-Platform Duplicates</h3>
+                <p style="color:var(--text-secondary); font-size:0.9em; margin-bottom:12px;">Games you own on more than one platform.</p>
+                <div id="duplicates-list"></div>
             </div>
         </div>
 
         <!-- Favorites Tab -->
         <div id="favorites-tab" class="tab-content">
-            <h2>⭐ Your Favorite Games</h2>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2 style="margin:0;">⭐ Your Favorite Games</h2>
+                <a href="/api/export/favorites" download="gapi_favorites.csv" style="padding:9px 18px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.9em; white-space:nowrap;">⬇️ Export CSV</a>
+            </div>
             <div id="favorites-list" class="list-container">
                 <div class="loading">Loading favorites...</div>
             </div>
@@ -1111,6 +1123,10 @@
                 <div id="game-details-protondb-section" style="display:none;">
                     <small style="color:var(--text-secondary);">ProtonDB (Linux)</small><br>
                     <span id="game-details-protondb" style="font-size:1.1em; font-weight:600;">—</span>
+                </div>
+                <div id="game-details-hltb-section" style="display:none;">
+                    <small style="color:var(--text-secondary);">⏱️ How Long to Beat</small><br>
+                    <div id="game-details-hltb" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px;"></div>
                 </div>
                 <div>
                     <small style="color:var(--text-secondary);">Links & Pricing</small><br>
@@ -1742,6 +1758,42 @@
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading library</div>';
             }
+
+            // Load cross-platform duplicates section
+            loadDuplicates();
+        }
+
+        async function loadDuplicates() {
+            try {
+                const resp = await fetch('/api/duplicates');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const section = document.getElementById('duplicates-section');
+                const listDiv = document.getElementById('duplicates-list');
+                if (!data.duplicates || data.duplicates.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+                section.style.display = 'block';
+                let html = '';
+                data.duplicates.forEach(group => {
+                    const platformBadges = group.platforms.map(p =>
+                        `<span style="padding:2px 8px; border-radius:10px; font-size:0.8em; background:var(--list-hover); margin-right:4px;">${p}</span>`
+                    ).join('');
+                    const gameRows = group.games.map(g =>
+                        `<div style="padding:6px 0; font-size:0.9em; color:var(--text-secondary);">&nbsp;&nbsp;• ${g.platform}: ${g.playtime_hours}h played</div>`
+                    ).join('');
+                    html += `
+                        <div style="padding:12px; background:var(--list-hover); border-radius:10px; margin-bottom:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                                <strong>${group.name}</strong>
+                                <span>${platformBadges}</span>
+                            </div>
+                            ${gameRows}
+                        </div>`;
+                });
+                listDiv.innerHTML = html;
+            } catch (_) {}
         }
         
         // Helper function for debouncing user input
@@ -1828,6 +1880,7 @@
             // Hide additional details sections initially
             document.getElementById('game-details-metacritic-section').style.display = 'none';
             document.getElementById('game-details-protondb-section').style.display = 'none';
+            document.getElementById('game-details-hltb-section').style.display = 'none';
             
             // Show loading state
             document.getElementById('game-details-description').innerHTML = `<em>Loading details...</em>`;
@@ -1863,6 +1916,22 @@
                     }
                 }
             });
+
+            // Fetch HLTB data asynchronously (best-effort, non-blocking)
+            fetch(`/api/hltb/${encodeURIComponent(gameName)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(hltb => {
+                    if (!hltb || modal.style.display !== 'flex') return;
+                    const pills = [];
+                    if (hltb.main != null)          pills.push(`<span style="padding:4px 10px; background:var(--list-hover); border-radius:6px; font-size:0.85em;">🎯 Main: ${hltb.main}h</span>`);
+                    if (hltb.main_extra != null)     pills.push(`<span style="padding:4px 10px; background:var(--list-hover); border-radius:6px; font-size:0.85em;">➕ Main+Extra: ${hltb.main_extra}h</span>`);
+                    if (hltb.completionist != null)  pills.push(`<span style="padding:4px 10px; background:var(--list-hover); border-radius:6px; font-size:0.85em;">🏆 Completionist: ${hltb.completionist}h</span>`);
+                    if (pills.length) {
+                        document.getElementById('game-details-hltb-section').style.display = 'block';
+                        document.getElementById('game-details-hltb').innerHTML = pills.join('');
+                    }
+                })
+                .catch(() => {});  // silently ignore network errors
         }
 
         function closeGameDetailsModal() {

@@ -4,6 +4,23 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.3.0] - 2026-02-25
+
+### Added
+- **HowLongToBeat Integration** (`/api/hltb/<game_name>` endpoint + game-details modal)
+  - Shows Main Story, Main + Extra, and Completionist completion times
+  - Optional dependency (`howlongtobeatpy>=1.0.0`); feature degrades gracefully if not installed
+  - New `gapi.get_hltb_data(game_name)` helper with in-process caching
+  - HLTB pills rendered in the game-details modal alongside Metacritic / ProtonDB
+- **Cross-Platform Duplicate Detection** (`/api/duplicates` endpoint + Library tab section)
+  - Detects games you own on more than one platform (Steam, Epic, GOG) by normalised name
+  - New `GamePicker.find_duplicates()` method in `gapi.py`
+  - Duplicate groups appear at the bottom of the Library tab, each showing platform badges and per-platform playtime
+- **Export Library / Favorites as CSV** (`/api/export/library` and `/api/export/favorites`)
+  - One-click "⬇️ Export CSV" buttons in the Library and Favorites tabs
+  - Exports: app_id, name, platform, playtime_hours, is_favorite, backlog_status, tags, review_rating, review_notes
+  - Favorites export: app_id, name, platform, playtime_hours, tags, review_rating, review_notes
+
 ## [2.2.0] - 2026-02-25
 
 ### Added

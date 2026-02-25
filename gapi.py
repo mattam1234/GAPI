@@ -169,6 +169,54 @@ def is_valid_steam_id(steam_id: str) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# HowLongToBeat integration
+# ---------------------------------------------------------------------------
+
+_HLTB_CACHE: Dict[str, Optional[Dict]] = {}
+
+
+def get_hltb_data(game_name: str) -> Optional[Dict]:
+    """Fetch HowLongToBeat completion times for *game_name*.
+
+    Returns a dict with keys ``main``, ``main_extra``, and ``completionist``
+    (each a float representing hours, or ``None`` if not available), plus
+    ``game_name`` (the best-matching title on HLTB) and ``similarity`` (float
+    0-1).  Returns ``None`` if the library is not installed, the query
+    produces no results, or any network error occurs.
+
+    Results are cached in-process so repeated calls for the same name are
+    cheap.
+    """
+    _log = logging.getLogger('gapi.hltb')
+    key = game_name.strip().lower()
+    if key in _HLTB_CACHE:
+        return _HLTB_CACHE[key]
+
+    try:
+        from howlongtobeatpy import HowLongToBeat  # optional dependency
+        results = HowLongToBeat().search(game_name)
+        if not results:
+            _HLTB_CACHE[key] = None
+            return None
+        best = max(results, key=lambda r: r.similarity)
+        data: Dict = {
+            'game_name': best.game_name,
+            'similarity': round(best.similarity, 3),
+            'main': best.main_story,
+            'main_extra': best.main_extra,
+            'completionist': best.completionist,
+        }
+        _HLTB_CACHE[key] = data
+        return data
+    except ImportError:
+        _log.debug("howlongtobeatpy not installed; HLTB data unavailable.")
+    except Exception as e:
+        _log.debug("HLTB lookup failed for '%s': %s", game_name, e)
+    _HLTB_CACHE[key] = None
+    return None
+
+
 class GamePlatformClient(ABC):
     """Abstract base class for game platform API clients"""
     
@@ -988,6 +1036,48 @@ class GamePicker:
                 entry['backlog_status'] = id_to_status[gid]
                 result.append(entry)
         return result
+
+    # ------------------------------------------------------------------
+    # Duplicate detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalise_game_name(name: str) -> str:
+        """Lowercase, strip punctuation/articles for fuzzy name matching."""
+        name = name.lower()
+        name = re.sub(r"[^a-z0-9\s]", "", name)
+        name = re.sub(r"\b(the|a|an)\b", "", name)
+        return re.sub(r"\s+", " ", name).strip()
+
+    def find_duplicates(self) -> List[Dict]:
+        """Return groups of games that appear on more than one platform.
+
+        Each entry in the returned list represents a group::
+
+            {
+              "name": "Portal 2",          # display name (from first seen)
+              "platforms": ["steam", "epic"],
+              "games": [ {...}, {...} ]     # original game dicts
+            }
+
+        Matching is done by normalised name (case-insensitive, ignoring
+        punctuation and leading articles).  Only groups with ≥ 2 entries
+        (i.e. genuinely duplicated across platforms) are returned.
+        """
+        buckets: Dict[str, Dict] = {}
+        for game in self.games:
+            platform = game.get('platform', 'steam')
+            name = game.get('name', '')
+            if not name:
+                continue
+            key = self._normalise_game_name(name)
+            if key not in buckets:
+                buckets[key] = {'name': name, 'platforms': [], 'games': []}
+            if platform not in buckets[key]['platforms']:
+                buckets[key]['platforms'].append(platform)
+            buckets[key]['games'].append(game)
+
+        return [v for v in buckets.values() if len(v['platforms']) > 1]
 
     def load_history(self):
         """Load game picking history (supports both old int and new composite ID formats)"""

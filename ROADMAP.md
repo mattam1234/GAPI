@@ -63,7 +63,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 
 #### Smart Features
 - [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
-- [ ] **Duplicate Detection** - Identify same games across platforms
+- [x] **Duplicate Detection** - Identify same games across platforms
 - [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
 - [x] **Achievement Tracking** - Display completion percentage
 - [x] **Friend Activity** - See what friends are playing (Steam API)
@@ -73,7 +73,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] **Game Night Scheduler** - Schedule game sessions with friends
 - [ ] **Voting System Improvements** - Multiple voting rounds, ranked choice
 - [x] **Game Reviews** - Add personal notes/reviews to games
-- [ ] **Share Picks** - Generate shareable links for game picks
+- [x] **Export game recommendations** - Export library / favorites as CSV
 
 ### 📅 Long-term Vision (v3.0.0+)
 
@@ -138,8 +138,8 @@ Features requested by the community will be tracked here. Please open an issue w
 - Dark mode support
 - Game statistics visualization (charts, graphs)
 - Import game lists from other services
-- Export game recommendations
-- Integration with HowLongToBeat API
+- ~~Export game recommendations~~ ✅ (see v2.3.0)
+- ~~Integration with HowLongToBeat API~~ ✅ (see v2.3.0)
 - VR game filtering
 - Controller support for desktop app
 - Voice commands for game picking
