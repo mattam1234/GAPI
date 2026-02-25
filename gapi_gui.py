@@ -460,6 +460,68 @@ def _ensure_multi_picker() -> None:
         multi_picker.users = users
 
 
+def sync_library_to_db(username: str, force: bool = False) -> Tuple[bool, str]:
+    """Sync user's game library from Steam API to database cache.
+    
+    Args:
+        username: Username to sync
+        force: Force sync even if cache is recent
+    
+    Returns:
+        (success, message) tuple
+    """
+    if not DB_AVAILABLE:
+        return False, "Database not available"
+    
+    try:
+        # Get user's Steam ID
+        user_ids = user_manager.get_user_ids(username)
+        steam_id = user_ids.get('steam_id', '')
+        
+        # Check if Steam ID is valid
+        if not steam_id or gapi.is_placeholder_value(steam_id):
+            gui_logger.info(f"No valid Steam ID for user {username}, skipping library sync")
+            return True, "No Steam ID configured"
+        
+        # Check cache age unless forced
+        db = database.SessionLocal()
+        cache_age = database.get_library_cache_age(db, username)
+        
+        # Don't sync if cache is less than 1 hour old (unless forced)
+        if not force and cache_age is not None and cache_age < 3600:
+            db.close()
+            gui_logger.debug(f"Library cache for {username} is fresh ({cache_age:.0f}s old), skipping sync")
+            return True, f"Cache is fresh ({int(cache_age/60)}m old)"
+        
+        # Fetch library from Steam API
+        base_config = load_base_config()
+        steam_api_key = base_config.get('steam_api_key', '')
+        
+        if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
+            db.close()
+            return False, "Steam API key not configured"
+        
+        gui_logger.info(f"Syncing library for {username} from Steam API...")
+        steam_client = gapi.SteamAPIClient(steam_api_key)
+        games = steam_client.get_owned_games(steam_id)
+        
+        if not games:
+            db.close()
+            return False, "Failed to fetch games from Steam API"
+        
+        # Cache the games in database
+        count = database.cache_user_library(db, username, games)
+        db.close()
+        
+        gui_logger.info(f"Synced {count} games for {username}")
+        return True, f"Synced {count} games"
+        
+    except Exception as e:
+        gui_logger.exception(f"Error syncing library for {username}: {e}")
+        return False, str(e)
+
+
+
 def initialize_picker(config_path: str = 'config.json'):
     """Initialize the game picker"""
     global picker, multi_picker
@@ -602,40 +664,24 @@ def api_auth_login():
             'gog_id': user_ids.get('gog_id', '')
         }
         
-        # Initialize picker in background with proper GamePicker initialization
-        def init_picker_async():
+        # Initialize background library sync if Steam ID is configured
+        def init_library_async():
             try:
-                # Write temporary config to a file for GamePicker to load
-                temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_user_{username}_config.json')
-                
-                with open(temp_config_path, 'w') as f:
-                    json.dump(temp_config, f)
-                
-                with picker_lock:
-                    global picker
-                    picker = gapi.GamePicker(config_path=temp_config_path)
-                    picker.fetch_games()
-                    
-                    # Initialize multi-user picker with config
-                    with multi_picker_lock:
-                        global multi_picker
-                        multi_picker = multiuser.MultiUserPicker(picker.config)
-                
-                # Clean up temp config after initialization
-                if os.path.exists(temp_config_path):
-                    os.remove(temp_config_path)
+                # Only sync if user has a valid Steam ID
+                if user_ids.get('steam_id') and not gapi.is_placeholder_value(user_ids['steam_id']):
+                    gui_logger.info(f"Triggering library sync for {username}")
+                    success, msg = sync_library_to_db(username, force=False)
+                    if success:
+                        gui_logger.info(f"Library sync completed for {username}: {msg}")
+                    else:
+                        gui_logger.warning(f"Library sync failed for {username}: {msg}")
+                else:
+                    gui_logger.info(f"No valid Steam ID for {username}, skipping library sync")
                     
             except Exception as e:
-                gui_logger.error("Error initializing picker: %s", e)
-                # Clean up on error
-                temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_user_{username}_config.json')
-                if os.path.exists(temp_config_path):
-                    try:
-                        os.remove(temp_config_path)
-                    except:
-                        pass
+                gui_logger.error("Error in background library sync: %s", e)
         
-        threading.Thread(target=init_picker_async, daemon=True).start()
+        threading.Thread(target=init_library_async, daemon=True).start()
     
     return jsonify({'message': 'Login successful', 'username': username})
 
@@ -678,55 +724,23 @@ def api_auth_update_ids():
     if not success:
         return jsonify({'error': 'Failed to update IDs'}), 400
     
-    # Reinitialize picker with new IDs
+    # Trigger library sync if Steam ID was added/changed
     user_ids = user_manager.get_user_ids(username)
     
-    if user_ids.get('steam_id'):
-        base_config = load_base_config()
-        
-        # Create temporary config for this user
-        temp_config = {
-            'steam_api_key': base_config.get('steam_api_key', ''),
-            'steam_id': user_ids['steam_id'],
-            'epic_enabled': user_ids.get('epic_id') != '',
-            'epic_id': user_ids.get('epic_id', ''),
-            'gog_enabled': user_ids.get('gog_id') != '',
-            'gog_id': user_ids.get('gog_id', '')
-        }
-        
-        # Write temp config to a file for GamePicker to load
-        temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_user_{username}_config.json')
-        
-        def init_picker_async():
+    if user_ids.get('steam_id') and not gapi.is_placeholder_value(user_ids['steam_id']):
+        # Sync library in background
+        def sync_async():
             try:
-                # Write temporary config
-                with open(temp_config_path, 'w') as f:
-                    json.dump(temp_config, f)
-                
-                with picker_lock:
-                    global picker
-                    picker = gapi.GamePicker(config_path=temp_config_path)
-                    picker.fetch_games()
-                    
-                    # Initialize multi-user picker with config
-                    with multi_picker_lock:
-                        global multi_picker
-                        multi_picker = multiuser.MultiUserPicker(picker.config)
-                
-                # Clean up temp config after initialization
-                if os.path.exists(temp_config_path):
-                    os.remove(temp_config_path)
-                    
+                gui_logger.info(f"Syncing library after ID update for {username}")
+                success, msg = sync_library_to_db(username, force=True)
+                if success:
+                    gui_logger.info(f"Library sync completed: {msg}")
+                else:
+                    gui_logger.warning(f"Library sync failed: {msg}")
             except Exception as e:
-                gui_logger.error("Error initializing picker: %s", e)
-                # Clean up on error
-                if os.path.exists(temp_config_path):
-                    try:
-                        os.remove(temp_config_path)
-                    except:
-                        pass
+                gui_logger.error(f"Error in background sync: {e}")
         
-        threading.Thread(target=init_picker_async, daemon=True).start()
+        threading.Thread(target=sync_async, daemon=True).start()
     
     return jsonify({'message': 'Platform IDs updated successfully'})
 
@@ -962,42 +976,124 @@ def api_toggle_favorite(app_id):
 @app.route('/api/library')
 @require_login
 def api_library():
-    """Get all games in library"""
-    global picker
+    """Get all games in library from database cache"""
+    username = session.get('username')
     
-    # Ensure picker is initialized for logged-in user
-    if not picker or not picker.games:
-        # Initialize with demo games if not loaded
-        if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
-        if not picker.games:
-            picker.games = DEMO_GAMES
+    if not DB_AVAILABLE:
+        # Fallback to demo games if DB not available
+        return jsonify({'games': [{
+            'app_id': g.get('appid'),
+            'name': g.get('name', 'Unknown'),
+            'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
+            'is_favorite': False
+        } for g in DEMO_GAMES]})
     
-    search = request.args.get('search', '').lower()
-    
-    with picker_lock:
-        games = []
-        sorted_games = sorted(picker.games, key=lambda g: g.get('name', '').lower())
+    try:
+        db = database.SessionLocal()
         
-        for game in sorted_games:
+        # Get cached library
+        cached_games = database.get_cached_library(db, username)
+        
+        # If cache is empty or old, trigger background sync
+        if not cached_games:
+            db.close()
+            # Trigger sync in background
+            def background_sync():
+                success, msg = sync_library_to_db(username, force=True)
+                gui_logger.info(f"Background library sync for {username}: {msg}")
+            
+            threading.Thread(target=background_sync, daemon=True).start()
+            
+            # Return empty library with message to refresh
+            return jsonify({
+                'games': [],
+                'message': 'Library is being loaded from Steam. Please refresh in a few seconds.'
+            })
+        
+        # Check if cache is old (>6 hours) and trigger background refresh
+        cache_age = database.get_library_cache_age(db, username)
+        if cache_age and cache_age > 21600:  # 6 hours
+            # Trigger background refresh but return cached data
+            def background_sync():
+                success, msg = sync_library_to_db(username, force=False)
+                gui_logger.info(f"Background library refresh for {username}: {msg}")
+            
+            threading.Thread(target=background_sync, daemon=True).start()
+        
+        search = request.args.get('search', '').lower()
+        
+        # Get user's favorites (still from picker for now)
+        favorite_ids = set()
+        if picker and picker.favorites:
+            favorite_ids = set(picker.favorites)
+        
+        # Filter and format games
+        games = []
+        for game in cached_games:
             name = game.get('name', 'Unknown')
             if search and search not in name.lower():
                 continue
             
-            app_id = game.get('appid')
-            playtime_hours = game.get('playtime_forever', 0) / 60
-            is_favorite = app_id in picker.favorites if app_id else False
+            app_id = game.get('app_id')
+            try:
+                app_id_int = int(app_id) if app_id else None
+            except (ValueError, TypeError):
+                app_id_int = None
             
             games.append({
-                'app_id': app_id,
+                'app_id': app_id_int,
                 'name': name,
-                'playtime_hours': round(playtime_hours, 1),
-                'is_favorite': is_favorite
+                'playtime_hours': round(game.get('playtime_hours', 0), 1),
+                'is_favorite': app_id_int in favorite_ids if app_id_int else False,
+                'platform': game.get('platform', 'steam'),
+                'last_played': game.get('last_played').isoformat() if game.get('last_played') else None
             })
         
-        return jsonify({'games': games})
+        db.close()
+        
+        return jsonify({
+            'games': games,
+            'cache_age_minutes': int(cache_age / 60) if cache_age else 0
+        })
+        
+    except Exception as e:
+        gui_logger.exception(f"Error loading library from database: {e}")
+        # Fallback to demo games on error
+        return jsonify({'games': [{
+            'app_id': g.get('appid'),
+            'name': g.get('name', 'Unknown'),
+            'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
+            'is_favorite': False
+        } for g in DEMO_GAMES]})
+
+
+@app.route('/api/library/sync', methods=['POST'])
+@require_login
+def api_sync_library():
+    """Manually trigger library sync from Steam API to database"""
+    username = session.get('username')
+    
+    # Check if already syncing (simple lock mechanism)
+    global _sync_in_progress
+    if not hasattr(api_sync_library, '_sync_in_progress'):
+        api_sync_library._sync_in_progress = set()
+    
+    if username in api_sync_library._sync_in_progress:
+        return jsonify({'error': 'Sync already in progress'}), 429
+    
+    try:
+        api_sync_library._sync_in_progress.add(username)
+        success, message = sync_library_to_db(username, force=True)
+        api_sync_library._sync_in_progress.discard(username)
+        
+        if success:
+            return jsonify({'message': message})
+        else:
+            return jsonify({'error': message}), 400
+    except Exception as e:
+        api_sync_library._sync_in_progress.discard(username)
+        gui_logger.exception(f"Error in manual sync: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/favorites')

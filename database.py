@@ -357,3 +357,102 @@ def verify_user_password(db, username: str, password_hash: str):
     except Exception as e:
         logger.error(f"Error verifying password: {e}")
         return False
+
+
+def get_cached_library(db, username: str):
+    """Get cached game library for a user."""
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        
+        games = db.query(GameLibraryCache).filter(
+            GameLibraryCache.user_id == user.id
+        ).order_by(GameLibraryCache.game_name).all()
+        
+        return [{
+            'app_id': g.app_id,
+            'name': g.game_name,
+            'platform': g.platform,
+            'playtime_hours': g.playtime_hours,
+            'last_played': g.last_played,
+            'cached_at': g.cached_at
+        } for g in games]
+    except Exception as e:
+        logger.error(f"Error getting cached library: {e}")
+        return []
+
+
+def cache_user_library(db, username: str, games: list):
+    """Cache user's game library in the database.
+    
+    Args:
+        db: Database session
+        username: Username
+        games: List of game dicts with keys: app_id, name, platform, playtime_hours, last_played
+    
+    Returns:
+        Number of games cached
+    """
+    if not db:
+        return 0
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            logger.error(f"User {username} not found")
+            return 0
+        
+        # Delete existing cache for this user
+        db.query(GameLibraryCache).filter(GameLibraryCache.user_id == user.id).delete()
+        
+        # Add new cache entries
+        count = 0
+        for game in games:
+            cache_entry = GameLibraryCache(
+                user_id=user.id,
+                app_id=str(game.get('app_id', game.get('appid', ''))),
+                game_name=game.get('name', 'Unknown'),
+                platform=game.get('platform', 'steam'),
+                playtime_hours=float(game.get('playtime_hours', game.get('playtime_forever', 0)) / 60 
+                                   if 'playtime_forever' in game else game.get('playtime_hours', 0)),
+                last_played=game.get('last_played')
+            )
+            db.add(cache_entry)
+            count += 1
+        
+        db.commit()
+        logger.info(f"Cached {count} games for user {username}")
+        return count
+    except Exception as e:
+        logger.error(f"Error caching library: {e}")
+        db.rollback()
+        return 0
+
+
+def get_library_cache_age(db, username: str):
+    """Get the age of the cached library in seconds.
+    
+    Returns:
+        Number of seconds since last cache, or None if no cache exists
+    """
+    if not db:
+        return None
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return None
+        
+        latest = db.query(GameLibraryCache).filter(
+            GameLibraryCache.user_id == user.id
+        ).order_by(GameLibraryCache.cached_at.desc()).first()
+        
+        if not latest:
+            return None
+        
+        age = (datetime.utcnow() - latest.cached_at).total_seconds()
+        return age
+    except Exception as e:
+        logger.error(f"Error getting cache age: {e}")
+        return None
