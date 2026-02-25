@@ -1154,9 +1154,12 @@
         // Initialize
         async function init() {
             showSpinner('Loading your game library…');
-            await updateStatus();
-            await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter()]);
-            hideSpinner();
+            try {
+                await updateStatus();
+                await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter()]);
+            } finally {
+                hideSpinner();
+            }
         }
         
         async function updateStatus() {
@@ -2871,8 +2874,7 @@
             }
         }
 
-        // Initialize on page load
-        init();
+        // Authentication is initialized via DOMContentLoaded below
 
         // ---- Game Night Scheduler ----
 
@@ -3185,7 +3187,7 @@
                     }
                     
                     loadSettings();
-                    updateStatus();
+                    init();
                 } else {
                     // User is not logged in
                     document.getElementById('auth-modal').style.display = 'flex';
