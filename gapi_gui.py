@@ -2237,6 +2237,50 @@ def api_get_friends():
     return jsonify({'friends': result})
 
 
+# ---------------------------------------------------------------------------
+# Recommendations API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/recommendations')
+@require_login
+def api_get_recommendations():
+    """Return personalised game recommendations for the current user.
+
+    Uses ``GamePicker.get_recommendations()`` which scores unplayed / barely-played
+    games based on the user's genre affinity derived from their well-played games.
+
+    Query params:
+        count (int, default 10): Maximum number of recommendations to return.
+
+    Response JSON::
+
+        {
+          "recommendations": [
+            {
+              "appid": 620,
+              "name": "Portal 2",
+              "playtime_hours": 0.0,
+              "recommendation_score": 5.2,
+              "recommendation_reason": "Unplayed. Matches your Puzzle, Action preference",
+              ...
+            }
+          ]
+        }
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized. Please log in and ensure your Steam ID is set.'}), 400
+
+    try:
+        count = min(int(request.args.get('count', 10)), 50)
+    except (ValueError, TypeError):
+        count = 10
+
+    with picker_lock:
+        recs = picker.get_recommendations(count=count)
+
+    return jsonify({'recommendations': recs})
+
+
 def create_templates():
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)

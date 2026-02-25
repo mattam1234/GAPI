@@ -989,6 +989,137 @@ class GamePicker:
                 result.append(entry)
         return result
 
+    def get_recommendations(self, count: int = 10) -> List[Dict]:
+        """Recommend games from the user's library based on playtime and genre patterns.
+
+        The algorithm:
+        1. Builds a *genre affinity score* from well-played games (> WELL_PLAYED threshold)
+           using cached Steam details (no new API calls).
+        2. Scores every unplayed / barely-played game by how closely its genres match
+           the affinity profile.
+        3. Applies a small penalty for games picked recently (history).
+        4. Returns the top *count* candidates sorted by score, with a human-readable
+           ``recommendation_reason`` field.
+
+        If no genre data is cached the algorithm falls back to returning unplayed games
+        sorted by total community playtime (playtime_forever field is absent for
+        unplayed games, so they rank equally and a shuffle provides variety).
+
+        Args:
+            count: Maximum number of recommendations to return.
+
+        Returns:
+            List of game dicts enriched with ``recommendation_score`` (float) and
+            ``recommendation_reason`` (str) fields.
+        """
+        if not self.games:
+            return []
+
+        # ------------------------------------------------------------------
+        # Step 1: build genre affinity from well-played games
+        # ------------------------------------------------------------------
+        genre_weights: Dict[str, float] = {}
+        for game in self.games:
+            playtime = game.get('playtime_forever', 0)
+            if playtime < self.WELL_PLAYED_THRESHOLD_MINUTES:
+                continue
+            app_id = extract_game_id(game)
+            platform = game.get('platform', 'steam')
+            client = self.clients.get(platform)
+            if app_id is None or client is None:
+                continue
+            try:
+                cache_key = int(app_id)
+            except (ValueError, TypeError):
+                cache_key = app_id  # type: ignore[assignment]
+            details = client.details_cache.get(cache_key)
+            if not details:
+                continue
+            hours = minutes_to_hours(playtime)
+            for genre_entry in details.get('genres', []):
+                g = genre_entry.get('description', '').lower()
+                if g:
+                    genre_weights[g] = genre_weights.get(g, 0.0) + hours
+
+        # ------------------------------------------------------------------
+        # Step 2: candidates = unplayed or barely-played games
+        # ------------------------------------------------------------------
+        candidates = [
+            g for g in self.games
+            if g.get('playtime_forever', 0) <= self.BARELY_PLAYED_THRESHOLD_MINUTES
+        ]
+        if not candidates:
+            candidates = list(self.games)
+
+        recent_ids: set = set(self.history[-min(len(self.history), 10):])
+
+        # ------------------------------------------------------------------
+        # Step 3: score each candidate
+        # ------------------------------------------------------------------
+        scored: List[Dict] = []
+        for game in candidates:
+            score = 0.0
+            reasons: List[str] = []
+
+            playtime = game.get('playtime_forever', 0)
+            game_id_str = game.get('game_id', '')
+
+            # Base score: unplayed > barely-played
+            if playtime == 0:
+                score += 3.0
+                reasons.append('Unplayed')
+            else:
+                score += 1.5
+                reasons.append(f'Barely played ({minutes_to_hours(playtime):.1f}h)')
+
+            # History penalty
+            if game_id_str in recent_ids:
+                score -= 2.0
+
+            # Genre affinity boost
+            if genre_weights:
+                app_id = extract_game_id(game)
+                platform = game.get('platform', 'steam')
+                client = self.clients.get(platform)
+                if app_id is not None and client is not None:
+                    try:
+                        cache_key = int(app_id)
+                    except (ValueError, TypeError):
+                        cache_key = app_id  # type: ignore[assignment]
+                    details = client.details_cache.get(cache_key)
+                    if details:
+                        matched_genres: List[str] = []
+                        for genre_entry in details.get('genres', []):
+                            g = genre_entry.get('description', '').lower()
+                            if g in genre_weights:
+                                boost = min(genre_weights[g] / 20.0, 2.0)
+                                score += boost
+                                matched_genres.append(genre_entry['description'])
+                        if matched_genres:
+                            reasons.append(
+                                'Matches your ' + ', '.join(matched_genres[:2]) + ' preference'
+                            )
+
+            scored.append({
+                'game': game,
+                'score': score,
+                'reasons': reasons,
+            })
+
+        scored.sort(key=lambda x: x['score'], reverse=True)
+
+        # ------------------------------------------------------------------
+        # Step 4: build return list
+        # ------------------------------------------------------------------
+        result: List[Dict] = []
+        for item in scored[:count]:
+            entry = dict(item['game'])
+            entry['recommendation_score'] = round(item['score'], 2)
+            entry['recommendation_reason'] = '. '.join(item['reasons'][:2])
+            entry['playtime_hours'] = minutes_to_hours(entry.get('playtime_forever', 0))
+            result.append(entry)
+        return result
+
     def load_history(self):
         """Load game picking history (supports both old int and new composite ID formats)"""
         if os.path.exists(self.HISTORY_FILE):

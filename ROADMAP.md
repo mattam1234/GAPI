@@ -63,6 +63,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 
 #### Smart Features
 - [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
+- [x] **Smart Recommendations** - Genre-affinity based recommendations from user's own library
 - [ ] **Duplicate Detection** - Identify same games across platforms
 - [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
 - [x] **Achievement Tracking** - Display completion percentage
@@ -108,7 +109,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ## 🔧 Technical Improvements
 
 ### Code Quality
-- [ ] Comprehensive test suite (unit, integration, e2e)
+- [x] Comprehensive test suite (unit, integration, e2e)
 - [ ] CI/CD pipeline with automated testing
 - [ ] Code coverage reports (target: 80%+)
 - [ ] Type checking with mypy

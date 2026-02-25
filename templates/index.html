@@ -557,6 +557,7 @@
             <button class="tab" onclick="switchTab('ignored', event)">No-Play List</button>
             <button class="tab" onclick="switchTab('achievements', event)">Achievements</button>
             <button class="tab" onclick="switchTab('friends', event)">👥 Friends</button>
+            <button class="tab" onclick="switchTab('recommendations', event)">💡 For You</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
         </div>        
         <!-- Picker Tab -->
@@ -1029,6 +1030,26 @@
             </div>
         </div>
 
+        <!-- Recommendations Tab -->
+        <div id="recommendations-tab" class="tab-content">
+            <h2>💡 Recommended For You</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                Games from your library that you haven't played (or barely played), ranked by how well they match the genres of your most-played games.
+            </p>
+            <div style="display:flex; gap:12px; align-items:center; margin-bottom:20px; flex-wrap:wrap;">
+                <label style="font-weight:600; color:var(--text-primary);">Number of suggestions:</label>
+                <select id="rec-count" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                </select>
+                <button onclick="loadRecommendations()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
+            </div>
+            <div id="recommendations-list">
+                <div class="loading">Click Refresh to generate recommendations…</div>
+            </div>
+        </div>
+
         <!-- Settings Tab -->
         <div id="settings-tab" class="tab-content">
             <h2>⚙️ Account Settings</h2>
@@ -1296,6 +1317,7 @@
             if (tabName === 'ignored') loadIgnoredGames();
             if (tabName === 'achievements') loadAchievements();
             if (tabName === 'friends') loadFriends();
+            if (tabName === 'recommendations') loadRecommendations();
             if (tabName === 'settings') {
                 loadSettings();
             }
@@ -3662,6 +3684,56 @@
                 }
             } catch (error) {
                 alert('Error: ' + error.message);
+            }
+        }
+
+        // ==============================================================================================
+        // Recommendations Functions
+        // ==============================================================================================
+
+        async function loadRecommendations() {
+            const listDiv = document.getElementById('recommendations-list');
+            const count = document.getElementById('rec-count').value;
+            listDiv.innerHTML = '<div class="loading">Generating recommendations…</div>';
+            try {
+                const response = await fetch(`/api/recommendations?count=${count}`);
+                const data = await response.json();
+                if (response.status === 400) {
+                    listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Not initialized. Add your Steam ID in ⚙️ Settings.'}</div>`;
+                    return;
+                }
+                const recs = data.recommendations || [];
+                if (recs.length === 0) {
+                    listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No recommendations yet. Play some games and come back!</div>';
+                    return;
+                }
+                let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${recs.length} recommendation${recs.length !== 1 ? 's' : ''}</p>`;
+                recs.forEach((game, idx) => {
+                    const safeName = game.name.replace(/'/g, "\\'");
+                    const scoreStars = '⭐'.repeat(Math.min(Math.round(game.recommendation_score), 5));
+                    html += `
+                        <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:10px;"
+                             onclick="showGameDetails(${game.appid}, '${safeName}', ${game.playtime_hours || 0}, '')">
+                            <div style="flex:1;">
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <span style="background:linear-gradient(135deg,#667eea,#764ba2); color:white; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9em; flex-shrink:0;">${idx + 1}</span>
+                                    <strong>${game.name}</strong>
+                                    <span style="font-size:0.85em; color:var(--text-secondary);">${game.playtime_hours > 0 ? game.playtime_hours + 'h played' : 'Never played'}</span>
+                                </div>
+                                <div style="margin-top:6px; font-size:0.85em; color:var(--text-secondary); padding-left:38px;">
+                                    💡 ${game.recommendation_reason || 'Unplayed game'}
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
+                                <a href="https://store.steampowered.com/app/${game.appid}/" target="_blank" onclick="event.stopPropagation()" style="font-size:0.8em; color:var(--tab-active-color); text-decoration:none;">Steam →</a>
+                                <span onclick="event.stopPropagation(); toggleFavorite(${game.appid})" style="cursor:pointer; font-size:1.1em;" title="Add to favorites">☆</span>
+                                <span onclick="event.stopPropagation(); quickIgnoreGame(${game.appid}, '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Ignore">🚫</span>
+                            </div>
+                        </div>`;
+                });
+                listDiv.innerHTML = html;
+            } catch (error) {
+                listDiv.innerHTML = `<div class="error">Error loading recommendations: ${error.message}</div>`;
             }
         }
     </script>

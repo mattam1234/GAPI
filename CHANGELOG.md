@@ -4,6 +4,28 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.3.0] - 2026-02-25
+
+### Added
+- **Comprehensive Unit Test Suite** (`tests/test_gapi.py`)
+  - 106 tests covering all core `GamePicker` functionality
+  - Helper function tests: `minutes_to_hours`, `is_valid_steam_id`, `is_placeholder_value`,
+    `_parse_release_year`, `extract_game_id`, `_atomic_write_json`
+  - `GamePicker` state tests: favorites, tags, reviews, backlog, playlists
+  - `filter_games()` tests including genre/metacritic/release-year filters via cached details
+  - `pick_random_game()` tests including history-avoidance behaviour
+  - `VotingSession` tests: vote casting, eligibility, results tallying, expiry
+  - `get_recommendations()` tests with mock library and genre affinity
+  - Runnable with `python -m pytest tests/` or `python -m unittest discover tests/`
+- **Smart Recommendations** (`/api/recommendations` endpoint + 💡 For You tab)
+  - Scores every unplayed / barely-played game in the user's library
+  - Genre affinity built from the user's most-played games using cached Steam details
+  - Applies a recency penalty for games picked recently (history list)
+  - New `GamePicker.get_recommendations(count)` method in `gapi.py`
+  - `GET /api/recommendations?count=N` Flask endpoint (login required)
+  - **💡 For You** tab in the Web GUI with configurable result count (5 / 10 / 20)
+  - Each recommendation shows name, playtime, explanation, Steam link, favourite ☆, and quick-ignore 🚫
+
 ## [2.2.0] - 2026-02-25
 
 ### Added
