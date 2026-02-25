@@ -143,8 +143,8 @@ If PostgreSQL is not available:
 ## Next Steps
 
 ### Immediate (Recommended)
-- [ ] Add UI tabs for "Ignore List" and "Achievements"
-- [ ] Create quick-ignore buttons in game library
+- [x] Add UI tabs for "Ignore List" and "Achievements"
+- [x] Create quick-ignore buttons in game library
 - [ ] Show ignored games in separate section
 
 ### Short-term

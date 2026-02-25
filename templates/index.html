@@ -556,6 +556,7 @@
             <button class="tab" onclick="switchTab('backlog', event)">📚 Backlog</button>
             <button class="tab" onclick="switchTab('ignored', event)">No-Play List</button>
             <button class="tab" onclick="switchTab('achievements', event)">Achievements</button>
+            <button class="tab" onclick="switchTab('friends', event)">👥 Friends</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
         </div>        
         <!-- Picker Tab -->
@@ -1018,6 +1019,16 @@
             </div>
         </div>
 
+        <!-- Friends Activity Tab -->
+        <div id="friends-tab" class="tab-content">
+            <h2>👥 Steam Friends Activity</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">See what your Steam friends are playing recently. Requires a public Steam profile and a configured Steam ID.</p>
+            <button onclick="loadFriends()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:20px;">🔄 Refresh</button>
+            <div id="friends-list">
+                <div class="loading">Click Refresh to load your friends…</div>
+            </div>
+        </div>
+
         <!-- Settings Tab -->
         <div id="settings-tab" class="tab-content">
             <h2>⚙️ Account Settings</h2>
@@ -1284,6 +1295,7 @@
             if (tabName === 'backlog') loadBacklog();
             if (tabName === 'ignored') loadIgnoredGames();
             if (tabName === 'achievements') loadAchievements();
+            if (tabName === 'friends') loadFriends();
             if (tabName === 'settings') {
                 loadSettings();
             }
@@ -1714,6 +1726,7 @@
                                     <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
+                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
                                 </div>
                             </div>
                         `;
@@ -1770,6 +1783,7 @@
                                     <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
+                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
                                 </div>
                             </div>
                         `;
@@ -3571,6 +3585,85 @@
         
         // Initialize auth status on page load
         document.addEventListener('DOMContentLoaded', checkAuthStatus);
+
+        // ==============================================================================================
+        // Friends Activity Functions
+        // ==============================================================================================
+
+        const PERSONA_STATE = ['Offline', 'Online', 'Busy', 'Away', 'Snooze', 'Looking to trade', 'Looking to play'];
+
+        async function loadFriends() {
+            const listDiv = document.getElementById('friends-list');
+            listDiv.innerHTML = '<div class="loading">Loading friends…</div>';
+            try {
+                const response = await fetch('/api/friends');
+                if (response.status === 503) {
+                    const data = await response.json();
+                    listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Steam not configured. Add your Steam ID in ⚙️ Settings.'}</div>`;
+                    return;
+                }
+                const data = await response.json();
+                if (!data.friends || data.friends.length === 0) {
+                    listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No friends found, or your friend list is private.</div>';
+                    return;
+                }
+                let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${data.friends.length} friend${data.friends.length !== 1 ? 's' : ''}</p>`;
+                data.friends.forEach(friend => {
+                    const stateLabel = PERSONA_STATE[friend.personastate] || 'Offline';
+                    const stateColor = friend.personastate > 0 ? '#27ae60' : '#7f8c8d';
+                    const avatar = friend.avatarfull
+                        ? `<img src="${friend.avatarfull}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;margin-right:12px;" loading="lazy">`
+                        : `<span style="width:40px;height:40px;border-radius:6px;background:var(--card-border);display:inline-block;margin-right:12px;"></span>`;
+                    const inGame = friend.current_game
+                        ? `<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#1b2838;color:#c7d5e0;font-size:0.8em;">🎮 ${friend.current_game}</span>`
+                        : '';
+                    let recentHtml = '';
+                    if (friend.recently_played && friend.recently_played.length > 0) {
+                        recentHtml = '<div style="margin-top:8px; font-size:0.85em; color:var(--text-secondary);">'
+                            + '<span style="font-weight:600;">Recently played: </span>'
+                            + friend.recently_played.map(g => {
+                                const hrs = (g.playtime_2weeks / 60).toFixed(1);
+                                return `<a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" style="color:var(--tab-active-color); text-decoration:none;">${g.name}</a> (${hrs}h this week)`;
+                            }).join(', ')
+                            + '</div>';
+                    }
+                    html += `
+                        <div class="list-item" style="display:flex; align-items:flex-start; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:10px; cursor:default;">
+                            ${avatar}
+                            <div style="flex:1;">
+                                <div>
+                                    <strong>${friend.personaname}</strong>
+                                    <span style="margin-left:8px; font-size:0.82em; color:${stateColor}; font-weight:600;">${stateLabel}</span>
+                                    ${inGame}
+                                </div>
+                                ${recentHtml}
+                            </div>
+                        </div>`;
+                });
+                listDiv.innerHTML = html;
+            } catch (error) {
+                listDiv.innerHTML = `<div class="error">Error loading friends: ${error.message}</div>`;
+            }
+        }
+
+        async function quickIgnoreGame(appId, gameName) {
+            if (!confirm(`Add "${gameName}" to your No-Play List?`)) return;
+            try {
+                const response = await fetch('/api/ignored-games', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({app_id: appId, game_name: gameName, reason: ''})
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    alert(`"${gameName}" added to No-Play List.`);
+                } else {
+                    alert(data.error || 'Failed to ignore game');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
     </script>
 </body>
 </html>

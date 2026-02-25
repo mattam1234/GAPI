@@ -4,6 +4,20 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.2.0] - 2026-02-25
+
+### Added
+- **Steam Friend Activity** (`/api/friends` endpoint + 👥 Friends tab in Web GUI)
+  - View all Steam friends with their online status (Online, Offline, Busy, Away…)
+  - See which friends are currently in-game, including the game name
+  - Per-friend recently-played list (last 2 weeks) with links to Steam store pages
+  - Sorted by activity: in-game friends first, then online, then offline
+  - New `SteamAPIClient.get_friend_list()`, `get_player_summaries()`, and
+    `get_recently_played()` methods in `gapi.py`
+- **Quick-Ignore button in Library view** (🚫 button on each game row)
+  - One-click to add any library game to the No-Play List without leaving the Library tab
+  - Available in both the full library view and the search results
+
 ## [2.1.0] - 2026-02-18
 
 ### Added

@@ -66,7 +66,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Duplicate Detection** - Identify same games across platforms
 - [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
 - [x] **Achievement Tracking** - Display completion percentage
-- [ ] **Friend Activity** - See what friends are playing (Steam API)
+- [x] **Friend Activity** - See what friends are playing (Steam API)
 
 #### Social Features
 - [ ] **Discord Rich Presence** - Show currently picked game in Discord status

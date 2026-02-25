@@ -339,6 +339,78 @@ class SteamAPIClient(GamePlatformClient):
             self._log.debug("Achievement fetch failed for app %s: %s", app_id, e)
         return None
 
+    def get_friend_list(self, steam_id: str) -> List[Dict]:
+        """Return the friend list for *steam_id*.
+
+        Each entry is a dict with at least ``steamid`` and ``friend_since``
+        keys (epoch timestamp).  Returns an empty list on error or if the
+        profile is private.
+        """
+        url = f"{self.BASE_URL}/ISteamUser/GetFriendList/v0001/"
+        params = {
+            'key': self.api_key,
+            'steamid': steam_id,
+            'relationship': 'friend',
+            'format': 'json',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            return data.get('friendslist', {}).get('friends', [])
+        except requests.RequestException as e:
+            self._log.debug("Friend list fetch failed for %s: %s", steam_id, e)
+        return []
+
+    def get_player_summaries(self, steam_ids: List[str]) -> List[Dict]:
+        """Return basic profile info for up to 100 Steam IDs.
+
+        Each entry contains ``steamid``, ``personaname``, ``avatarfull``,
+        ``personastate`` (0=offline…6), ``gameextrainfo`` (current game name,
+        if any) and ``gameid`` (current game app id, if any).
+        """
+        if not steam_ids:
+            return []
+        # Steam API accepts up to 100 IDs per request
+        chunk = steam_ids[:100]
+        url = f"{self.BASE_URL}/ISteamUser/GetPlayerSummaries/v0002/"
+        params = {
+            'key': self.api_key,
+            'steamids': ','.join(chunk),
+            'format': 'json',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get('response', {}).get('players', [])
+        except requests.RequestException as e:
+            self._log.debug("Player summaries fetch failed: %s", e)
+        return []
+
+    def get_recently_played(self, steam_id: str, count: int = 10) -> List[Dict]:
+        """Return recently played games for *steam_id*.
+
+        Each entry has ``appid``, ``name``, ``playtime_2weeks`` (minutes),
+        and ``playtime_forever`` (minutes).
+        """
+        url = f"{self.BASE_URL}/IPlayerService/GetRecentlyPlayedGames/v0001/"
+        params = {
+            'key': self.api_key,
+            'steamid': steam_id,
+            'count': count,
+            'format': 'json',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get('response', {}).get('games', [])
+        except requests.RequestException as e:
+            self._log.debug("Recently played fetch failed for %s: %s", steam_id, e)
+        return []
+
 
 class EpicAPIClient(GamePlatformClient):
     """Client for interacting with Epic Games Store API"""

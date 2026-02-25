@@ -2141,6 +2141,102 @@ def api_get_steam_achievements(app_id: int):
     return jsonify({'app_id': app_id, **stats})
 
 
+# ---------------------------------------------------------------------------
+# Friend Activity API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/friends')
+@require_login
+def api_get_friends():
+    """Return the current user's Steam friends and their recent activity.
+
+    Response JSON::
+
+        {
+          "friends": [
+            {
+              "steamid": "...",
+              "personaname": "...",
+              "avatarfull": "...",
+              "personastate": 1,
+              "current_game": "...",    // present if in-game
+              "current_gameid": "...",  // present if in-game
+              "recently_played": [      // up to 5 games
+                {"appid": 620, "name": "Portal 2",
+                 "playtime_2weeks": 60, "playtime_forever": 2400}
+              ]
+            }
+          ]
+        }
+
+    Returns 503 if Steam is not configured or the profile is private.
+    """
+    username = session.get('username')
+    user_ids = user_manager.get_user_ids(username)
+    steam_id = user_ids.get('steam_id', '')
+
+    if not steam_id or gapi.is_placeholder_value(steam_id):
+        return jsonify({'error': 'Steam ID not configured'}), 503
+
+    if not picker or not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
+        return jsonify({'error': 'Steam client not available'}), 503
+
+    steam_client: gapi.SteamAPIClient = picker.steam_client
+
+    # Fetch friend list
+    friends_raw = steam_client.get_friend_list(steam_id)
+    if not friends_raw:
+        return jsonify({'friends': []}), 200
+
+    friend_ids = [f['steamid'] for f in friends_raw]
+
+    # Fetch profile summaries (names, avatars, current game)
+    summaries = steam_client.get_player_summaries(friend_ids)
+    summary_map = {s['steamid']: s for s in summaries}
+
+    # Build response, fetching recently-played for online/in-game friends first
+    result = []
+    for fid in friend_ids:
+        summary = summary_map.get(fid, {})
+        entry: Dict = {
+            'steamid': fid,
+            'personaname': summary.get('personaname', fid),
+            'avatarfull': summary.get('avatarfull', ''),
+            'personastate': summary.get('personastate', 0),
+        }
+        if summary.get('gameextrainfo'):
+            entry['current_game'] = summary['gameextrainfo']
+        if summary.get('gameid'):
+            entry['current_gameid'] = summary['gameid']
+
+        # Fetch recently played (best-effort)
+        try:
+            recent = steam_client.get_recently_played(fid, count=5)
+            entry['recently_played'] = [
+                {
+                    'appid': g['appid'],
+                    'name': g.get('name', ''),
+                    'playtime_2weeks': g.get('playtime_2weeks', 0),
+                    'playtime_forever': g.get('playtime_forever', 0),
+                }
+                for g in recent
+            ]
+        except Exception:
+            entry['recently_played'] = []
+
+        result.append(entry)
+
+    # Sort: in-game first, then online, then offline
+    def _sort_key(f):
+        if f.get('current_game'):
+            return 0
+        state = f.get('personastate', 0)
+        return 1 if state > 0 else 2
+
+    result.sort(key=_sort_key)
+    return jsonify({'friends': result})
+
+
 def create_templates():
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)
