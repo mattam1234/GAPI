@@ -6,12 +6,14 @@ A modern web GUI for randomly picking games from your Steam library.
 
 import logging
 import argparse
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, Response
 import threading
 import json
 import os
 import sys
+import csv
 import hashlib
+import io
 import tempfile
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
@@ -2279,6 +2281,177 @@ def api_get_recommendations():
         recs = picker.get_recommendations(count=count)
 
     return jsonify({'recommendations': recs})
+
+
+# ---------------------------------------------------------------------------
+# HowLongToBeat API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/hltb/<path:game_name>')
+@require_login
+def api_get_hltb(game_name: str):
+    """Return HowLongToBeat completion-time estimates for *game_name*.
+
+    Uses the ``howlongtobeatpy`` library (optional).  If the library is not
+    installed or the HLTB website is unreachable, returns HTTP 503.
+
+    Response JSON::
+
+        {
+          "game_name": "Portal 2",
+          "similarity": 0.95,
+          "main": 8.5,
+          "main_extra": 13.0,
+          "completionist": 17.5
+        }
+
+    ``main``, ``main_extra``, and ``completionist`` are floats (hours) or
+    ``null`` when HLTB has no data for that category.
+    """
+    data = gapi.get_hltb_data(game_name)
+    if data is None:
+        return jsonify({'error': 'No HLTB data available for this game'}), 503
+    return jsonify(data)
+
+
+# ---------------------------------------------------------------------------
+# Duplicate Detection API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/duplicates')
+@require_login
+def api_get_duplicates():
+    """Return games that appear on more than one platform.
+
+    Each entry has ``name``, ``platforms`` (list), and ``games`` (list of
+    minimal game dicts).  Returns an empty list when only one platform is
+    configured or no duplicates are found.
+    """
+    global picker
+    if not picker or not picker.games:
+        return jsonify({'duplicates': []}), 200
+
+    with picker_lock:
+        raw = picker.find_duplicates()
+
+    # Slim down each game dict to what the UI needs
+    result = []
+    for group in raw:
+        slim_games = [
+            {
+                'app_id': g.get('appid'),
+                'game_id': g.get('game_id'),
+                'name': g.get('name', ''),
+                'platform': g.get('platform', 'steam'),
+                'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
+            }
+            for g in group['games']
+        ]
+        result.append({
+            'name': group['name'],
+            'platforms': group['platforms'],
+            'games': slim_games,
+        })
+
+    result.sort(key=lambda g: g['name'].lower())
+    return jsonify({'duplicates': result})
+
+
+# ---------------------------------------------------------------------------
+# Export Library / Favorites as CSV
+# ---------------------------------------------------------------------------
+
+def _make_csv_response(rows: List[Dict], fieldnames: List[str], filename: str) -> Response:
+    """Build a streaming CSV download response."""
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore',
+                            lineterminator='\n')
+    writer.writeheader()
+    writer.writerows(rows)
+    csv_bytes = output.getvalue().encode('utf-8')
+    return Response(
+        csv_bytes,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route('/api/export/library')
+@require_login
+def api_export_library():
+    """Download the full game library as a CSV file.
+
+    Columns: ``app_id``, ``name``, ``platform``, ``playtime_hours``,
+    ``is_favorite``, ``backlog_status``, ``tags``, ``review_rating``,
+    ``review_notes``.
+    """
+    global picker
+    if not picker or not picker.games:
+        return jsonify({'error': 'Library not loaded'}), 400
+
+    with picker_lock:
+        rows = []
+        for game in sorted(picker.games, key=lambda g: g.get('name', '').lower()):
+            app_id = game.get('appid') or game.get('id') or ''
+            game_id = game.get('game_id', f"steam:{app_id}")
+            review = picker.get_review(game_id) or {}
+            rows.append({
+                'app_id': app_id,
+                'name': game.get('name', ''),
+                'platform': game.get('platform', 'steam'),
+                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
+                'is_favorite': 'yes' if game_id in picker.favorites else 'no',
+                'backlog_status': picker.get_backlog_status(game_id) or '',
+                'tags': ','.join(picker.get_tags(game_id)),
+                'review_rating': review.get('rating', ''),
+                'review_notes': review.get('notes', ''),
+            })
+
+    return _make_csv_response(
+        rows,
+        ['app_id', 'name', 'platform', 'playtime_hours', 'is_favorite',
+         'backlog_status', 'tags', 'review_rating', 'review_notes'],
+        'gapi_library.csv',
+    )
+
+
+@app.route('/api/export/favorites')
+@require_login
+def api_export_favorites():
+    """Download the favorites list as a CSV file.
+
+    Columns: ``app_id``, ``name``, ``platform``, ``playtime_hours``,
+    ``tags``, ``review_rating``, ``review_notes``.
+    """
+    global picker
+    if not picker or not picker.games:
+        return jsonify({'error': 'Library not loaded'}), 400
+
+    with picker_lock:
+        rows = []
+        for game in picker.games:
+            game_id = game.get('game_id', '')
+            app_id = game.get('appid') or game.get('id') or ''
+            if game_id not in picker.favorites:
+                continue
+            review = picker.get_review(game_id) or {}
+            rows.append({
+                'app_id': app_id,
+                'name': game.get('name', ''),
+                'platform': game.get('platform', 'steam'),
+                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
+                'tags': ','.join(picker.get_tags(game_id)),
+                'review_rating': review.get('rating', ''),
+                'review_notes': review.get('notes', ''),
+            })
+        rows.sort(key=lambda r: r['name'].lower())
+
+    return _make_csv_response(
+        rows,
+        ['app_id', 'name', 'platform', 'playtime_hours', 'tags',
+         'review_rating', 'review_notes'],
+        'gapi_favorites.csv',
+    )
 
 
 def create_templates():

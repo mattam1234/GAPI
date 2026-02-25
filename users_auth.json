@@ -48,6 +48,13 @@
       "epic_id": "",
       "gog_id": "",
       "role": "user"
+    },
+    "testdup": {
+      "password": "ecd71870d1963316a97e3ac3408c9835ad8cf0f3c1bc703527c30265534f75ae",
+      "steam_id": "",
+      "epic_id": "",
+      "gog_id": "",
+      "role": "user"
     }
   }
 }
