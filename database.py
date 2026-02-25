@@ -37,6 +37,7 @@ class User(Base):
     
     id = Column(Integer, primary_key=True)
     username = Column(String(255), unique=True, index=True)
+    password = Column(String(64), nullable=False)  # SHA256 hash
     steam_id = Column(String(20), nullable=True)
     epic_id = Column(String(255), nullable=True)
     gog_id = Column(String(255), nullable=True)
@@ -173,21 +174,39 @@ def get_user_by_username(db, username: str):
         return None
 
 
-def create_or_update_user(db, username: str, steam_id: str = '', epic_id: str = '', gog_id: str = '', role: str = 'user'):
-    """Create or update user in database."""
+def create_or_update_user(db, username: str, password: str = '', steam_id: str = '', epic_id: str = '', gog_id: str = '', role: str = 'user'):
+    """Create or update user in database.
+    
+    Args:
+        db: Database session
+        username: Username
+        password: Password hash (SHA256). If empty and user exists, password is not updated.
+        steam_id: Steam ID
+        epic_id: Epic Games ID
+        gog_id: GOG ID
+        role: User role ('admin' or 'user')
+    """
     if not db:
         return None
     try:
         user = db.query(User).filter(User.username == username).first()
         if user:
+            # Update existing user
+            if password:  # Only update password if provided
+                user.password = password
             user.steam_id = steam_id
             user.epic_id = epic_id
             user.gog_id = gog_id
             user.role = role
             user.updated_at = datetime.utcnow()
         else:
+            # Create new user - password is required
+            if not password:
+                logger.error("Password required for new user")
+                return None
             user = User(
                 username=username,
+                password=password,
                 steam_id=steam_id,
                 epic_id=epic_id,
                 gog_id=gog_id,
@@ -277,3 +296,64 @@ def get_shared_ignore_games(db, usernames: list):
     except Exception as e:
         logger.error(f"Error getting shared ignores: {e}")
         return []
+
+
+def get_all_users(db):
+    """Get all users from the database."""
+    if not db:
+        return []
+    try:
+        users = db.query(User).all()
+        return users
+    except Exception as e:
+        logger.error(f"Error getting all users: {e}")
+        return []
+
+
+def delete_user(db, username: str):
+    """Delete a user from the database."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if user:
+            db.delete(user)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error deleting user: {e}")
+        db.rollback()
+        return False
+
+
+def update_user_role(db, username: str, role: str):
+    """Update user's role."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if user:
+            user.role = role
+            user.updated_at = datetime.utcnow()
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error updating user role: {e}")
+        db.rollback()
+        return False
+
+
+def verify_user_password(db, username: str, password_hash: str):
+    """Verify a user's password hash."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if user and user.password == password_hash:
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error verifying password: {e}")
+        return False

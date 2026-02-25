@@ -86,70 +86,67 @@ DEMO_GAMES = [
 
 
 class UserManager:
-    """Manages user authentication and platform IDs"""
+    """Manages user authentication and platform IDs using database as primary storage"""
     
     def __init__(self, users_file: str = USERS_AUTH_FILE):
         self.users_file = users_file
-        self.users: Dict = {}
-        self.load_users()
+        self._migrate_json_to_db()
     
-    def load_users(self):
-        """Load users from file"""
-        if os.path.exists(self.users_file):
-            try:
-                with open(self.users_file, 'r') as f:
-                    data = json.load(f)
-                    self.users = data.get('users', {})
-                # Backfill roles for existing users
-                updated = False
-                has_admin = any(u.get('role') == 'admin' for u in self.users.values())
-                for username, user_data in self.users.items():
-                    if 'role' not in user_data:
-                        # If no admin exists, make first user admin
-                        user_data['role'] = 'admin' if not has_admin else 'user'
-                        has_admin = True
-                        updated = True
-                if updated:
-                    self.save_users()
-            except (json.JSONDecodeError, IOError) as e:
-                gui_logger.error("Error loading users: %s", e)
-                self.users = {}
-
-        # If DB is available, merge platform IDs from DB for existing users
-        if DB_AVAILABLE:
-            try:
-                db = database.SessionLocal()
-                db_users = db.query(database.User).all()
-                merged = False
-                for dbu in db_users:
-                    uname = getattr(dbu, 'username', None)
-                    if uname and uname in self.users:
-                        u = self.users[uname]
-                        # copy platform IDs and role from DB when present
-                        if getattr(dbu, 'steam_id', None):
-                            u['steam_id'] = dbu.steam_id
-                            merged = True
-                        if getattr(dbu, 'epic_id', None):
-                            u['epic_id'] = dbu.epic_id
-                            merged = True
-                        if getattr(dbu, 'gog_id', None):
-                            u['gog_id'] = dbu.gog_id
-                            merged = True
-                        if getattr(dbu, 'role', None):
-                            u['role'] = dbu.role
-                            merged = True
-                if merged:
-                    self.save_users()
-                db.close()
-            except Exception as e:
-                gui_logger.exception('Failed to merge users from DB: %s', e)
-    
-    def save_users(self):
-        """Save users to file"""
+    def _migrate_json_to_db(self):
+        """One-time migration: Load users from JSON file and migrate to database"""
+        if not DB_AVAILABLE:
+            gui_logger.warning("Database not available - cannot migrate users from JSON")
+            return
+            
+        if not os.path.exists(self.users_file):
+            return
+            
         try:
-            gapi._atomic_write_json(self.users_file, {'users': self.users})
+            with open(self.users_file, 'r') as f:
+                data = json.load(f)
+                json_users = data.get('users', {})
+            
+            if not json_users:
+                return
+                
+            db = database.SessionLocal()
+            migrated_count = 0
+            
+            # Check which users need migration
+            for username, user_data in json_users.items():
+                existing_user = database.get_user_by_username(db, username)
+                
+                if not existing_user:
+                    # User doesn't exist in DB - migrate from JSON
+                    password_hash = user_data.get('password', '')
+                    steam_id = user_data.get('steam_id', '')
+                    epic_id = user_data.get('epic_id', '')
+                    gog_id = user_data.get('gog_id', '')
+                    role = user_data.get('role', 'user')
+                    
+                    if password_hash:  # Only migrate if we have a password
+                        database.create_or_update_user(
+                            db, username, password_hash, steam_id, epic_id, gog_id, role
+                        )
+                        migrated_count += 1
+                        gui_logger.info('Migrated user %s from JSON to database', username)
+            
+            db.close()
+            
+            if migrated_count > 0:
+                gui_logger.info('Migration complete: %d users migrated to database', migrated_count)
+                # Rename the JSON file to indicate migration is done
+                backup_file = self.users_file + '.migrated'
+                if not os.path.exists(backup_file):
+                    try:
+                        import shutil
+                        shutil.copy2(self.users_file, backup_file)
+                        gui_logger.info('Backed up JSON file to %s', backup_file)
+                    except Exception as e:
+                        gui_logger.warning('Could not backup JSON file: %s', e)
+        
         except Exception as e:
-            gui_logger.error("Error saving users: %s", e)
+            gui_logger.exception('Error during JSON to DB migration: %s', e)
     
     def hash_password(self, password: str) -> str:
         """Hash a password"""
@@ -157,85 +154,130 @@ class UserManager:
     
     def register(self, username: str, password: str, role: str = None) -> Tuple[bool, str]:
         """Register a new user"""
-        if username in self.users:
-            return False, "Username already exists"
+        if not DB_AVAILABLE:
+            return False, "Database not available"
+            
         if len(username) < 3:
             return False, "Username must be at least 3 characters"
         if len(password) < 6:
             return False, "Password must be at least 6 characters"
         
-        # First user becomes admin, rest are regular users
-        if role is None:
-            role = 'admin' if len(self.users) == 0 else 'user'
-        
-        self.users[username] = {
-            'password': self.hash_password(password),
-            'steam_id': '',
-            'epic_id': '',
-            'gog_id': '',
-            'role': role
-        }
-        self.save_users()
-        # Also persist to database if available
-        if DB_AVAILABLE:
-            try:
-                db = database.SessionLocal()
-                database.create_or_update_user(db, username, '', '', '', role)
+        try:
+            db = database.SessionLocal()
+            
+            # Check if user already exists
+            existing_user = database.get_user_by_username(db, username)
+            if existing_user:
                 db.close()
-                gui_logger.info('Persisted new user to database: %s', username)
-            except Exception as e:
-                gui_logger.exception('Failed to persist user to database: %s', e)
-        return True, "User registered successfully"
+                return False, "Username already exists"
+            
+            # Determine role: first user becomes admin, rest are regular users
+            if role is None:
+                all_users = database.get_all_users(db)
+                role = 'admin' if len(all_users) == 0 else 'user'
+            
+            # Create user in database
+            password_hash = self.hash_password(password)
+            user = database.create_or_update_user(db, username, password_hash, '', '', '', role)
+            db.close()
+            
+            if user:
+                gui_logger.info('Registered new user: %s (role: %s)', username, role)
+                return True, "User registered successfully"
+            else:
+                return False, "Failed to create user"
+                
+        except Exception as e:
+            gui_logger.exception('Error registering user: %s', e)
+            return False, "Registration failed"
     
     def login(self, username: str, password: str) -> Tuple[bool, str]:
         """Verify user credentials"""
-        if username not in self.users:
-            return False, "Invalid username or password"
-        
-        if self.users[username]['password'] != self.hash_password(password):
-            return False, "Invalid username or password"
-        
-        return True, "Login successful"
+        if not DB_AVAILABLE:
+            return False, "Database not available"
+            
+        try:
+            db = database.SessionLocal()
+            password_hash = self.hash_password(password)
+            is_valid = database.verify_user_password(db, username, password_hash)
+            db.close()
+            
+            if is_valid:
+                return True, "Login successful"
+            else:
+                return False, "Invalid username or password"
+                
+        except Exception as e:
+            gui_logger.exception('Error during login: %s', e)
+            return False, "Login failed"
     
     def get_user_ids(self, username: str) -> Dict:
         """Get user's platform IDs"""
-        if username not in self.users:
+        if not DB_AVAILABLE:
             return {}
-        
-        user = self.users[username]
-        return {
-            'steam_id': user.get('steam_id', ''),
-            'epic_id': user.get('epic_id', ''),
-            'gog_id': user.get('gog_id', '')
-        }
+            
+        try:
+            db = database.SessionLocal()
+            user = database.get_user_by_username(db, username)
+            db.close()
+            
+            if user:
+                return {
+                    'steam_id': user.steam_id or '',
+                    'epic_id': user.epic_id or '',
+                    'gog_id': user.gog_id or ''
+                }
+            return {}
+            
+        except Exception as e:
+            gui_logger.exception('Error getting user IDs: %s', e)
+            return {}
     
     def update_user_ids(self, username: str, steam_id: str = '', epic_id: str = '', gog_id: str = '') -> bool:
         """Update user's platform IDs"""
-        if username not in self.users:
+        if not DB_AVAILABLE:
             return False
-        
-        self.users[username]['steam_id'] = steam_id
-        self.users[username]['epic_id'] = epic_id
-        self.users[username]['gog_id'] = gog_id
-        self.save_users()
-        # Persist to DB when available
-        if DB_AVAILABLE:
-            try:
-                db = database.SessionLocal()
-                # preserve role if present in JSON store
-                role = self.users.get(username, {}).get('role', 'user')
-                database.create_or_update_user(db, username, steam_id, epic_id, gog_id, role)
+            
+        try:
+            db = database.SessionLocal()
+            user = database.get_user_by_username(db, username)
+            
+            if not user:
                 db.close()
-                gui_logger.info('Persisted updated IDs for user %s to DB', username)
-            except Exception as e:
-                gui_logger.exception('Failed to persist updated IDs for %s: %s', username, e)
-        return True
+                return False
+            
+            # Update platform IDs without changing password or role
+            user.steam_id = steam_id
+            user.epic_id = epic_id
+            user.gog_id = gog_id
+            user.updated_at = datetime.utcnow()
+            db.commit()
+            db.close()
+            
+            gui_logger.info('Updated platform IDs for user: %s', username)
+            return True
+            
+        except Exception as e:
+            gui_logger.exception('Error updating user IDs: %s', e)
+            return False
     
     def get_user_role(self, username: str) -> str:
         """Get user's role"""
-        if username not in self.users:
+        if not DB_AVAILABLE:
             return 'user'
-        return self.users[username].get('role', 'user')
+            
+        try:
+            db = database.SessionLocal()
+            user = database.get_user_by_username(db, username)
+            db.close()
+            
+            if user:
+                return user.role or 'user'
+            return 'user'
+            
+        except Exception as e:
+            gui_logger.exception('Error getting user role: %s', e)
+            return 'user'
     
     def is_admin(self, username: str) -> bool:
         """Check if user is admin"""
@@ -243,74 +285,92 @@ class UserManager:
     
     def get_all_users(self) -> List[Dict]:
         """Get all users with their info (excluding passwords)"""
-        users_list = []
-        for username, user_data in self.users.items():
-            users_list.append({
-                'username': username,
-                'steam_id': user_data.get('steam_id', ''),
-                'epic_id': user_data.get('epic_id', ''),
-                'gog_id': user_data.get('gog_id', ''),
-                'role': user_data.get('role', 'user')
-            })
-        return users_list
+        if not DB_AVAILABLE:
+            return []
+            
+        try:
+            db = database.SessionLocal()
+            users = database.get_all_users(db)
+            db.close()
+            
+            users_list = []
+            for user in users:
+                users_list.append({
+                    'username': user.username,
+                    'steam_id': user.steam_id or '',
+                    'epic_id': user.epic_id or '',
+                    'gog_id': user.gog_id or '',
+                    'role': user.role or 'user'
+                })
+            return users_list
+            
+        except Exception as e:
+            gui_logger.exception('Error getting all users: %s', e)
+            return []
     
     def delete_user(self, username: str, requesting_user: str) -> Tuple[bool, str]:
         """Delete a user (admin only)"""
+        if not DB_AVAILABLE:
+            return False, "Database not available"
+            
         if not self.is_admin(requesting_user):
             return False, "Only admins can delete users"
-        
-        if username not in self.users:
-            return False, "User not found"
         
         if username == requesting_user:
             return False, "Cannot delete yourself"
         
-        del self.users[username]
-        self.save_users()
-        # Remove from DB if available
-        if DB_AVAILABLE:
-            try:
-                db = database.SessionLocal()
-                user_obj = database.get_user_by_username(db, username)
-                if user_obj:
-                    db.delete(user_obj)
-                    db.commit()
+        try:
+            db = database.SessionLocal()
+            user = database.get_user_by_username(db, username)
+            
+            if not user:
                 db.close()
-                gui_logger.info('Deleted user %s from DB', username)
-            except Exception as e:
-                gui_logger.exception('Failed to delete user %s from DB: %s', username, e)
-        return True, "User deleted successfully"
+                return False, "User not found"
+            
+            success = database.delete_user(db, username)
+            db.close()
+            
+            if success:
+                gui_logger.info('Deleted user: %s', username)
+                return True, "User deleted successfully"
+            else:
+                return False, "Failed to delete user"
+                
+        except Exception as e:
+            gui_logger.exception('Error deleting user: %s', e)
+            return False, "Delete failed"
     
     def update_user_role(self, username: str, role: str, requesting_user: str) -> Tuple[bool, str]:
         """Update user's role (admin only)"""
+        if not DB_AVAILABLE:
+            return False, "Database not available"
+            
         if not self.is_admin(requesting_user):
             return False, "Only admins can change roles"
-        
-        if username not in self.users:
-            return False, "User not found"
         
         if role not in ['admin', 'user']:
             return False, "Invalid role"
         
-        self.users[username]['role'] = role
-        self.save_users()
-        # Persist role change to DB
-        if DB_AVAILABLE:
-            try:
-                db = database.SessionLocal()
-                user_obj = database.get_user_by_username(db, username)
-                if user_obj:
-                    user_obj.role = role
-                    user_obj.updated_at = datetime.utcnow()
-                    db.commit()
-                else:
-                    # create if missing
-                    database.create_or_update_user(db, username, self.users[username].get('steam_id',''), self.users[username].get('epic_id',''), self.users[username].get('gog_id',''), role)
+        try:
+            db = database.SessionLocal()
+            user = database.get_user_by_username(db, username)
+            
+            if not user:
                 db.close()
-                gui_logger.info('Updated role for user %s to %s in DB', username, role)
-            except Exception as e:
-                gui_logger.exception('Failed to persist role change for %s: %s', username, e)
-        return True, "Role updated successfully"
+                return False, "User not found"
+            
+            success = database.update_user_role(db, username, role)
+            db.close()
+            
+            if success:
+                gui_logger.info('Updated role for user %s to %s', username, role)
+                return True, "Role updated successfully"
+            else:
+                return False, "Failed to update role"
+                
+        except Exception as e:
+            gui_logger.exception('Error updating user role: %s', e)
+            return False, "Update failed"
 
 
 # Global user manager
@@ -484,15 +544,6 @@ def api_auth_register():
     if not success:
         return jsonify({'error': message}), 400
     gui_logger.info('Register result for username=%s: %s', username, 'success' if success else 'failure')
-    # Ensure the user is persisted to the database (do this in request context)
-    if DB_AVAILABLE:
-        try:
-            db = database.SessionLocal()
-            database.create_or_update_user(db, username, '', '', '', user_manager.get_user_role(username))
-            db.close()
-            gui_logger.info('Persisted user to DB (via endpoint): %s', username)
-        except Exception as e:
-            gui_logger.exception('Failed to persist user to DB from register endpoint: %s', e)
 
     return jsonify({'message': message})
 
@@ -1245,10 +1296,11 @@ def api_toggle_ignored_game():
     try:
         db = database.SessionLocal()
         
-        # Ensure user exists in database
+        # Verify user exists in database
         user = database.get_user_by_username(db, username)
         if not user:
-            user = database.create_or_update_user(db, username)
+            db.close()
+            return jsonify({'error': 'User not found in database'}), 404
         
         success = database.toggle_ignore_game(db, username, app_id, game_name, reason)
         db.close()
@@ -1343,7 +1395,8 @@ def api_start_achievement_hunt():
         user = database.get_user_by_username(db, username)
         
         if not user:
-            user = database.create_or_update_user(db, username)
+            db.close()
+            return jsonify({'error': 'User not found in database'}), 404
         
         hunt = database.AchievementHunt(
             user_id=user.id,
