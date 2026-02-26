@@ -71,7 +71,7 @@
 
         /* Dark mode toggle button */
         #dark-mode-btn {
-            position: fixed;
+            position: absolute;
             top: 15px;
             right: 15px;
             background: rgba(255,255,255,0.18);
@@ -82,7 +82,6 @@
             font-size: 0.95em;
             cursor: pointer;
             transition: background 0.2s;
-            z-index: 10000;
         }
         #dark-mode-btn:hover { background: rgba(255,255,255,0.32); }
 
@@ -269,6 +268,59 @@
             box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
         }
 
+        .game-hero {
+            position: relative;
+            margin: 10px 0 12px;
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--card-bg);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+        }
+
+        .game-hero img {
+            width: 100%;
+            max-width: none;
+            display: block;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+        }
+
+        .game-hero-overlay {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 14px;
+            background: linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.75));
+            color: #fff;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+        }
+
+        .game-hero-title {
+            font-weight: 800;
+            font-size: 1.15em;
+            line-height: 1.2;
+        }
+
+        .game-hero-subtitle {
+            font-size: 0.9em;
+            font-weight: 600;
+            opacity: 0.95;
+        }
+
+        .game-description-card {
+            margin-top: 10px;
+            padding: 14px;
+            border-radius: 10px;
+            background: var(--list-hover);
+            color: var(--text-primary);
+            line-height: 1.7;
+        }
+
         .action-buttons {
             display: flex;
             gap: 10px;
@@ -328,6 +380,33 @@
         
         .list-item:last-child {
             border-bottom: none;
+        }
+
+        .list-item-media {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .list-thumb {
+            width: 108px;
+            height: 60px;
+            border-radius: 8px;
+            object-fit: cover;
+            flex-shrink: 0;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.2);
+            background: var(--list-hover);
+        }
+
+        .list-item-title {
+            display: inline-block;
+            max-width: 460px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            vertical-align: middle;
         }
 
         .search-input {
@@ -595,6 +674,18 @@
                     <input type="text" id="genre-filter" class="genre-input" placeholder="Leave empty for any genre">
                 </div>
 
+                <div class="filter-group">
+                    <label class="filter-label" for="platform-filter">Platform / Device</label>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <select id="platform-filter" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:0.95em; min-width:160px;">
+                            <option value="">Any platform</option>
+                        </select>
+                        <select id="device-filter" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:0.95em; min-width:140px;">
+                            <option value="">Any device</option>
+                        </select>
+                    </div>
+                </div>
+
                 <!-- Advanced filters toggle -->
                 <div class="filter-group">
                     <label class="filter-label" style="cursor:pointer;" onclick="toggleAdvancedFilters()">
@@ -819,6 +910,21 @@
                         <span style="font-weight: 600;">Exclude Game IDs (comma-separated)</span>
                         <input type="text" id="exclude-game-ids" placeholder="e.g., 570, 620, 440"
                                style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    </label>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Platform</span>
+                        <select id="multi-platform-filter" style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                            <option value="">Any platform</option>
+                        </select>
+                    </label>
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Device</span>
+                        <select id="multi-device-filter" style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                            <option value="">Any device</option>
+                        </select>
                     </label>
                 </div>
 
@@ -1101,6 +1207,95 @@
                     Save Settings
                 </button>
             </div>
+            
+            <!-- Library Sync Settings -->
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>📚 Library Sync</h3>
+                <p style="color: #666; margin-bottom: 15px;">Manage your game library synchronization with Steam API.</p>
+                
+                <div id="sync-status-display" style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <small style="color: #666;">Last Sync</small>
+                            <div id="last-sync-time" style="font-weight: 600;">Never</div>
+                        </div>
+                        <div>
+                            <small style="color: #666;">Games Cached</small>
+                            <div id="games-cached-count" style="font-weight: 600;">0</div>
+                        </div>
+                        <div>
+                            <small style="color: #666;">Cache Age</small>
+                            <div id="cache-age-display" style="font-weight: 600;">—</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <button onclick="triggerLibrarySync()" id="sync-library-btn" 
+                            style="padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                        🔄 Sync Library Now
+                    </button>
+                    <small style="color: #666; display: block; margin-top: 8px;">
+                        Fetch your latest games from Steam API
+                    </small>
+                </div>
+                
+                <!-- Admin-only sync interval settings -->
+                <div id="sync-interval-settings" style="display: none; border-top: 1px solid #ddd; padding-top: 20px; margin-top: 20px;">
+                    <h4 style="margin-top: 0;">⚙️ Auto-Sync Interval (Admin Only)</h4>
+                    <p style="color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                        Background sync automatically updates all users' libraries at the specified interval.
+                    </p>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; flex-direction: column; gap: 5px;">
+                            <span style="font-weight: 600;">Sync Interval (hours)</span>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="number" id="sync-interval-input" min="1" max="168" step="0.5" 
+                                       placeholder="6" value="6"
+                                       style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 150px;">
+                                <span style="color: #666; font-size: 0.9em;">hours (1-168)</span>
+                            </div>
+                        </label>
+                        <small style="color: #666; display: block; margin-top: 5px;">
+                            Recommended: 6 hours. Lower values may hit Steam API rate limits.
+                        </small>
+                    </div>
+                    
+                    <button onclick="updateSyncInterval()" 
+                            style="padding: 10px 24px; background: #f39c12; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                        💾 Save Sync Interval
+                    </button>
+                </div>
+            </div>
+
+            <!-- Admin-only migrations -->
+            <div id="admin-migrations" style="display: none; background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>🛠️ Database Migrations (Admin Only)</h3>
+                <p style="color: #666; margin-bottom: 15px;">Preview, edit, and run per-entity migrations while the app is running.</p>
+
+                <div style="display: grid; gap: 12px; margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Select Migration</span>
+                        <select id="migration-select" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;"></select>
+                    </label>
+                    <div id="migration-description" style="color: #666; font-size: 0.95em;"></div>
+                </div>
+
+                <label style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
+                    <span style="font-weight: 600;">SQL (preview and edit)</span>
+                    <textarea id="migration-sql" rows="8" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-family: monospace;"></textarea>
+                </label>
+
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button onclick="loadMigrations()" style="padding: 10px 24px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                        🔄 Reload Migrations
+                    </button>
+                    <button onclick="runMigration()" style="padding: 10px 24px; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                        ▶️ Run Migration
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1116,9 +1311,30 @@
         </div>
     </div>
 
+    <!-- First-time Setup Modal -->
+    <div id="setup-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2500; align-items:center; justify-content:center;">
+        <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:520px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+            <h3 style="margin-top:0;">🔧 First-time Setup</h3>
+            <p style="color:var(--text-secondary);">No users found. Create the initial admin account.</p>
+            <div style="display:grid; gap:12px; margin-top:15px;">
+                <label style="display:flex; flex-direction:column; gap:6px;">
+                    <span style="font-weight:600;">Admin Username</span>
+                    <input id="setup-admin-username" type="text" value="admin" style="padding:10px; border:1px solid #ddd; border-radius:8px;">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:6px;">
+                    <span style="font-weight:600;">Admin Password</span>
+                    <input id="setup-admin-password" type="password" style="padding:10px; border:1px solid #ddd; border-radius:8px;">
+                </label>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
+                <button onclick="runInitialSetup()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Create Admin</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Game Details Modal -->
     <div id="game-details-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center; overflow-y:auto;">
-        <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:700px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
+        <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:800px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
             <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:20px;">
                 <h3 id="game-details-name" style="margin:0; font-size:1.5em;">Game Name</h3>
                 <button onclick="closeGameDetailsModal()" style="padding:6px 12px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-size:1.2em;">✕</button>
@@ -1151,6 +1367,10 @@
                     <div id="game-details-hltb" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px;"></div>
                 </div>
                 <div>
+                    <small style="color:var(--text-secondary);">Details & Description</small><br>
+                    <div id="game-details-description" style="padding:15px; background:var(--list-hover); border-radius:8px; max-height:400px; overflow-y:auto; color:var(--text-primary); margin-top:10px; line-height:1.6;"><em>Loading details...</em></div>
+                </div>
+                <div>
                     <small style="color:var(--text-secondary);">Links & Pricing</small><br>
                     <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
                         <a id="game-details-steam" href="#" target="_blank" style="padding:8px 16px; background:#000; color:white; text-decoration:none; border-radius:6px; font-size:0.9em; font-weight:600;">🔗 Steam Store</a>
@@ -1158,7 +1378,6 @@
                         <a id="game-details-steamdb" href="#" target="_blank" style="padding:8px 16px; background:#213956; color:white; text-decoration:none; border-radius:6px; font-size:0.9em; font-weight:600;">📊 SteamDB</a>
                     </div>
                 </div>
-                <div id="game-details-description" style="padding:15px; background:var(--list-hover); border-radius:8px; max-height:200px; overflow-y:auto; color:var(--text-secondary);"><em>Loading details...</em></div>
             </div>
             <div style="display:flex; gap:10px; margin-top:20px; justify-content:flex-end;">
                 <button onclick="closeGameDetailsModal()" style="padding:10px 20px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
@@ -1215,7 +1434,8 @@
             showSpinner('Loading your game library…');
             try {
                 await updateStatus();
-                await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter()]);
+                await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter(), refreshPlatformFilters()]);
+                checkInitialSetup();
             } finally {
                 hideSpinner();
             }
@@ -1296,10 +1516,14 @@
         }
 
         /**
-         * Pre-load details for multiple games (batch async loading)
+         * Pre-load details for multiple games (batch async loading with concurrency limit)
+         * Games are loaded on-demand when user clicks on them - this just primes the cache
          */
         async function preloadGameDetails(appIds) {
-            return Promise.allSettled(appIds.map(id => loadGameDetailsAsync(id)));
+            // With lazy loading, we don't need to preload all details anymore
+            // Details are loaded on-demand from cache (database) or API
+            // This function is kept for compatibility but doesn't preload anymore
+            return [];
         }
         
         function switchTab(tabName, event) {
@@ -1353,6 +1577,8 @@
         async function pickGame() {
             const filterValue = document.querySelector('input[name="filter"]:checked').value;
             const genreValue = document.getElementById('genre-filter').value.trim();
+            const platformFilter = document.getElementById('platform-filter').value;
+            const deviceFilter = document.getElementById('device-filter').value;
             const minScore = document.getElementById('adv-min-score').value;
             const minYear = document.getElementById('adv-min-year').value;
             const maxYear = document.getElementById('adv-max-year').value;
@@ -1376,6 +1602,8 @@
                 if (tagFilter) body.tag = tagFilter;
                 if (multiplayerOnly) body.multiplayer_only = true;
                 if (singleplayerOnly) body.singleplayer_only = true;
+                if (platformFilter) body.platform_filter = platformFilter;
+                if (deviceFilter) body.device_filter = deviceFilter;
 
                 const response = await fetch('/api/pick', {
                     method: 'POST',
@@ -1418,6 +1646,86 @@
                 });
             } catch (e) { console.warn('Tag filter refresh failed:', e.message); }
         }
+
+        function rebuildFilterSelect(selectEl, items, anyLabel, selectedValue) {
+            if (!selectEl) return;
+            const current = selectedValue !== undefined ? selectedValue : (selectEl.value || '');
+            selectEl.innerHTML = `<option value="">${anyLabel}</option>`;
+            (items || []).forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.value;
+                option.textContent = item.label;
+                if (item.value === current) option.selected = true;
+                selectEl.appendChild(option);
+            });
+        }
+
+        async function refreshPlatformFilters() {
+            try {
+                const response = await fetch('/api/filters/platform-options');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                rebuildFilterSelect(
+                    document.getElementById('platform-filter'),
+                    data.platforms || [],
+                    'Any platform'
+                );
+                rebuildFilterSelect(
+                    document.getElementById('device-filter'),
+                    data.devices || [],
+                    'Any device'
+                );
+            } catch (error) {
+                console.warn('Platform filter refresh failed:', error.message);
+            }
+        }
+
+        async function refreshMultiUserPlatformFilters() {
+            const selectedUsers = getSelectedUsers();
+            const usersParam = encodeURIComponent(selectedUsers.join(','));
+            const url = `/api/filters/platform-options${selectedUsers.length ? `?users=${usersParam}` : ''}`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) return;
+                const data = await response.json();
+
+                rebuildFilterSelect(
+                    document.getElementById('multi-platform-filter'),
+                    data.platforms || [],
+                    'Any platform'
+                );
+                rebuildFilterSelect(
+                    document.getElementById('multi-device-filter'),
+                    data.devices || [],
+                    'Any device'
+                );
+            } catch (error) {
+                console.warn('Multi-user platform filter refresh failed:', error.message);
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function getGameThumbUrl(appId) {
+            const cached = gameDetailsCache.get(appId);
+            return (cached && (cached.header_image || cached.capsule_image))
+                || `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+        }
+
+        function renderGameListThumb(appId, gameName) {
+            const src = getGameThumbUrl(appId);
+            const safeName = escapeHtml(gameName || 'Game');
+            return `<img class="list-thumb" src="${src}" alt="${safeName} thumbnail" loading="lazy">`;
+        }
         
         async function displayGame(game) {
             const resultDiv = document.getElementById('game-result');
@@ -1455,11 +1763,18 @@
             const currentStatus = game.backlog_status || '';
             const backlogOptions = `<option value="">— none —</option>` +
                 backlogStatuses.map(s => `<option value="${s}" ${currentStatus===s?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('');
+            const safeGameName = escapeHtml(game.name || 'Unknown Game');
+            const heroFallback = `https://cdn.akamai.steamstatic.com/steam/apps/${game.app_id}/header.jpg`;
 
             let html = `
-                <div class="game-title">${favoriteIcon}${game.name}</div>
+                <div class="game-hero" id="game-hero-card">
+                    <img id="game-hero-image" src="${heroFallback}" alt="${safeGameName} hero" loading="lazy">
+                    <div class="game-hero-overlay">
+                        <div class="game-hero-title">${favoriteIcon}${safeGameName}</div>
+                        <div class="game-hero-subtitle">App ID: ${game.app_id}</div>
+                    </div>
+                </div>
                 <div class="game-info">
-                    <strong>App ID:</strong> ${game.app_id}<br>
                     <strong>Playtime:</strong> ${game.playtime_hours} hours
                 </div>
                 <div id="game-details">Loading details...</div>
@@ -1687,17 +2002,17 @@
                     let detailsHtml = '<div class="game-description">';
 
                     const previewUrl = details.header_image || details.capsule_image || `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
-                    const previewAlt = currentGame && currentGame.name ? `${currentGame.name} preview` : 'Game preview';
-                    const safeAlt = previewAlt.replace(/"/g, '&quot;');
-                    if (previewUrl) {
-                        detailsHtml += `<div class="game-preview"><img src="${previewUrl}" alt="${safeAlt}" loading="lazy"></div>`;
+                    const heroImg = document.getElementById('game-hero-image');
+                    if (heroImg && previewUrl) {
+                        heroImg.src = previewUrl;
                     }
+
+                    const descriptionText = (details.description || '').trim();
+                    const safeDescription = escapeHtml(descriptionText);
                     
-                    if (details.description) {
-                        detailsHtml += `<p>${details.description}</p>`;
-                    }
+                    detailsHtml += `<div class="game-description-card"><strong>About this game</strong><p style="margin-top:8px;">${safeDescription || 'No description available for this game yet.'}</p></div>`;
                     
-                    if (details.genres) {
+                    if (details.genres && details.genres.length) {
                         detailsHtml += `<p><strong>Genres:</strong> ${details.genres.join(', ')}</p>`;
                     }
                     
@@ -1767,8 +2082,9 @@
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
                         html += `
                             <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${game.name.replace(/'/g, "\\'")}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
-                                <div>
-                                    ${favoriteIcon}<strong>${game.name}</strong>
+                                <div class="list-item-media">
+                                    ${renderGameListThumb(game.app_id, game.name)}
+                                    <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
                                 </div>
                                 <div style="display:flex; gap:10px; align-items:center;">
                                     <span>${game.playtime_hours}h</span>
@@ -1860,8 +2176,9 @@
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
                         html += `
                             <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${game.name.replace(/'/g, "\\'")}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
-                                <div>
-                                    ${favoriteIcon}<strong>${game.name}</strong>
+                                <div class="list-item-media">
+                                    ${renderGameListThumb(game.app_id, game.name)}
+                                    <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
                                 </div>
                                 <div style="display:flex; gap:10px; align-items:center;">
                                     <span>${game.playtime_hours}h</span>
@@ -1923,30 +2240,62 @@
             // Load details asynchronously and update modal when ready
             loadGameDetailsAsync(appId).then(details => {
                 if (details && modal.style.display === 'flex') {
-                    // Update release year/date
+                    let detailsHtml = '';
+                    
+                    // Add game preview image
+                    const previewUrl = details.header_image || details.capsule_image || `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+                    const safeName = escapeHtml(gameName);
+                    if (previewUrl) {
+                        detailsHtml += `
+                            <div class="game-hero" style="margin-bottom:15px;">
+                                <img src="${previewUrl}" alt="${safeName} hero" loading="lazy">
+                                <div class="game-hero-overlay">
+                                    <div class="game-hero-title">${safeName}</div>
+                                    <div class="game-hero-subtitle">App ID: ${appId}</div>
+                                </div>
+                            </div>`;
+                    }
+                    
+                    // Add description
+                    if (details.description) {
+                        detailsHtml += `<div class="game-description-card"><strong>About this game</strong><p style="margin-top:8px;">${escapeHtml(details.description)}</p></div>`;
+                    } else {
+                        detailsHtml += `<div class="game-description-card"><strong>About this game</strong><p style="margin-top:8px;">No description available for this game yet.</p></div>`;
+                    }
+                    
+                    // Add genres
+                    if (details.genres && details.genres.length) {
+                        detailsHtml += `<p style="margin:10px 0;"><strong>Genres:</strong> ${details.genres.join(', ')}</p>`;
+                    }
+                    
+                    // Add release date
                     if (details.release_date) {
                         const year = details.release_date.split(', ').pop().trim();
                         document.getElementById('game-details-year').textContent = year || '—';
+                        detailsHtml += `<p style="margin:10px 0;"><strong>Release Date:</strong> ${details.release_date}</p>`;
                     }
                     
-                    // Update description
-                    if (details.description) {
-                        document.getElementById('game-details-description').textContent = details.description;
-                    } else {
-                        document.getElementById('game-details-description').innerHTML = '<em style="color:var(--text-secondary);">No description available</em>';
-                    }
-                    
-                    // Show Metacritic score if available
+                    // Add Metacritic score
                     if (details.metacritic_score) {
+                        detailsHtml += `<p style="margin:10px 0;"><strong>Metacritic Score:</strong> ${details.metacritic_score}</p>`;
                         document.getElementById('game-details-metacritic-section').style.display = 'block';
                         document.getElementById('game-details-metacritic').textContent = `${details.metacritic_score}/100`;
                     }
                     
-                    // Show ProtonDB rating if available
+                    // Add ProtonDB rating
                     if (details.protondb) {
+                        const tier = details.protondb.tier || 'unknown';
+                        const tierColors = {
+                            platinum: '#ace0fb', gold: '#ffd700', silver: '#c0c0c0',
+                            bronze: '#cd7f32', borked: '#e74c3c', pending: '#95a5a6'
+                        };
+                        const bg = tierColors[tier] || '#aaa';
+                        const total = details.protondb.total || 0;
+                        detailsHtml += `<p style="margin:10px 0;"><strong>ProtonDB:</strong> <span style="display:inline-block;padding:2px 10px;border-radius:10px;background:${bg};color:#1a1a2e;font-weight:700;font-size:0.9em;">${tier.charAt(0).toUpperCase()+tier.slice(1)}</span> <span style="color:var(--text-secondary);font-size:0.85em;">(${total} report${total!==1?'s':''})</span></p>`;
                         document.getElementById('game-details-protondb-section').style.display = 'block';
-                        document.getElementById('game-details-protondb').textContent = details.protondb;
                     }
+                    
+                    document.getElementById('game-details-description').innerHTML = detailsHtml;
                 }
             });
 
@@ -2002,21 +2351,26 @@
                 
                 if (data.favorites && data.favorites.length > 0) {
                     let html = '';
+                    const appIds = [];
                     data.favorites.forEach(game => {
+                        appIds.push(game.app_id);
+                        const safeName = (game.name || '').replace(/'/g, "\\'");
                         html += `
-                            <div class="list-item">
-                                <div>
-                                    <span class="favorite-icon">⭐</span><strong>${game.name}</strong>
+                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
+                                <div class="list-item-media">
+                                    ${renderGameListThumb(game.app_id, game.name)}
+                                    <div><span class="favorite-icon">⭐</span><strong class="list-item-title">${game.name}</strong></div>
                                 </div>
                                 <div>
                                     ${game.playtime_hours}h
                                     <button class="btn btn-favorite" style="margin-left: 10px; padding: 5px 10px;"
-                                            onclick="removeFavorite(${game.app_id})">Remove</button>
+                                            onclick="event.stopPropagation(); removeFavorite(${game.app_id})">Remove</button>
                                 </div>
                             </div>
                         `;
                     });
                     listDiv.innerHTML = html;
+                    preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
                 } else {
                     listDiv.innerHTML = '<div class="loading">No favorite games yet!</div>';
                 }
@@ -2452,6 +2806,18 @@
             listDiv.innerHTML = '<div class="loading">Loading...</div>';
             
             try {
+                let availableRoles = [];
+                try {
+                    const rolesResp = await fetch('/api/roles');
+                    if (rolesResp.ok) {
+                        const rolesData = await rolesResp.json();
+                        availableRoles = rolesData.roles || [];
+                    }
+                } catch (e) {
+                    availableRoles = [];
+                }
+                window.availableRoles = availableRoles;
+
                 const response = await fetch('/api/users/all');
                 const data = await response.json();
                 
@@ -2464,6 +2830,8 @@
                     let html = '<div style="display: grid; gap: 10px;">';
                     data.users.forEach(user => {
                         const isAdmin = user.role === 'admin';
+                        const roleList = user.roles && user.roles.length ? user.roles : [user.role];
+                        const roleBadges = roleList.map(r => `<span style=\"display:inline-block; margin:2px 6px 0 0; padding:2px 8px; background:#eef1ff; color:#445; border-radius:10px; font-size:0.75em; font-weight:600;\">${r}</span>`).join(' ');
                         const roleColor = isAdmin ? '#f39c12' : '#667eea';
                         const roleIcon = isAdmin ? '👑' : '👤';
                         
@@ -2474,6 +2842,7 @@
                                     <span style="display: inline-block; margin-top: 5px; padding: 3px 10px; background: ${roleColor}; color: white; border-radius: 12px; font-size: 0.85em; font-weight: 600;">
                                         ${user.role.toUpperCase()}
                                     </span>
+                                    <div style="margin-top:6px;">${roleBadges}</div>
                                 </div>
                                 <div>
                                     <small style="color: var(--text-secondary);">Steam ID:</small><br>
@@ -2487,7 +2856,12 @@
                                     <small style="color: var(--text-secondary);">GOG ID:</small><br>
                                     <span style="font-family: monospace; font-size: 0.9em;">${user.gog_id || '<span style="color: #999;">Not set</span>'}</span>
                                 </div>
-                                <div style="display: flex; gap: 8px;">
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <button onclick="editUserRoles('${user.username}')" 
+                                            style="padding: 6px 12px; background: #2d9cdb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                            title="Edit Roles">
+                                        🧩 Roles
+                                    </button>
                                     ${!isAdmin ? `
                                         <button onclick="toggleUserRole('${user.username}', 'admin')" 
                                                 style="padding: 6px 12px; background: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
@@ -2545,6 +2919,36 @@
                 }
             } catch (error) {
                 showMessage('Error updating role: ' + error.message, 'error');
+            }
+        }
+
+        async function editUserRoles(username) {
+            const roles = (window.availableRoles && window.availableRoles.length) ? window.availableRoles.join(', ') : 'admin, user';
+            const input = prompt(`Enter roles for ${username} (comma-separated). Available: ${roles}`);
+            if (input === null) return;
+
+            const roleList = input.split(',').map(r => r.trim()).filter(Boolean);
+            if (roleList.length === 0) {
+                showMessage('At least one role is required', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/users/roles', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username, roles: roleList })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    showMessage('Roles updated successfully!', 'success');
+                    loadUsers();
+                } else {
+                    showMessage(data.error || 'Failed to update roles', 'error');
+                }
+            } catch (error) {
+                showMessage('Error updating roles: ' + error.message, 'error');
             }
         }
         
@@ -2616,7 +3020,7 @@
                         
                         html += `
                             <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: 8px; cursor: pointer; border: 2px solid ${hasAnyId ? '#667eea' : '#e0e0e0'};" title="${tooltipText}">
-                                <input type="checkbox" class="user-checkbox" value="${user.username}" ${!hasAnyId ? 'disabled' : ''} style="width: 18px; height: 18px;">
+                                <input type="checkbox" class="user-checkbox" value="${user.username}" ${!hasAnyId ? 'disabled' : ''} style="width: 18px; height: 18px;" onchange="refreshMultiUserPlatformFilters()">
                                 <span><strong>${badge} ${user.username}</strong></span>
                             </label>
                         `;
@@ -2624,8 +3028,11 @@
                     html += '</div>';
                     html += '<p style="margin-top: 15px; color: var(--text-secondary); font-size: 0.9em;">💡 Tip: Users need at least one platform ID in Settings to appear in multi-user game picker.</p>';
                     checkboxDiv.innerHTML = html;
+                    await refreshMultiUserPlatformFilters();
                 } else {
                     checkboxDiv.innerHTML = '<div class="loading">No users with platform IDs found. Users can add their IDs in Settings.</div>';
+                    rebuildFilterSelect(document.getElementById('multi-platform-filter'), [], 'Any platform');
+                    rebuildFilterSelect(document.getElementById('multi-device-filter'), [], 'Any device');
                 }
             } catch (error) {
                 checkboxDiv.innerHTML = '<div class="error">Error loading users: ' + error.message + '</div>';
@@ -2660,6 +3067,8 @@
             const minAvgPlaytime = document.getElementById('min-avg-playtime').value;
             const requireMultiplayer = document.getElementById('require-multiplayer').checked;
             const requireSingleplayer = document.getElementById('require-singleplayer').checked;
+            const platformFilter = document.getElementById('multi-platform-filter').value;
+            const deviceFilter = document.getElementById('multi-device-filter').value;
             
             const resultDiv = document.getElementById('multiuser-result');
 
@@ -2687,6 +3096,8 @@
                 if (minAvgPlaytime) body.min_avg_playtime = parseInt(minAvgPlaytime) * 60; // Convert hours to minutes
                 if (requireMultiplayer) body.multiplayer_only = true;
                 if (requireSingleplayer) body.singleplayer_only = true;
+                if (platformFilter) body.platform_filter = platformFilter;
+                if (deviceFilter) body.device_filter = deviceFilter;
                 
                 const response = await fetch('/api/multiuser/pick', {
                     method: 'POST',
@@ -2740,6 +3151,8 @@
             document.getElementById('exclude-game-ids').value = '';
             document.getElementById('min-avg-playtime').value = '';
             document.getElementById('coop-only').checked = false;
+            document.getElementById('multi-platform-filter').value = '';
+            document.getElementById('multi-device-filter').value = '';
         }
 
         async function showCommonGames() {
@@ -3459,8 +3872,254 @@
                 document.getElementById('settings-steam-id').value = data.steam_id || '';
                 document.getElementById('settings-epic-id').value = data.epic_id || '';
                 document.getElementById('settings-gog-id').value = data.gog_id || '';
+
+                await loadSyncStatus();
+                await loadSyncSettings();
+                await loadMigrations();
+                await refreshPlatformFilters();
             } catch (error) {
                 console.error('Error loading settings:', error);
+            }
+        }
+
+        async function checkInitialSetup() {
+            try {
+                const response = await fetch('/api/setup/status');
+                if (!response.ok) return;
+                const data = await response.json();
+                if (data.needs_setup) {
+                    const modal = document.getElementById('setup-modal');
+                    if (modal) {
+                        modal.style.display = 'flex';
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking setup status:', error);
+            }
+        }
+
+        async function runInitialSetup() {
+            const username = document.getElementById('setup-admin-username').value.trim();
+            const password = document.getElementById('setup-admin-password').value.trim();
+
+            if (!username || !password) {
+                toastr.error('Username and password are required');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/setup/initial-admin', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    toastr.success('Admin user created. Please log in.');
+                    const modal = document.getElementById('setup-modal');
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                } else {
+                    toastr.error(data.error || 'Failed to create admin');
+                }
+            } catch (error) {
+                toastr.error('Setup error: ' + error.message);
+            }
+        }
+
+        async function loadSyncStatus() {
+            try {
+                const response = await fetch('/api/library/sync/status');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                const lastSyncEl = document.getElementById('last-sync-time');
+                const gamesCachedEl = document.getElementById('games-cached-count');
+                const cacheAgeEl = document.getElementById('cache-age-display');
+                const syncBtn = document.getElementById('sync-library-btn');
+
+                if (lastSyncEl) {
+                    lastSyncEl.textContent = data.last_sync ? new Date(data.last_sync).toLocaleString() : 'Never';
+                }
+                if (gamesCachedEl) {
+                    gamesCachedEl.textContent = data.games_cached || 0;
+                }
+                if (cacheAgeEl) {
+                    cacheAgeEl.textContent = data.cache_age_hours !== null && data.cache_age_hours !== undefined
+                        ? `${data.cache_age_hours}h`
+                        : '—';
+                }
+                if (syncBtn) {
+                    if (data.is_syncing) {
+                        syncBtn.disabled = true;
+                        syncBtn.textContent = '⏳ Syncing...';
+                    } else {
+                        syncBtn.disabled = false;
+                        syncBtn.textContent = '🔄 Sync Library Now';
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading sync status:', error);
+            }
+        }
+
+        async function loadSyncSettings() {
+            try {
+                const authResponse = await fetch('/api/auth/current');
+                if (!authResponse.ok) return;
+                const authData = await authResponse.json();
+
+                const syncSettingsDiv = document.getElementById('sync-interval-settings');
+                if (!syncSettingsDiv) return;
+
+                const migrationsDiv = document.getElementById('admin-migrations');
+
+                if (authData.role !== 'admin') {
+                    syncSettingsDiv.style.display = 'none';
+                    if (migrationsDiv) {
+                        migrationsDiv.style.display = 'none';
+                    }
+                    return;
+                }
+
+                const response = await fetch('/api/library/sync/settings');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                const intervalInput = document.getElementById('sync-interval-input');
+                if (intervalInput && data.sync_interval_hours) {
+                    intervalInput.value = data.sync_interval_hours;
+                }
+
+                syncSettingsDiv.style.display = 'block';
+                if (migrationsDiv) {
+                    migrationsDiv.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading sync settings:', error);
+            }
+        }
+
+        async function loadMigrations() {
+            const select = document.getElementById('migration-select');
+            const description = document.getElementById('migration-description');
+            const sqlArea = document.getElementById('migration-sql');
+            if (!select || !description || !sqlArea) return;
+
+            try {
+                const response = await fetch('/api/admin/migrations');
+                if (!response.ok) {
+                    return;
+                }
+                const data = await response.json();
+                const migrations = data.migrations || [];
+
+                select.innerHTML = '';
+                migrations.forEach((mig, idx) => {
+                    const option = document.createElement('option');
+                    option.value = mig.id;
+                    option.textContent = mig.label;
+                    option.dataset.description = mig.description || '';
+                    option.dataset.sql = mig.sql || '';
+                    select.appendChild(option);
+                    if (idx === 0) {
+                        select.value = mig.id;
+                        description.textContent = mig.description || '';
+                        sqlArea.value = mig.sql || '';
+                    }
+                });
+
+                select.onchange = () => {
+                    const selected = select.options[select.selectedIndex];
+                    description.textContent = selected.dataset.description || '';
+                    sqlArea.value = selected.dataset.sql || '';
+                };
+            } catch (error) {
+                console.error('Error loading migrations:', error);
+            }
+        }
+
+        async function runMigration() {
+            const select = document.getElementById('migration-select');
+            const sqlArea = document.getElementById('migration-sql');
+            if (!select || !sqlArea) return;
+
+            const id = select.value;
+            const sql = sqlArea.value;
+            if (!id) {
+                toastr.error('Select a migration first');
+                return;
+            }
+
+            if (!confirm('Run this migration now? This will execute SQL against the database.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/admin/migrations/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id, sql })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    toastr.success(data.message || 'Migration executed');
+                } else {
+                    toastr.error(data.error || 'Migration failed');
+                }
+            } catch (error) {
+                toastr.error('Error running migration: ' + error.message);
+            }
+        }
+
+        async function triggerLibrarySync() {
+            const syncBtn = document.getElementById('sync-library-btn');
+            if (syncBtn) {
+                syncBtn.disabled = true;
+                syncBtn.textContent = '⏳ Syncing...';
+            }
+
+            try {
+                const response = await fetch('/api/library/sync', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    toastr.success(data.message || 'Library sync started');
+                } else {
+                    toastr.error(data.error || 'Failed to start sync');
+                }
+            } catch (error) {
+                toastr.error('Error starting sync: ' + error.message);
+            } finally {
+                setTimeout(() => loadSyncStatus(), 1500);
+            }
+        }
+
+        async function updateSyncInterval() {
+            const intervalInput = document.getElementById('sync-interval-input');
+            if (!intervalInput) return;
+
+            const interval = intervalInput.value;
+
+            try {
+                const response = await fetch('/api/library/sync/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ sync_interval_hours: interval })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    toastr.success('Sync interval updated');
+                    intervalInput.value = data.sync_interval_hours;
+                } else {
+                    toastr.error(data.error || 'Failed to update interval');
+                }
+            } catch (error) {
+                toastr.error('Error updating interval: ' + error.message);
             }
         }
         
@@ -3492,6 +4151,8 @@
                     setTimeout(() => {
                         messageDiv.style.display = 'none';
                         updateStatus();
+                        loadSyncStatus();
+                        refreshPlatformFilters();
                     }, 2000);
                 } else {
                     messageDiv.style.background = '#f8d7da';
@@ -3870,30 +4531,36 @@
                     return;
                 }
                 let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${recs.length} recommendation${recs.length !== 1 ? 's' : ''}</p>`;
+                const appIds = [];
                 recs.forEach((game, idx) => {
+                    appIds.push(game.appid);
                     const safeName = game.name.replace(/'/g, "\\'");
                     const scoreStars = '⭐'.repeat(Math.min(Math.round(game.recommendation_score), 5));
                     html += `
                         <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:10px;"
                              onclick="showGameDetails(${game.appid}, '${safeName}', ${game.playtime_hours || 0}, '')">
-                            <div style="flex:1;">
+                            <div style="display:flex; gap:12px; align-items:flex-start; flex:1; min-width:0;">
+                                ${renderGameListThumb(game.appid, game.name)}
+                                <div style="flex:1; min-width:0;">
                                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                                     <span style="background:linear-gradient(135deg,#667eea,#764ba2); color:white; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9em; flex-shrink:0;">${idx + 1}</span>
-                                    <strong>${game.name}</strong>
+                                    <strong class="list-item-title">${game.name}</strong>
                                     <span style="font-size:0.85em; color:var(--text-secondary);">${game.playtime_hours > 0 ? game.playtime_hours + 'h played' : 'Never played'}</span>
                                 </div>
                                 <div style="margin-top:6px; font-size:0.85em; color:var(--text-secondary); padding-left:38px;">
                                     💡 ${game.recommendation_reason || 'Unplayed game'}
                                 </div>
-                            </div>
-                            <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
+                                <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
                                 <a href="https://store.steampowered.com/app/${game.appid}/" target="_blank" onclick="event.stopPropagation()" style="font-size:0.8em; color:var(--tab-active-color); text-decoration:none;">Steam →</a>
                                 <span onclick="event.stopPropagation(); toggleFavorite(${game.appid})" style="cursor:pointer; font-size:1.1em;" title="Add to favorites">☆</span>
                                 <span onclick="event.stopPropagation(); quickIgnoreGame(${game.appid}, '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Ignore">🚫</span>
+                                </div>
+                                </div>
                             </div>
                         </div>`;
                 });
                 listDiv.innerHTML = html;
+                preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
             } catch (error) {
                 listDiv.innerHTML = `<div class="error">Error loading recommendations: ${error.message}</div>`;
             }

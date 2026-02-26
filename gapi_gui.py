@@ -15,11 +15,20 @@ import csv
 import hashlib
 import io
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple
 from functools import wraps
 import gapi
 import multiuser
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+try:
+    from sqlalchemy import text
+except Exception:
+    text = None
 
 try:
     import database
@@ -50,8 +59,26 @@ if DB_AVAILABLE:
             gui_logger.info('Database initialized successfully')
         else:
             gui_logger.warning('Database initialization reported failure')
+            DB_AVAILABLE = False
     except Exception as e:
         gui_logger.exception('Database init failed: %s', e)
+        DB_AVAILABLE = False
+
+
+def ensure_db_available() -> bool:
+    """Try to (re)initialize DB if it was previously unavailable."""
+    global DB_AVAILABLE
+    if DB_AVAILABLE:
+        return True
+    try:
+        ok = database.init_db()
+        DB_AVAILABLE = bool(ok)
+        if DB_AVAILABLE:
+            gui_logger.info('Database reconnected successfully')
+        return DB_AVAILABLE
+    except Exception as e:
+        gui_logger.exception('Database reconnect failed: %s', e)
+        return False
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -69,7 +96,6 @@ multi_picker: Optional[multiuser.MultiUserPicker] = None
 multi_picker_lock = threading.Lock()
 
 # User authentication
-USERS_AUTH_FILE = 'users_auth.json'
 current_user: Optional[str] = None
 current_user_lock = threading.Lock()
 
@@ -84,69 +110,350 @@ DEMO_GAMES = [
     {"appid": 4000, "name": "Garry's Mod", "playtime_forever": 320},
 ]
 
+# Library sync settings
+SYNC_SETTINGS_FILE = 'sync_settings.json'
+DEFAULT_SYNC_INTERVAL_HOURS = 6  # Default: sync every 6 hours
+
+# Admin migrations (PostgreSQL)
+ADMIN_MIGRATIONS = {
+    'users_table': {
+        'label': 'Users table',
+        'description': 'Create the users table if it does not exist.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS users (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    username VARCHAR(255) UNIQUE,\n"
+            "    password VARCHAR(64) NOT NULL,\n"
+            "    steam_id VARCHAR(20),\n"
+            "    epic_id VARCHAR(255),\n"
+            "    gog_id VARCHAR(255),\n"
+            "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n"
+            ");"
+        )
+    },
+    'users_add_password': {
+        'label': 'Users add password column',
+        'description': 'Add password column to users table (if missing).',
+        'sql': (
+            "ALTER TABLE users \n"
+            "ADD COLUMN IF NOT EXISTS password VARCHAR(64);"
+        )
+    },
+    'roles_table': {
+        'label': 'Roles table',
+        'description': 'Create roles and user_roles tables if missing.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS roles (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    name VARCHAR(50) UNIQUE\n"
+            ");\n"
+            "CREATE TABLE IF NOT EXISTS user_roles (\n"
+            "    user_id INTEGER REFERENCES users(id),\n"
+            "    role_id INTEGER REFERENCES roles(id),\n"
+            "    PRIMARY KEY (user_id, role_id)\n"
+            ");"
+        )
+    },
+    'roles_backfill': {
+        'label': 'Backfill roles from users.role',
+        'description': 'Copy users.role into roles/user_roles and drop users.role column.',
+        'sql': (
+            "INSERT INTO roles (name) VALUES ('admin') ON CONFLICT DO NOTHING;\n"
+            "INSERT INTO roles (name) VALUES ('user') ON CONFLICT DO NOTHING;\n"
+            "INSERT INTO user_roles (user_id, role_id)\n"
+            "SELECT u.id, r.id FROM users u\n"
+            "JOIN roles r ON r.name = COALESCE(u.role, 'user')\n"
+            "ON CONFLICT DO NOTHING;\n"
+            "ALTER TABLE users DROP COLUMN IF EXISTS role;"
+        )
+    },
+    'ignored_games_table': {
+        'label': 'Ignored games table',
+        'description': 'Create ignored_games table if missing.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS ignored_games (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    user_id INTEGER REFERENCES users(id),\n"
+            "    app_id VARCHAR(50),\n"
+            "    game_name VARCHAR(500),\n"
+            "    reason VARCHAR(500),\n"
+            "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n"
+            ");"
+        )
+    },
+    'achievements_table': {
+        'label': 'Achievements table',
+        'description': 'Create achievements table if missing.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS achievements (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    user_id INTEGER REFERENCES users(id),\n"
+            "    app_id VARCHAR(50),\n"
+            "    game_name VARCHAR(500),\n"
+            "    achievement_id VARCHAR(255),\n"
+            "    achievement_name VARCHAR(500),\n"
+            "    achievement_description TEXT,\n"
+            "    unlocked BOOLEAN DEFAULT FALSE,\n"
+            "    unlock_time TIMESTAMP,\n"
+            "    rarity DOUBLE PRECISION,\n"
+            "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n"
+            ");"
+        )
+    },
+    'achievement_hunts_table': {
+        'label': 'Achievement hunts table',
+        'description': 'Create achievement_hunts table if missing.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS achievement_hunts (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    user_id INTEGER REFERENCES users(id),\n"
+            "    app_id VARCHAR(50),\n"
+            "    game_name VARCHAR(500),\n"
+            "    difficulty VARCHAR(50),\n"
+            "    target_achievements INTEGER DEFAULT 0,\n"
+            "    unlocked_achievements INTEGER DEFAULT 0,\n"
+            "    progress_percent DOUBLE PRECISION DEFAULT 0.0,\n"
+            "    status VARCHAR(50) DEFAULT 'in_progress',\n"
+            "    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    completed_at TIMESTAMP\n"
+            ");"
+        )
+    },
+    'game_library_cache_table': {
+        'label': 'Game library cache table',
+        'description': 'Create game_library_cache table if missing.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS game_library_cache (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    user_id INTEGER REFERENCES users(id),\n"
+            "    app_id VARCHAR(50),\n"
+            "    game_name VARCHAR(500),\n"
+            "    platform VARCHAR(50),\n"
+            "    playtime_hours DOUBLE PRECISION DEFAULT 0.0,\n"
+            "    last_played TIMESTAMP,\n"
+            "    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n"
+            ");"
+        )
+    },
+    'multiuser_sessions_table': {
+        'label': 'Multi-user sessions table',
+        'description': 'Create multiuser_sessions table if missing.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS multiuser_sessions (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    session_id VARCHAR(255) UNIQUE,\n"
+            "    participants TEXT,\n"
+            "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    shared_ignores BOOLEAN DEFAULT FALSE,\n"
+            "    game_picked VARCHAR(50),\n"
+            "    picked_at TIMESTAMP\n"
+            ");"
+        )
+    },
+    'favorite_games_table': {
+        'label': 'Favorite games table',
+        'description': 'Create favorite_games table if missing.',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS favorite_games (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    user_id INTEGER REFERENCES users(id),\n"
+            "    app_id VARCHAR(50),\n"
+            "    platform VARCHAR(50) DEFAULT 'steam',\n"
+            "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    UNIQUE(user_id, app_id)\n"
+            ");\n"
+            "CREATE INDEX IF NOT EXISTS idx_favorite_games_user_id ON favorite_games(user_id);\n"
+            "CREATE INDEX IF NOT EXISTS idx_favorite_games_app_id ON favorite_games(app_id);"
+        )
+    },
+    'game_details_cache_table': {
+        'label': 'Game details cache table',
+        'description': 'Create game_details_cache table for lazy loading with smart caching (platform-aware).',
+        'sql': (
+            "CREATE TABLE IF NOT EXISTS game_details_cache (\n"
+            "    id SERIAL PRIMARY KEY,\n"
+            "    app_id VARCHAR(50),\n"
+            "    platform VARCHAR(50),\n"
+            "    details_json TEXT,\n"
+            "    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    last_api_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    UNIQUE(app_id, platform)\n"
+            ");\n"
+            "CREATE INDEX IF NOT EXISTS idx_game_details_cache_app_id ON game_details_cache(app_id);\n"
+            "CREATE INDEX IF NOT EXISTS idx_game_details_cache_platform ON game_details_cache(platform);\n"
+            "CREATE INDEX IF NOT EXISTS idx_game_details_cache_last_api_check ON game_details_cache(last_api_check);"
+        )
+    }
+}
+
+
+class LibrarySyncScheduler:
+    """Background scheduler for library syncing"""
+    
+    def __init__(self):
+        self.running = False
+        self.thread = None
+        self.sync_interval_hours = DEFAULT_SYNC_INTERVAL_HOURS
+        self.last_sync_times = {}  # username -> timestamp
+        self.in_progress = set()
+        self.lock = threading.Lock()
+        self.load_settings()
+    
+    def load_settings(self):
+        """Load sync settings from file"""
+        if os.path.exists(SYNC_SETTINGS_FILE):
+            try:
+                with open(SYNC_SETTINGS_FILE, 'r') as f:
+                    settings = json.load(f)
+                    self.sync_interval_hours = settings.get('sync_interval_hours', DEFAULT_SYNC_INTERVAL_HOURS)
+                    gui_logger.info(f'Loaded sync settings: interval={self.sync_interval_hours}h')
+            except Exception as e:
+                gui_logger.error(f'Error loading sync settings: {e}')
+    
+    def save_settings(self):
+        """Save sync settings to file"""
+        try:
+            settings = {
+                'sync_interval_hours': self.sync_interval_hours,
+                'last_updated': datetime.now(timezone.utc).isoformat()
+            }
+            gapi._atomic_write_json(SYNC_SETTINGS_FILE, settings)
+            gui_logger.info(f'Saved sync settings: interval={self.sync_interval_hours}h')
+        except Exception as e:
+            gui_logger.error(f'Error saving sync settings: {e}')
+    
+    def set_interval(self, hours: float):
+        """Set the sync interval in hours (admin only)"""
+        with self.lock:
+            self.sync_interval_hours = max(1.0, min(168.0, hours))  # Between 1h and 1 week
+            self.save_settings()
+            gui_logger.info(f'Sync interval updated to {self.sync_interval_hours}h')
+    
+    def get_interval(self) -> float:
+        """Get current sync interval in hours"""
+        return self.sync_interval_hours
+    
+    def should_sync(self, username: str) -> bool:
+        """Check if user's library should be synced"""
+        with self.lock:
+            last_sync = self.last_sync_times.get(username)
+            if not last_sync:
+                return True
+            
+            hours_since_sync = (datetime.now(timezone.utc) - last_sync).total_seconds() / 3600
+            return hours_since_sync >= self.sync_interval_hours
+    
+    def record_sync(self, username: str):
+        """Record that a sync was completed for a user"""
+        with self.lock:
+            self.last_sync_times[username] = datetime.now(timezone.utc)
+    
+    def sync_all_users(self):
+        """Sync libraries for all users who need it"""
+        if not DB_AVAILABLE:
+            return
+        
+        try:
+            # Get all users
+            db = database.SessionLocal()
+            all_users = database.get_all_users(db)
+            db.close()
+            
+            for user in all_users:
+                username = user.username
+                
+                # Check if sync is needed
+                if not self.should_sync(username):
+                    continue
+                
+                # Sync in background
+                def sync_user(uname):
+                    try:
+                        success, msg = sync_library_to_db(uname, force=False)
+                        if success:
+                            self.record_sync(uname)
+                            gui_logger.info(f'Background sync for {uname}: {msg}')
+                        else:
+                            gui_logger.debug(f'Skipped sync for {uname}: {msg}')
+                    except Exception as e:
+                        gui_logger.error(f'Error in background sync for {uname}: {e}')
+                
+                threading.Thread(target=sync_user, args=(username,), daemon=True).start()
+                
+        except Exception as e:
+            gui_logger.error(f'Error in sync_all_users: {e}')
+    
+    def run(self):
+        """Background task that runs periodically"""
+        while self.running:
+            try:
+                # Run sync check every 30 minutes
+                self.sync_all_users()
+                
+                # Sleep for 30 minutes
+                for _ in range(1800):  # 30 minutes in seconds
+                    if not self.running:
+                        break
+                    threading.Event().wait(1)
+                    
+            except Exception as e:
+                gui_logger.error(f'Error in sync scheduler: {e}')
+                threading.Event().wait(60)  # Wait 1 minute before retrying
+    
+    def start(self):
+        """Start the background sync scheduler"""
+        if self.running:
+            return
+        
+        self.running = True
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+        gui_logger.info('Library sync scheduler started')
+    
+    def stop(self):
+        """Stop the background sync scheduler"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=5)
+        gui_logger.info('Library sync scheduler stopped')
+    
+    def trigger_sync(self, username: str) -> Tuple[bool, str]:
+        """Manually trigger sync for a specific user in background"""
+        with self.lock:
+            if username in self.in_progress:
+                return False, "Sync already in progress"
+            self.in_progress.add(username)
+
+        def run_sync():
+            try:
+                success, msg = sync_library_to_db(username, force=True)
+                if success:
+                    self.record_sync(username)
+                    gui_logger.info('Manual sync completed for %s: %s', username, msg)
+                else:
+                    gui_logger.warning('Manual sync skipped for %s: %s', username, msg)
+            except Exception as e:
+                gui_logger.error('Manual sync error for %s: %s', username, e)
+            finally:
+                with self.lock:
+                    self.in_progress.discard(username)
+
+        threading.Thread(target=run_sync, daemon=True).start()
+        return True, "Sync started"
+
+
+# Global sync scheduler
+sync_scheduler = LibrarySyncScheduler()
+
 
 class UserManager:
     """Manages user authentication and platform IDs using database as primary storage"""
     
-    def __init__(self, users_file: str = USERS_AUTH_FILE):
-        self.users_file = users_file
-        self._migrate_json_to_db()
-    
-    def _migrate_json_to_db(self):
-        """One-time migration: Load users from JSON file and migrate to database"""
-        if not DB_AVAILABLE:
-            gui_logger.warning("Database not available - cannot migrate users from JSON")
-            return
-            
-        if not os.path.exists(self.users_file):
-            return
-            
-        try:
-            with open(self.users_file, 'r') as f:
-                data = json.load(f)
-                json_users = data.get('users', {})
-            
-            if not json_users:
-                return
-                
-            db = database.SessionLocal()
-            migrated_count = 0
-            
-            # Check which users need migration
-            for username, user_data in json_users.items():
-                existing_user = database.get_user_by_username(db, username)
-                
-                if not existing_user:
-                    # User doesn't exist in DB - migrate from JSON
-                    password_hash = user_data.get('password', '')
-                    steam_id = user_data.get('steam_id', '')
-                    epic_id = user_data.get('epic_id', '')
-                    gog_id = user_data.get('gog_id', '')
-                    role = user_data.get('role', 'user')
-                    
-                    if password_hash:  # Only migrate if we have a password
-                        database.create_or_update_user(
-                            db, username, password_hash, steam_id, epic_id, gog_id, role
-                        )
-                        migrated_count += 1
-                        gui_logger.info('Migrated user %s from JSON to database', username)
-            
-            db.close()
-            
-            if migrated_count > 0:
-                gui_logger.info('Migration complete: %d users migrated to database', migrated_count)
-                # Rename the JSON file to indicate migration is done
-                backup_file = self.users_file + '.migrated'
-                if not os.path.exists(backup_file):
-                    try:
-                        import shutil
-                        shutil.copy2(self.users_file, backup_file)
-                        gui_logger.info('Backed up JSON file to %s', backup_file)
-                    except Exception as e:
-                        gui_logger.warning('Could not backup JSON file: %s', e)
-        
-        except Exception as e:
-            gui_logger.exception('Error during JSON to DB migration: %s', e)
+    def __init__(self):
+        pass
     
     def hash_password(self, password: str) -> str:
         """Hash a password"""
@@ -250,7 +557,7 @@ class UserManager:
             user.steam_id = steam_id
             user.epic_id = epic_id
             user.gog_id = gog_id
-            user.updated_at = datetime.utcnow()
+            user.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.close()
             
@@ -268,11 +575,13 @@ class UserManager:
             
         try:
             db = database.SessionLocal()
-            user = database.get_user_by_username(db, username)
+            roles = database.get_user_roles(db, username)
             db.close()
             
-            if user:
-                return user.role or 'user'
+            if 'admin' in roles:
+                return 'admin'
+            if roles:
+                return roles[0]
             return 'user'
             
         except Exception as e:
@@ -291,17 +600,20 @@ class UserManager:
         try:
             db = database.SessionLocal()
             users = database.get_all_users(db)
-            db.close()
             
             users_list = []
             for user in users:
+                role_names = [r.name for r in user.roles] if user.roles else []
+                primary_role = 'admin' if 'admin' in role_names else (role_names[0] if role_names else 'user')
                 users_list.append({
                     'username': user.username,
                     'steam_id': user.steam_id or '',
                     'epic_id': user.epic_id or '',
                     'gog_id': user.gog_id or '',
-                    'role': user.role or 'user'
+                    'role': primary_role,
+                    'roles': role_names
                 })
+            db.close()
             return users_list
             
         except Exception as e:
@@ -372,6 +684,38 @@ class UserManager:
             gui_logger.exception('Error updating user role: %s', e)
             return False, "Update failed"
 
+    def update_user_roles(self, username: str, roles: List[str], requesting_user: str) -> Tuple[bool, str]:
+        """Update user's roles (admin only)"""
+        if not DB_AVAILABLE:
+            return False, "Database not available"
+
+        if not self.is_admin(requesting_user):
+            return False, "Only admins can change roles"
+
+        if not roles:
+            return False, "At least one role is required"
+
+        try:
+            db = database.SessionLocal()
+            user = database.get_user_by_username(db, username)
+
+            if not user:
+                db.close()
+                return False, "User not found"
+
+            success = database.set_user_roles(db, username, roles)
+            db.close()
+
+            if success:
+                gui_logger.info('Updated roles for user %s to %s', username, roles)
+                return True, "Roles updated successfully"
+            else:
+                return False, "Failed to update roles"
+
+        except Exception as e:
+            gui_logger.exception('Error updating user roles: %s', e)
+            return False, "Update failed"
+
 
 # Global user manager
 user_manager = UserManager()
@@ -419,6 +763,113 @@ def require_admin(f):
                 return jsonify({'error': 'Admin privileges required'}), 403
         return f(*args, **kwargs)
     return decorated_function
+
+
+PLATFORM_DEVICE_MAP = {
+    'steam': 'pc',
+    'epic': 'pc',
+    'gog': 'pc',
+    'origin': 'pc',
+    'ea': 'pc',
+    'ubisoft': 'pc',
+    'uplay': 'pc',
+    'battlenet': 'pc',
+    'battle.net': 'pc',
+    'xbox': 'console',
+    'playstation': 'console',
+    'ps': 'console',
+    'nintendo': 'console',
+    'switch': 'console'
+}
+
+
+def classify_device_for_platform(platform: str) -> str:
+    """Map platform name to broad device type (pc/console/other)."""
+    p = (platform or '').strip().lower()
+    if not p:
+        return 'other'
+    if p in PLATFORM_DEVICE_MAP:
+        return PLATFORM_DEVICE_MAP[p]
+    if 'xbox' in p or 'playstation' in p or 'nintendo' in p or 'switch' in p:
+        return 'console'
+    if p in {'pc', 'windows', 'linux', 'mac'}:
+        return 'pc'
+    return 'other'
+
+
+def _filter_games_by_platform_device(
+    games: Optional[List[Dict]],
+    platform_filter: Optional[str],
+    device_filter: Optional[str]
+) -> Optional[List[Dict]]:
+    """Filter game list by platform and/or device type."""
+    if games is None:
+        return None
+
+    selected_platform = (platform_filter or '').strip().lower() or None
+    selected_device = (device_filter or '').strip().lower() or None
+    if selected_device not in {None, 'pc', 'console'}:
+        selected_device = None
+
+    filtered = games
+    if selected_platform:
+        filtered = [
+            game for game in filtered
+            if str(game.get('platform', 'steam')).strip().lower() == selected_platform
+        ]
+
+    if selected_device:
+        filtered = [
+            game for game in filtered
+            if classify_device_for_platform(str(game.get('platform', 'steam'))) == selected_device
+        ]
+
+    return filtered
+
+
+def _collect_available_platforms(usernames: List[str]) -> List[str]:
+    """Collect unique platforms configured/seen for the provided users."""
+    usernames_set = {u for u in usernames if u}
+    if not usernames_set:
+        return []
+
+    platforms = set()
+
+    users_by_name = {u.get('username'): u for u in user_manager.get_all_users()}
+    for username in usernames_set:
+        user = users_by_name.get(username)
+        if not user:
+            continue
+        if user.get('steam_id'):
+            platforms.add('steam')
+        if user.get('epic_id'):
+            platforms.add('epic')
+        if user.get('gog_id'):
+            platforms.add('gog')
+
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            for username in usernames_set:
+                cached_games = database.get_cached_library(db, username)
+                for game in cached_games or []:
+                    platform = str(game.get('platform', '')).strip().lower()
+                    if platform:
+                        platforms.add(platform)
+        except Exception as e:
+            gui_logger.warning('Could not collect cached library platforms: %s', e)
+        finally:
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+    preferred_order = ['steam', 'epic', 'gog', 'xbox', 'playstation', 'nintendo', 'switch']
+    ordered = [p for p in preferred_order if p in platforms]
+    ordered.extend(sorted(p for p in platforms if p not in set(preferred_order)))
+    return ordered
 
 
 def _build_auth_users_for_multi() -> List[Dict]:
@@ -470,7 +921,7 @@ def sync_library_to_db(username: str, force: bool = False) -> Tuple[bool, str]:
     Returns:
         (success, message) tuple
     """
-    if not DB_AVAILABLE:
+    if not ensure_db_available():
         return False, "Database not available"
     
     try:
@@ -608,6 +1059,57 @@ def api_auth_register():
     gui_logger.info('Register result for username=%s: %s', username, 'success' if success else 'failure')
 
     return jsonify({'message': message})
+
+
+# ===========================================================================================
+# First-time Setup Endpoints
+# ===========================================================================================
+
+@app.route('/api/setup/status', methods=['GET'])
+def api_setup_status():
+    """Check if initial admin setup is required."""
+    if not ensure_db_available():
+        return jsonify({'needs_setup': False, 'error': 'Database not available'}), 503
+    try:
+        db = database.SessionLocal()
+        count = database.get_user_count(db)
+        db.close()
+        return jsonify({'needs_setup': count == 0})
+    except Exception as e:
+        gui_logger.exception('Setup status check failed: %s', e)
+        return jsonify({'needs_setup': False, 'error': str(e)}), 500
+
+
+@app.route('/api/setup/initial-admin', methods=['POST'])
+def api_setup_initial_admin():
+    """Create the initial admin user if no users exist."""
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+
+    try:
+        db = database.SessionLocal()
+        count = database.get_user_count(db)
+        if count > 0:
+            db.close()
+            return jsonify({'error': 'Users already exist'}), 409
+
+        password_hash = user_manager.hash_password(password)
+        user = database.create_or_update_user(db, username, password_hash, '', '', '', role='admin', roles=['admin'])
+        db.close()
+
+        if user:
+            return jsonify({'message': 'Initial admin created'}), 201
+        return jsonify({'error': 'Failed to create admin'}), 500
+    except Exception as e:
+        gui_logger.exception('Initial admin setup failed: %s', e)
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -773,213 +1275,494 @@ def api_auth_get_ids():
     return jsonify(user_ids)
 
 
+@app.route('/api/filters/platform-options', methods=['GET'])
+@require_login
+def api_filter_platform_options():
+    """Return platform/device filter options limited to user-configured platforms."""
+    with current_user_lock:
+        username = current_user
+
+    users_param = request.args.get('users', '').strip()
+    requested_users = [u.strip() for u in users_param.split(',') if u.strip()] if users_param else []
+    usernames = requested_users or ([username] if username else [])
+
+    platforms = _collect_available_platforms(usernames)
+    platform_items = [
+        {
+            'value': platform,
+            'label': platform.title(),
+            'device': classify_device_for_platform(platform)
+        }
+        for platform in platforms
+    ]
+
+    device_values = sorted({
+        item['device'] for item in platform_items if item['device'] in {'pc', 'console'}
+    })
+    device_items = [
+        {
+            'value': device,
+            'label': 'PC' if device == 'pc' else 'Console'
+        }
+        for device in device_values
+    ]
+
+    return jsonify({
+        'platforms': platform_items,
+        'devices': device_items
+    })
+
+
 @app.route('/api/pick', methods=['POST'])
 @require_login
 def api_pick_game():
     """Pick a random game"""
     global picker, current_game, current_user
 
-    # Ensure picker is initialized for logged-in user
-    if not picker or not picker.games:
-        # Initialize with demo games if not loaded
-        if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
-        if not picker.games:
-            picker.games = DEMO_GAMES
-
-    data = request.json or {}
-    filter_type = data.get('filter', 'all')
-    genre_text = data.get('genre', '').strip()
-    genres = [g.strip() for g in genre_text.split(',')] if genre_text else None
-    min_metacritic = data.get('min_metacritic')
-    min_year = data.get('min_year')
-    max_year = data.get('max_year')
-    exclude_ids_raw = data.get('exclude_game_ids', '')
-    exclude_game_ids = [s.strip() for s in exclude_ids_raw.split(',') if s.strip()] if exclude_ids_raw else None
-    tag_filter = data.get('tag', '').strip() or None
-
-    # Get ignored games from database
+    # Get current user
     with current_user_lock:
         username = current_user
     
-    if DB_AVAILABLE:
-        try:
-            ignored_games = database.get_ignored_games(database.SessionLocal(), username)
-            if ignored_games:
-                if exclude_game_ids:
-                    exclude_game_ids.extend(ignored_games)
-                else:
-                    exclude_game_ids = ignored_games
-        except Exception as e:
-            gui_logger.warning(f"Could not fetch ignored games: {e}")
+    try:
+        gui_logger.info(f"Pick request from user {username}")
+        
+        # Ensure picker is initialized for logged-in user
+        # Create a minimal picker without config validation (we're just picking from cached games)
+        if not picker:
+            with picker_lock:
+                # Create picker with minimal config to avoid requiring Steam API credentials
+                picker = gapi.GamePicker.__new__(gapi.GamePicker)
+                picker._log = logging.getLogger('gapi.picker')
+                picker.config = {}
+                picker.MAX_HISTORY = gapi.GamePicker.DEFAULT_MAX_HISTORY
+                picker.BARELY_PLAYED_THRESHOLD_MINUTES = gapi.GamePicker.DEFAULT_BARELY_PLAYED_HOURS * 60
+                picker.WELL_PLAYED_THRESHOLD_MINUTES = gapi.GamePicker.DEFAULT_WELL_PLAYED_HOURS * 60
+                picker.API_TIMEOUT = gapi.GamePicker.DEFAULT_API_TIMEOUT
+                picker.clients = {}
+                picker.steam_client = None
+                picker.games = []
+                picker.history = []
+                picker.favorites = []
+                picker.reviews = {}
+                picker.tags = {}
+                picker.schedule = {}
+                picker.playlists = {}
+                picker.backlog = {}
+                
+                # Initialize steam_client for fetching game details
+                try:
+                    base_config = load_base_config()
+                    api_key = base_config.get('steam_api_key', '').strip()
+                    if api_key and not gapi.is_placeholder_value(api_key):
+                        picker.steam_client = gapi.SteamAPIClient(api_key)
+                        gui_logger.debug("Initialized SteamAPIClient for game details")
+                    else:
+                        gui_logger.warning("No valid Steam API key configured, game details may be limited")
+                except Exception as e:
+                    gui_logger.warning(f"Failed to initialize SteamAPIClient: {e}")
+                
+                gui_logger.debug("Initialized minimal picker for game selection")
+        
+        # Load user's games from database cache if available
+        if not picker.games or len(picker.games) == 0:
+            if DB_AVAILABLE and ensure_db_available():
+                db = None
+                try:
+                    db = database.SessionLocal()
+                    cached_games = database.get_cached_library(db, username)
+                    
+                    if cached_games:
+                        # Convert database format to picker format
+                        picker.games = [
+                            {
+                                'appid': int(g['app_id']) if str(g['app_id']).isdigit() else g['app_id'],
+                                'name': g['name'],
+                                'playtime_forever': int(g.get('playtime_hours', 0) * 60),  # Convert hours to minutes
+                                'platform': g.get('platform', 'steam')
+                            }
+                            for g in cached_games
+                        ]
+                        gui_logger.info(f"Loaded {len(picker.games)} games for {username} from database cache")
+                    else:
+                        picker.games = DEMO_GAMES
+                        gui_logger.warning(f"No cached games for {username}, using demo games")
+                except Exception as e:
+                    gui_logger.exception(f"Failed to load games from database for {username}: {e}")
+                    picker.games = DEMO_GAMES
+                finally:
+                    if db:
+                        try:
+                            db.close()
+                        except Exception:
+                            pass
+            else:
+                picker.games = DEMO_GAMES
+                gui_logger.warning(f"Database not available for {username}, using demo games")
+        
+        if not picker.games or len(picker.games) == 0:
+            gui_logger.error(f"No games available for {username} after loading attempt")
+            return jsonify({'error': 'No games available in your library'}), 400
 
-    # Build shared advanced-filter kwargs
-    adv = {
-        'genres': genres,
-        'min_metacritic': int(min_metacritic) if min_metacritic is not None else None,
-        'min_release_year': int(min_year) if min_year is not None else None,
-        'max_release_year': int(max_year) if max_year is not None else None,
-        'exclude_game_ids': exclude_game_ids,
-    }
+        data = request.json or {}
+        filter_type = data.get('filter', 'all')
+        genre_text = data.get('genre', '').strip()
+        genres = [g.strip() for g in genre_text.split(',')] if genre_text else None
+        min_metacritic = data.get('min_metacritic')
+        min_year = data.get('min_year')
+        max_year = data.get('max_year')
+        exclude_ids_raw = data.get('exclude_game_ids', '')
+        exclude_game_ids = [s.strip() for s in exclude_ids_raw.split(',') if s.strip()] if exclude_ids_raw else None
+        tag_filter = data.get('tag', '').strip() or None
+        platform_filter = data.get('platform_filter', '').strip().lower() or None
+        device_filter = data.get('device_filter', '').strip().lower() or None
+        
+        if DB_AVAILABLE:
+            db = None
+            try:
+                db = database.SessionLocal()
+                ignored_games = database.get_ignored_games(db, username)
+                if ignored_games:
+                    if exclude_game_ids:
+                        exclude_game_ids.extend(ignored_games)
+                    else:
+                        exclude_game_ids = ignored_games
+            except Exception as e:
+                gui_logger.warning(f"Could not fetch ignored games: {e}")
+            finally:
+                if db:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
 
-    with picker_lock:
-        # Apply filters
-        filtered_games = None
-
-        if filter_type == "unplayed":
-            filtered_games = picker.filter_games(max_playtime=0, **adv)
-        elif filter_type == "barely":
-            filtered_games = picker.filter_games(
-                max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, **adv)
-        elif filter_type == "well":
-            filtered_games = picker.filter_games(
-                min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, **adv)
-        elif filter_type == "favorites":
-            filtered_games = picker.filter_games(favorites_only=True, **adv)
-        elif any(v is not None and v != [] for v in adv.values()):
-            filtered_games = picker.filter_games(**adv)
-
-        # Apply tag filter on top of other filters (or on whole library)
-        if tag_filter:
-            filtered_games = picker.filter_by_tag(tag_filter, filtered_games)
-
-        if filtered_games is not None and len(filtered_games) == 0:
-            return jsonify({'error': 'No games match the selected filters'}), 400
-
-        # Pick game
-        game = picker.pick_random_game(filtered_games)
-
-        if not game:
-            return jsonify({'error': 'Failed to pick a game'}), 500
-
-        current_game = game
-
-        app_id = game.get('appid')
-        game_id = game.get('game_id') or (f'steam:{app_id}' if app_id else None)
-        name = game.get('name', 'Unknown Game')
-        playtime_minutes = game.get('playtime_forever', 0)
-        playtime_hours = playtime_minutes / 60
-        is_favorite = app_id in picker.favorites if app_id else False
-        review = picker.get_review(game_id) if game_id else None
-        tags = picker.get_tags(game_id) if game_id else []
-        backlog_status = picker.get_backlog_status(game_id) if game_id else None
-
-        response = {
-            'app_id': app_id,
-            'game_id': game_id,
-            'name': name,
-            'playtime_hours': round(playtime_hours, 1),
-            'is_favorite': is_favorite,
-            'review': review,
-            'tags': tags,
-            'backlog_status': backlog_status,
-            'steam_url': f'https://store.steampowered.com/app/{app_id}/',
-            'steamdb_url': f'https://steamdb.info/app/{app_id}/'
+        # Build shared advanced-filter kwargs
+        adv = {
+            'genres': genres,
+            'min_metacritic': int(min_metacritic) if min_metacritic is not None else None,
+            'min_release_year': int(min_year) if min_year is not None else None,
+            'max_release_year': int(max_year) if max_year is not None else None,
+            'exclude_game_ids': exclude_game_ids,
+            'platforms': [platform_filter] if platform_filter else None,
+            'device_types': [device_filter] if device_filter else None,
         }
 
-        # Try to get details (non-blocking)
-        def fetch_details():
-            if app_id and picker and picker.steam_client:
-                details = picker.steam_client.get_game_details(app_id)
-                if details:
-                    game['_details'] = details
+        with picker_lock:
+            try:
+                # Apply filters
+                filtered_games = None
 
-        threading.Thread(target=fetch_details, daemon=True).start()
+                if filter_type == "unplayed":
+                    filtered_games = picker.filter_games(max_playtime=0, **adv)
+                elif filter_type == "barely":
+                    filtered_games = picker.filter_games(
+                        max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, **adv)
+                elif filter_type == "well":
+                    filtered_games = picker.filter_games(
+                        min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, **adv)
+                elif filter_type == "favorites":
+                    filtered_games = picker.filter_games(favorites_only=True, **adv)
+                elif any(v is not None and v != [] for v in adv.values()):
+                    filtered_games = picker.filter_games(**adv)
 
-        # Fire webhook if one is configured (non-blocking, best-effort)
-        webhook_url = picker.config.get('webhook_url', '').strip()
-        if webhook_url and not gapi.is_placeholder_value(webhook_url):
-            wh_payload = {
-                'content': f"🎮 **Game pick:** {name} ({round(playtime_hours, 1)}h played)\n"
-                           f"{response.get('steam_url', '')}",
-                'game': response,
-            }
-            threading.Thread(
-                target=gapi.send_webhook,
-                args=(webhook_url, wh_payload),
-                daemon=True,
-            ).start()
+                # Apply tag filter on top of other filters (or on whole library)
+                if tag_filter:
+                    filtered_games = picker.filter_by_tag(tag_filter, filtered_games)
 
-        return jsonify(response)
+                # Apply platform/device filter even when no other filter was active
+                if platform_filter or device_filter:
+                    base_games = filtered_games if filtered_games is not None else picker.games
+                    filtered_games = _filter_games_by_platform_device(
+                        base_games,
+                        platform_filter,
+                        device_filter
+                    )
+
+                if filtered_games is not None and len(filtered_games) == 0:
+                    gui_logger.info(f"No games matched filters for {username}")
+                    return jsonify({'error': 'No games match the selected filters'}), 400
+
+                # Pick game
+                game = picker.pick_random_game(filtered_games)
+
+                if not game:
+                    gui_logger.error(f"Failed to pick game for {username}")
+                    return jsonify({'error': 'Failed to pick a game'}), 500
+
+                current_game = game
+                gui_logger.info(f"Picked game for {username}: {game.get('name')}")
+
+                app_id = game.get('appid')
+                game_id = game.get('game_id') or (f'steam:{app_id}' if app_id else None)
+                name = game.get('name', 'Unknown Game')
+                playtime_minutes = game.get('playtime_forever', 0)
+                playtime_hours = playtime_minutes / 60
+                is_favorite = app_id in picker.favorites if app_id else False
+                review = picker.get_review(game_id) if game_id else None
+                tags = picker.get_tags(game_id) if game_id else []
+                backlog_status = picker.get_backlog_status(game_id) if game_id else None
+
+                response = {
+                    'app_id': app_id,
+                    'game_id': game_id,
+                    'name': name,
+                    'playtime_hours': round(playtime_hours, 1),
+                    'is_favorite': is_favorite,
+                    'review': review,
+                    'tags': tags,
+                    'backlog_status': backlog_status,
+                    'steam_url': f'https://store.steampowered.com/app/{app_id}/',
+                    'steamdb_url': f'https://steamdb.info/app/{app_id}/'
+                }
+
+                # Try to get details and cache them
+                try:
+                    if app_id and picker and picker.steam_client:
+                        details = picker.steam_client.get_game_details(app_id)
+                        if details:
+                            # Extract key fields for the response
+                            if 'short_description' in details:
+                                response['description'] = details['short_description']
+                            if 'header_image' in details:
+                                response['header_image'] = details['header_image']
+                            if 'capsule_image' in details:
+                                response['capsule_image'] = details['capsule_image']
+                            if 'genres' in details:
+                                response['genres'] = [g['description'] for g in details['genres']]
+                            if 'release_date' in details:
+                                response['release_date'] = details['release_date'].get('date', '')
+                            if 'metacritic' in details:
+                                response['metacritic_score'] = details['metacritic'].get('score')
+                            
+                            # Cache the full details for later use
+                            try:
+                                if DB_AVAILABLE and ensure_db_available():
+                                    db = None
+                                    try:
+                                        db = database.SessionLocal()
+                                        platform = game.get('platform', 'steam')
+                                        database.update_game_details_cache(db, app_id, platform, response)
+                                    except Exception as cache_err:
+                                        gui_logger.debug(f"Failed to cache details: {cache_err}")
+                                    finally:
+                                        if db:
+                                            db.close()
+                            except Exception as e:
+                                gui_logger.debug(f"Failed to cache game details: {e}")
+                            
+                            # Fetch ProtonDB rating in background (non-blocking)
+                            def fetch_protondb():
+                                try:
+                                    if picker and picker.steam_client:
+                                        protondb = picker.steam_client.get_protondb_rating(app_id)
+                                        if protondb:
+                                            response['protondb'] = protondb
+                                except Exception:
+                                    pass
+                            
+                            threading.Thread(target=fetch_protondb, daemon=True).start()
+                except Exception as e:
+                    gui_logger.debug(f"Failed to fetch game details: {e}")
+
+                # Fire webhook if one is configured (non-blocking, best-effort)
+                webhook_url = picker.config.get('webhook_url', '').strip() if picker.config else ''
+                if webhook_url and not gapi.is_placeholder_value(webhook_url):
+                    wh_payload = {
+                        'content': f"🎮 **Game pick:** {name} ({round(playtime_hours, 1)}h played)\n"
+                                   f"{response.get('steam_url', '')}",
+                        'game': response,
+                    }
+                    threading.Thread(
+                        target=gapi.send_webhook,
+                        args=(webhook_url, wh_payload),
+                        daemon=True,
+                    ).start()
+
+                return jsonify(response)
+            
+            except Exception as e:
+                gui_logger.exception(f"Error in pick endpoint for {username}: {e}")
+                return jsonify({'error': f'Error picking game: {str(e)}'}), 500
+    
+    except Exception as e:
+        gui_logger.exception(f"Unexpected error in pick endpoint: {e}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 
 @app.route('/api/game/<int:app_id>/details')
 @require_login
 def api_game_details(app_id):
-    """Get detailed game information"""
-    global picker
+    """Get detailed game information with smart caching.
     
-    if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+    1. Check which platform the game is from (user's library or default to steam)
+    2. Check database cache first
+    3. If cache is fresh (< 1 hour old), return cached details
+    4. If cache is stale, fetch from API and compare
+    5. Update cache only if API data differs
+    """
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
     
-    if not picker.steam_client:
-        return jsonify({'error': 'Steam client not initialized'}), 400
+    db = None
+    try:
+        db = database.SessionLocal()
+        global current_user
+        
+        with current_user_lock:
+            username = current_user
+        
+        # Determine platform: check user's library for this game
+        platform = 'steam'  # Default to steam
+        try:
+            user = database.get_user_by_username(db, username)
+            if user:
+                lib_entry = db.query(database.GameLibraryCache).filter(
+                    database.GameLibraryCache.user_id == user.id,
+                    database.GameLibraryCache.app_id == str(app_id)
+                ).first()
+                if lib_entry:
+                    platform = lib_entry.platform or 'steam'
+        except Exception as e:
+            gui_logger.debug(f"Could not determine platform from library: {e}")
+        
+        # Step 1: Check database cache first
+        cached_details = database.get_game_details_cache(db, app_id, platform, max_age_hours=1)
+        
+        if cached_details:
+            # Cache is fresh, return immediately
+            return jsonify({**cached_details, 'source': 'cache', 'app_id': app_id, 'platform': platform})
+        
+        # Step 2: Cache is missing or stale. Try to fetch from API
+        api_details = None
+        global picker
+        
+        if picker:
+            try:
+                with picker_lock:
+                    if picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
+                        api_details = picker.steam_client.get_game_details(app_id)
+            except Exception as e:
+                gui_logger.debug(f"Could not fetch from Steam API: {e}")
+        
+        if api_details:
+            # Step 3: Format API response
+            response = {'app_id': app_id, 'platform': platform, 'source': 'api', 'steam_integration': True}
+            
+            if 'header_image' in api_details:
+                response['header_image'] = api_details['header_image']
+            
+            if 'capsule_image' in api_details:
+                response['capsule_image'] = api_details['capsule_image']
+            
+            if 'short_description' in api_details:
+                response['description'] = api_details['short_description']
+            
+            if 'genres' in api_details:
+                response['genres'] = [g['description'] for g in api_details['genres']]
+            
+            if 'release_date' in api_details:
+                response['release_date'] = api_details['release_date'].get('date', 'Unknown')
+            
+            if 'metacritic' in api_details:
+                response['metacritic_score'] = api_details['metacritic'].get('score')
+            
+            # Try to get ProtonDB rating
+            try:
+                with picker_lock:
+                    if picker and picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
+                        protondb = picker.steam_client.get_protondb_rating(app_id)
+                        if protondb:
+                            response['protondb'] = protondb
+            except Exception:
+                pass  # ProtonDB is best-effort, don't fail on it
+            
+            # Update cache with new data (include platform)
+            database.update_game_details_cache(db, app_id, platform, response)
+            return jsonify(response)
+        
+        # Step 4: No API data available. Return last cached data even if stale, or minimal response
+        try:
+            last_cache = db.query(database.GameDetailsCache).filter(
+                database.GameDetailsCache.app_id == str(app_id),
+                database.GameDetailsCache.platform == platform
+            ).first()
+            
+            if last_cache:
+                import json
+                return jsonify({
+                    **json.loads(last_cache.details_json),
+                    'source': 'cache_stale',
+                    'app_id': app_id,
+                    'platform': platform
+                })
+        except Exception as e:
+            gui_logger.debug(f"Could not get last cache: {e}")
+        
+        # No cache or API data - return minimal response
+        return jsonify({
+            'app_id': app_id,
+            'platform': platform,
+            'steam_integration': False,
+            'source': 'none',
+            'message': 'Steam integration not configured for this user'
+        })
     
-    with picker_lock:
-        details = picker.steam_client.get_game_details(app_id)
-        
-        if not details:
-            return jsonify({'error': 'Could not fetch details'}), 404
-        
-        response = {}
-
-        if 'header_image' in details:
-            response['header_image'] = details['header_image']
-
-        if 'capsule_image' in details:
-            response['capsule_image'] = details['capsule_image']
-        
-        if 'short_description' in details:
-            response['description'] = details['short_description']
-        
-        if 'genres' in details:
-            response['genres'] = [g['description'] for g in details['genres']]
-        
-        if 'release_date' in details:
-            response['release_date'] = details['release_date'].get('date', 'Unknown')
-        
-        if 'metacritic' in details:
-            response['metacritic_score'] = details['metacritic'].get('score')
-
-        # ProtonDB Linux compatibility rating (best-effort, non-blocking cache)
-        if picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
-            protondb = picker.steam_client.get_protondb_rating(app_id)
-            if protondb:
-                response['protondb'] = protondb
-
-        return jsonify(response)
+    except Exception as e:
+        gui_logger.exception(f"Error getting game details: {e}")
+        return jsonify({'error': f'Failed to load game details: {str(e)}'}), 500
+    
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 @app.route('/api/favorite/<int:app_id>', methods=['POST', 'DELETE'])
 @require_login
 def api_toggle_favorite(app_id):
     """Add or remove a game from favorites"""
-    global picker
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
     
-    # Ensure picker is initialized for logged-in user
-    if not picker:
-        with picker_lock:
-            picker = gapi.GamePicker()
-            picker.games = DEMO_GAMES
+    global current_user
+    with current_user_lock:
+        username = current_user
     
-    with picker_lock:
+    if not username:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        db = database.SessionLocal()
+        
         if request.method == 'POST':
-            picker.add_favorite(app_id)
-            return jsonify({'success': True, 'action': 'added'})
+            success = database.add_favorite(db, username, str(app_id))
+            db.close()
+            if success:
+                return jsonify({'success': True, 'action': 'added'})
+            else:
+                return jsonify({'error': 'Failed to add favorite'}), 500
         else:
-            picker.remove_favorite(app_id)
-            return jsonify({'success': True, 'action': 'removed'})
+            success = database.remove_favorite(db, username, str(app_id))
+            db.close()
+            if success:
+                return jsonify({'success': True, 'action': 'removed'})
+            else:
+                return jsonify({'error': 'Failed to remove favorite'}), 500
+    except Exception as e:
+        gui_logger.error(f"Error toggling favorite: {e}")
+        return jsonify({'error': 'Failed to toggle favorite'}), 500
 
 
 @app.route('/api/library')
 @require_login
 def api_library():
     """Get all games in library from database cache"""
-    username = session.get('username')
+    global current_user
+    with current_user_lock:
+        username = current_user
     
-    if not DB_AVAILABLE:
+    if not ensure_db_available():
         # Fallback to demo games if DB not available
         return jsonify({'games': [{
             'app_id': g.get('appid'),
@@ -1022,10 +1805,8 @@ def api_library():
         
         search = request.args.get('search', '').lower()
         
-        # Get user's favorites (still from picker for now)
-        favorite_ids = set()
-        if picker and picker.favorites:
-            favorite_ids = set(picker.favorites)
+        # Get user's favorites from database
+        favorite_ids = set(str(fav) for fav in database.get_user_favorites(db, username))
         
         # Filter and format games
         games = []
@@ -1044,7 +1825,7 @@ def api_library():
                 'app_id': app_id_int,
                 'name': name,
                 'playtime_hours': round(game.get('playtime_hours', 0), 1),
-                'is_favorite': app_id_int in favorite_ids if app_id_int else False,
+                'is_favorite': str(app_id) in favorite_ids if app_id else False,
                 'platform': game.get('platform', 'steam'),
                 'last_played': game.get('last_played').isoformat() if game.get('last_played') else None
             })
@@ -1071,28 +1852,149 @@ def api_library():
 @require_login
 def api_sync_library():
     """Manually trigger library sync from Steam API to database"""
-    username = session.get('username')
-    
-    # Check if already syncing (simple lock mechanism)
-    global _sync_in_progress
-    if not hasattr(api_sync_library, '_sync_in_progress'):
-        api_sync_library._sync_in_progress = set()
-    
-    if username in api_sync_library._sync_in_progress:
-        return jsonify({'error': 'Sync already in progress'}), 429
+    global current_user
+    with current_user_lock:
+        username = current_user
     
     try:
-        api_sync_library._sync_in_progress.add(username)
-        success, message = sync_library_to_db(username, force=True)
-        api_sync_library._sync_in_progress.discard(username)
+        success, message = sync_scheduler.trigger_sync(username)
         
         if success:
             return jsonify({'message': message})
         else:
             return jsonify({'error': message}), 400
     except Exception as e:
-        api_sync_library._sync_in_progress.discard(username)
         gui_logger.exception(f"Error in manual sync: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/library/sync/settings', methods=['GET'])
+@require_admin
+def api_get_sync_settings():
+    """Get library sync settings (admin only)"""
+    return jsonify({
+        'sync_interval_hours': sync_scheduler.get_interval(),
+        'last_sync_times': {
+            username: time.isoformat() 
+            for username, time in sync_scheduler.last_sync_times.items()
+        }
+    })
+
+
+@app.route('/api/library/sync/settings', methods=['POST'])
+@require_admin
+def api_update_sync_settings():
+    """Update library sync interval (admin only)"""
+    data = request.json or {}
+    interval = data.get('sync_interval_hours')
+    
+    if interval is None:
+        return jsonify({'error': 'sync_interval_hours is required'}), 400
+    
+    try:
+        interval_float = float(interval)
+        if interval_float < 1 or interval_float > 168:
+            return jsonify({'error': 'Interval must be between 1 and 168 hours'}), 400
+        
+        sync_scheduler.set_interval(interval_float)
+        
+        return jsonify({
+            'message': 'Sync interval updated successfully',
+            'sync_interval_hours': sync_scheduler.get_interval()
+        })
+    except ValueError:
+        return jsonify({'error': 'Invalid interval value'}), 400
+
+
+@app.route('/api/library/sync/status', methods=['GET'])
+@require_login
+def api_sync_status():
+    """Get sync status for current user"""
+    global current_user
+    with current_user_lock:
+        username = current_user
+    
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+    
+    try:
+        db = database.SessionLocal()
+        cache_age = database.get_library_cache_age(db, username)
+        cached_games = database.get_cached_library(db, username)
+        db.close()
+        
+        last_sync = sync_scheduler.last_sync_times.get(username)
+        
+        return jsonify({
+            'last_sync': last_sync.isoformat() if last_sync else None,
+            'cache_age_hours': round(cache_age / 3600, 2) if cache_age else None,
+            'sync_interval_hours': sync_scheduler.get_interval(),
+            'games_cached': len(cached_games),
+            'should_sync': sync_scheduler.should_sync(username),
+            'is_syncing': username in sync_scheduler.in_progress
+        })
+    except Exception as e:
+        gui_logger.exception(f"Error getting sync status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ===========================================================================================
+# Admin Migration Endpoints (PostgreSQL)
+# ===========================================================================================
+
+@app.route('/api/admin/migrations', methods=['GET'])
+@require_admin
+def api_list_migrations():
+    """List available admin migrations (PostgreSQL)."""
+    migrations = []
+    for key, meta in ADMIN_MIGRATIONS.items():
+        migrations.append({
+            'id': key,
+            'label': meta['label'],
+            'description': meta['description'],
+            'sql': meta['sql']
+        })
+    return jsonify({'migrations': migrations})
+
+
+def _run_sql_statements(db, sql: str) -> None:
+    """Execute one or more SQL statements separated by semicolons."""
+    if not text:
+        raise RuntimeError('SQLAlchemy text() not available')
+    statements = [stmt.strip() for stmt in sql.split(';') if stmt.strip()]
+    for stmt in statements:
+        db.execute(text(stmt))
+
+
+@app.route('/api/admin/migrations/run', methods=['POST'])
+@require_admin
+def api_run_migration():
+    """Run a selected migration with optional SQL override (admin only)."""
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    migration_id = data.get('id')
+    sql_override = data.get('sql')
+
+    if not migration_id or migration_id not in ADMIN_MIGRATIONS:
+        return jsonify({'error': 'Invalid migration id'}), 400
+
+    sql = sql_override if isinstance(sql_override, str) and sql_override.strip() else ADMIN_MIGRATIONS[migration_id]['sql']
+
+    try:
+        db = database.SessionLocal()
+        _run_sql_statements(db, sql)
+        db.commit()
+        db.close()
+        return jsonify({'message': f'Migration {migration_id} executed successfully'})
+    except Exception as e:
+        try:
+            db.rollback()
+            db.close()
+        except Exception:
+            pass
+        gui_logger.exception('Migration failed: %s', e)
         return jsonify({'error': str(e)}), 500
 
 
@@ -1100,24 +2002,32 @@ def api_sync_library():
 @require_login
 def api_favorites():
     """Get all favorite games"""
-    global picker
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
     
-    # Ensure picker is initialized for logged-in user
-    if not picker:
-        with picker_lock:
-            picker = gapi.GamePicker()
-            picker.games = DEMO_GAMES
+    global current_user
+    with current_user_lock:
+        username = current_user
     
-    with picker_lock:
-        favorites = []
+    if not username:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        db = database.SessionLocal()
+        favorite_ids = database.get_user_favorites(db, username)
         
-        for app_id in picker.favorites:
-            game = next((g for g in picker.games if g.get('appid') == app_id), None)
+        # Get cached library to look up game details
+        cached_games = database.get_cached_library(db, username)
+        db.close()
+        
+        favorites = []
+        for app_id in favorite_ids:
+            game = next((g for g in cached_games if str(g.get('app_id')) == str(app_id)), None)
             if game:
                 favorites.append({
                     'app_id': app_id,
                     'name': game.get('name', 'Unknown'),
-                    'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1)
+                    'playtime_hours': round(game.get('playtime_hours', 0), 1)
                 })
             else:
                 favorites.append({
@@ -1127,33 +2037,48 @@ def api_favorites():
                 })
         
         return jsonify({'favorites': favorites})
+    except Exception as e:
+        gui_logger.error(f"Error loading favorites: {e}")
+        return jsonify({'error': 'Failed to load favorites'}), 500
 
 
 @app.route('/api/stats')
 @require_login
 def api_stats():
-    """Get library statistics"""
-    global picker
+    """Get library statistics from database cache"""
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
     
-    # Ensure picker is initialized for logged-in user
-    if not picker or not picker.games:
-        # Initialize with demo games if not loaded
-        if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
-        if not picker.games:
-            picker.games = DEMO_GAMES
+    global current_user
+    with current_user_lock:
+        username = current_user
     
-    with picker_lock:
-        total_games = len(picker.games)
-        unplayed = len([g for g in picker.games if g.get('playtime_forever', 0) == 0])
-        total_playtime = sum(g.get('playtime_forever', 0) for g in picker.games) / 60
+    try:
+        db = database.SessionLocal()
+        cached_games = database.get_cached_library(db, username)
+        favorite_count = len(database.get_user_favorites(db, username))
+        db.close()
+        
+        if not cached_games:
+            return jsonify({
+                'total_games': 0,
+                'unplayed_games': 0,
+                'played_games': 0,
+                'unplayed_percentage': 0,
+                'total_playtime': 0,
+                'average_playtime': 0,
+                'favorite_count': favorite_count,
+                'top_games': []
+            })
+        
+        total_games = len(cached_games)
+        unplayed = len([g for g in cached_games if g.get('playtime_hours', 0) == 0])
+        total_playtime = sum(g.get('playtime_hours', 0) for g in cached_games)
         
         # Top 10 most played
         sorted_by_playtime = sorted(
-            picker.games,
-            key=lambda g: g.get('playtime_forever', 0),
+            cached_games,
+            key=lambda g: g.get('playtime_hours', 0),
             reverse=True
         )[:10]
         
@@ -1161,7 +2086,7 @@ def api_stats():
         for game in sorted_by_playtime:
             top_games.append({
                 'name': game.get('name', 'Unknown'),
-                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1)
+                'playtime_hours': round(game.get('playtime_hours', 0), 1)
             })
         
         return jsonify({
@@ -1171,9 +2096,12 @@ def api_stats():
             'unplayed_percentage': round(unplayed / total_games * 100, 1) if total_games > 0 else 0,
             'total_playtime': round(total_playtime, 1),
             'average_playtime': round(total_playtime / total_games, 1) if total_games > 0 else 0,
-            'favorite_count': len(picker.favorites),
+            'favorite_count': favorite_count,
             'top_games': top_games
         })
+    except Exception as e:
+        gui_logger.error(f"Error calculating stats: {e}")
+        return jsonify({'error': 'Failed to load stats'}), 500
 
 
 @app.route('/api/stats/compare')
@@ -1554,9 +2482,9 @@ def api_update_achievement_hunt(hunt_id: str):
         if status:
             hunt.status = status
             if status == 'completed':
-                hunt.completed_at = datetime.utcnow()
+                hunt.completed_at = datetime.now(timezone.utc)
         
-        hunt.updated_at = datetime.utcnow()
+        hunt.updated_at = datetime.now(timezone.utc)
         db.commit()
         
         result = {
@@ -1628,6 +2556,47 @@ def api_users_update_role():
         return jsonify({'error': message}), 400
     
     return jsonify({'message': message})
+
+
+@app.route('/api/users/roles', methods=['POST'])
+@require_admin
+def api_users_update_roles():
+    """Update user roles (admin only)"""
+    with current_user_lock:
+        requesting_user = current_user
+
+    if not requesting_user:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    data = request.json or {}
+    username = data.get('username', '').strip()
+    roles = data.get('roles', [])
+
+    if not username or not isinstance(roles, list):
+        return jsonify({'error': 'Username and roles list required'}), 400
+
+    success, message = user_manager.update_user_roles(username, roles, requesting_user)
+
+    if not success:
+        return jsonify({'error': message}), 400
+
+    return jsonify({'message': message})
+
+
+@app.route('/api/roles', methods=['GET'])
+@require_admin
+def api_roles_list():
+    """List available roles (admin only)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = database.SessionLocal()
+        roles = database.get_roles(db)
+        db.close()
+        return jsonify({'roles': roles})
+    except Exception as e:
+        gui_logger.exception('Error listing roles: %s', e)
+        return jsonify({'error': str(e)}), 500
 
 
 # ===========================================================================================
@@ -1803,6 +2772,8 @@ def api_multiuser_pick():
     max_release_year = int(max_release_year_val) if max_release_year_val is not None else None
     min_avg_playtime_val = data.get('min_avg_playtime')
     min_avg_playtime = int(min_avg_playtime_val) if min_avg_playtime_val is not None else None
+    platform_filter = data.get('platform_filter', '').strip().lower() or None
+    device_filter = data.get('device_filter', '').strip().lower() or None
     
     # Parse comma-separated lists
     genre_text = data.get('genres', '').strip()
@@ -1831,7 +2802,9 @@ def api_multiuser_pick():
             exclude_genres=exclude_genres,
             tags=tags,
             exclude_game_ids=exclude_game_ids,
-            min_avg_playtime=min_avg_playtime
+            min_avg_playtime=min_avg_playtime,
+            platforms=[platform_filter] if platform_filter else None,
+            device_types=[device_filter] if device_filter else None
         )
         
         if not game:
@@ -2109,25 +3082,37 @@ def api_get_all_tags():
     """Return all unique tags and a mapping of game_id → tags."""
     global picker
     
-    # Ensure picker is initialized for logged-in user
-    if not picker:
-        with picker_lock:
-            picker = gapi.GamePicker()
+    try:
+        # Ensure picker is initialized for logged-in user
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
+        if not picker.games:
             picker.games = DEMO_GAMES
-    if not picker.games:
-        picker.games = DEMO_GAMES
-        
-    with picker_lock:
-        return jsonify({'tags': picker.all_tags(), 'game_tags': picker.tags})
+            
+        with picker_lock:
+            return jsonify({'tags': picker.all_tags(), 'game_tags': picker.tags})
+    except Exception as e:
+        gui_logger.error(f"Error getting tags: {e}")
+        return jsonify({'tags': [], 'game_tags': {}})
 
 
 @app.route('/api/tags/<game_id>', methods=['GET'])
 def api_get_game_tags(game_id: str):
     """Return the tags for a specific game."""
-    if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
-    with picker_lock:
-        return jsonify({'game_id': game_id, 'tags': picker.get_tags(game_id)})
+    global picker
+    
+    try:
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
+        with picker_lock:
+            return jsonify({'game_id': game_id, 'tags': picker.get_tags(game_id)})
+    except Exception as e:
+        gui_logger.error(f"Error getting game tags: {e}")
+        return jsonify({'game_id': game_id, 'tags': []})
 
 
 @app.route('/api/tags/<game_id>', methods=['POST'])
@@ -2136,36 +3121,52 @@ def api_add_tag(game_id: str):
 
     Body JSON: {"tag": "cozy"}
     """
-    if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+    global picker
+    
+    try:
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
 
-    data = request.json or {}
-    tag = data.get('tag', '').strip()
-    if not tag:
-        return jsonify({'error': 'tag is required'}), 400
+        data = request.json or {}
+        tag = data.get('tag', '').strip()
+        if not tag:
+            return jsonify({'error': 'tag is required'}), 400
 
-    with picker_lock:
-        added = picker.add_tag(game_id, tag)
-        tags = picker.get_tags(game_id)
+        with picker_lock:
+            added = picker.add_tag(game_id, tag)
+            tags = picker.get_tags(game_id)
 
-    return jsonify({'success': True, 'added': added,
-                    'game_id': game_id, 'tags': tags})
+        return jsonify({'success': True, 'added': added,
+                        'game_id': game_id, 'tags': tags})
+    except Exception as e:
+        gui_logger.error(f"Error adding tag: {e}")
+        return jsonify({'error': 'Failed to add tag'}), 500
 
 
 @app.route('/api/tags/<game_id>/<tag>', methods=['DELETE'])
 def api_remove_tag(game_id: str, tag: str):
     """Remove a tag from a game."""
-    if not picker:
-        return jsonify({'error': 'Picker not initialized'}), 400
+    global picker
+    
+    try:
+        if not picker:
+            with picker_lock:
+                picker = gapi.GamePicker()
+                picker.games = DEMO_GAMES
 
-    with picker_lock:
-        removed = picker.remove_tag(game_id, tag)
-        tags = picker.get_tags(game_id)
+        with picker_lock:
+            removed = picker.remove_tag(game_id, tag)
+            tags = picker.get_tags(game_id)
 
-    if not removed:
-        return jsonify({'error': 'Tag not found'}), 404
+        if not removed:
+            return jsonify({'error': 'Tag not found'}), 404
 
-    return jsonify({'success': True, 'game_id': game_id, 'tags': tags})
+        return jsonify({'success': True, 'game_id': game_id, 'tags': tags})
+    except Exception as e:
+        gui_logger.error(f"Error removing tag: {e}")
+        return jsonify({'error': 'Failed to remove tag'}), 500
 
 
 @app.route('/api/library/by-tag/<tag>', methods=['GET'])
@@ -2468,7 +3469,9 @@ def api_get_friends():
 
     Returns 503 if Steam is not configured or the profile is private.
     """
-    username = session.get('username')
+    global current_user
+    with current_user_lock:
+        username = current_user
     user_ids = user_manager.get_user_ids(username)
     steam_id = user_ids.get('steam_id', '')
 
@@ -3997,6 +5000,9 @@ def main():
     # Create templates
     create_templates()
     
+    # Start background sync scheduler
+    sync_scheduler.start()
+    
     # Run Flask app
     print("\n" + "="*60)
     print("🎮 GAPI Web GUI is starting...")
@@ -4013,6 +5019,9 @@ def main():
         print("🛑 GAPI Web GUI stopped")
         print("="*60 + "\n")
     finally:
+        # Stop background scheduler
+        sync_scheduler.stop()
+        
         if demo_mode and os.path.exists(config_path):
             os.remove(config_path)
 

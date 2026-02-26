@@ -6,7 +6,7 @@ Handles PostgreSQL connections for user data, ignored games, and achievements.
 
 import os
 import json
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -14,11 +14,35 @@ import logging
 
 logger = logging.getLogger('gapi.database')
 
+# Load .env if available so DATABASE_URL can be picked up
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+def _load_database_url() -> str:
+    """Load DATABASE_URL from env or config.json."""
+    env_url = os.getenv('DATABASE_URL')
+    if env_url:
+        return env_url
+
+    config_path = os.getenv('GAPI_CONFIG_PATH', 'config.json')
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                data = json.load(f)
+            config_url = data.get('database_url')
+            if isinstance(config_url, str) and config_url.strip():
+                return config_url.strip()
+    except Exception as e:
+        logger.warning("Failed to read database_url from config: %s", e)
+
+    return 'postgresql://gapi:gapi_password@localhost:5432/gapi_db'
+
+
 # Database URL - adjust for your PostgreSQL setup
-DATABASE_URL = os.getenv(
-    'DATABASE_URL',
-    'postgresql://gapi:gapi_password@localhost:5432/gapi_db'
-)
+DATABASE_URL = _load_database_url()
 
 try:
     engine = create_engine(DATABASE_URL, echo=False)
@@ -31,6 +55,24 @@ except Exception as e:
     Base = object
 
 
+user_roles = Table(
+    "user_roles",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("role_id", Integer, ForeignKey("roles.id"), primary_key=True)
+)
+
+
+class Role(Base):
+    """Role for access control."""
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, index=True)
+
+    users = relationship("User", secondary=user_roles, back_populates="roles")
+
+
 class User(Base):
     """User account with platform IDs."""
     __tablename__ = "users"
@@ -41,14 +83,28 @@ class User(Base):
     steam_id = Column(String(20), nullable=True)
     epic_id = Column(String(255), nullable=True)
     gog_id = Column(String(255), nullable=True)
-    role = Column(String(20), default='user')  # 'admin' or 'user'
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
+    roles = relationship("Role", secondary=user_roles, back_populates="users")
+    favorites = relationship("FavoriteGame", back_populates="user", cascade="all, delete-orphan")
     ignored_games = relationship("IgnoredGame", back_populates="user", cascade="all, delete-orphan")
     achievements = relationship("Achievement", back_populates="user", cascade="all, delete-orphan")
     game_libraries = relationship("GameLibraryCache", back_populates="user", cascade="all, delete-orphan")
+
+
+class FavoriteGame(Base):
+    """Favorite games per user."""
+    __tablename__ = "favorite_games"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    app_id = Column(String(50), index=True)
+    platform = Column(String(50), default='steam')
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="favorites")
 
 
 class IgnoredGame(Base):
@@ -124,6 +180,25 @@ class GameLibraryCache(Base):
     user = relationship("User", back_populates="game_libraries")
 
 
+class GameDetailsCache(Base):
+    """Cache game details from Steam/Epic/GOG for faster access and lazy loading."""
+    __tablename__ = "game_details_cache"
+    
+    id = Column(Integer, primary_key=True)
+    app_id = Column(String(50), index=True)
+    platform = Column(String(50))  # 'steam', 'epic', 'gog'
+    details_json = Column(Text)  # JSON serialized details
+    cached_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Store last API check time to implement 1-hour TTL
+    last_api_check = Column(DateTime, default=datetime.utcnow)
+    
+    # Unique constraint on app_id + platform combination
+    __table_args__ = (
+        UniqueConstraint('app_id', 'platform', name='uq_app_id_platform'),
+    )
+
+
 class MultiUserSession(Base):
     """Track multi-user game picking sessions."""
     __tablename__ = "multiuser_sessions"
@@ -174,7 +249,61 @@ def get_user_by_username(db, username: str):
         return None
 
 
-def create_or_update_user(db, username: str, password: str = '', steam_id: str = '', epic_id: str = '', gog_id: str = '', role: str = 'user'):
+def ensure_role(db, role_name: str) -> Role:
+    """Ensure a role exists and return it."""
+    if not db:
+        return None
+    role = db.query(Role).filter(Role.name == role_name).first()
+    if role:
+        return role
+    role = Role(name=role_name)
+    db.add(role)
+    db.commit()
+    return role
+
+
+def get_user_roles(db, username: str) -> list:
+    """Get a list of role names for a user."""
+    if not db:
+        return []
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        return []
+    return [r.name for r in user.roles]
+
+
+def get_roles(db) -> list:
+    """Get all role names."""
+    if not db:
+        return []
+    try:
+        roles = db.query(Role).order_by(Role.name).all()
+        return [r.name for r in roles]
+    except Exception as e:
+        logger.error(f"Error getting roles: {e}")
+        return []
+
+
+def set_user_roles(db, username: str, roles: list) -> bool:
+    """Set roles for a user (replaces existing roles)."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        role_objects = [ensure_role(db, r) for r in roles if r]
+        user.roles = [r for r in role_objects if r]
+        user.updated_at = datetime.utcnow()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error setting user roles: {e}")
+        db.rollback()
+        return False
+
+
+def create_or_update_user(db, username: str, password: str = '', steam_id: str = '', epic_id: str = '', gog_id: str = '', role: str = 'user', roles: list = None):
     """Create or update user in database.
     
     Args:
@@ -185,6 +314,7 @@ def create_or_update_user(db, username: str, password: str = '', steam_id: str =
         epic_id: Epic Games ID
         gog_id: GOG ID
         role: User role ('admin' or 'user')
+        roles: Optional list of role names to assign (overrides role param)
     """
     if not db:
         return None
@@ -197,7 +327,6 @@ def create_or_update_user(db, username: str, password: str = '', steam_id: str =
             user.steam_id = steam_id
             user.epic_id = epic_id
             user.gog_id = gog_id
-            user.role = role
             user.updated_at = datetime.utcnow()
         else:
             # Create new user - password is required
@@ -209,10 +338,14 @@ def create_or_update_user(db, username: str, password: str = '', steam_id: str =
                 password=password,
                 steam_id=steam_id,
                 epic_id=epic_id,
-                gog_id=gog_id,
-                role=role
+                gog_id=gog_id
             )
             db.add(user)
+
+        # Assign roles
+        role_names = roles if isinstance(roles, list) and roles else [role]
+        role_objects = [ensure_role(db, r) for r in role_names if r]
+        user.roles = [r for r in role_objects if r]
         db.commit()
         return user
     except Exception as e:
@@ -334,7 +467,8 @@ def update_user_role(db, username: str, role: str):
     try:
         user = db.query(User).filter(User.username == username).first()
         if user:
-            user.role = role
+            role_obj = ensure_role(db, role)
+            user.roles = [role_obj] if role_obj else []
             user.updated_at = datetime.utcnow()
             db.commit()
             return True
@@ -357,6 +491,17 @@ def verify_user_password(db, username: str, password_hash: str):
     except Exception as e:
         logger.error(f"Error verifying password: {e}")
         return False
+
+
+def get_user_count(db) -> int:
+    """Get total number of users."""
+    if not db:
+        return 0
+    try:
+        return db.query(User).count()
+    except Exception as e:
+        logger.error(f"Error getting user count: {e}")
+        return 0
 
 
 def get_cached_library(db, username: str):
@@ -456,3 +601,154 @@ def get_library_cache_age(db, username: str):
     except Exception as e:
         logger.error(f"Error getting cache age: {e}")
         return None
+
+
+def get_user_favorites(db, username: str) -> list:
+    """Get user's favorite game IDs."""
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        return [f.app_id for f in user.favorites]
+    except Exception as e:
+        logger.error(f"Error getting user favorites: {e}")
+        return []
+
+
+def add_favorite(db, username: str, app_id: str, platform: str = 'steam') -> bool:
+    """Add a game to user's favorites."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        
+        # Check if already favorited
+        existing = db.query(FavoriteGame).filter(
+            FavoriteGame.user_id == user.id,
+            FavoriteGame.app_id == app_id
+        ).first()
+        
+        if existing:
+            return True
+        
+        favorite = FavoriteGame(user_id=user.id, app_id=app_id, platform=platform)
+        db.add(favorite)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error adding favorite: {e}")
+        db.rollback()
+        return False
+
+
+def remove_favorite(db, username: str, app_id: str) -> bool:
+    """Remove a game from user's favorites."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        
+        favorite = db.query(FavoriteGame).filter(
+            FavoriteGame.user_id == user.id,
+            FavoriteGame.app_id == app_id
+        ).first()
+        
+        if favorite:
+            db.delete(favorite)
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error removing favorite: {e}")
+        db.rollback()
+        return False
+
+
+def get_game_details_cache(db, app_id: str, platform: str = 'steam', max_age_hours: int = 1) -> dict:
+    """Get cached game details if available and fresh.
+    
+    Args:
+        db: Database session
+        app_id: Game app ID
+        platform: Platform name ('steam', 'epic', 'gog')
+        max_age_hours: Maximum age in hours to consider cache fresh
+        
+    Returns:
+        Cached details dict or None if not available/stale
+    """
+    if not db:
+        return None
+    try:
+        cache = db.query(GameDetailsCache).filter(
+            GameDetailsCache.app_id == str(app_id),
+            GameDetailsCache.platform == platform.lower()
+        ).first()
+        
+        if not cache:
+            return None
+        
+        # Check if cache is still fresh (within max_age_hours)
+        age_seconds = (datetime.utcnow() - cache.last_api_check).total_seconds()
+        if age_seconds > max_age_hours * 3600:  # Older than max_age_hours
+            return None  # Cache is stale
+        
+        # Parse and return cached details
+        import json
+        return json.loads(cache.details_json)
+    except Exception as e:
+        logger.error(f"Error getting game details cache: {e}")
+        return None
+
+
+def update_game_details_cache(db, app_id: str, platform: str, details: dict) -> bool:
+    """Update game details cache.
+    
+    Args:
+        db: Database session
+        app_id: Game app ID
+        platform: Platform name ('steam', 'epic', 'gog')
+        details: Details dict to cache
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not db or not details:
+        return False
+    try:
+        import json
+        
+        app_id_str = str(app_id)
+        platform_lower = platform.lower()
+        
+        cache = db.query(GameDetailsCache).filter(
+            GameDetailsCache.app_id == app_id_str,
+            GameDetailsCache.platform == platform_lower
+        ).first()
+        
+        if cache:
+            # Update existing
+            cache.details_json = json.dumps(details)
+            cache.cached_at = datetime.utcnow()
+            cache.last_api_check = datetime.utcnow()
+        else:
+            # Create new
+            cache = GameDetailsCache(
+                app_id=app_id_str,
+                platform=platform_lower,
+                details_json=json.dumps(details),
+                cached_at=datetime.utcnow(),
+                last_api_check=datetime.utcnow()
+            )
+            db.add(cache)
+        
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error updating game details cache: {e}")
+        db.rollback()
+        return False

@@ -2,7 +2,7 @@
 
 ## Summary
 
-The application has been successfully migrated from using JSON files (`users_auth.json`, `users_template.json`) to using the PostgreSQL database as the primary storage for user authentication and platform IDs.
+The application uses the PostgreSQL database as the primary storage for user authentication and platform IDs.
 
 ## Changes Made
 
@@ -24,19 +24,9 @@ Added the following authentication functions in [database.py](database.py):
 
 The `UserManager` class in [gapi_gui.py](gapi_gui.py) has been completely refactored to:
 - Use the database as the primary storage (no more in-memory dictionary)
-- Automatically migrate users from `users_auth.json` to the database on first run
 - Perform all operations (register, login, get/update IDs) directly against the database
 
 ## Migration Process
-
-### Automatic Migration
-
-When you start the application after this update, it will automatically:
-
-1. Check if `users_auth.json` exists
-2. Migrate all users from the JSON file to the database
-3. Create a backup file `users_auth.json.migrated`
-4. Log all migration activities
 
 ### Manual Migration Steps
 
@@ -53,7 +43,7 @@ This will add the `password` column to your existing `users` table.
 All tests passed successfully:
 
 ✅ Database schema migration complete
-✅ User migration from JSON to database (11 users migrated)
+✅ User registration works
 ✅ User registration works
 ✅ User login authentication works
 ✅ Platform ID retrieval works
@@ -61,16 +51,9 @@ All tests passed successfully:
 
 ## What Changed for Users
 
-### Before (JSON-based)
-- User data stored in `users_auth.json`
-- Platform IDs synced between JSON and database
-- JSON file was the source of truth
-
-### After (Database-based)
+### Database-based
 - All user data stored in PostgreSQL database
-- No runtime dependency on JSON files
 - Database is the single source of truth
-- JSON files only used for one-time migration
 
 ## Files Modified
 
@@ -81,9 +64,8 @@ All tests passed successfully:
 
 ## Backward Compatibility
 
-- Existing users in `users_auth.json` are automatically migrated
-- The JSON file is backed up to `users_auth.json.migrated`
-- You can safely delete the JSON backup after confirming migration
+- Database is the single source of truth for users
+- Use the admin migration UI to add missing tables or roles
 
 ## Important Notes
 
@@ -106,7 +88,6 @@ If you see "Database not available" errors:
 If migration fails:
 1. Run `python migrate_database.py` manually
 2. Check the logs in `logs/gapi_gui.log`
-3. Verify your `users_auth.json` file is valid JSON
 
 ### User Not Found Errors
 
@@ -120,7 +101,7 @@ If you get "User not found in database" errors:
 1. ✅ Migration is complete!
 2. Start the application: `python gapi_gui.py`
 3. Verify all users can log in
-4. Optionally delete `users_auth.json` and `users_auth.json.migrated` after confirming everything works
+4. Use the admin migration UI to add roles tables if needed
 
 ## Support
 

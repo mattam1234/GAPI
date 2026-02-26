@@ -453,7 +453,9 @@ class MultiUserPicker:
                      exclude_genres: Optional[List[str]] = None,
                      tags: Optional[List[str]] = None,
                      exclude_game_ids: Optional[List[str]] = None,
-                     min_avg_playtime: Optional[int] = None) -> List[Dict]:
+                     min_avg_playtime: Optional[int] = None,
+                     platforms: Optional[List[str]] = None,
+                     device_types: Optional[List[str]] = None) -> List[Dict]:
         """
         Filter games by various criteria.
         
@@ -469,6 +471,8 @@ class MultiUserPicker:
             tags: List of Steam tags to include (OR logic)
             exclude_game_ids: Game IDs to exclude
             min_avg_playtime: Minimum average playtime per player in minutes
+            platforms: List of platform names to include (e.g., steam, epic)
+            device_types: List of device types to include (pc, console)
         
         Returns:
             Filtered list of games
@@ -490,11 +494,46 @@ class MultiUserPicker:
         genres_lower = [g.lower() for g in genres] if genres else []
         exclude_lower = [g.lower() for g in exclude_genres] if exclude_genres else []
         tags_lower = [t.lower() for t in tags] if tags else []
+        platforms_lower = {p.strip().lower() for p in (platforms or []) if str(p).strip()}
+        allowed_devices = {
+            d.strip().lower() for d in (device_types or []) if str(d).strip().lower() in {'pc', 'console'}
+        }
+
+        platform_device_map = {
+            'steam': 'pc',
+            'epic': 'pc',
+            'gog': 'pc',
+            'origin': 'pc',
+            'ea': 'pc',
+            'ubisoft': 'pc',
+            'uplay': 'pc',
+            'battlenet': 'pc',
+            'battle.net': 'pc',
+            'xbox': 'console',
+            'playstation': 'console',
+            'ps': 'console',
+            'nintendo': 'console',
+            'switch': 'console'
+        }
+
+        def _device_for_platform(platform: str) -> str:
+            p = (platform or '').strip().lower()
+            if p in platform_device_map:
+                return platform_device_map[p]
+            if 'xbox' in p or 'playstation' in p or 'nintendo' in p or 'switch' in p:
+                return 'console'
+            return 'pc' if p in {'pc', 'windows', 'linux', 'mac'} else 'other'
         
         for game in games:
             # Basic exclusions
             app_id = str(game.get('appid') or game.get('app_id') or game.get('game_id', ''))
             if app_id in exclude_ids:
+                continue
+
+            platform = str(game.get('platform', 'steam')).strip().lower()
+            if platforms_lower and platform not in platforms_lower:
+                continue
+            if allowed_devices and _device_for_platform(platform) not in allowed_devices:
                 continue
             
             playtime = game.get('playtime_forever', 0)
@@ -580,7 +619,9 @@ class MultiUserPicker:
                         exclude_genres: Optional[List[str]] = None,
                         tags: Optional[List[str]] = None,
                         exclude_game_ids: Optional[List[str]] = None,
-                        min_avg_playtime: Optional[int] = None) -> Optional[Dict]:
+                        min_avg_playtime: Optional[int] = None,
+                        platforms: Optional[List[str]] = None,
+                        device_types: Optional[List[str]] = None) -> Optional[Dict]:
         """
         Pick a random game from the common library with optional filters
         
@@ -598,6 +639,8 @@ class MultiUserPicker:
             tags: List of Steam tags to include (OR logic)
             exclude_game_ids: Game IDs to exclude
             min_avg_playtime: Minimum average playtime per player
+            platforms: List of platform names to include
+            device_types: List of device types to include (pc, console)
         
         Returns:
             A randomly selected game dict, or None if no games match filters
@@ -626,7 +669,9 @@ class MultiUserPicker:
             exclude_genres=exclude_genres,
             tags=tags,
             exclude_game_ids=exclude_game_ids,
-            min_avg_playtime=min_avg_playtime
+            min_avg_playtime=min_avg_playtime,
+            platforms=platforms,
+            device_types=device_types
         )
         
         if not common_games:

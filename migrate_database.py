@@ -85,10 +85,8 @@ def main():
     print("=" * 60)
     print()
     print("Next steps:")
-    print("1. The application will automatically migrate user passwords from")
-    print("   users_auth.json to the database on first run")
-    print("2. A backup file users_auth.json.migrated will be created")
-    print("3. You can optionally delete users_auth.json after migration")
+    print("1. Start the app to create missing tables")
+    print("2. Use the admin migration UI if you need to add role tables")
     print()
     
     return 0

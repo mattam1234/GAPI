@@ -183,7 +183,7 @@ GAPI now features a built-in **user authentication system** for the Web GUI:
 3. **Pick Games** - Start using GAPI with your game library!
 
 ### User Account Storage
-- Accounts are stored in `users_auth.json` (created automatically)
+- Accounts are stored in the PostgreSQL database
 - Passwords are securely hashed using SHA-256
 - Users can have different platform IDs configured
 
@@ -425,31 +425,12 @@ The `config.json` file contains your API keys and global settings:
 - `log_level` - Logging level: DEBUG, INFO, WARNING, ERROR *(default: WARNING)*
 - `webhook_url` - Discord webhook URL for notifications *(optional)*
 
-### User Account Storage (`users_auth.json`)
+### User Account Storage (Database)
 
-The `users_auth.json` file is created automatically and stores:
+User accounts are stored in the PostgreSQL database:
 - User account credentials (username, hashed password)
 - User's platform IDs (Steam, Epic Games, GOG)
-
-**Example format:**
-```json
-{
-  "users": {
-    "john": {
-      "password": "<hashed_password>",
-      "steam_id": "76561198123639801",
-      "epic_id": "",
-      "gog_id": ""
-    },
-    "jane": {
-      "password": "<hashed_password>",
-      "steam_id": "76561199876543210",
-      "epic_id": "jane_epic_username",
-      "gog_id": ""
-    }
-  }
-}
-```
+- Role assignments (admin/user)
 
 ⚠️ **Note:** Platform IDs are managed through the Web GUI Settings tab, not manually edited.
 

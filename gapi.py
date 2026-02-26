@@ -1404,7 +1404,9 @@ class GamePicker:
                      min_metacritic: Optional[int] = None,
                      min_release_year: Optional[int] = None,
                      max_release_year: Optional[int] = None,
-                     exclude_game_ids: Optional[List[str]] = None) -> List[Dict]:
+                     exclude_game_ids: Optional[List[str]] = None,
+                     platforms: Optional[List[str]] = None,
+                     device_types: Optional[List[str]] = None) -> List[Dict]:
         """Filter games based on various criteria
 
         Args:
@@ -1417,6 +1419,8 @@ class GamePicker:
             min_release_year: Earliest release year (inclusive)
             max_release_year: Latest release year (inclusive)
             exclude_game_ids: List of appids/game IDs to exclude from results
+            platforms: List of platform names to include (e.g., steam, epic)
+            device_types: List of device types to include (pc, console)
 
         Returns:
             List of filtered games
@@ -1442,6 +1446,51 @@ class GamePicker:
                 if str(g.get('appid', '')) not in exclude_set
                 and str(g.get('game_id', '')) not in exclude_set
             ]
+
+        # Filter by platform
+        if platforms:
+            allowed_platforms = {str(p).strip().lower() for p in platforms if str(p).strip()}
+            if allowed_platforms:
+                filtered = [
+                    g for g in filtered
+                    if str(g.get('platform', 'steam')).strip().lower() in allowed_platforms
+                ]
+
+        # Filter by broad device type (pc/console)
+        if device_types:
+            allowed_devices = {
+                str(d).strip().lower() for d in device_types if str(d).strip().lower() in {'pc', 'console'}
+            }
+            if allowed_devices:
+                platform_device_map = {
+                    'steam': 'pc',
+                    'epic': 'pc',
+                    'gog': 'pc',
+                    'origin': 'pc',
+                    'ea': 'pc',
+                    'ubisoft': 'pc',
+                    'uplay': 'pc',
+                    'battlenet': 'pc',
+                    'battle.net': 'pc',
+                    'xbox': 'console',
+                    'playstation': 'console',
+                    'ps': 'console',
+                    'nintendo': 'console',
+                    'switch': 'console'
+                }
+
+                def _device_for_platform(platform: str) -> str:
+                    p = (platform or '').strip().lower()
+                    if p in platform_device_map:
+                        return platform_device_map[p]
+                    if 'xbox' in p or 'playstation' in p or 'nintendo' in p or 'switch' in p:
+                        return 'console'
+                    return 'pc' if p in {'pc', 'windows', 'linux', 'mac'} else 'other'
+
+                filtered = [
+                    g for g in filtered
+                    if _device_for_platform(str(g.get('platform', 'steam'))) in allowed_devices
+                ]
 
         # Filters that require fetching game details
         needs_details = bool(genres or exclude_genres or min_metacritic is not None
