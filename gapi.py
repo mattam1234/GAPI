@@ -563,6 +563,7 @@ class GamePicker:
     SCHEDULE_FILE = '.gapi_schedule.json'
     PLAYLISTS_FILE = '.gapi_playlists.json'
     BACKLOG_FILE = '.gapi_backlog.json'
+    BUDGET_FILE = '.gapi_budget.json'
 
     BACKLOG_STATUSES = ('want_to_play', 'playing', 'completed', 'dropped')
 
@@ -618,6 +619,7 @@ class GamePicker:
         self.schedule: Dict[str, Dict] = self.load_schedule()  # event_id -> event dict
         self.playlists: Dict[str, List[str]] = self.load_playlists()  # name -> [game_id, ...]
         self.backlog: Dict[str, str] = self.load_backlog()  # game_id -> status
+        self.budget: Dict[str, Dict] = self.load_budget()  # game_id -> {price, currency, ...}
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -1036,6 +1038,109 @@ class GamePicker:
                 entry['backlog_status'] = id_to_status[gid]
                 result.append(entry)
         return result
+
+    # ------------------------------------------------------------------
+    # Budget tracking
+    # ------------------------------------------------------------------
+
+    def load_budget(self) -> Dict[str, Dict]:
+        """Load budget data from disk.
+
+        Returns a dict mapping game_id -> {price, currency, purchase_date, notes}.
+        """
+        if os.path.exists(self.BUDGET_FILE):
+            try:
+                with open(self.BUDGET_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
+
+    def save_budget(self) -> None:
+        """Persist budget data to disk (atomic write)."""
+        try:
+            _atomic_write_json(self.BUDGET_FILE, self.budget)
+        except IOError as e:
+            self._log.warning("Could not save budget: %s", e)
+
+    def set_game_budget(self, game_id: str, price: float,
+                        currency: str = 'USD',
+                        purchase_date: Optional[str] = None,
+                        notes: str = '') -> bool:
+        """Record or update the purchase price for a game.
+
+        Args:
+            game_id:       Composite game ID (e.g. 'steam:620').
+            price:         Amount paid (0 = free / Game Pass / gift).
+            currency:      ISO 4217 currency code (default 'USD').
+            purchase_date: Optional date string (e.g. '2024-12-25').
+            notes:         Optional free-text note (e.g. 'Steam sale 80% off').
+
+        Returns:
+            True on success, False if price is negative.
+        """
+        if price < 0:
+            return False
+        entry: Dict = {
+            'game_id': game_id,
+            'price': round(float(price), 2),
+            'currency': currency.strip().upper() or 'USD',
+            'purchase_date': purchase_date or '',
+            'notes': notes,
+        }
+        self.budget[game_id] = entry
+        self.save_budget()
+        return True
+
+    def remove_game_budget(self, game_id: str) -> bool:
+        """Remove budget entry for a game.
+
+        Returns:
+            True if an entry was removed, False if not found.
+        """
+        if game_id not in self.budget:
+            return False
+        del self.budget[game_id]
+        self.save_budget()
+        return True
+
+    def get_budget_summary(self) -> Dict:
+        """Return an aggregated budget summary.
+
+        Returns::
+
+            {
+              "total_spent": 142.50,
+              "currency_breakdown": {"USD": 142.50},
+              "game_count": 7,
+              "entries": [...]   # list of all budget entries enriched with game names
+            }
+
+        Only entries whose currency matches the most common currency are
+        included in ``total_spent`` (mixed-currency totals are meaningless).
+        """
+        entries = []
+        currency_totals: Dict[str, float] = {}
+        game_name_map = {g.get('game_id'): g.get('name', '') for g in self.games}
+
+        for game_id, entry in self.budget.items():
+            enriched = dict(entry)
+            enriched['name'] = game_name_map.get(game_id, game_id)
+            entries.append(enriched)
+            cur = entry.get('currency', 'USD')
+            currency_totals[cur] = round(currency_totals.get(cur, 0.0) + entry.get('price', 0.0), 2)
+
+        # Primary currency = the one with the highest total spend
+        primary_currency = max(currency_totals, key=currency_totals.get) if len(currency_totals) > 0 else 'USD'
+        total_spent = currency_totals.get(primary_currency, 0.0)
+
+        return {
+            'total_spent': round(total_spent, 2),
+            'primary_currency': primary_currency,
+            'currency_breakdown': currency_totals,
+            'game_count': len(self.budget),
+            'entries': sorted(entries, key=lambda e: e.get('purchase_date', ''), reverse=True),
+        }
 
     def get_recommendations(self, count: int = 10) -> List[Dict]:
         """Recommend games from the user's library based on playtime and genre patterns.

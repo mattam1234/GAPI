@@ -72,7 +72,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### Social Features
 - [ ] **Discord Rich Presence** - Show currently picked game in Discord status
 - [x] **Game Night Scheduler** - Schedule game sessions with friends
-- [ ] **Voting System Improvements** - Multiple voting rounds, ranked choice
+- [x] **Voting System Improvements** - Multiple voting rounds, ranked choice (Instant Runoff Voting)
 - [x] **Game Reviews** - Add personal notes/reviews to games
 - [x] **Export game recommendations** - Export library / favorites as CSV
 
@@ -103,7 +103,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### Long-term Backlog Features
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
 - [x] **Game Backlog Manager** - Track want_to_play / playing / completed / dropped per game
-- [ ] **Budget Tracking** - Track game purchases and library value
+- [x] **Budget Tracking** - Track game purchases and library value
 - [ ] **Sale Alerts** - Notify when wishlist games go on sale
 
 ## 🔧 Technical Improvements

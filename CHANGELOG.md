@@ -4,6 +4,33 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.4.0] - 2026-02-27
+
+### Added
+- **Ranked-Choice (Instant Runoff) Voting** — extended `VotingSession` in `multiuser.py`
+  - New `voting_method` parameter: `'plurality'` (default, fully backward-compatible)
+    or `'ranked_choice'` (Instant Runoff Voting)
+  - `cast_vote()` now accepts an ordered preference list for ranked-choice sessions
+  - `run_irv()` method implements the full IRV algorithm with round-by-round elimination
+  - `get_winner()` dispatches to IRV automatically when `voting_method='ranked_choice'`
+  - `to_dict()` includes `voting_method` and, for ranked-choice sessions, `irv_rounds`
+    (list of per-round counts and eliminated candidates)
+  - `POST /api/voting/create` accepts `voting_method` in request body
+  - `POST /api/voting/<id>/vote` accepts `ranking` (list) for ranked-choice sessions
+  - `POST /api/voting/<id>/close` response includes `voting_method` and `irv_rounds`
+  - 18 new unit tests covering all ranked-choice code paths
+- **Budget Tracking** — track what you paid for your games
+  - New `GamePicker` methods: `load_budget()`, `save_budget()`, `set_game_budget()`,
+    `remove_game_budget()`, `get_budget_summary()`
+  - Per-game entries: `price`, `currency`, `purchase_date`, `notes`
+  - Aggregated summary: `total_spent`, `primary_currency`, `currency_breakdown`,
+    `game_count`, `entries` (sorted by purchase date, enriched with game names)
+  - Persisted to `.gapi_budget.json` via atomic write
+  - `GET /api/budget` — retrieve all entries + summary (login required)
+  - `POST/PUT /api/budget/<game_id>` — set / update budget entry (login required)
+  - `DELETE /api/budget/<game_id>` — remove budget entry (login required)
+  - 16 new unit tests covering all budget code paths
+
 ## [2.3.0] - 2026-02-25
 
 ### Added

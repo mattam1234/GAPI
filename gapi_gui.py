@@ -2852,10 +2852,11 @@ def api_voting_create():
     """Create a new voting session from common games.
 
     Expected JSON body:
-        users        – list of user names participating (optional – all users if omitted)
+        users          – list of user names participating (optional – all users if omitted)
         num_candidates – number of game candidates to put to a vote (default: 5)
-        duration     – voting window in seconds (optional)
-        coop_only    – filter to co-op games only (default: false)
+        duration       – voting window in seconds (optional)
+        coop_only      – filter to co-op games only (default: false)
+        voting_method  – 'plurality' (default) or 'ranked_choice'
     """
     global multi_picker
 
@@ -2868,6 +2869,9 @@ def api_voting_create():
     num_candidates = min(int(data.get('num_candidates', 5)), 10)
     duration = data.get('duration')
     coop_only = data.get('coop_only', False)
+    voting_method = data.get('voting_method', 'plurality')
+    if voting_method not in ('plurality', 'ranked_choice'):
+        return jsonify({'error': "voting_method must be 'plurality' or 'ranked_choice'"}), 400
 
     with multi_picker_lock:
         common_games = multi_picker.find_common_games(user_names)
@@ -2886,7 +2890,7 @@ def api_voting_create():
 
         voters = user_names if user_names else [u['name'] for u in multi_picker.users]
         session = multi_picker.create_voting_session(
-            candidates, voters=voters, duration=duration
+            candidates, voters=voters, duration=duration, voting_method=voting_method
         )
 
     return jsonify(session.to_dict()), 201
@@ -2897,9 +2901,13 @@ def api_voting_create():
 def api_voting_cast(session_id: str):
     """Cast a vote in an active voting session.
 
-    Expected JSON body:
+    Expected JSON body (plurality):
         user_name – name of the voter
         app_id    – app ID of the game being voted for
+
+    Expected JSON body (ranked_choice):
+        user_name – name of the voter
+        ranking   – ordered list of app IDs (most preferred first)
     """
     global multi_picker
 
@@ -2909,19 +2917,25 @@ def api_voting_cast(session_id: str):
 
     data = request.json or {}
     user_name = data.get('user_name', '').strip()
-    app_id = str(data.get('app_id', '')).strip()
 
     if not user_name:
         return jsonify({'error': 'user_name is required'}), 400
-    if not app_id:
-        return jsonify({'error': 'app_id is required'}), 400
 
     with multi_picker_lock:
         session = multi_picker.get_voting_session(session_id)
         if session is None:
             return jsonify({'error': 'Voting session not found'}), 404
 
-        success, message = session.cast_vote(user_name, app_id)
+        if session.voting_method == 'ranked_choice':
+            ranking = data.get('ranking')
+            if not isinstance(ranking, list) or not ranking:
+                return jsonify({'error': 'ranking (list of app IDs) is required for ranked_choice voting'}), 400
+            success, message = session.cast_vote(user_name, ranking)
+        else:
+            app_id = str(data.get('app_id', '')).strip()
+            if not app_id:
+                return jsonify({'error': 'app_id is required'}), 400
+            success, message = session.cast_vote(user_name, app_id)
 
     if not success:
         return jsonify({'error': message}), 400
@@ -2969,7 +2983,7 @@ def api_voting_close(session_id: str):
 
     app_id = winner.get('appid') or winner.get('app_id') or winner.get('game_id')
 
-    return jsonify({
+    response = {
         'winner': {
             'app_id': app_id,
             'name': winner.get('name', 'Unknown'),
@@ -2977,9 +2991,13 @@ def api_voting_close(session_id: str):
             'steam_url': f'https://store.steampowered.com/app/{app_id}/' if app_id else None,
             'steamdb_url': f'https://steamdb.info/app/{app_id}/' if app_id else None,
         },
+        'voting_method': session_data.get('voting_method', 'plurality'),
         'vote_counts': session_data.get('vote_counts', {}),
         'total_votes': session_data.get('total_votes', 0),
-    })
+    }
+    if session_data.get('voting_method') == 'ranked_choice':
+        response['irv_rounds'] = session_data.get('irv_rounds', [])
+    return jsonify(response)
 
 
 # -----------------------------------------------------------------------
@@ -3408,6 +3426,70 @@ def api_delete_backlog_status(game_id: str):
         removed = picker.remove_backlog_status(game_id)
     if not removed:
         return jsonify({'error': 'Game not in backlog'}), 404
+    return jsonify({'success': True})
+
+
+# ---------------------------------------------------------------------------
+# Budget Tracking API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/budget', methods=['GET'])
+@require_login
+def api_get_budget():
+    """Return all budget entries and an aggregated summary."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        summary = picker.get_budget_summary()
+    return jsonify(summary)
+
+
+@app.route('/api/budget/<path:game_id>', methods=['POST', 'PUT'])
+@require_login
+def api_set_budget(game_id: str):
+    """Set or update the purchase price for a game.
+
+    Expected JSON body::
+
+        {
+            "price":         14.99,       // required; 0 = free/gift
+            "currency":      "USD",       // optional, default "USD"
+            "purchase_date": "2024-12-25",// optional
+            "notes":         "Steam sale" // optional
+        }
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    if 'price' not in data:
+        return jsonify({'error': 'price is required'}), 400
+    try:
+        price = float(data['price'])
+    except (TypeError, ValueError):
+        return jsonify({'error': 'price must be a number'}), 400
+    with picker_lock:
+        ok = picker.set_game_budget(
+            game_id,
+            price=price,
+            currency=str(data.get('currency', 'USD')),
+            purchase_date=str(data.get('purchase_date', '')),
+            notes=str(data.get('notes', '')),
+        )
+    if not ok:
+        return jsonify({'error': 'price must not be negative'}), 400
+    return jsonify({'success': True, 'game_id': game_id, 'price': price})
+
+
+@app.route('/api/budget/<path:game_id>', methods=['DELETE'])
+@require_login
+def api_delete_budget(game_id: str):
+    """Remove a budget entry for a game."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        removed = picker.remove_game_budget(game_id)
+    if not removed:
+        return jsonify({'error': 'No budget entry found for this game'}), 404
     return jsonify({'success': True})
 
 
