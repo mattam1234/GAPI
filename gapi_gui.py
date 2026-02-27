@@ -3494,6 +3494,96 @@ def api_delete_budget(game_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Wishlist & Sale Alerts API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/wishlist', methods=['GET'])
+@require_login
+def api_get_wishlist():
+    """Return all wishlist entries."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        entries = list(picker.wishlist.values())
+    return jsonify({'entries': entries, 'count': len(entries)})
+
+
+@app.route('/api/wishlist', methods=['POST'])
+@require_login
+def api_add_to_wishlist():
+    """Add or update a game in the wishlist.
+
+    Expected JSON body::
+
+        {
+            "game_id":      "steam:620",  // required
+            "name":         "Portal 2",   // required
+            "platform":     "steam",      // optional, default "steam"
+            "target_price": 4.99,         // optional – alert when price <= this
+            "notes":        "Want this"   // optional
+        }
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    game_id = (data.get('game_id') or '').strip()
+    name = (data.get('name') or '').strip()
+    if not game_id:
+        return jsonify({'error': 'game_id is required'}), 400
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    platform = str(data.get('platform', 'steam')).strip().lower() or 'steam'
+    notes = str(data.get('notes', ''))
+    target_price = data.get('target_price')
+    if target_price is not None:
+        try:
+            target_price = float(target_price)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'target_price must be a number'}), 400
+    with picker_lock:
+        ok = picker.add_to_wishlist(game_id, name, platform=platform,
+                                    target_price=target_price, notes=notes)
+    if not ok:
+        return jsonify({'error': 'target_price must not be negative'}), 400
+    return jsonify({'success': True, 'game_id': game_id}), 201
+
+
+@app.route('/api/wishlist/<path:game_id>', methods=['DELETE'])
+@require_login
+def api_remove_from_wishlist(game_id: str):
+    """Remove a game from the wishlist."""
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    with picker_lock:
+        removed = picker.remove_from_wishlist(game_id)
+    if not removed:
+        return jsonify({'error': 'Game not found in wishlist'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/wishlist/sales', methods=['GET'])
+@require_login
+def api_check_wishlist_sales():
+    """Check current Steam prices and return wishlist items that are on sale
+    or at/below the user-set target price.
+
+    This makes live Steam Store API calls so may take a few seconds for large
+    wishlists.  Results are not cached.
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    if not picker.wishlist:
+        return jsonify({'sales': [], 'checked': 0})
+    if not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
+        return jsonify({'error': 'Steam client not available; cannot check prices'}), 503
+    with picker_lock:
+        sales = picker.check_wishlist_sales()
+        checked = len([e for e in picker.wishlist.values()
+                       if e.get('platform', 'steam') == 'steam'])
+    return jsonify({'sales': sales, 'checked': checked, 'on_sale_count': len(sales)})
+
+
+# ---------------------------------------------------------------------------
 # Achievement Tracking API
 # ---------------------------------------------------------------------------
 

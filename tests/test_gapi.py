@@ -1131,5 +1131,235 @@ class TestGamePickerBudget(unittest.TestCase):
         self.assertIn('EUR', summary['currency_breakdown'])
 
 
+# ===========================================================================
+# Wishlist & Sale Alerts tests
+# ===========================================================================
+
+class TestGamePickerWishlist(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.orig = os.getcwd()
+        self.picker = make_picker(self.tmp_dir)
+        os.chdir(self.tmp_dir)
+        self.picker.games = list(FAKE_GAMES)
+
+    def tearDown(self):
+        os.chdir(self.orig)
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    # -- add_to_wishlist --
+
+    def test_add_to_wishlist_basic(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        self.assertTrue(ok)
+        self.assertIn('steam:730', self.picker.wishlist)
+
+    def test_add_to_wishlist_stores_fields(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', platform='steam',
+                                    target_price=9.99, notes='Want this')
+        entry = self.picker.wishlist['steam:730']
+        self.assertEqual(entry['name'], 'CS:GO')
+        self.assertEqual(entry['platform'], 'steam')
+        self.assertEqual(entry['target_price'], 9.99)
+        self.assertEqual(entry['notes'], 'Want this')
+
+    def test_add_to_wishlist_stores_added_date(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        entry = self.picker.wishlist['steam:730']
+        self.assertIn('added_date', entry)
+        self.assertTrue(entry['added_date'])  # non-empty
+
+    def test_add_to_wishlist_rejects_negative_target_price(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=-1.0)
+        self.assertFalse(ok)
+        self.assertNotIn('steam:730', self.picker.wishlist)
+
+    def test_add_to_wishlist_zero_target_price_allowed(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=0.0)
+        self.assertTrue(ok)
+
+    def test_add_to_wishlist_none_target_price_allowed(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=None)
+        self.assertTrue(ok)
+
+    def test_add_to_wishlist_overwrites_existing(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', notes='First')
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', notes='Updated')
+        self.assertEqual(self.picker.wishlist['steam:730']['notes'], 'Updated')
+
+    # -- remove_from_wishlist --
+
+    def test_remove_from_wishlist(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        removed = self.picker.remove_from_wishlist('steam:730')
+        self.assertTrue(removed)
+        self.assertNotIn('steam:730', self.picker.wishlist)
+
+    def test_remove_from_wishlist_not_present(self):
+        removed = self.picker.remove_from_wishlist('steam:99999')
+        self.assertFalse(removed)
+
+    # -- persistence --
+
+    def test_wishlist_persisted(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=4.99)
+        new_picker = make_picker(self.tmp_dir)
+        self.assertIn('steam:730', new_picker.wishlist)
+        self.assertEqual(new_picker.wishlist['steam:730']['target_price'], 4.99)
+
+    # -- check_wishlist_sales --
+
+    def test_check_wishlist_sales_no_steam_client(self):
+        """Returns empty list when no Steam client is available."""
+        self.picker.steam_client = None
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        result = self.picker.check_wishlist_sales()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_on_sale(self):
+        """Items with discount_percent > 0 should be returned."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 999,
+            'discount_percent': 50,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$9.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['game_id'], 'steam:730')
+        self.assertEqual(result[0]['discount_percent'], 50)
+        self.assertAlmostEqual(result[0]['current_price_usd'], 9.99, places=2)
+
+    def test_check_wishlist_sales_below_target(self):
+        """Items at or below target_price should be returned even without a discount."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=15.00)
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 1499,
+            'discount_percent': 0,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$14.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(len(result), 1)
+        self.assertIn('target', result[0]['sale_reason'])
+
+    def test_check_wishlist_sales_not_on_sale(self):
+        """Items not on sale and above target should not be returned."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=5.00)
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 1999,
+            'discount_percent': 0,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$19.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_skips_non_steam(self):
+        """Non-Steam wishlist entries should be skipped."""
+        self.picker.add_to_wishlist('epic:ABC', 'Some Epic Game', platform='epic')
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value={'discount_percent': 50, 'final': 500,
+                                        'initial': 1000, 'final_formatted': '$5.00',
+                                        'initial_formatted': '$10.00'}) as mock_p:
+            result = self.picker.check_wishlist_sales()
+        mock_p.assert_not_called()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_no_price_data(self):
+        """Games where the API returns None are skipped."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=None):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_sale_reason_combined(self):
+        """sale_reason mentions both discount and target when both conditions are met."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=10.00)
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 999,
+            'discount_percent': 50,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$9.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(len(result), 1)
+        reason = result[0]['sale_reason']
+        self.assertIn('off', reason)
+        self.assertIn('target', reason)
+
+
+class TestSteamAPIClientGetPriceOverview(unittest.TestCase):
+    """Unit tests for SteamAPIClient.get_price_overview."""
+
+    def _make_client(self) -> gapi.SteamAPIClient:
+        return gapi.SteamAPIClient(api_key='FAKE_KEY')
+
+    def test_returns_price_overview_dict(self):
+        client = self._make_client()
+        mock_resp = {
+            '620': {
+                'success': True,
+                'data': {
+                    'price_overview': {
+                        'currency': 'USD', 'initial': 1999, 'final': 999,
+                        'discount_percent': 50,
+                        'initial_formatted': '$19.99', 'final_formatted': '$9.99',
+                    }
+                }
+            }
+        }
+        with patch.object(client.session, 'get') as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = mock_resp
+            result = client.get_price_overview('620')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['discount_percent'], 50)
+
+    def test_returns_none_for_free_game(self):
+        """Free games have no price_overview key."""
+        client = self._make_client()
+        mock_resp = {'440': {'success': True, 'data': {}}}
+        with patch.object(client.session, 'get') as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = mock_resp
+            result = client.get_price_overview('440')
+        self.assertIsNone(result)
+
+    def test_returns_none_on_api_failure(self):
+        import requests as _requests
+        client = self._make_client()
+        with patch.object(client.session, 'get',
+                          side_effect=_requests.RequestException('network error')):
+            result = client.get_price_overview('620')
+        self.assertIsNone(result)
+
+    def test_returns_none_for_invalid_app_id(self):
+        client = self._make_client()
+        result = client.get_price_overview('not-a-number')
+        self.assertIsNone(result)
+
+
 if __name__ == '__main__':
     unittest.main()

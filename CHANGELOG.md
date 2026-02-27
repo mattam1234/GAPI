@@ -4,6 +4,29 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.5.0] - 2026-02-27
+
+### Added
+- **Wishlist with Sale Alerts** — track unowned games and get notified of discounts
+  - New `GamePicker` methods: `load_wishlist()`, `save_wishlist()`, `add_to_wishlist()`,
+    `remove_from_wishlist()`, `check_wishlist_sales()`
+  - Per-game entries: `game_id`, `name`, `platform`, `added_date`, `target_price`, `notes`
+  - `check_wishlist_sales()` calls the Steam Store API for live prices; returns games
+    that are discounted **or** at/below the user's target price
+  - New `SteamAPIClient.get_price_overview(app_id)` — lightweight price-only Steam call
+    (does not pollute the full details cache)
+  - Persisted to `.gapi_wishlist.json` via atomic write
+  - `GET /api/wishlist` — list all wishlist entries (login required)
+  - `POST /api/wishlist` — add/update a wishlist entry (login required)
+  - `DELETE /api/wishlist/<game_id>` — remove a wishlist entry (login required)
+  - `GET /api/wishlist/sales` — live sale check for all Steam wishlist items (login required)
+  - 21 new unit tests covering all wishlist and price-overview code paths
+- **CI/CD Pipeline** — new `.github/workflows/tests.yml` GitHub Actions workflow
+  - Runs on every push to `main` / `copilot/**` branches and on all pull requests
+  - Python 3.11, installs all dependencies from `requirements.txt`
+  - Executes full pytest suite with coverage report (`--cov=gapi --cov=multiuser`)
+  - Verifies syntax of all main Python modules
+
 ## [2.4.0] - 2026-02-27
 
 ### Added

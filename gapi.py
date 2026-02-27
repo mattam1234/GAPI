@@ -460,6 +460,46 @@ class SteamAPIClient(GamePlatformClient):
         return []
 
 
+    def get_price_overview(self, app_id) -> Optional[Dict]:
+        """Fetch the current price overview for a Steam app.
+
+        Uses the Steam storefront API with ``filters=price_overview`` so the
+        response is lightweight (does not pollute the full details cache, since
+        prices change frequently).
+
+        Returns a dict such as::
+
+            {
+                "currency": "USD",
+                "initial": 1999,           # base price in cents
+                "final": 999,              # current price in cents
+                "discount_percent": 50,
+                "initial_formatted": "$19.99",
+                "final_formatted": "$9.99"
+            }
+
+        Returns ``None`` if the game is free, not found, or the API fails.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return None
+
+        url = "https://store.steampowered.com/api/appdetails"
+        params = {'appids': app_id_int, 'filters': 'price_overview'}
+        try:
+            response = self.session.get(url, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+            app_data = data.get(str(app_id_int), {})
+            if not app_data.get('success'):
+                return None
+            return app_data.get('data', {}).get('price_overview') or None
+        except requests.RequestException as e:
+            self._log.debug("Price fetch failed for app %s: %s", app_id, e)
+        return None
+
+
 class EpicAPIClient(GamePlatformClient):
     """Client for interacting with Epic Games Store API"""
 
@@ -564,6 +604,7 @@ class GamePicker:
     PLAYLISTS_FILE = '.gapi_playlists.json'
     BACKLOG_FILE = '.gapi_backlog.json'
     BUDGET_FILE = '.gapi_budget.json'
+    WISHLIST_FILE = '.gapi_wishlist.json'
 
     BACKLOG_STATUSES = ('want_to_play', 'playing', 'completed', 'dropped')
 
@@ -620,6 +661,7 @@ class GamePicker:
         self.playlists: Dict[str, List[str]] = self.load_playlists()  # name -> [game_id, ...]
         self.backlog: Dict[str, str] = self.load_backlog()  # game_id -> status
         self.budget: Dict[str, Dict] = self.load_budget()  # game_id -> {price, currency, ...}
+        self.wishlist: Dict[str, Dict] = self.load_wishlist()  # game_id -> wishlist entry
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -1141,6 +1183,134 @@ class GamePicker:
             'game_count': len(self.budget),
             'entries': sorted(entries, key=lambda e: e.get('purchase_date', ''), reverse=True),
         }
+
+    # ------------------------------------------------------------------
+    # Wishlist & sale alerts
+    # ------------------------------------------------------------------
+
+    def load_wishlist(self) -> Dict[str, Dict]:
+        """Load wishlist data from disk.
+
+        Returns a dict mapping game_id -> entry dict with at least
+        ``game_id``, ``name``, ``platform``, ``added_date``.
+        Optional fields: ``target_price`` (float), ``notes`` (str).
+        """
+        if os.path.exists(self.WISHLIST_FILE):
+            try:
+                with open(self.WISHLIST_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
+
+    def save_wishlist(self) -> None:
+        """Persist wishlist to disk (atomic write)."""
+        try:
+            _atomic_write_json(self.WISHLIST_FILE, self.wishlist)
+        except IOError as e:
+            self._log.warning("Could not save wishlist: %s", e)
+
+    def add_to_wishlist(self, game_id: str, name: str,
+                        platform: str = 'steam',
+                        target_price: Optional[float] = None,
+                        notes: str = '') -> bool:
+        """Add or update a game in the wishlist.
+
+        Args:
+            game_id:      Composite game ID (e.g. ``'steam:620'``).
+            name:         Human-readable game name.
+            platform:     Platform name (default ``'steam'``).
+            target_price: Alert threshold in USD (or None to alert on any sale).
+            notes:        Optional free-text note.
+
+        Returns:
+            True if added successfully, False if target_price is negative.
+        """
+        if target_price is not None and target_price < 0:
+            return False
+        entry: Dict = {
+            'game_id': game_id,
+            'name': name,
+            'platform': platform,
+            'added_date': datetime.date.today().strftime('%Y-%m-%d'),
+            'target_price': target_price,
+            'notes': notes,
+        }
+        self.wishlist[game_id] = entry
+        self.save_wishlist()
+        return True
+
+    def remove_from_wishlist(self, game_id: str) -> bool:
+        """Remove a game from the wishlist.
+
+        Returns:
+            True if removed, False if game was not in the wishlist.
+        """
+        if game_id not in self.wishlist:
+            return False
+        del self.wishlist[game_id]
+        self.save_wishlist()
+        return True
+
+    def check_wishlist_sales(self) -> List[Dict]:
+        """Check Steam prices for all wishlist games and return sale items.
+
+        For each Steam wishlist entry this calls
+        :meth:`SteamAPIClient.get_price_overview` and checks whether:
+
+        * The current Steam price is **discounted** (``discount_percent > 0``), OR
+        * The current price is at or below the user-specified ``target_price``.
+
+        Non-Steam entries or games where price data is unavailable are skipped.
+
+        Returns:
+            List of dicts, each containing the wishlist entry enriched with
+            ``current_price_usd`` (float), ``discount_percent`` (int),
+            ``original_price_usd`` (float), and ``sale_reason`` (str).
+        """
+        if not self.steam_client or not isinstance(self.steam_client, SteamAPIClient):
+            return []
+
+        sales: List[Dict] = []
+        for game_id, entry in self.wishlist.items():
+            if entry.get('platform', 'steam') != 'steam':
+                continue
+            # Extract the numeric app_id from the composite game_id
+            raw_id = game_id
+            if ':' in raw_id:
+                raw_id = raw_id.split(':', 1)[1]
+            price_data = self.steam_client.get_price_overview(raw_id)
+            if not price_data:
+                continue
+
+            discount = price_data.get('discount_percent', 0)
+            final_cents = price_data.get('final', 0)
+            initial_cents = price_data.get('initial', 0)
+            current_price = round(final_cents / 100, 2)
+            original_price = round(initial_cents / 100, 2)
+            target = entry.get('target_price')
+
+            on_sale = discount > 0
+            below_target = (target is not None and current_price <= target)
+
+            if on_sale or below_target:
+                reasons = []
+                if on_sale:
+                    reasons.append(f"{discount}% off ({price_data.get('final_formatted', '')})")
+                if below_target:
+                    reasons.append(f"at or below your target of ${target:.2f}")
+                result = dict(entry)
+                result.update({
+                    'current_price_usd': current_price,
+                    'original_price_usd': original_price,
+                    'discount_percent': discount,
+                    'formatted_price': price_data.get('final_formatted', ''),
+                    'formatted_original': price_data.get('initial_formatted', ''),
+                    'sale_reason': ' and '.join(reasons),
+                })
+                sales.append(result)
+
+        return sales
 
     def get_recommendations(self, count: int = 10) -> List[Dict]:
         """Recommend games from the user's library based on playtime and genre patterns.

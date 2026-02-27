@@ -88,10 +88,10 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Machine Learning Recommendations** - ML model trained on your playing habits
 - [ ] **Calendar Integration** - Sync game sessions with calendar apps
 - [ ] **Twitch Integration** - Pick games based on what's trending on Twitch
-- [ ] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
-- [ ] **Game Backlog Manager** - Prioritize and track game completion
-- [ ] **Budget Tracking** - Track game purchases and library value
-- [ ] **Sale Alerts** - Notify when wishlist games go on sale
+- [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
+- [x] **Game Backlog Manager** - Prioritize and track game completion
+- [x] **Budget Tracking** - Track game purchases and library value
+- [x] **Sale Alerts** - Notify when wishlist games go on sale
 
 #### API & Integrations
 - [x] **Public API** - RESTful API for third-party integrations (Flask REST API fully implemented)
@@ -104,13 +104,13 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
 - [x] **Game Backlog Manager** - Track want_to_play / playing / completed / dropped per game
 - [x] **Budget Tracking** - Track game purchases and library value
-- [ ] **Sale Alerts** - Notify when wishlist games go on sale
+- [x] **Sale Alerts** - Notify when wishlist games go on sale
 
 ## 🔧 Technical Improvements
 
 ### Code Quality
 - [x] Comprehensive test suite (unit, integration, e2e)
-- [ ] CI/CD pipeline with automated testing
+- [x] CI/CD pipeline with automated testing (GitHub Actions)
 - [ ] Code coverage reports (target: 80%+)
 - [ ] Type checking with mypy
 - [ ] Automated dependency updates (Dependabot)
