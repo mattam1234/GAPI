@@ -7,6 +7,7 @@ from .backlog_service import BacklogService
 from .budget_service import BudgetService
 from .wishlist_service import WishlistService
 from .favorites_service import FavoritesService
+from .history_service import HistoryService
 
 __all__ = [
     'ReviewService',
@@ -17,4 +18,5 @@ __all__ = [
     'BudgetService',
     'WishlistService',
     'FavoritesService',
+    'HistoryService',
 ]

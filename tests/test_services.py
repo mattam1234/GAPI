@@ -23,6 +23,7 @@ from app.repositories import (
 from app.services import (
     ReviewService, TagService, ScheduleService, PlaylistService,
     BacklogService, BudgetService, WishlistService, FavoritesService,
+    HistoryService,
 )
 
 
@@ -697,6 +698,97 @@ class TestFavoritesService(TmpDirMixin):
         self.assertEqual(len(svc.get_all()), 2)
 
 
+class TestHistoryService(TmpDirMixin):
+
+    def _make(self, max_size=10):
+        repo = HistoryRepository(self._path('history.json'), max_size=max_size)
+        return HistoryService(repo)
+
+    def test_append_and_data(self):
+        svc = self._make()
+        svc.append('steam:620')
+        self.assertIn('steam:620', svc.data)
+
+    def test_append_persisted(self):
+        path = self._path('history.json')
+        repo = HistoryRepository(path)
+        svc = HistoryService(repo)
+        svc.append('steam:620')
+        with open(path) as f:
+            saved = json.load(f)
+        self.assertIn('steam:620', saved)
+
+    def test_clear(self):
+        svc = self._make()
+        svc.append('steam:620')
+        svc.clear()
+        self.assertEqual(svc.data, [])
+
+    def test_export_creates_file(self):
+        svc = self._make()
+        svc.append('steam:620')
+        out = self._path('export.json')
+        self.assertTrue(svc.export(out))
+        self.assertTrue(os.path.exists(out))
+
+    def test_export_contains_history(self):
+        svc = self._make()
+        svc.append('steam:620')
+        out = self._path('export.json')
+        svc.export(out)
+        with open(out) as f:
+            data = json.load(f)
+        self.assertIn('history', data)
+        self.assertIn('steam:620', data['history'])
+
+    def test_export_contains_exported_at(self):
+        svc = self._make()
+        out = self._path('export.json')
+        svc.export(out)
+        with open(out) as f:
+            data = json.load(f)
+        self.assertIn('exported_at', data)
+
+    def test_import_from_list(self):
+        svc = self._make()
+        src = self._path('src.json')
+        with open(src, 'w') as f:
+            json.dump(['steam:620', 'steam:440'], f)
+        count = svc.import_from(src)
+        self.assertEqual(count, 2)
+        self.assertIn('steam:620', svc.data)
+
+    def test_import_from_export_dict(self):
+        svc = self._make()
+        src = self._path('src.json')
+        with open(src, 'w') as f:
+            json.dump({'history': ['steam:570'], 'exported_at': '2026-01-01'}, f)
+        count = svc.import_from(src)
+        self.assertEqual(count, 1)
+        self.assertIn('steam:570', svc.data)
+
+    def test_import_from_missing_file_returns_none(self):
+        svc = self._make()
+        self.assertIsNone(svc.import_from(self._path('no_such_file.json')))
+
+    def test_import_from_invalid_format_returns_none(self):
+        svc = self._make()
+        src = self._path('bad.json')
+        with open(src, 'w') as f:
+            json.dump({'no_history_key': True}, f)
+        self.assertIsNone(svc.import_from(src))
+
+    def test_import_replaces_existing(self):
+        svc = self._make()
+        svc.append('steam:999')
+        src = self._path('src.json')
+        with open(src, 'w') as f:
+            json.dump(['steam:620'], f)
+        svc.import_from(src)
+        self.assertNotIn('steam:999', svc.data)
+        self.assertIn('steam:620', svc.data)
+
+
 # ===========================================================================
 # Integration: GamePicker wires services and shared references stay in sync
 # ===========================================================================
@@ -751,6 +843,16 @@ class TestGamePickerServiceIntegration(TmpDirMixin):
         picker = self._make_picker()
         picker.favorites_service.add('steam:620')
         self.assertIn('steam:620', picker.favorites)
+
+    def test_history_service_exposed(self):
+        picker = self._make_picker()
+        from app.services import HistoryService
+        self.assertIsInstance(picker.history_service, HistoryService)
+
+    def test_history_service_and_legacy_attr_shared(self):
+        picker = self._make_picker()
+        picker.history_service.append('steam:620')
+        self.assertIn('steam:620', picker.history)
 
 
 if __name__ == '__main__':

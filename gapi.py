@@ -680,6 +680,7 @@ class GamePicker:
         from app.services import (
             ReviewService, TagService, ScheduleService, PlaylistService,
             BacklogService, BudgetService, WishlistService, FavoritesService,
+            HistoryService,
         )
         self.review_service = ReviewService(self._review_repo)
         self.tag_service = TagService(self._tag_repo)
@@ -689,6 +690,7 @@ class GamePicker:
         self.budget_service = BudgetService(self._budget_repo)
         self.wishlist_service = WishlistService(self._wishlist_repo)
         self.favorites_service = FavoritesService(self._favorites_repo)
+        self.history_service = HistoryService(self._history_repo)
 
         # ----------------------------------------------------------------
         # Backward-compatible attributes — point directly at the repo's
@@ -762,20 +764,11 @@ class GamePicker:
         Returns:
             Dict mapping game_id → {'rating': int, 'notes': str, 'updated_at': str}
         """
-        if os.path.exists(self.REVIEWS_FILE):
-            try:
-                with open(self.REVIEWS_FILE, 'r') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                self._log.warning("Could not load reviews: %s", e)
-        return {}
+        return self._review_repo.data
 
     def save_reviews(self):
         """Persist reviews to disk (atomic write)."""
-        try:
-            _atomic_write_json(self.REVIEWS_FILE, self.reviews)
-        except IOError as e:
-            self._log.error("Error saving reviews: %s", e)
+        self._review_repo._save(self._review_repo.data)
 
     def add_or_update_review(self, game_id: str, rating: int, notes: str = "") -> bool:
         """Add or update a personal review for a game.
@@ -788,15 +781,7 @@ class GamePicker:
         Returns:
             True on success, False if rating is out of range.
         """
-        if not 1 <= rating <= 10:
-            return False
-        self.reviews[str(game_id)] = {
-            'rating': rating,
-            'notes': notes,
-            'updated_at': datetime.datetime.now().isoformat(),
-        }
-        self.save_reviews()
-        return True
+        return self.review_service.add_or_update(game_id, rating, notes)
 
     def remove_review(self, game_id: str) -> bool:
         """Remove a review for a game.
@@ -804,15 +789,11 @@ class GamePicker:
         Returns:
             True if the review existed and was removed, False otherwise.
         """
-        if str(game_id) in self.reviews:
-            del self.reviews[str(game_id)]
-            self.save_reviews()
-            return True
-        return False
+        return self.review_service.remove(game_id)
 
     def get_review(self, game_id: str) -> Optional[Dict]:
         """Return the review dict for a game, or None if not reviewed."""
-        return self.reviews.get(str(game_id))
+        return self.review_service.get(game_id)
 
     # ------------------------------------------------------------------
     # Custom Game Tags
@@ -824,20 +805,11 @@ class GamePicker:
         Returns:
             Dict mapping game_id → list of tag strings.
         """
-        if os.path.exists(self.TAGS_FILE):
-            try:
-                with open(self.TAGS_FILE, 'r') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                self._log.warning("Could not load tags: %s", e)
-        return {}
+        return self._tag_repo.data
 
     def save_tags(self):
         """Persist tags to disk (atomic write)."""
-        try:
-            _atomic_write_json(self.TAGS_FILE, self.tags)
-        except IOError as e:
-            self._log.error("Error saving tags: %s", e)
+        self._tag_repo._save(self._tag_repo.data)
 
     def add_tag(self, game_id: str, tag: str) -> bool:
         """Add a tag to a game (case-insensitive, normalised to lower-case).
@@ -845,17 +817,7 @@ class GamePicker:
         Returns:
             True if the tag was added, False if it was already present.
         """
-        tag = tag.strip().lower()
-        if not tag:
-            return False
-        gid = str(game_id)
-        if gid not in self.tags:
-            self.tags[gid] = []
-        if tag in self.tags[gid]:
-            return False
-        self.tags[gid].append(tag)
-        self.save_tags()
-        return True
+        return self.tag_service.add(game_id, tag)
 
     def remove_tag(self, game_id: str, tag: str) -> bool:
         """Remove a tag from a game.
@@ -863,26 +825,15 @@ class GamePicker:
         Returns:
             True if removed, False if it wasn't there.
         """
-        tag = tag.strip().lower()
-        gid = str(game_id)
-        if gid in self.tags and tag in self.tags[gid]:
-            self.tags[gid].remove(tag)
-            if not self.tags[gid]:
-                del self.tags[gid]
-            self.save_tags()
-            return True
-        return False
+        return self.tag_service.remove(game_id, tag)
 
     def get_tags(self, game_id: str) -> List[str]:
         """Return the tag list for a game (empty list if none)."""
-        return self.tags.get(str(game_id), [])
+        return self.tag_service.get(game_id)
 
     def all_tags(self) -> List[str]:
         """Return a sorted list of every unique tag across all games."""
-        seen: set = set()
-        for tags in self.tags.values():
-            seen.update(tags)
-        return sorted(seen)
+        return self.tag_service.all_tag_names()
 
     def filter_by_tag(self, tag: str,
                       games: Optional[List[Dict]] = None) -> List[Dict]:
@@ -895,12 +846,8 @@ class GamePicker:
         Returns:
             Filtered list of game dicts.
         """
-        tag = tag.strip().lower()
         pool = games if games is not None else self.games
-        return [
-            g for g in pool
-            if tag in self.tags.get(str(g.get('game_id', g.get('appid', ''))), [])
-        ]
+        return self.tag_service.filter_by_tag(tag, pool)
 
     # ------------------------------------------------------------------
     # Game Night Scheduler
@@ -908,17 +855,11 @@ class GamePicker:
 
     def load_schedule(self) -> Dict[str, Dict]:
         """Load game night events from disk."""
-        if os.path.exists(self.SCHEDULE_FILE):
-            try:
-                with open(self.SCHEDULE_FILE, 'r') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                self._log.warning("Could not load schedule: %s", e)
-        return {}
+        return self._schedule_repo.data
 
     def save_schedule(self) -> None:
         """Persist game night events to disk (atomic write)."""
-        _atomic_write_json(self.SCHEDULE_FILE, self.schedule)
+        self._schedule_repo._save(self._schedule_repo.data)
 
     def add_event(self, title: str, date: str, time_str: str,
                   attendees: Optional[List[str]] = None,
@@ -936,20 +877,7 @@ class GamePicker:
         Returns:
             The new event dict (includes generated ``id`` and ``created_at``).
         """
-        event_id = str(uuid.uuid4())[:8]
-        event: Dict = {
-            'id': event_id,
-            'title': title,
-            'date': date,
-            'time': time_str,
-            'attendees': attendees or [],
-            'game_name': game_name,
-            'notes': notes,
-            'created_at': datetime.datetime.utcnow().isoformat(),
-        }
-        self.schedule[event_id] = event
-        self.save_schedule()
-        return event
+        return self.schedule_service.add_event(title, date, time_str, attendees, game_name, notes)
 
     def update_event(self, event_id: str, **kwargs) -> Optional[Dict]:
         """Update an existing event's fields.
@@ -960,15 +888,7 @@ class GamePicker:
         Returns:
             Updated event dict, or ``None`` if not found.
         """
-        if event_id not in self.schedule:
-            return None
-        event = self.schedule[event_id]
-        for key in ('title', 'date', 'time', 'attendees', 'game_name', 'notes'):
-            if key in kwargs:
-                event[key] = kwargs[key]
-        event['updated_at'] = datetime.datetime.utcnow().isoformat()
-        self.save_schedule()
-        return event
+        return self.schedule_service.update_event(event_id, **kwargs)
 
     def remove_event(self, event_id: str) -> bool:
         """Delete an event by ID.
@@ -976,17 +896,11 @@ class GamePicker:
         Returns:
             True if the event existed and was removed, False if not found.
         """
-        if event_id in self.schedule:
-            del self.schedule[event_id]
-            self.save_schedule()
-            return True
-        return False
+        return self.schedule_service.remove_event(event_id)
 
     def get_events(self) -> List[Dict]:
         """Return all events sorted by date then time (ascending)."""
-        events = list(self.schedule.values())
-        events.sort(key=lambda e: (e.get('date', ''), e.get('time', '')))
-        return events
+        return self.schedule_service.get_events()
 
     # ------------------------------------------------------------------
     # Custom Playlists
@@ -994,55 +908,27 @@ class GamePicker:
 
     def load_playlists(self) -> Dict[str, List[str]]:
         """Load playlists from disk."""
-        if os.path.exists(self.PLAYLISTS_FILE):
-            try:
-                with open(self.PLAYLISTS_FILE, 'r') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                self._log.warning("Could not load playlists: %s", e)
-        return {}
+        return self._playlist_repo.data
 
     def save_playlists(self) -> None:
         """Persist playlists to disk (atomic write)."""
-        _atomic_write_json(self.PLAYLISTS_FILE, self.playlists)
+        self._playlist_repo._save(self._playlist_repo.data)
 
     def create_playlist(self, name: str) -> bool:
         """Create a new empty playlist. Returns False if it already exists."""
-        name = name.strip()
-        if not name or name in self.playlists:
-            return False
-        self.playlists[name] = []
-        self.save_playlists()
-        return True
+        return self.playlist_service.create(name)
 
     def delete_playlist(self, name: str) -> bool:
         """Delete a playlist by name. Returns False if not found."""
-        if name not in self.playlists:
-            return False
-        del self.playlists[name]
-        self.save_playlists()
-        return True
+        return self.playlist_service.delete(name)
 
     def add_to_playlist(self, name: str, game_id: str) -> bool:
         """Add *game_id* to a playlist (creates it if absent). Returns True if added."""
-        name = name.strip()
-        if not name:
-            return False
-        if name not in self.playlists:
-            self.playlists[name] = []
-        if game_id in self.playlists[name]:
-            return False  # already present
-        self.playlists[name].append(game_id)
-        self.save_playlists()
-        return True
+        return self.playlist_service.add_game(name, game_id)
 
     def remove_from_playlist(self, name: str, game_id: str) -> bool:
         """Remove *game_id* from a playlist. Returns False if not found."""
-        if name not in self.playlists or game_id not in self.playlists[name]:
-            return False
-        self.playlists[name].remove(game_id)
-        self.save_playlists()
-        return True
+        return self.playlist_service.remove_game(name, game_id)
 
     def get_playlist_games(self, name: str) -> Optional[List[Dict]]:
         """Return game dicts for every ID stored in playlist *name*.
@@ -1050,14 +936,11 @@ class GamePicker:
         Unknown / stale IDs are silently skipped.  Returns ``None`` if the
         playlist itself does not exist.
         """
-        if name not in self.playlists:
-            return None
-        id_set = set(self.playlists[name])
-        return [g for g in self.games if g.get('game_id') in id_set]
+        return self.playlist_service.get_games(name, self.games)
 
     def list_playlists(self) -> List[Dict]:
         """Return a summary list of all playlists with name and game count."""
-        return [{'name': n, 'count': len(ids)} for n, ids in self.playlists.items()]
+        return self.playlist_service.list_all()
 
     # ------------------------------------------------------------------
     # Game Backlog / Status Tracker
@@ -1065,17 +948,11 @@ class GamePicker:
 
     def load_backlog(self) -> Dict[str, str]:
         """Load backlog statuses from disk."""
-        if os.path.exists(self.BACKLOG_FILE):
-            try:
-                with open(self.BACKLOG_FILE, 'r') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                self._log.warning("Could not load backlog: %s", e)
-        return {}
+        return self._backlog_repo.data
 
     def save_backlog(self) -> None:
         """Persist backlog to disk (atomic write)."""
-        _atomic_write_json(self.BACKLOG_FILE, self.backlog)
+        self._backlog_repo._save(self._backlog_repo.data)
 
     def set_backlog_status(self, game_id: str, status: str) -> bool:
         """Set the backlog status for a game.
@@ -1087,41 +964,22 @@ class GamePicker:
         Returns:
             True on success, False if *status* is invalid.
         """
-        if status not in self.BACKLOG_STATUSES:
-            return False
-        self.backlog[game_id] = status
-        self.save_backlog()
-        return True
+        return self.backlog_service.set_status(game_id, status)
 
     def remove_backlog_status(self, game_id: str) -> bool:
         """Remove a game from the backlog. Returns False if not present."""
-        if game_id not in self.backlog:
-            return False
-        del self.backlog[game_id]
-        self.save_backlog()
-        return True
+        return self.backlog_service.remove(game_id)
 
     def get_backlog_status(self, game_id: str) -> Optional[str]:
         """Return the backlog status for *game_id*, or ``None`` if not tracked."""
-        return self.backlog.get(game_id)
+        return self.backlog_service.get_status(game_id)
 
     def get_backlog_games(self, status: Optional[str] = None) -> List[Dict]:
         """Return game dicts for all backlog entries, optionally filtered by *status*.
 
         The returned dicts have an extra ``backlog_status`` key.
         """
-        id_to_status = dict(self.backlog)
-        if status:
-            id_to_status = {k: v for k, v in id_to_status.items() if v == status}
-        id_set = set(id_to_status)
-        result = []
-        for g in self.games:
-            gid = g.get('game_id')
-            if gid in id_set:
-                entry = dict(g)
-                entry['backlog_status'] = id_to_status[gid]
-                result.append(entry)
-        return result
+        return self.backlog_service.get_games(self.games, status)
 
     # ------------------------------------------------------------------
     # Budget tracking
@@ -1132,20 +990,11 @@ class GamePicker:
 
         Returns a dict mapping game_id -> {price, currency, purchase_date, notes}.
         """
-        if os.path.exists(self.BUDGET_FILE):
-            try:
-                with open(self.BUDGET_FILE, 'r') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                return {}
-        return {}
+        return self._budget_repo.data
 
     def save_budget(self) -> None:
         """Persist budget data to disk (atomic write)."""
-        try:
-            _atomic_write_json(self.BUDGET_FILE, self.budget)
-        except IOError as e:
-            self._log.warning("Could not save budget: %s", e)
+        self._budget_repo._save(self._budget_repo.data)
 
     def set_game_budget(self, game_id: str, price: float,
                         currency: str = 'USD',
@@ -1163,18 +1012,7 @@ class GamePicker:
         Returns:
             True on success, False if price is negative.
         """
-        if price < 0:
-            return False
-        entry: Dict = {
-            'game_id': game_id,
-            'price': round(float(price), 2),
-            'currency': currency.strip().upper() or 'USD',
-            'purchase_date': purchase_date or '',
-            'notes': notes,
-        }
-        self.budget[game_id] = entry
-        self.save_budget()
-        return True
+        return self.budget_service.set_entry(game_id, price, currency, purchase_date, notes)
 
     def remove_game_budget(self, game_id: str) -> bool:
         """Remove budget entry for a game.
@@ -1182,49 +1020,11 @@ class GamePicker:
         Returns:
             True if an entry was removed, False if not found.
         """
-        if game_id not in self.budget:
-            return False
-        del self.budget[game_id]
-        self.save_budget()
-        return True
+        return self.budget_service.remove_entry(game_id)
 
     def get_budget_summary(self) -> Dict:
-        """Return an aggregated budget summary.
-
-        Returns::
-
-            {
-              "total_spent": 142.50,
-              "currency_breakdown": {"USD": 142.50},
-              "game_count": 7,
-              "entries": [...]   # list of all budget entries enriched with game names
-            }
-
-        Only entries whose currency matches the most common currency are
-        included in ``total_spent`` (mixed-currency totals are meaningless).
-        """
-        entries = []
-        currency_totals: Dict[str, float] = {}
-        game_name_map = {g.get('game_id'): g.get('name', '') for g in self.games}
-
-        for game_id, entry in self.budget.items():
-            enriched = dict(entry)
-            enriched['name'] = game_name_map.get(game_id, game_id)
-            entries.append(enriched)
-            cur = entry.get('currency', 'USD')
-            currency_totals[cur] = round(currency_totals.get(cur, 0.0) + entry.get('price', 0.0), 2)
-
-        # Primary currency = the one with the highest total spend
-        primary_currency = max(currency_totals, key=currency_totals.get) if len(currency_totals) > 0 else 'USD'
-        total_spent = currency_totals.get(primary_currency, 0.0)
-
-        return {
-            'total_spent': round(total_spent, 2),
-            'primary_currency': primary_currency,
-            'currency_breakdown': currency_totals,
-            'game_count': len(self.budget),
-            'entries': sorted(entries, key=lambda e: e.get('purchase_date', ''), reverse=True),
-        }
+        """Return an aggregated budget summary."""
+        return self.budget_service.get_summary(self.games)
 
     # ------------------------------------------------------------------
     # Wishlist & sale alerts
@@ -1237,20 +1037,11 @@ class GamePicker:
         ``game_id``, ``name``, ``platform``, ``added_date``.
         Optional fields: ``target_price`` (float), ``notes`` (str).
         """
-        if os.path.exists(self.WISHLIST_FILE):
-            try:
-                with open(self.WISHLIST_FILE, 'r') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                return {}
-        return {}
+        return self._wishlist_repo.data
 
     def save_wishlist(self) -> None:
         """Persist wishlist to disk (atomic write)."""
-        try:
-            _atomic_write_json(self.WISHLIST_FILE, self.wishlist)
-        except IOError as e:
-            self._log.warning("Could not save wishlist: %s", e)
+        self._wishlist_repo._save(self._wishlist_repo.data)
 
     def add_to_wishlist(self, game_id: str, name: str,
                         platform: str = 'steam',
@@ -1268,19 +1059,7 @@ class GamePicker:
         Returns:
             True if added successfully, False if target_price is negative.
         """
-        if target_price is not None and target_price < 0:
-            return False
-        entry: Dict = {
-            'game_id': game_id,
-            'name': name,
-            'platform': platform,
-            'added_date': datetime.date.today().strftime('%Y-%m-%d'),
-            'target_price': target_price,
-            'notes': notes,
-        }
-        self.wishlist[game_id] = entry
-        self.save_wishlist()
-        return True
+        return self.wishlist_service.add(game_id, name, platform, target_price, notes)
 
     def remove_from_wishlist(self, game_id: str) -> bool:
         """Remove a game from the wishlist.
@@ -1288,71 +1067,11 @@ class GamePicker:
         Returns:
             True if removed, False if game was not in the wishlist.
         """
-        if game_id not in self.wishlist:
-            return False
-        del self.wishlist[game_id]
-        self.save_wishlist()
-        return True
+        return self.wishlist_service.remove(game_id)
 
     def check_wishlist_sales(self) -> List[Dict]:
-        """Check Steam prices for all wishlist games and return sale items.
-
-        For each Steam wishlist entry this calls
-        :meth:`SteamAPIClient.get_price_overview` and checks whether:
-
-        * The current Steam price is **discounted** (``discount_percent > 0``), OR
-        * The current price is at or below the user-specified ``target_price``.
-
-        Non-Steam entries or games where price data is unavailable are skipped.
-
-        Returns:
-            List of dicts, each containing the wishlist entry enriched with
-            ``current_price_usd`` (float), ``discount_percent`` (int),
-            ``original_price_usd`` (float), and ``sale_reason`` (str).
-        """
-        if not self.steam_client or not isinstance(self.steam_client, SteamAPIClient):
-            return []
-
-        sales: List[Dict] = []
-        for game_id, entry in self.wishlist.items():
-            if entry.get('platform', 'steam') != 'steam':
-                continue
-            # Extract the numeric app_id from the composite game_id
-            raw_id = game_id
-            if ':' in raw_id:
-                raw_id = raw_id.split(':', 1)[1]
-            price_data = self.steam_client.get_price_overview(raw_id)
-            if not price_data:
-                continue
-
-            discount = price_data.get('discount_percent', 0)
-            final_cents = price_data.get('final', 0)
-            initial_cents = price_data.get('initial', 0)
-            current_price = round(final_cents / 100, 2)
-            original_price = round(initial_cents / 100, 2)
-            target = entry.get('target_price')
-
-            on_sale = discount > 0
-            below_target = (target is not None and current_price <= target)
-
-            if on_sale or below_target:
-                reasons = []
-                if on_sale:
-                    reasons.append(f"{discount}% off ({price_data.get('final_formatted', '')})")
-                if below_target:
-                    reasons.append(f"at or below your target of ${target:.2f}")
-                result = dict(entry)
-                result.update({
-                    'current_price_usd': current_price,
-                    'original_price_usd': original_price,
-                    'discount_percent': discount,
-                    'formatted_price': price_data.get('final_formatted', ''),
-                    'formatted_original': price_data.get('initial_formatted', ''),
-                    'sale_reason': ' and '.join(reasons),
-                })
-                sales.append(result)
-
-        return sales
+        """Check Steam prices for all wishlist games and return sale items."""
+        return self.wishlist_service.check_sales(self.steam_client)
 
     def get_recommendations(self, count: int = 10) -> List[Dict]:
         """Recommend games from the user's library based on playtime and genre patterns.
@@ -1529,99 +1248,43 @@ class GamePicker:
 
     def load_history(self):
         """Load game picking history (supports both old int and new composite ID formats)"""
-        if os.path.exists(self.HISTORY_FILE):
-            try:
-                with open(self.HISTORY_FILE, 'r') as f:
-                    data = json.load(f)
-                    # Convert old integer IDs to composite format (steam:id)
-                    return [f"steam:{item}" if isinstance(item, int) else item for item in data]
-            except (json.JSONDecodeError, IOError):
-                return []
-        return []
+        return self._history_repo.data
 
     def save_history(self):
         """Save game picking history (atomic write)"""
-        try:
-            _atomic_write_json(self.HISTORY_FILE, self.history[-self.MAX_HISTORY:])
-        except IOError as e:
-            self._log.warning("Could not save history: %s", e)
+        self._history_repo.save()
 
     def load_favorites(self) -> List[str]:
         """Load favorite games list (supports both old int and new composite ID formats)"""
-        if os.path.exists(self.FAVORITES_FILE):
-            try:
-                with open(self.FAVORITES_FILE, 'r') as f:
-                    data = json.load(f)
-                    # Convert old integer IDs to composite format (steam:id)
-                    return [f"steam:{item}" if isinstance(item, int) else item for item in data]
-            except (json.JSONDecodeError, IOError):
-                return []
-        return []
+        return self._favorites_repo.data
 
     def save_favorites(self):
         """Save favorite games list (atomic write)"""
-        try:
-            _atomic_write_json(self.FAVORITES_FILE, self.favorites)
-        except IOError as e:
-            self._log.error("Error saving favorites: %s", e)
-    
+        self._favorites_repo._save(self._favorites_repo.data)
+
     def add_favorite(self, game_id: str) -> bool:
         """Add a game to favorites (accepts composite ID like 'steam:620' or int for backward compatibility)"""
-        # Convert int to composite ID for backward compatibility
-        if isinstance(game_id, int):
-            game_id = f"steam:{game_id}"
-        
-        if game_id not in self.favorites:
-            self.favorites.append(game_id)
-            self.save_favorites()
-            return True
-        return False
-    
+        return self.favorites_service.add(game_id)
+
     def remove_favorite(self, game_id: str) -> bool:
         """Remove a game from favorites (accepts composite ID like 'steam:620' or int for backward compatibility)"""
-        # Convert int to composite ID for backward compatibility
-        if isinstance(game_id, int):
-            game_id = f"steam:{game_id}"
-        
-        if game_id in self.favorites:
-            self.favorites.remove(game_id)
-            self.save_favorites()
-            return True
-        return False
-    
+        return self.favorites_service.remove(game_id)
+
     def export_history(self, filepath: str):
         """Export game history to a file"""
-        try:
-            export_data = {
-                'history': self.history,
-                'exported_at': datetime.datetime.now().isoformat()
-            }
-            _atomic_write_json(filepath, export_data)
+        ok = self.history_service.export(filepath)
+        if ok:
             print(f"{Fore.GREEN}History exported to {filepath}")
-        except IOError as e:
-            print(f"{Fore.RED}Error exporting history: {e}")
+        else:
+            print(f"{Fore.RED}Error exporting history to {filepath}")
 
     def import_history(self, filepath: str):
         """Import game history from a file"""
-        try:
-            with open(filepath, 'r') as f:
-                data = json.load(f)
-
-            if isinstance(data, dict) and 'history' in data:
-                new_history = data['history']
-            elif isinstance(data, list):
-                new_history = data
-            else:
-                print(f"{Fore.RED}Invalid history file format")
-                return
-
-            # Mutate in-place to maintain the shared reference with the repo
-            self.history.clear()
-            self.history.extend(new_history)
-            self.save_history()
+        count = self.history_service.import_from(filepath)
+        if count is None:
+            print(f"{Fore.RED}Invalid history file format or could not read {filepath}")
+        else:
             print(f"{Fore.GREEN}History imported from {filepath}")
-        except (IOError, json.JSONDecodeError) as e:
-            print(f"{Fore.RED}Error importing history: {e}")
 
     def load_config(self, config_path: str) -> Dict:
         """Load configuration from JSON file with environment variable support
