@@ -553,6 +553,113 @@
             font-size: 1.05em;
             font-weight: 600;
         }
+
+        /* ── User Profile Cards ───────────────────────────────────────── */
+        .user-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: box-shadow 0.2s;
+        }
+        .user-card:hover {
+            box-shadow: 0 4px 18px rgba(102,126,234,0.18);
+        }
+        .user-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-card-avatar {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: var(--card-border);
+            flex-shrink: 0;
+        }
+        .user-card-avatar-placeholder {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4em;
+            color: white;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .user-card-info { flex: 1; min-width: 0; }
+        .user-card-name {
+            font-weight: 700;
+            font-size: 1.05em;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .user-card-username {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+        .user-card-bio {
+            font-size: 0.88em;
+            color: var(--text-secondary);
+            font-style: italic;
+            min-height: 1.2em;
+        }
+        .user-card-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            text-align: center;
+            background: var(--list-hover);
+            border-radius: 8px;
+            padding: 10px 6px;
+        }
+        .user-card-stat-value {
+            font-weight: 700;
+            font-size: 1.1em;
+            color: var(--tab-active-color);
+        }
+        .user-card-stat-label {
+            font-size: 0.72em;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        .user-card-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .user-card-badge {
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 600;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        .user-card-badge.admin { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        .user-card-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .user-card-actions button {
+            flex: 1;
+            padding: 7px 0;
+            border: none;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -638,6 +745,10 @@
             <button class="tab" onclick="switchTab('achievements', event)">Achievements</button>
             <button class="tab" onclick="switchTab('friends', event)">👥 Friends</button>
             <button class="tab" onclick="switchTab('recommendations', event)">💡 For You</button>
+            <button class="tab" onclick="switchTab('leaderboard', event)">🏆 Leaderboard</button>
+            <button class="tab" onclick="switchTab('chat', event)">💬 Chat</button>
+            <button id="notifications-tab-btn" class="tab" onclick="switchTab('notifications', event)">🔔 Alerts <span id="notif-badge" style="display:none;background:#e74c3c;color:white;border-radius:50%;padding:1px 6px;font-size:0.75em;margin-left:4px;"></span></button>
+            <button class="tab" onclick="switchTab('plugins', event)">🧩 Plugins</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
         </div>        
         <!-- Picker Tab -->
@@ -1141,11 +1252,41 @@
 
         <!-- Friends Activity Tab -->
         <div id="friends-tab" class="tab-content">
-            <h2>👥 Steam Friends Activity</h2>
-            <p style="color: var(--text-secondary); margin-bottom: 20px;">See what your Steam friends are playing recently. Requires a public Steam profile and a configured Steam ID.</p>
-            <button onclick="loadFriends()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:20px;">🔄 Refresh</button>
-            <div id="friends-list">
-                <div class="loading">Click Refresh to load your friends…</div>
+            <h2>👥 Friends</h2>
+
+            <!-- GAPI in-app friends -->
+            <div style="margin-bottom:28px;">
+                <h3 style="margin-bottom:8px;">🃏 GAPI Friends</h3>
+                <p style="color:var(--text-secondary); margin-bottom:12px; font-size:0.9em;">Connect with other GAPI users. Each friend is shown as a profile card with their stats.</p>
+                <!-- Send friend request -->
+                <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+                    <input id="friend-request-input" type="text" placeholder="Enter username to add…"
+                           style="flex:1; min-width:180px; padding:9px 12px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);"
+                           onkeydown="if(event.key==='Enter') sendFriendRequest()">
+                    <button onclick="sendFriendRequest()" style="padding:9px 22px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Add Friend</button>
+                    <button onclick="loadAppFriends()" style="padding:9px 18px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄</button>
+                </div>
+                <!-- Pending received requests -->
+                <div id="friend-requests-section" style="display:none; margin-bottom:16px;">
+                    <h4 style="margin:0 0 8px; color:#e67e22;">📨 Pending Requests</h4>
+                    <div id="friend-requests-list"></div>
+                </div>
+                <!-- Friend cards grid -->
+                <div id="app-friends-list" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px;">
+                    <div class="loading">Click 🔄 to load your GAPI friends…</div>
+                </div>
+            </div>
+
+            <hr style="border:none; border-top:1px solid var(--card-border); margin:24px 0;">
+
+            <!-- Steam friends activity -->
+            <div>
+                <h3 style="margin-bottom:8px;">🎮 Steam Friends Activity</h3>
+                <p style="color:var(--text-secondary); margin-bottom:12px; font-size:0.9em;">Requires a public Steam profile and a configured Steam ID.</p>
+                <button onclick="loadFriends()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:16px;">🔄 Refresh Steam</button>
+                <div id="friends-list">
+                    <div class="loading">Click Refresh to load your Steam friends…</div>
+                </div>
             </div>
         </div>
 
@@ -1169,9 +1310,121 @@
             </div>
         </div>
 
+        <!-- Leaderboard Tab -->
+        <div id="leaderboard-tab" class="tab-content">
+            <h2>🏆 Leaderboard</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">See who leads in playtime, library size, or unlocked achievements.</p>
+            <div style="display:flex; gap:12px; align-items:center; margin-bottom:20px; flex-wrap:wrap;">
+                <label style="font-weight:600; color:var(--text-primary);">Rank by:</label>
+                <select id="leaderboard-metric" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                    <option value="playtime">⏱️ Total Playtime</option>
+                    <option value="games">🎮 Games Owned</option>
+                    <option value="achievements">🏅 Achievements</option>
+                </select>
+                <button onclick="loadLeaderboard()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
+            </div>
+            <div id="leaderboard-list"><div class="loading">Select a metric and click Refresh…</div></div>
+        </div>
+
+        <!-- Chat Tab -->
+        <div id="chat-tab" class="tab-content">
+            <h2>💬 Chat</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 12px;">Real-time chat with other users.</p>
+            <div style="display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+                <label style="font-weight:600; color:var(--text-primary);">Room:</label>
+                <select id="chat-room" onchange="switchChatRoom()" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                    <option value="general">💬 general</option>
+                    <option value="gaming">🎮 gaming</option>
+                    <option value="off-topic">🎲 off-topic</option>
+                </select>
+            </div>
+            <div id="chat-messages" style="height:350px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px; margin-bottom:12px; display:flex; flex-direction:column; gap:8px;">
+                <div class="loading">Loading messages…</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <input id="chat-input" type="text" placeholder="Type a message…" maxlength="500"
+                       onkeydown="if(event.key==='Enter')sendChatMessage()"
+                       style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                <button onclick="sendChatMessage()" style="padding:10px 24px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Send</button>
+            </div>
+        </div>
+
+        <!-- Notifications / Alerts Tab -->
+        <div id="notifications-tab" class="tab-content">
+            <h2>🔔 Alerts &amp; Notifications</h2>
+            <div style="display:flex; gap:12px; align-items:center; margin-bottom:20px; flex-wrap:wrap;">
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                    <input type="checkbox" id="notif-unread-only" onchange="loadNotifications()">
+                    <span style="color:var(--text-primary); font-weight:600;">Unread only</span>
+                </label>
+                <button onclick="markAllNotificationsRead()" style="padding:8px 20px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">✅ Mark all read</button>
+                <button onclick="loadNotifications()" style="padding:8px 20px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
+            </div>
+            <div id="admin-send-notification" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:16px; margin-bottom:20px;">
+                <h4 style="margin-top:0;">📢 Send Alert (Admin)</h4>
+                <div style="display:grid; gap:10px;">
+                    <input id="notif-target-user" type="text" placeholder="Target username" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                    <input id="notif-title" type="text" placeholder="Title" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                    <textarea id="notif-message" rows="3" placeholder="Message…" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); resize:vertical;"></textarea>
+                    <select id="notif-type" style="padding:8px; border-radius:6px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                        <option value="info">ℹ️ Info</option>
+                        <option value="success">✅ Success</option>
+                        <option value="warning">⚠️ Warning</option>
+                        <option value="error">❌ Error</option>
+                    </select>
+                    <button onclick="sendAdminNotification()" style="padding:10px 24px; background:#e67e22; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">📢 Send</button>
+                </div>
+            </div>
+            <div id="notifications-list"><div class="loading">Click Refresh to load notifications…</div></div>
+        </div>
+
+        <!-- Plugins / Addons Tab -->
+        <div id="plugins-tab" class="tab-content">
+            <h2>🧩 Plugins &amp; Addons</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">Extend GAPI with community plugins. Admins can register new plugins.</p>
+            <div id="admin-register-plugin" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:16px; margin-bottom:20px;">
+                <h4 style="margin-top:0;">➕ Register Plugin (Admin)</h4>
+                <div style="display:grid; gap:10px;">
+                    <input id="plugin-name" type="text" placeholder="Plugin name (unique)" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                    <input id="plugin-description" type="text" placeholder="Short description" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                    <input id="plugin-version" type="text" placeholder="Version (e.g. 1.0.0)" value="1.0.0" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                    <input id="plugin-author" type="text" placeholder="Author" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                    <button onclick="registerPlugin()" style="padding:10px 24px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Register</button>
+                </div>
+            </div>
+            <button onclick="loadPlugins()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:16px;">🔄 Refresh</button>
+            <div id="plugins-list"><div class="loading">Click Refresh to load plugins…</div></div>
+        </div>
+
         <!-- Settings Tab -->
         <div id="settings-tab" class="tab-content">
             <h2>⚙️ Account Settings</h2>
+
+            <!-- My Profile Card -->
+            <div style="background: var(--input-bg); border: 1px solid var(--input-border); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3 style="margin-top:0;">🃏 My Profile Card</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 15px; font-size:0.9em;">This information is shown on your user card visible to your GAPI friends.</p>
+                <div id="my-profile-card-preview" style="margin-bottom:16px;"></div>
+                <div style="display:grid; gap:12px;">
+                    <label style="display:flex; flex-direction:column; gap:5px;">
+                        <span style="font-weight:600;">Display Name</span>
+                        <input type="text" id="profile-display-name" maxlength="255" placeholder="Name shown on your card"
+                               style="padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px;">
+                        <span style="font-weight:600;">Bio / Status</span>
+                        <input type="text" id="profile-bio" maxlength="500" placeholder="Short bio or status message…"
+                               style="padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px;">
+                        <span style="font-weight:600;">Avatar URL</span>
+                        <input type="url" id="profile-avatar-url" maxlength="500" placeholder="https://…  (leave blank to use Steam avatar)"
+                               style="padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                    </label>
+                </div>
+                <div id="profile-card-message" style="display:none; margin-top:12px; padding:10px; border-radius:8px;"></div>
+                <button onclick="saveProfileCard()" style="margin-top:14px; padding:11px 28px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">💾 Save Profile Card</button>
+            </div>
             
             <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
                 <h3>Platform IDs (Optional)</h3>
@@ -4565,6 +4818,579 @@
                 listDiv.innerHTML = `<div class="error">Error loading recommendations: ${error.message}</div>`;
             }
         }
+    </script>
+    <script>
+        // ==============================================================================================
+        // User Profile Card helpers
+        // ==============================================================================================
+
+        function buildUserCard(card, actions) {
+            const initials = (card.display_name || card.username || '?')[0].toUpperCase();
+            const avatar = card.avatar_url
+                ? `<img class="user-card-avatar" src="${card.avatar_url.replace(/"/g,'%22').replace(/'/g,'%27')}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                   <div class="user-card-avatar-placeholder" style="display:none">${initials}</div>`
+                : `<div class="user-card-avatar-placeholder">${initials}</div>`;
+            const roles = (card.roles || []).map(r =>
+                `<span class="user-card-badge${r === 'admin' ? ' admin' : ''}">${r}</span>`
+            ).join('');
+            const stats = card.stats || {};
+            const actionsHtml = (actions || []).map(a =>
+                `<button onclick="${a.onclick}" style="background:${a.bg || 'var(--card-border)'}; color:${a.color || 'var(--text-primary)'};">${a.label}</button>`
+            ).join('');
+            return `
+                <div class="user-card">
+                    <div class="user-card-header">
+                        ${avatar}
+                        <div class="user-card-info">
+                            <div class="user-card-name">${card.display_name || card.username}</div>
+                            ${card.display_name && card.display_name !== card.username ? `<div class="user-card-username">@${card.username}</div>` : ''}
+                            ${roles ? `<div class="user-card-badges" style="margin-top:4px">${roles}</div>` : ''}
+                        </div>
+                    </div>
+                    ${card.bio ? `<div class="user-card-bio">"${card.bio}"</div>` : ''}
+                    <div class="user-card-stats">
+                        <div>
+                            <div class="user-card-stat-value">${(stats.total_playtime_hours || 0).toLocaleString()}h</div>
+                            <div class="user-card-stat-label">Playtime</div>
+                        </div>
+                        <div>
+                            <div class="user-card-stat-value">${(stats.total_games || 0).toLocaleString()}</div>
+                            <div class="user-card-stat-label">Games</div>
+                        </div>
+                        <div>
+                            <div class="user-card-stat-value">${(stats.total_achievements || 0).toLocaleString()}</div>
+                            <div class="user-card-stat-label">Achievements</div>
+                        </div>
+                    </div>
+                    ${actionsHtml ? `<div class="user-card-actions">${actionsHtml}</div>` : ''}
+                </div>`;
+        }
+
+        // ==============================================================================================
+        // GAPI In-app Friends
+        // ==============================================================================================
+
+        async function loadAppFriends() {
+            const grid = document.getElementById('app-friends-list');
+            const reqSection = document.getElementById('friend-requests-section');
+            const reqList = document.getElementById('friend-requests-list');
+            grid.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const resp = await fetch('/api/app-friends');
+                if (!resp.ok) { grid.innerHTML = '<div class="loading">Not available (no DB).</div>'; return; }
+                const data = await resp.json();
+                // Pending received requests
+                if (data.received && data.received.length > 0) {
+                    reqSection.style.display = 'block';
+                    reqList.innerHTML = data.received.map(r => `
+                        <div style="display:flex; align-items:center; gap:10px; padding:10px; background:var(--list-hover); border-radius:8px; margin-bottom:8px;">
+                            <strong>${r.display_name}</strong><span style="color:var(--text-secondary);">(@${r.username})</span>
+                            <button onclick="respondFriendRequest('${r.username}', true)" style="padding:5px 14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✅ Accept</button>
+                            <button onclick="respondFriendRequest('${r.username}', false)" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">❌ Decline</button>
+                        </div>`).join('');
+                } else {
+                    reqSection.style.display = 'none';
+                }
+                // Friend cards
+                if (!data.friends || data.friends.length === 0) {
+                    let hint = data.sent && data.sent.length > 0
+                        ? `<div style="color:var(--text-secondary); font-size:0.9em; margin-top:8px;">⏳ Pending sent requests: ${data.sent.map(s => s.username).join(', ')}</div>`
+                        : '';
+                    grid.innerHTML = `<div style="color:var(--text-secondary);">No GAPI friends yet. Add someone above!${hint}</div>`;
+                    return;
+                }
+                // Fetch full cards for each friend
+                const cards = await Promise.all(data.friends.map(f =>
+                    fetch(`/api/user/${encodeURIComponent(f.username)}/card`).then(r => r.ok ? r.json() : f)
+                ));
+                grid.innerHTML = cards.map(card =>
+                    buildUserCard(card, [
+                        { label: '👤 View Card', onclick: `showUserCardModal('${card.username}')`, bg: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white' },
+                        { label: '❌ Remove', onclick: `removeAppFriend('${card.username}')`, bg: '#fdecea', color: '#c0392b' },
+                    ])
+                ).join('');
+            } catch (err) {
+                grid.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function sendFriendRequest() {
+            const input = document.getElementById('friend-request-input');
+            const username = (input.value || '').trim();
+            if (!username) return;
+            try {
+                const resp = await fetch('/api/app-friends/request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    input.value = '';
+                    showMessage(data.message || 'Friend request sent!', 'success');
+                    loadAppFriends();
+                } else {
+                    showMessage(data.error || 'Failed to send request', 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function respondFriendRequest(username, accept) {
+            try {
+                const resp = await fetch('/api/app-friends/respond', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, accept }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    showMessage(accept ? '✅ Friend request accepted!' : 'Request declined.', accept ? 'success' : 'info');
+                    loadAppFriends();
+                } else {
+                    showMessage(data.error || 'Failed', 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function removeAppFriend(username) {
+            if (!confirm(`Remove ${username} from your GAPI friends?`)) return;
+            try {
+                const resp = await fetch('/api/app-friends/remove', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username }),
+                });
+                if (resp.ok) {
+                    showMessage('Friend removed.', 'info');
+                    loadAppFriends();
+                } else {
+                    const d = await resp.json();
+                    showMessage(d.error || 'Failed', 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        // User card modal
+        async function showUserCardModal(username) {
+            try {
+                const resp = await fetch(`/api/user/${encodeURIComponent(username)}/card`);
+                if (!resp.ok) { showMessage('User not found', 'error'); return; }
+                const card = await resp.json();
+                const html = buildUserCard(card, []);
+                // Reuse share modal as a simple card display
+                const modalContent = document.getElementById('share-text');
+                if (modalContent) {
+                    // Build a mini modal-like overlay
+                    const overlay = document.createElement('div');
+                    overlay.id = 'user-card-overlay';
+                    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:3000;display:flex;align-items:center;justify-content:center;';
+                    overlay.innerHTML = `
+                        <div style="background:var(--card-bg);border-radius:16px;padding:28px;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+                            ${html}
+                            <div style="margin-top:14px;text-align:right;">
+                                <button onclick="document.getElementById('user-card-overlay').remove()"
+                                        style="padding:8px 20px;background:var(--card-border);color:var(--text-primary);border:none;border-radius:8px;cursor:pointer;">Close</button>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(overlay);
+                    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+                }
+            } catch (err) {
+                showMessage('Error loading card: ' + err.message, 'error');
+            }
+        }
+
+        // ==============================================================================================
+        // Profile Card Settings
+        // ==============================================================================================
+
+        async function loadMyProfileCard() {
+            try {
+                const resp = await fetch('/api/auth/current');
+                if (!resp.ok) return;
+                const me = await resp.json();
+                const username = me.username;
+                if (!username) return;
+                const cardResp = await fetch(`/api/user/${encodeURIComponent(username)}/card`);
+                if (!cardResp.ok) return;
+                const card = await cardResp.json();
+                // Populate form fields
+                document.getElementById('profile-display-name').value = card.display_name !== card.username ? card.display_name : '';
+                document.getElementById('profile-bio').value = card.bio || '';
+                document.getElementById('profile-avatar-url').value = card.avatar_url || '';
+                // Show preview
+                const preview = document.getElementById('my-profile-card-preview');
+                if (preview) preview.innerHTML = buildUserCard(card, []);
+            } catch (err) {
+                console.log('Profile card load error:', err);
+            }
+        }
+
+        async function saveProfileCard() {
+            const display_name = document.getElementById('profile-display-name').value.trim();
+            const bio = document.getElementById('profile-bio').value.trim();
+            const avatar_url = document.getElementById('profile-avatar-url').value.trim();
+            const msgEl = document.getElementById('profile-card-message');
+            try {
+                const resp = await fetch('/api/user/profile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ display_name: display_name || null, bio: bio || null, avatar_url: avatar_url || null }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = '#d4edda';
+                    msgEl.style.color = '#155724';
+                    msgEl.textContent = '✅ Profile card saved!';
+                    loadMyProfileCard();
+                    setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
+                } else {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = '#f8d7da';
+                    msgEl.style.color = '#721c24';
+                    msgEl.textContent = data.error || 'Failed to save';
+                }
+            } catch (err) {
+                msgEl.style.display = 'block';
+                msgEl.style.background = '#f8d7da';
+                msgEl.style.color = '#721c24';
+                msgEl.textContent = 'Error: ' + err.message;
+            }
+        }
+
+        // ==============================================================================================
+        // Leaderboard
+        // ==============================================================================================
+
+        async function loadLeaderboard() {
+            const listDiv = document.getElementById('leaderboard-list');
+            const metric = document.getElementById('leaderboard-metric').value;
+            const labels = { playtime: '⏱️ h played', games: '🎮 games', achievements: '🏅 achievements' };
+            listDiv.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const resp = await fetch(`/api/leaderboard?metric=${metric}&limit=20`);
+                if (!resp.ok) { listDiv.innerHTML = '<div class="loading">Leaderboard not available (no DB).</div>'; return; }
+                const data = await resp.json();
+                if (!data.entries || data.entries.length === 0) {
+                    listDiv.innerHTML = '<div style="color:var(--text-secondary);">No data yet. Sync libraries to populate the leaderboard.</div>';
+                    return;
+                }
+                const medals = ['🥇','🥈','🥉'];
+                listDiv.innerHTML = data.entries.map((e, i) => `
+                    <div class="list-item" style="display:flex; align-items:center; gap:14px; padding:14px; cursor:pointer;"
+                         onclick="showUserCardModal('${e.username}')">
+                        <span style="font-size:1.5em; width:36px; text-align:center; flex-shrink:0;">${medals[i] || ('#' + e.rank)}</span>
+                        <div style="flex:1;">
+                            <strong>${e.username}</strong>
+                        </div>
+                        <div style="font-weight:700; color:var(--tab-active-color); font-size:1.1em;">
+                            ${e.score.toLocaleString()} <small style="font-weight:400; color:var(--text-secondary);">${labels[metric] || ''}</small>
+                        </div>
+                    </div>`).join('');
+            } catch (err) {
+                listDiv.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+            }
+        }
+
+        // ==============================================================================================
+        // Chat
+        // ==============================================================================================
+
+        let chatPollInterval = null;
+        let chatLastId = 0;
+
+        async function loadChatMessages(append) {
+            const messagesDiv = document.getElementById('chat-messages');
+            const room = document.getElementById('chat-room').value;
+            try {
+                const resp = await fetch(`/api/chat/messages?room=${encodeURIComponent(room)}&since_id=${chatLastId}&limit=50`);
+                if (!resp.ok) {
+                    if (!append) messagesDiv.innerHTML = '<div class="loading">Chat not available (no DB).</div>';
+                    return;
+                }
+                const data = await resp.json();
+                if (!data.messages || data.messages.length === 0) {
+                    if (!append) messagesDiv.innerHTML = '<div style="color:var(--text-secondary); text-align:center; padding:20px;">No messages yet. Say hello! 👋</div>';
+                    return;
+                }
+                if (!append) messagesDiv.innerHTML = '';
+                const meResp = await fetch('/api/auth/current').catch(() => null);
+                const me = meResp && meResp.ok ? await meResp.json().catch(() => ({})) : {};
+                data.messages.forEach(msg => {
+                    if (msg.id > chatLastId) chatLastId = msg.id;
+                    const isMe = msg.sender === me.username;
+                    const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+                    const bubble = document.createElement('div');
+                    bubble.style.cssText = `display:flex; flex-direction:column; align-items:${isMe?'flex-end':'flex-start'}; gap:2px;`;
+                    bubble.innerHTML = `
+                        <span style="font-size:0.75em; color:var(--text-secondary);">${isMe ? 'You' : msg.sender} · ${time}</span>
+                        <div style="max-width:75%; padding:8px 13px; border-radius:${isMe?'14px 14px 4px 14px':'14px 14px 14px 4px'};
+                             background:${isMe?'linear-gradient(135deg,#667eea,#764ba2)':'var(--list-hover)'};
+                             color:${isMe?'white':'var(--text-primary)'}; word-break:break-word; font-size:0.93em;">
+                            ${msg.message.replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+                        </div>`;
+                    messagesDiv.appendChild(bubble);
+                });
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            } catch (err) {
+                if (!append) messagesDiv.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+            }
+        }
+
+        function switchChatRoom() {
+            chatLastId = 0;
+            loadChatMessages(false);
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const message = (input.value || '').trim();
+            if (!message) return;
+            const room = document.getElementById('chat-room').value;
+            input.value = '';
+            try {
+                const resp = await fetch('/api/chat/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ room, message }),
+                });
+                if (resp.ok) {
+                    loadChatMessages(true);
+                } else {
+                    const d = await resp.json();
+                    showMessage(d.error || 'Failed to send', 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        function startChatPolling() {
+            if (chatPollInterval) return;
+            chatPollInterval = setInterval(() => loadChatMessages(true), 5000);
+        }
+        function stopChatPolling() {
+            if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
+        }
+
+        // ==============================================================================================
+        // Notifications / Alerts
+        // ==============================================================================================
+
+        let notifPollInterval = null;
+
+        async function loadNotifications() {
+            const listDiv = document.getElementById('notifications-list');
+            const unreadOnly = document.getElementById('notif-unread-only').checked;
+            listDiv.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const resp = await fetch(`/api/notifications?unread_only=${unreadOnly}`);
+                if (!resp.ok) { listDiv.innerHTML = '<div class="loading">Notifications not available (no DB).</div>'; return; }
+                const data = await resp.json();
+                updateNotifBadge(data.unread_count || 0);
+                if (!data.notifications || data.notifications.length === 0) {
+                    listDiv.innerHTML = '<div style="color:var(--text-secondary);">No notifications yet.</div>';
+                    return;
+                }
+                const typeIcon = { info:'ℹ️', success:'✅', warning:'⚠️', error:'❌', friend_request:'👥' };
+                const typeBg   = { info:'#e8f4fd', success:'#d4edda', warning:'#fff3cd', error:'#f8d7da', friend_request:'#e8f4fd' };
+                listDiv.innerHTML = data.notifications.map(n => `
+                    <div style="padding:14px; border-radius:10px; margin-bottom:10px; background:${n.is_read ? 'var(--list-hover)' : typeBg[n.type] || '#e8f4fd'};
+                                border-left:4px solid ${n.is_read ? 'var(--card-border)' : '#667eea'}; opacity:${n.is_read ? '0.75' : '1'};">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                            <span style="font-size:1.1em;">${typeIcon[n.type] || 'ℹ️'}</span>
+                            <strong style="color:var(--text-primary);">${n.title}</strong>
+                            <span style="margin-left:auto; font-size:0.78em; color:var(--text-secondary);">${n.created_at ? new Date(n.created_at).toLocaleString() : ''}</span>
+                            ${!n.is_read ? `<button onclick="markNotifRead(${n.id})" style="padding:3px 10px; background:var(--card-border); border:none; border-radius:6px; cursor:pointer; font-size:0.78em;">Mark read</button>` : ''}
+                        </div>
+                        <div style="color:var(--text-secondary); font-size:0.9em; padding-left:28px;">${n.message}</div>
+                    </div>`).join('');
+            } catch (err) {
+                listDiv.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function markNotifRead(id) {
+            await fetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids:[id]}) });
+            loadNotifications();
+        }
+
+        async function markAllNotificationsRead() {
+            await fetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+            loadNotifications();
+        }
+
+        function updateNotifBadge(count) {
+            const badge = document.getElementById('notif-badge');
+            if (!badge) return;
+            if (count > 0) { badge.textContent = count; badge.style.display = 'inline'; }
+            else { badge.style.display = 'none'; }
+        }
+
+        async function pollNotifications() {
+            try {
+                const resp = await fetch('/api/notifications?unread_only=true');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    updateNotifBadge(data.unread_count || 0);
+                }
+            } catch (e) {}
+        }
+
+        async function sendAdminNotification() {
+            const username = document.getElementById('notif-target-user').value.trim();
+            const title    = document.getElementById('notif-title').value.trim();
+            const message  = document.getElementById('notif-message').value.trim();
+            const type     = document.getElementById('notif-type').value;
+            if (!username || !title || !message) { showMessage('Fill in all fields', 'error'); return; }
+            try {
+                const resp = await fetch('/api/notifications/send', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ username, title, message, type }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    showMessage('Notification sent!', 'success');
+                    document.getElementById('notif-target-user').value = '';
+                    document.getElementById('notif-title').value = '';
+                    document.getElementById('notif-message').value = '';
+                } else {
+                    showMessage(data.error || 'Failed', 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        // ==============================================================================================
+        // Plugins / Addons
+        // ==============================================================================================
+
+        async function loadPlugins() {
+            const listDiv = document.getElementById('plugins-list');
+            listDiv.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const resp = await fetch('/api/plugins');
+                if (!resp.ok) { listDiv.innerHTML = '<div class="loading">Plugins not available (no DB).</div>'; return; }
+                const data = await resp.json();
+                const plugins = data.plugins || [];
+                if (plugins.length === 0) {
+                    listDiv.innerHTML = '<div style="color:var(--text-secondary);">No plugins registered yet. Admins can register plugins above.</div>';
+                    return;
+                }
+                listDiv.innerHTML = plugins.map(p => `
+                    <div class="list-item" style="padding:16px; margin-bottom:10px; background:var(--list-hover); border-radius:10px;">
+                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                            <span style="font-size:1.4em;">🧩</span>
+                            <div style="flex:1;">
+                                <strong style="font-size:1.05em;">${p.name}</strong>
+                                <span style="margin-left:8px; font-size:0.8em; padding:2px 8px; border-radius:10px; background:${p.enabled ? '#d4edda' : '#f8d7da'}; color:${p.enabled ? '#155724' : '#721c24'};">${p.enabled ? '✅ enabled' : '❌ disabled'}</span>
+                            </div>
+                            <span style="font-size:0.82em; color:var(--text-secondary);">v${p.version}</span>
+                            <div id="plugin-toggle-admin-${p.id}" style="display:none;">
+                                <button onclick="togglePlugin(${p.id}, ${!p.enabled})"
+                                        style="padding:5px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; background:${p.enabled ? '#e74c3c' : '#27ae60'}; color:white;">
+                                    ${p.enabled ? '⏸ Disable' : '▶ Enable'}
+                                </button>
+                            </div>
+                        </div>
+                        ${p.description ? `<div style="margin-top:6px; color:var(--text-secondary); font-size:0.9em;">${p.description}</div>` : ''}
+                        ${p.author ? `<div style="font-size:0.8em; color:var(--text-secondary); margin-top:3px;">by ${p.author}</div>` : ''}
+                    </div>`).join('');
+                // Show toggle buttons for admins
+                checkIfAdmin(isAdmin => {
+                    if (isAdmin) plugins.forEach(p => {
+                        const el = document.getElementById(`plugin-toggle-admin-${p.id}`);
+                        if (el) el.style.display = 'block';
+                    });
+                });
+            } catch (err) {
+                listDiv.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function registerPlugin() {
+            const name    = document.getElementById('plugin-name').value.trim();
+            const desc    = document.getElementById('plugin-description').value.trim();
+            const version = document.getElementById('plugin-version').value.trim() || '1.0.0';
+            const author  = document.getElementById('plugin-author').value.trim();
+            if (!name) { showMessage('Plugin name is required', 'error'); return; }
+            try {
+                const resp = await fetch('/api/plugins', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ name, description: desc, version, author }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    showMessage('Plugin registered!', 'success');
+                    document.getElementById('plugin-name').value = '';
+                    document.getElementById('plugin-description').value = '';
+                    loadPlugins();
+                } else {
+                    showMessage(data.error || 'Failed', 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function togglePlugin(id, enabled) {
+            try {
+                const resp = await fetch(`/api/plugins/${id}`, {
+                    method:'PUT',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ enabled }),
+                });
+                if (resp.ok) { showMessage(enabled ? 'Plugin enabled' : 'Plugin disabled', 'success'); loadPlugins(); }
+                else { const d = await resp.json(); showMessage(d.error || 'Failed', 'error'); }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        function checkIfAdmin(callback) {
+            fetch('/api/auth/current').then(r => r.ok ? r.json() : {}).then(me => {
+                callback(me.roles && me.roles.includes('admin'));
+            }).catch(() => callback(false));
+        }
+
+        // ==============================================================================================
+        // Hook new tabs into switchTab + init
+        // ==============================================================================================
+
+        const _origSwitchTab = window.switchTab;
+        window.switchTab = function(tabName, event) {
+            if (_origSwitchTab) _origSwitchTab(tabName, event);
+            if (tabName === 'leaderboard') loadLeaderboard();
+            if (tabName === 'chat') { chatLastId = 0; loadChatMessages(false); startChatPolling(); }
+            else stopChatPolling();
+            if (tabName === 'notifications') loadNotifications();
+            if (tabName === 'plugins') { loadPlugins(); checkIfAdmin(isAdmin => {
+                const adminBox = document.getElementById('admin-register-plugin');
+                if (adminBox) adminBox.style.display = isAdmin ? 'block' : 'none';
+            }); }
+            if (tabName === 'friends') loadAppFriends();
+            if (tabName === 'settings') loadMyProfileCard();
+        };
+
+        // Poll notifications badge every 30s
+        setInterval(pollNotifications, 30000);
+        pollNotifications();
+
+        // Show admin notification sender for admins
+        checkIfAdmin(isAdmin => {
+            const adminSend = document.getElementById('admin-send-notification');
+            if (adminSend) adminSend.style.display = isAdmin ? 'block' : 'none';
+        });
     </script>
 </body>
 </html>
