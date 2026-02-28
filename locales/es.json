@@ -1,0 +1,145 @@
+{
+  "lang": "es",
+  "lang_name": "Español",
+  "nav": {
+    "pick": "Elegir Juego",
+    "library": "Biblioteca",
+    "favorites": "Favoritos",
+    "stats": "Estadísticas",
+    "reviews": "Reseñas",
+    "tags": "Etiquetas",
+    "backlog": "Pendientes",
+    "playlists": "Listas",
+    "schedule": "Agenda",
+    "budget": "Presupuesto",
+    "wishlist": "Lista de Deseos",
+    "settings": "Configuración",
+    "logout": "Cerrar Sesión"
+  },
+  "pick": {
+    "heading": "Elegir un Juego al Azar",
+    "button": "¡Elegir!",
+    "filter_label": "Filtro",
+    "filter_none": "Ninguno",
+    "filter_unplayed": "Solo no jugados",
+    "filter_barely": "Apenas jugados",
+    "filter_well": "Muy jugados",
+    "filter_favorites": "Solo favoritos",
+    "picked": "Deberías jugar:",
+    "playtime": "{hours}h jugado",
+    "no_games": "Ningún juego coincide con los filtros seleccionados.",
+    "loading": "Eligiendo juego…"
+  },
+  "library": {
+    "heading": "Tu Biblioteca",
+    "search_placeholder": "Buscar juegos…",
+    "sort_name": "Nombre",
+    "sort_playtime": "Tiempo de juego",
+    "playtime_label": "{hours}h",
+    "no_games": "No hay juegos en la biblioteca.",
+    "sync": "Sincronizar Biblioteca"
+  },
+  "reviews": {
+    "heading": "Mis Reseñas",
+    "rating_label": "Puntuación",
+    "notes_label": "Notas",
+    "save": "Guardar Reseña",
+    "delete": "Eliminar Reseña",
+    "no_reviews": "Aún no hay reseñas.",
+    "rating_range": "1 – 10"
+  },
+  "tags": {
+    "heading": "Etiquetas de Juegos",
+    "add_placeholder": "Añadir etiqueta…",
+    "add_button": "Añadir",
+    "no_tags": "Aún no hay etiquetas."
+  },
+  "backlog": {
+    "heading": "Juegos Pendientes",
+    "status_want": "Quiero Jugar",
+    "status_playing": "Jugando",
+    "status_completed": "Completado",
+    "status_dropped": "Abandonado",
+    "status_on_hold": "En Espera",
+    "no_entries": "Tu lista de pendientes está vacía."
+  },
+  "playlists": {
+    "heading": "Listas de Juegos",
+    "new_placeholder": "Nombre de la nueva lista…",
+    "create_button": "Crear",
+    "delete_button": "Eliminar",
+    "no_playlists": "Aún no hay listas."
+  },
+  "schedule": {
+    "heading": "Agenda de Noches de Juego",
+    "title_label": "Título del Evento",
+    "date_label": "Fecha",
+    "time_label": "Hora",
+    "attendees_label": "Asistentes",
+    "game_label": "Juego",
+    "notes_label": "Notas",
+    "create_button": "Programar Evento",
+    "no_events": "No hay eventos programados."
+  },
+  "budget": {
+    "heading": "Control de Presupuesto",
+    "add_heading": "Añadir Compra",
+    "game_label": "Juego",
+    "price_label": "Precio",
+    "currency_label": "Moneda",
+    "date_label": "Fecha",
+    "platform_label": "Plataforma",
+    "notes_label": "Notas",
+    "add_button": "Añadir",
+    "total_label": "Total Gastado",
+    "no_entries": "No hay compras registradas.",
+    "delete_button": "Eliminar"
+  },
+  "wishlist": {
+    "heading": "Lista de Deseos",
+    "add_button": "Añadir Juego",
+    "check_sales": "Ver Ofertas",
+    "on_sale": "¡En Oferta!",
+    "no_entries": "Tu lista de deseos está vacía.",
+    "target_price": "Precio objetivo",
+    "notes_label": "Notas"
+  },
+  "voting": {
+    "heading": "Votar por el Próximo Juego",
+    "create_button": "Iniciar Votación",
+    "vote_button": "Votar",
+    "close_button": "Cerrar Votación",
+    "no_session": "No hay sesión de votación activa.",
+    "winner": "Ganador: {game}"
+  },
+  "stats": {
+    "heading": "Estadísticas de Juego",
+    "played_label": "Jugados",
+    "unplayed_label": "No Jugados",
+    "top10_label": "Top 10 por Tiempo de Juego",
+    "total_games": "{count} juegos en total",
+    "total_playtime": "{hours}h de juego en total"
+  },
+  "auth": {
+    "login_heading": "Iniciar Sesión",
+    "username_label": "Usuario",
+    "password_label": "Contraseña",
+    "login_button": "Iniciar Sesión",
+    "logout_button": "Cerrar Sesión",
+    "register_heading": "Crear Cuenta",
+    "register_button": "Crear Cuenta"
+  },
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "close": "Cerrar",
+    "loading": "Cargando…",
+    "error": "Ha ocurrido un error.",
+    "success": "¡Listo!",
+    "confirm_delete": "¿Estás seguro de que quieres eliminar esto?",
+    "yes": "Sí",
+    "no": "No"
+  }
+}

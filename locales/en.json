@@ -1,0 +1,145 @@
+{
+  "lang": "en",
+  "lang_name": "English",
+  "nav": {
+    "pick": "Pick a Game",
+    "library": "Library",
+    "favorites": "Favorites",
+    "stats": "Stats",
+    "reviews": "Reviews",
+    "tags": "Tags",
+    "backlog": "Backlog",
+    "playlists": "Playlists",
+    "schedule": "Schedule",
+    "budget": "Budget",
+    "wishlist": "Wishlist",
+    "settings": "Settings",
+    "logout": "Logout"
+  },
+  "pick": {
+    "heading": "Pick a Random Game",
+    "button": "Pick!",
+    "filter_label": "Filter",
+    "filter_none": "None",
+    "filter_unplayed": "Unplayed only",
+    "filter_barely": "Barely played",
+    "filter_well": "Well played",
+    "filter_favorites": "Favorites only",
+    "picked": "You should play:",
+    "playtime": "{hours}h played",
+    "no_games": "No games match the selected filters.",
+    "loading": "Picking a game…"
+  },
+  "library": {
+    "heading": "Your Library",
+    "search_placeholder": "Search games…",
+    "sort_name": "Name",
+    "sort_playtime": "Playtime",
+    "playtime_label": "{hours}h",
+    "no_games": "No games in library.",
+    "sync": "Sync Library"
+  },
+  "reviews": {
+    "heading": "My Reviews",
+    "rating_label": "Rating",
+    "notes_label": "Notes",
+    "save": "Save Review",
+    "delete": "Delete Review",
+    "no_reviews": "No reviews yet.",
+    "rating_range": "1 – 10"
+  },
+  "tags": {
+    "heading": "Game Tags",
+    "add_placeholder": "Add tag…",
+    "add_button": "Add",
+    "no_tags": "No tags yet."
+  },
+  "backlog": {
+    "heading": "Game Backlog",
+    "status_want": "Want to Play",
+    "status_playing": "Playing",
+    "status_completed": "Completed",
+    "status_dropped": "Dropped",
+    "status_on_hold": "On Hold",
+    "no_entries": "Your backlog is empty."
+  },
+  "playlists": {
+    "heading": "Playlists",
+    "new_placeholder": "New playlist name…",
+    "create_button": "Create",
+    "delete_button": "Delete",
+    "no_playlists": "No playlists yet."
+  },
+  "schedule": {
+    "heading": "Game Night Scheduler",
+    "title_label": "Event Title",
+    "date_label": "Date",
+    "time_label": "Time",
+    "attendees_label": "Attendees",
+    "game_label": "Game",
+    "notes_label": "Notes",
+    "create_button": "Schedule Event",
+    "no_events": "No events scheduled."
+  },
+  "budget": {
+    "heading": "Budget Tracker",
+    "add_heading": "Add Purchase",
+    "game_label": "Game",
+    "price_label": "Price",
+    "currency_label": "Currency",
+    "date_label": "Date",
+    "platform_label": "Platform",
+    "notes_label": "Notes",
+    "add_button": "Add",
+    "total_label": "Total Spent",
+    "no_entries": "No purchases recorded.",
+    "delete_button": "Delete"
+  },
+  "wishlist": {
+    "heading": "Wishlist",
+    "add_button": "Add Game",
+    "check_sales": "Check Sales",
+    "on_sale": "On Sale!",
+    "no_entries": "Your wishlist is empty.",
+    "target_price": "Target price",
+    "notes_label": "Notes"
+  },
+  "voting": {
+    "heading": "Vote for Next Game",
+    "create_button": "Start Vote",
+    "vote_button": "Vote",
+    "close_button": "Close Vote",
+    "no_session": "No active voting session.",
+    "winner": "Winner: {game}"
+  },
+  "stats": {
+    "heading": "Play Statistics",
+    "played_label": "Played",
+    "unplayed_label": "Unplayed",
+    "top10_label": "Top 10 by Playtime",
+    "total_games": "{count} games total",
+    "total_playtime": "{hours}h total playtime"
+  },
+  "auth": {
+    "login_heading": "Sign In",
+    "username_label": "Username",
+    "password_label": "Password",
+    "login_button": "Sign In",
+    "logout_button": "Sign Out",
+    "register_heading": "Create Account",
+    "register_button": "Create Account"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "loading": "Loading…",
+    "error": "An error occurred.",
+    "success": "Done!",
+    "confirm_delete": "Are you sure you want to delete this?",
+    "yes": "Yes",
+    "no": "No"
+  }
+}

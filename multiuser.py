@@ -23,7 +23,8 @@ class VotingSession:
 
     def __init__(self, session_id: str, candidates: List[Dict],
                  voters: Optional[List[str]] = None,
-                 duration: Optional[int] = None):
+                 duration: Optional[int] = None,
+                 voting_method: str = 'plurality'):
         """
         Initialize a voting session.
 
@@ -33,21 +34,29 @@ class VotingSession:
             voters: Optional list of eligible voter names. If None, any user may vote.
             duration: Optional voting duration in seconds. If None, session stays open
                       until explicitly closed.
+            voting_method: 'plurality' (default) or 'ranked_choice' (Instant Runoff Voting).
         """
+        if voting_method not in ('plurality', 'ranked_choice'):
+            raise ValueError(f"voting_method must be 'plurality' or 'ranked_choice', got '{voting_method}'")
         self.session_id = session_id
         self.candidates: List[Dict] = candidates
-        self.votes: Dict[str, str] = {}   # user_name -> app_id
+        # For plurality: votes is Dict[str, str] (user -> app_id)
+        # For ranked_choice: votes is Dict[str, List[str]] (user -> ordered preference list)
+        self.votes: Dict = {}
         self.voters: Set[str] = set(voters) if voters else set()
         self.created_at: datetime = datetime.now()
         self.duration: Optional[int] = duration
         self.closed: bool = False
+        self.voting_method: str = voting_method
 
-    def cast_vote(self, user_name: str, app_id: str) -> Tuple[bool, str]:
+    def cast_vote(self, user_name: str, app_id_or_ranking) -> Tuple[bool, str]:
         """Cast a vote for a game.
 
         Args:
-            user_name: Name of the voter
-            app_id: App ID of the game being voted for
+            user_name: Name of the voter.
+            app_id_or_ranking: For 'plurality' mode, a single app_id string.
+                               For 'ranked_choice' mode, an ordered list of app_id strings
+                               (most preferred first). Partial rankings are allowed.
 
         Returns:
             (success, message) tuple
@@ -59,16 +68,32 @@ class VotingSession:
             return False, "Voting session has expired"
         if self.voters and user_name not in self.voters:
             return False, f"User '{user_name}' is not eligible to vote in this session"
-        # Validate app_id is a valid candidate
         candidate_ids = {str(c.get('appid') or c.get('app_id') or c.get('game_id', ''))
                          for c in self.candidates}
-        if str(app_id) not in candidate_ids:
-            return False, f"Game ID '{app_id}' is not a candidate in this session"
-        self.votes[user_name] = str(app_id)
+
+        if self.voting_method == 'ranked_choice':
+            if not isinstance(app_id_or_ranking, list):
+                return False, "Ranked choice voting requires a list of game IDs"
+            ranking = [str(g) for g in app_id_or_ranking]
+            if len(ranking) != len(set(ranking)):
+                return False, "Duplicate game IDs in ranking"
+            for gid in ranking:
+                if gid not in candidate_ids:
+                    return False, f"Game ID '{gid}' is not a candidate in this session"
+            self.votes[user_name] = ranking
+        else:
+            if isinstance(app_id_or_ranking, list):
+                return False, "Plurality voting requires a single game ID string, not a list"
+            if str(app_id_or_ranking) not in candidate_ids:
+                return False, f"Game ID '{app_id_or_ranking}' is not a candidate in this session"
+            self.votes[user_name] = str(app_id_or_ranking)
         return True, "Vote cast successfully"
 
     def get_results(self) -> Dict[str, Dict]:
-        """Get vote tallies for all candidates.
+        """Get first-choice vote tallies for all candidates.
+
+        For 'plurality' mode this counts direct votes.
+        For 'ranked_choice' mode this counts first-preference votes only.
 
         Returns:
             Dict mapping app_id -> {'game': dict, 'count': int, 'voters': list}
@@ -82,23 +107,113 @@ class VotingSession:
                 'count': 0,
                 'voters': []
             }
-        for user, voted_id in self.votes.items():
-            if voted_id in tallies:
-                tallies[voted_id]['count'] += 1
-                tallies[voted_id]['voters'].append(user)
+        for user, vote in self.votes.items():
+            # For ranked_choice, count the first (highest) preference
+            first_choice = vote[0] if isinstance(vote, list) else vote
+            if first_choice in tallies:
+                tallies[first_choice]['count'] += 1
+                tallies[first_choice]['voters'].append(user)
         return tallies
+
+    def run_irv(self) -> Tuple[Optional[Dict], List[Dict]]:
+        """Run Instant Runoff Voting (ranked-choice) algorithm.
+
+        Iteratively eliminates the candidate with the fewest first-choice votes
+        and redistributes those ballots until one candidate holds a majority or
+        only one remains.
+
+        Returns:
+            (winner_game_dict, rounds) where ``rounds`` is a list of dicts:
+            [{'round': N, 'counts': {app_id: vote_count}, 'eliminated': app_id_or_None}]
+        """
+        if not self.candidates:
+            return None, []
+
+        cand_map: Dict[str, Dict] = {}
+        for c in self.candidates:
+            app_id = str(c.get('appid') or c.get('app_id') or c.get('game_id', ''))
+            cand_map[app_id] = c
+
+        # Build ballots (list of preference lists); handle both plurality and ranked votes
+        ballots: List[List[str]] = []
+        for vote in self.votes.values():
+            if isinstance(vote, list):
+                ballots.append(vote)
+            else:
+                ballots.append([str(vote)])
+
+        if not ballots:
+            # No votes cast – pick randomly
+            winner = random.choice(self.candidates) if self.candidates else None
+            return winner, []
+
+        remaining: Set[str] = set(cand_map.keys())
+        rounds: List[Dict] = []
+
+        while len(remaining) > 1:
+            counts: Counter = Counter()
+            for ballot in ballots:
+                for choice in ballot:
+                    if choice in remaining:
+                        counts[choice] += 1
+                        break
+
+            # Ensure every remaining candidate appears in counts (even with 0)
+            for cid in remaining:
+                if cid not in counts:
+                    counts[cid] = 0
+
+            total = sum(counts.values())
+            round_n = len(rounds) + 1
+
+            # Check for majority winner (strictly more than half of active votes)
+            for app_id, count in counts.items():
+                if total > 0 and count > total / 2:
+                    rounds.append({'round': round_n, 'counts': dict(counts), 'eliminated': None})
+                    return cand_map[app_id], rounds
+
+            # Eliminate the candidate with fewest votes (random tiebreak)
+            min_votes = min(counts.values())
+            to_eliminate = [a for a, c in counts.items() if c == min_votes]
+            eliminated = random.choice(to_eliminate)
+            rounds.append({'round': round_n, 'counts': dict(counts), 'eliminated': eliminated})
+            remaining.remove(eliminated)
+
+        # Only one candidate remains
+        if remaining:
+            winner_id = next(iter(remaining))
+            final_counts: Counter = Counter()
+            for ballot in ballots:
+                for choice in ballot:
+                    if choice in remaining:
+                        final_counts[choice] += 1
+                        break
+            rounds.append({
+                'round': len(rounds) + 1,
+                'counts': dict(final_counts),
+                'eliminated': None,
+            })
+            return cand_map.get(winner_id), rounds
+
+        return None, rounds
 
     def get_winner(self) -> Optional[Dict]:
         """Determine the winning game.
 
-        In case of a tie the winner is chosen randomly from the tied games.
-        If nobody voted, a random candidate is returned.
+        For 'plurality': In case of a tie the winner is chosen randomly from the
+        tied games. If nobody voted, a random candidate is returned.
+
+        For 'ranked_choice': Uses Instant Runoff Voting (see :meth:`run_irv`).
 
         Returns:
             The winning game dict, or None if there are no candidates.
         """
         if not self.candidates:
             return None
+        if self.voting_method == 'ranked_choice':
+            winner, _ = self.run_irv()
+            return winner
+        # Plurality
         tallies = self.get_results()
         if not tallies:
             return None
@@ -124,9 +239,10 @@ class VotingSession:
     def to_dict(self) -> Dict:
         """Serialise session state for API responses."""
         tallies = self.get_results()
-        return {
+        result = {
             'session_id': self.session_id,
             'closed': self.closed or self.is_expired(),
+            'voting_method': self.voting_method,
             'candidates': [
                 {
                     'app_id': str(c.get('appid') or c.get('app_id') or c.get('game_id', '')),
@@ -144,6 +260,10 @@ class VotingSession:
             'duration': self.duration,
             'created_at': self.created_at.isoformat(),
         }
+        if self.voting_method == 'ranked_choice':
+            _, rounds = self.run_irv()
+            result['irv_rounds'] = rounds
+        return result
 
 
 class MultiUserPicker:
