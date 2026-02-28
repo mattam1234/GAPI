@@ -869,5 +869,497 @@ class TestGamePickerRecommendations(unittest.TestCase):
         self.assertIsInstance(recs, list)
 
 
+
+# ===========================================================================
+# Ranked-Choice Voting (Instant Runoff) tests
+# ===========================================================================
+
+class TestVotingSessionRankedChoice(unittest.TestCase):
+
+    THREE_GAMES = [
+        {'appid': 620,  'name': 'Portal 2', 'game_id': 'steam:620'},
+        {'appid': 440,  'name': 'TF2',      'game_id': 'steam:440'},
+        {'appid': 730,  'name': 'CS:GO',    'game_id': 'steam:730'},
+    ]
+
+    def _make_rc_session(self, candidates=None, voters=None):
+        cands = candidates if candidates is not None else self.THREE_GAMES
+        return VotingSession(
+            session_id='rc-session',
+            candidates=cands,
+            voters=voters,
+            voting_method='ranked_choice',
+        )
+
+    # -- constructor --
+
+    def test_invalid_voting_method_raises(self):
+        with self.assertRaises(ValueError):
+            VotingSession('s', self.THREE_GAMES, voting_method='invalid')
+
+    def test_plurality_method_stored(self):
+        session = VotingSession('s', self.THREE_GAMES, voting_method='plurality')
+        self.assertEqual(session.voting_method, 'plurality')
+
+    def test_ranked_choice_method_stored(self):
+        session = self._make_rc_session()
+        self.assertEqual(session.voting_method, 'ranked_choice')
+
+    # -- cast_vote for ranked_choice --
+
+    def test_ranked_cast_vote_accepts_list(self):
+        session = self._make_rc_session()
+        ok, msg = session.cast_vote('Alice', ['620', '440', '730'])
+        self.assertTrue(ok, msg)
+
+    def test_ranked_cast_vote_rejects_string(self):
+        session = self._make_rc_session()
+        ok, msg = session.cast_vote('Alice', '620')
+        self.assertFalse(ok)
+        self.assertIn('list', msg.lower())
+
+    def test_ranked_cast_vote_rejects_invalid_candidate(self):
+        session = self._make_rc_session()
+        ok, msg = session.cast_vote('Alice', ['620', '99999'])
+        self.assertFalse(ok)
+
+    def test_ranked_cast_vote_rejects_duplicates(self):
+        session = self._make_rc_session()
+        ok, msg = session.cast_vote('Alice', ['620', '620'])
+        self.assertFalse(ok)
+        self.assertIn('duplicate', msg.lower())
+
+    def test_ranked_partial_ranking_allowed(self):
+        """Voters do not have to rank every candidate."""
+        session = self._make_rc_session()
+        ok, msg = session.cast_vote('Alice', ['620'])
+        self.assertTrue(ok, msg)
+
+    # -- plurality session still rejects lists --
+
+    def test_plurality_rejects_list(self):
+        session = VotingSession('s', self.THREE_GAMES, voting_method='plurality')
+        ok, msg = session.cast_vote('Alice', ['620', '440'])
+        self.assertFalse(ok)
+
+    # -- get_results counts first-choice votes for ranked_choice --
+
+    def test_ranked_get_results_counts_first_choices(self):
+        session = self._make_rc_session()
+        session.cast_vote('Alice', ['620', '440', '730'])
+        session.cast_vote('Bob',   ['620', '730', '440'])
+        session.cast_vote('Carol', ['440', '620', '730'])
+        results = session.get_results()
+        self.assertEqual(results['620']['count'], 2)
+        self.assertEqual(results['440']['count'], 1)
+        self.assertEqual(results['730']['count'], 0)
+
+    # -- IRV algorithm --
+
+    def test_irv_clear_majority_winner(self):
+        """If one candidate has >50% first-choices they win immediately."""
+        session = self._make_rc_session()
+        session.cast_vote('Alice', ['620', '440', '730'])
+        session.cast_vote('Bob',   ['620', '730', '440'])
+        session.cast_vote('Carol', ['620', '440', '730'])
+        winner, rounds = session.run_irv()
+        self.assertIsNotNone(winner)
+        self.assertEqual(str(winner.get('appid')), '620')
+
+    def test_irv_redistribution(self):
+        """The 3rd-place candidate is eliminated and votes redistribute."""
+        # Alice: 440 > 620 > 730
+        # Bob:   440 > 620 > 730
+        # Carol: 730 > 620 > 440  (730 will be eliminated; Carol's vote moves to 620)
+        session = self._make_rc_session()
+        session.cast_vote('Alice', ['440', '620', '730'])
+        session.cast_vote('Bob',   ['440', '620', '730'])
+        session.cast_vote('Carol', ['730', '620', '440'])
+        winner, rounds = session.run_irv()
+        self.assertIsNotNone(winner)
+        # After 730 is eliminated, 620 picks up Carol's vote → tie 440:2, 620:1 before elim
+        # 440 should win (2 first-choice votes originally, majority after redistribution)
+        self.assertEqual(str(winner.get('appid')), '440')
+
+    def test_irv_no_votes_returns_random_candidate(self):
+        """With no votes a winner is still returned (random pick)."""
+        session = self._make_rc_session()
+        winner, rounds = session.run_irv()
+        self.assertIsNotNone(winner)
+
+    def test_irv_rounds_recorded(self):
+        session = self._make_rc_session()
+        session.cast_vote('Alice', ['440', '620', '730'])
+        session.cast_vote('Bob',   ['440', '620', '730'])
+        session.cast_vote('Carol', ['730', '620', '440'])
+        _, rounds = session.run_irv()
+        self.assertIsInstance(rounds, list)
+        self.assertGreater(len(rounds), 0)
+        for r in rounds:
+            self.assertIn('round', r)
+            self.assertIn('counts', r)
+            self.assertIn('eliminated', r)
+
+    def test_get_winner_uses_irv_for_ranked_choice(self):
+        session = self._make_rc_session()
+        session.cast_vote('Alice', ['620', '440', '730'])
+        session.cast_vote('Bob',   ['620', '730', '440'])
+        session.cast_vote('Carol', ['620', '440', '730'])
+        winner = session.get_winner()
+        self.assertIsNotNone(winner)
+        self.assertEqual(str(winner.get('appid')), '620')
+
+    # -- to_dict includes voting_method and irv_rounds --
+
+    def test_to_dict_includes_voting_method(self):
+        session = self._make_rc_session()
+        d = session.to_dict()
+        self.assertEqual(d['voting_method'], 'ranked_choice')
+
+    def test_to_dict_plurality_includes_voting_method(self):
+        session = VotingSession('s', self.THREE_GAMES, voting_method='plurality')
+        d = session.to_dict()
+        self.assertEqual(d['voting_method'], 'plurality')
+
+    def test_to_dict_ranked_choice_includes_irv_rounds(self):
+        session = self._make_rc_session()
+        session.cast_vote('Alice', ['620', '440', '730'])
+        d = session.to_dict()
+        self.assertIn('irv_rounds', d)
+        self.assertIsInstance(d['irv_rounds'], list)
+
+    def test_to_dict_plurality_has_no_irv_rounds(self):
+        session = VotingSession('s', self.THREE_GAMES, voting_method='plurality')
+        session.cast_vote('Alice', '620')
+        d = session.to_dict()
+        self.assertNotIn('irv_rounds', d)
+
+
+# ===========================================================================
+# Budget Tracking tests
+# ===========================================================================
+
+class TestGamePickerBudget(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.orig = os.getcwd()
+        self.picker = make_picker(self.tmp_dir)
+        os.chdir(self.tmp_dir)
+        self.picker.games = list(FAKE_GAMES)
+
+    def tearDown(self):
+        os.chdir(self.orig)
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_set_budget_basic(self):
+        ok = self.picker.set_game_budget('steam:620', 29.99)
+        self.assertTrue(ok)
+        self.assertIn('steam:620', self.picker.budget)
+
+    def test_set_budget_stores_price(self):
+        self.picker.set_game_budget('steam:620', 14.99)
+        self.assertEqual(self.picker.budget['steam:620']['price'], 14.99)
+
+    def test_set_budget_stores_currency(self):
+        self.picker.set_game_budget('steam:620', 9.99, currency='EUR')
+        self.assertEqual(self.picker.budget['steam:620']['currency'], 'EUR')
+
+    def test_set_budget_stores_purchase_date(self):
+        self.picker.set_game_budget('steam:620', 4.99, purchase_date='2024-11-28')
+        self.assertEqual(self.picker.budget['steam:620']['purchase_date'], '2024-11-28')
+
+    def test_set_budget_stores_notes(self):
+        self.picker.set_game_budget('steam:620', 0.0, notes='Gift')
+        self.assertEqual(self.picker.budget['steam:620']['notes'], 'Gift')
+
+    def test_set_budget_rejects_negative_price(self):
+        ok = self.picker.set_game_budget('steam:620', -5.00)
+        self.assertFalse(ok)
+        self.assertNotIn('steam:620', self.picker.budget)
+
+    def test_set_budget_zero_price_allowed(self):
+        ok = self.picker.set_game_budget('steam:440', 0.0, notes='Free to play')
+        self.assertTrue(ok)
+
+    def test_remove_budget(self):
+        self.picker.set_game_budget('steam:620', 14.99)
+        removed = self.picker.remove_game_budget('steam:620')
+        self.assertTrue(removed)
+        self.assertNotIn('steam:620', self.picker.budget)
+
+    def test_remove_nonexistent_budget(self):
+        removed = self.picker.remove_game_budget('steam:99999')
+        self.assertFalse(removed)
+
+    def test_budget_persisted(self):
+        self.picker.set_game_budget('steam:620', 29.99)
+        # Re-load from the same temp directory
+        new_picker = make_picker(self.tmp_dir)
+        self.assertIn('steam:620', new_picker.budget)
+        self.assertEqual(new_picker.budget['steam:620']['price'], 29.99)
+
+    def test_get_budget_summary_total(self):
+        self.picker.set_game_budget('steam:620', 14.99)
+        self.picker.set_game_budget('steam:440', 9.99)
+        summary = self.picker.get_budget_summary()
+        self.assertAlmostEqual(summary['total_spent'], 24.98, places=2)
+
+    def test_get_budget_summary_game_count(self):
+        self.picker.set_game_budget('steam:620', 14.99)
+        self.picker.set_game_budget('steam:570', 4.99)
+        summary = self.picker.get_budget_summary()
+        self.assertEqual(summary['game_count'], 2)
+
+    def test_get_budget_summary_empty(self):
+        summary = self.picker.get_budget_summary()
+        self.assertEqual(summary['total_spent'], 0.0)
+        self.assertEqual(summary['game_count'], 0)
+        self.assertIsInstance(summary['entries'], list)
+
+    def test_get_budget_summary_entries_enriched_with_name(self):
+        self.picker.set_game_budget('steam:620', 14.99)
+        summary = self.picker.get_budget_summary()
+        entry = next(e for e in summary['entries'] if e['game_id'] == 'steam:620')
+        self.assertEqual(entry['name'], 'Portal 2')
+
+    def test_get_budget_summary_currency_breakdown(self):
+        self.picker.set_game_budget('steam:620', 14.99, currency='USD')
+        self.picker.set_game_budget('steam:440', 9.99, currency='EUR')
+        summary = self.picker.get_budget_summary()
+        self.assertIn('USD', summary['currency_breakdown'])
+        self.assertIn('EUR', summary['currency_breakdown'])
+
+
+# ===========================================================================
+# Wishlist & Sale Alerts tests
+# ===========================================================================
+
+class TestGamePickerWishlist(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.orig = os.getcwd()
+        self.picker = make_picker(self.tmp_dir)
+        os.chdir(self.tmp_dir)
+        self.picker.games = list(FAKE_GAMES)
+
+    def tearDown(self):
+        os.chdir(self.orig)
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    # -- add_to_wishlist --
+
+    def test_add_to_wishlist_basic(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        self.assertTrue(ok)
+        self.assertIn('steam:730', self.picker.wishlist)
+
+    def test_add_to_wishlist_stores_fields(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', platform='steam',
+                                    target_price=9.99, notes='Want this')
+        entry = self.picker.wishlist['steam:730']
+        self.assertEqual(entry['name'], 'CS:GO')
+        self.assertEqual(entry['platform'], 'steam')
+        self.assertEqual(entry['target_price'], 9.99)
+        self.assertEqual(entry['notes'], 'Want this')
+
+    def test_add_to_wishlist_stores_added_date(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        entry = self.picker.wishlist['steam:730']
+        self.assertIn('added_date', entry)
+        self.assertTrue(entry['added_date'])  # non-empty
+
+    def test_add_to_wishlist_rejects_negative_target_price(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=-1.0)
+        self.assertFalse(ok)
+        self.assertNotIn('steam:730', self.picker.wishlist)
+
+    def test_add_to_wishlist_zero_target_price_allowed(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=0.0)
+        self.assertTrue(ok)
+
+    def test_add_to_wishlist_none_target_price_allowed(self):
+        ok = self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=None)
+        self.assertTrue(ok)
+
+    def test_add_to_wishlist_overwrites_existing(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', notes='First')
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', notes='Updated')
+        self.assertEqual(self.picker.wishlist['steam:730']['notes'], 'Updated')
+
+    # -- remove_from_wishlist --
+
+    def test_remove_from_wishlist(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        removed = self.picker.remove_from_wishlist('steam:730')
+        self.assertTrue(removed)
+        self.assertNotIn('steam:730', self.picker.wishlist)
+
+    def test_remove_from_wishlist_not_present(self):
+        removed = self.picker.remove_from_wishlist('steam:99999')
+        self.assertFalse(removed)
+
+    # -- persistence --
+
+    def test_wishlist_persisted(self):
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=4.99)
+        new_picker = make_picker(self.tmp_dir)
+        self.assertIn('steam:730', new_picker.wishlist)
+        self.assertEqual(new_picker.wishlist['steam:730']['target_price'], 4.99)
+
+    # -- check_wishlist_sales --
+
+    def test_check_wishlist_sales_no_steam_client(self):
+        """Returns empty list when no Steam client is available."""
+        self.picker.steam_client = None
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        result = self.picker.check_wishlist_sales()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_on_sale(self):
+        """Items with discount_percent > 0 should be returned."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 999,
+            'discount_percent': 50,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$9.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['game_id'], 'steam:730')
+        self.assertEqual(result[0]['discount_percent'], 50)
+        self.assertAlmostEqual(result[0]['current_price_usd'], 9.99, places=2)
+
+    def test_check_wishlist_sales_below_target(self):
+        """Items at or below target_price should be returned even without a discount."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=15.00)
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 1499,
+            'discount_percent': 0,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$14.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(len(result), 1)
+        self.assertIn('target', result[0]['sale_reason'])
+
+    def test_check_wishlist_sales_not_on_sale(self):
+        """Items not on sale and above target should not be returned."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=5.00)
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 1999,
+            'discount_percent': 0,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$19.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_skips_non_steam(self):
+        """Non-Steam wishlist entries should be skipped."""
+        self.picker.add_to_wishlist('epic:ABC', 'Some Epic Game', platform='epic')
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value={'discount_percent': 50, 'final': 500,
+                                        'initial': 1000, 'final_formatted': '$5.00',
+                                        'initial_formatted': '$10.00'}) as mock_p:
+            result = self.picker.check_wishlist_sales()
+        mock_p.assert_not_called()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_no_price_data(self):
+        """Games where the API returns None are skipped."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO')
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=None):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(result, [])
+
+    def test_check_wishlist_sales_sale_reason_combined(self):
+        """sale_reason mentions both discount and target when both conditions are met."""
+        self.picker.add_to_wishlist('steam:730', 'CS:GO', target_price=10.00)
+        mock_price = {
+            'currency': 'USD',
+            'initial': 1999,
+            'final': 999,
+            'discount_percent': 50,
+            'initial_formatted': '$19.99',
+            'final_formatted': '$9.99',
+        }
+        with patch.object(self.picker.steam_client, 'get_price_overview',
+                          return_value=mock_price):
+            result = self.picker.check_wishlist_sales()
+        self.assertEqual(len(result), 1)
+        reason = result[0]['sale_reason']
+        self.assertIn('off', reason)
+        self.assertIn('target', reason)
+
+
+class TestSteamAPIClientGetPriceOverview(unittest.TestCase):
+    """Unit tests for SteamAPIClient.get_price_overview."""
+
+    def _make_client(self) -> gapi.SteamAPIClient:
+        return gapi.SteamAPIClient(api_key='FAKE_KEY')
+
+    def test_returns_price_overview_dict(self):
+        client = self._make_client()
+        mock_resp = {
+            '620': {
+                'success': True,
+                'data': {
+                    'price_overview': {
+                        'currency': 'USD', 'initial': 1999, 'final': 999,
+                        'discount_percent': 50,
+                        'initial_formatted': '$19.99', 'final_formatted': '$9.99',
+                    }
+                }
+            }
+        }
+        with patch.object(client.session, 'get') as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = mock_resp
+            result = client.get_price_overview('620')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['discount_percent'], 50)
+
+    def test_returns_none_for_free_game(self):
+        """Free games have no price_overview key."""
+        client = self._make_client()
+        mock_resp = {'440': {'success': True, 'data': {}}}
+        with patch.object(client.session, 'get') as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = mock_resp
+            result = client.get_price_overview('440')
+        self.assertIsNone(result)
+
+    def test_returns_none_on_api_failure(self):
+        import requests as _requests
+        client = self._make_client()
+        with patch.object(client.session, 'get',
+                          side_effect=_requests.RequestException('network error')):
+            result = client.get_price_overview('620')
+        self.assertIsNone(result)
+
+    def test_returns_none_for_invalid_app_id(self):
+        client = self._make_client()
+        result = client.get_price_overview('not-a-number')
+        self.assertIsNone(result)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -460,6 +460,46 @@ class SteamAPIClient(GamePlatformClient):
         return []
 
 
+    def get_price_overview(self, app_id) -> Optional[Dict]:
+        """Fetch the current price overview for a Steam app.
+
+        Uses the Steam storefront API with ``filters=price_overview`` so the
+        response is lightweight (does not pollute the full details cache, since
+        prices change frequently).
+
+        Returns a dict such as::
+
+            {
+                "currency": "USD",
+                "initial": 1999,           # base price in cents
+                "final": 999,              # current price in cents
+                "discount_percent": 50,
+                "initial_formatted": "$19.99",
+                "final_formatted": "$9.99"
+            }
+
+        Returns ``None`` if the game is free, not found, or the API fails.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return None
+
+        url = "https://store.steampowered.com/api/appdetails"
+        params = {'appids': app_id_int, 'filters': 'price_overview'}
+        try:
+            response = self.session.get(url, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+            app_data = data.get(str(app_id_int), {})
+            if not app_data.get('success'):
+                return None
+            return app_data.get('data', {}).get('price_overview') or None
+        except requests.RequestException as e:
+            self._log.debug("Price fetch failed for app %s: %s", app_id, e)
+        return None
+
+
 class EpicAPIClient(GamePlatformClient):
     """Client for interacting with Epic Games Store API"""
 
@@ -563,6 +603,8 @@ class GamePicker:
     SCHEDULE_FILE = '.gapi_schedule.json'
     PLAYLISTS_FILE = '.gapi_playlists.json'
     BACKLOG_FILE = '.gapi_backlog.json'
+    BUDGET_FILE = '.gapi_budget.json'
+    WISHLIST_FILE = '.gapi_wishlist.json'
 
     BACKLOG_STATUSES = ('want_to_play', 'playing', 'completed', 'dropped')
 
@@ -611,13 +653,57 @@ class GamePicker:
         self.steam_client = self.clients.get('steam')
 
         self.games: List[Dict] = []
-        self.history: List[str] = self.load_history()  # Now stores composite IDs
-        self.favorites: List[str] = self.load_favorites()  # Now stores composite IDs
-        self.reviews: Dict[str, Dict] = self.load_reviews()  # game_id -> review dict
-        self.tags: Dict[str, List[str]] = self.load_tags()  # game_id -> [tag, ...]
-        self.schedule: Dict[str, Dict] = self.load_schedule()  # event_id -> event dict
-        self.playlists: Dict[str, List[str]] = self.load_playlists()  # name -> [game_id, ...]
-        self.backlog: Dict[str, str] = self.load_backlog()  # game_id -> status
+
+        # ----------------------------------------------------------------
+        # Repositories — own the in-memory data and JSON persistence.
+        # ----------------------------------------------------------------
+        from app.repositories import (
+            ReviewRepository, TagRepository, ScheduleRepository,
+            PlaylistRepository, BacklogRepository, BudgetRepository,
+            WishlistRepository, FavoritesRepository, HistoryRepository,
+        )
+        self._history_repo = HistoryRepository(self.HISTORY_FILE, self.MAX_HISTORY)
+        self._favorites_repo = FavoritesRepository(self.FAVORITES_FILE)
+        self._review_repo = ReviewRepository(self.REVIEWS_FILE)
+        self._tag_repo = TagRepository(self.TAGS_FILE)
+        self._schedule_repo = ScheduleRepository(self.SCHEDULE_FILE)
+        self._playlist_repo = PlaylistRepository(self.PLAYLISTS_FILE)
+        self._backlog_repo = BacklogRepository(self.BACKLOG_FILE)
+        self._budget_repo = BudgetRepository(self.BUDGET_FILE)
+        self._wishlist_repo = WishlistRepository(self.WISHLIST_FILE)
+
+        # ----------------------------------------------------------------
+        # Services — contain all business / domain logic.
+        # Exposed as public attributes so Flask route handlers can use them
+        # directly (e.g. ``picker.review_service.add_or_update(...)``).
+        # ----------------------------------------------------------------
+        from app.services import (
+            ReviewService, TagService, ScheduleService, PlaylistService,
+            BacklogService, BudgetService, WishlistService, FavoritesService,
+        )
+        self.review_service = ReviewService(self._review_repo)
+        self.tag_service = TagService(self._tag_repo)
+        self.schedule_service = ScheduleService(self._schedule_repo)
+        self.playlist_service = PlaylistService(self._playlist_repo)
+        self.backlog_service = BacklogService(self._backlog_repo)
+        self.budget_service = BudgetService(self._budget_repo)
+        self.wishlist_service = WishlistService(self._wishlist_repo)
+        self.favorites_service = FavoritesService(self._favorites_repo)
+
+        # ----------------------------------------------------------------
+        # Backward-compatible attributes — point directly at the repo's
+        # in-memory data object so mutations via self.xxx[key] = val
+        # are immediately visible to the corresponding repository and service.
+        # ----------------------------------------------------------------
+        self.history: List[str] = self._history_repo.data
+        self.favorites: List[str] = self._favorites_repo.data
+        self.reviews: Dict[str, Dict] = self._review_repo.data
+        self.tags: Dict[str, List[str]] = self._tag_repo.data
+        self.schedule: Dict[str, Dict] = self._schedule_repo.data
+        self.playlists: Dict[str, List[str]] = self._playlist_repo.data
+        self.backlog: Dict[str, str] = self._backlog_repo.data
+        self.budget: Dict[str, Dict] = self._budget_repo.data
+        self.wishlist: Dict[str, Dict] = self._wishlist_repo.data
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -1037,6 +1123,237 @@ class GamePicker:
                 result.append(entry)
         return result
 
+    # ------------------------------------------------------------------
+    # Budget tracking
+    # ------------------------------------------------------------------
+
+    def load_budget(self) -> Dict[str, Dict]:
+        """Load budget data from disk.
+
+        Returns a dict mapping game_id -> {price, currency, purchase_date, notes}.
+        """
+        if os.path.exists(self.BUDGET_FILE):
+            try:
+                with open(self.BUDGET_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
+
+    def save_budget(self) -> None:
+        """Persist budget data to disk (atomic write)."""
+        try:
+            _atomic_write_json(self.BUDGET_FILE, self.budget)
+        except IOError as e:
+            self._log.warning("Could not save budget: %s", e)
+
+    def set_game_budget(self, game_id: str, price: float,
+                        currency: str = 'USD',
+                        purchase_date: Optional[str] = None,
+                        notes: str = '') -> bool:
+        """Record or update the purchase price for a game.
+
+        Args:
+            game_id:       Composite game ID (e.g. 'steam:620').
+            price:         Amount paid (0 = free / Game Pass / gift).
+            currency:      ISO 4217 currency code (default 'USD').
+            purchase_date: Optional date string (e.g. '2024-12-25').
+            notes:         Optional free-text note (e.g. 'Steam sale 80% off').
+
+        Returns:
+            True on success, False if price is negative.
+        """
+        if price < 0:
+            return False
+        entry: Dict = {
+            'game_id': game_id,
+            'price': round(float(price), 2),
+            'currency': currency.strip().upper() or 'USD',
+            'purchase_date': purchase_date or '',
+            'notes': notes,
+        }
+        self.budget[game_id] = entry
+        self.save_budget()
+        return True
+
+    def remove_game_budget(self, game_id: str) -> bool:
+        """Remove budget entry for a game.
+
+        Returns:
+            True if an entry was removed, False if not found.
+        """
+        if game_id not in self.budget:
+            return False
+        del self.budget[game_id]
+        self.save_budget()
+        return True
+
+    def get_budget_summary(self) -> Dict:
+        """Return an aggregated budget summary.
+
+        Returns::
+
+            {
+              "total_spent": 142.50,
+              "currency_breakdown": {"USD": 142.50},
+              "game_count": 7,
+              "entries": [...]   # list of all budget entries enriched with game names
+            }
+
+        Only entries whose currency matches the most common currency are
+        included in ``total_spent`` (mixed-currency totals are meaningless).
+        """
+        entries = []
+        currency_totals: Dict[str, float] = {}
+        game_name_map = {g.get('game_id'): g.get('name', '') for g in self.games}
+
+        for game_id, entry in self.budget.items():
+            enriched = dict(entry)
+            enriched['name'] = game_name_map.get(game_id, game_id)
+            entries.append(enriched)
+            cur = entry.get('currency', 'USD')
+            currency_totals[cur] = round(currency_totals.get(cur, 0.0) + entry.get('price', 0.0), 2)
+
+        # Primary currency = the one with the highest total spend
+        primary_currency = max(currency_totals, key=currency_totals.get) if len(currency_totals) > 0 else 'USD'
+        total_spent = currency_totals.get(primary_currency, 0.0)
+
+        return {
+            'total_spent': round(total_spent, 2),
+            'primary_currency': primary_currency,
+            'currency_breakdown': currency_totals,
+            'game_count': len(self.budget),
+            'entries': sorted(entries, key=lambda e: e.get('purchase_date', ''), reverse=True),
+        }
+
+    # ------------------------------------------------------------------
+    # Wishlist & sale alerts
+    # ------------------------------------------------------------------
+
+    def load_wishlist(self) -> Dict[str, Dict]:
+        """Load wishlist data from disk.
+
+        Returns a dict mapping game_id -> entry dict with at least
+        ``game_id``, ``name``, ``platform``, ``added_date``.
+        Optional fields: ``target_price`` (float), ``notes`` (str).
+        """
+        if os.path.exists(self.WISHLIST_FILE):
+            try:
+                with open(self.WISHLIST_FILE, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
+
+    def save_wishlist(self) -> None:
+        """Persist wishlist to disk (atomic write)."""
+        try:
+            _atomic_write_json(self.WISHLIST_FILE, self.wishlist)
+        except IOError as e:
+            self._log.warning("Could not save wishlist: %s", e)
+
+    def add_to_wishlist(self, game_id: str, name: str,
+                        platform: str = 'steam',
+                        target_price: Optional[float] = None,
+                        notes: str = '') -> bool:
+        """Add or update a game in the wishlist.
+
+        Args:
+            game_id:      Composite game ID (e.g. ``'steam:620'``).
+            name:         Human-readable game name.
+            platform:     Platform name (default ``'steam'``).
+            target_price: Alert threshold in USD (or None to alert on any sale).
+            notes:        Optional free-text note.
+
+        Returns:
+            True if added successfully, False if target_price is negative.
+        """
+        if target_price is not None and target_price < 0:
+            return False
+        entry: Dict = {
+            'game_id': game_id,
+            'name': name,
+            'platform': platform,
+            'added_date': datetime.date.today().strftime('%Y-%m-%d'),
+            'target_price': target_price,
+            'notes': notes,
+        }
+        self.wishlist[game_id] = entry
+        self.save_wishlist()
+        return True
+
+    def remove_from_wishlist(self, game_id: str) -> bool:
+        """Remove a game from the wishlist.
+
+        Returns:
+            True if removed, False if game was not in the wishlist.
+        """
+        if game_id not in self.wishlist:
+            return False
+        del self.wishlist[game_id]
+        self.save_wishlist()
+        return True
+
+    def check_wishlist_sales(self) -> List[Dict]:
+        """Check Steam prices for all wishlist games and return sale items.
+
+        For each Steam wishlist entry this calls
+        :meth:`SteamAPIClient.get_price_overview` and checks whether:
+
+        * The current Steam price is **discounted** (``discount_percent > 0``), OR
+        * The current price is at or below the user-specified ``target_price``.
+
+        Non-Steam entries or games where price data is unavailable are skipped.
+
+        Returns:
+            List of dicts, each containing the wishlist entry enriched with
+            ``current_price_usd`` (float), ``discount_percent`` (int),
+            ``original_price_usd`` (float), and ``sale_reason`` (str).
+        """
+        if not self.steam_client or not isinstance(self.steam_client, SteamAPIClient):
+            return []
+
+        sales: List[Dict] = []
+        for game_id, entry in self.wishlist.items():
+            if entry.get('platform', 'steam') != 'steam':
+                continue
+            # Extract the numeric app_id from the composite game_id
+            raw_id = game_id
+            if ':' in raw_id:
+                raw_id = raw_id.split(':', 1)[1]
+            price_data = self.steam_client.get_price_overview(raw_id)
+            if not price_data:
+                continue
+
+            discount = price_data.get('discount_percent', 0)
+            final_cents = price_data.get('final', 0)
+            initial_cents = price_data.get('initial', 0)
+            current_price = round(final_cents / 100, 2)
+            original_price = round(initial_cents / 100, 2)
+            target = entry.get('target_price')
+
+            on_sale = discount > 0
+            below_target = (target is not None and current_price <= target)
+
+            if on_sale or below_target:
+                reasons = []
+                if on_sale:
+                    reasons.append(f"{discount}% off ({price_data.get('final_formatted', '')})")
+                if below_target:
+                    reasons.append(f"at or below your target of ${target:.2f}")
+                result = dict(entry)
+                result.update({
+                    'current_price_usd': current_price,
+                    'original_price_usd': original_price,
+                    'discount_percent': discount,
+                    'formatted_price': price_data.get('final_formatted', ''),
+                    'formatted_original': price_data.get('initial_formatted', ''),
+                    'sale_reason': ' and '.join(reasons),
+                })
+                sales.append(result)
+
+        return sales
+
     def get_recommendations(self, count: int = 10) -> List[Dict]:
         """Recommend games from the user's library based on playtime and genre patterns.
 
@@ -1291,13 +1608,16 @@ class GamePicker:
                 data = json.load(f)
 
             if isinstance(data, dict) and 'history' in data:
-                self.history = data['history']
+                new_history = data['history']
             elif isinstance(data, list):
-                self.history = data
+                new_history = data
             else:
                 print(f"{Fore.RED}Invalid history file format")
                 return
 
+            # Mutate in-place to maintain the shared reference with the repo
+            self.history.clear()
+            self.history.extend(new_history)
             self.save_history()
             print(f"{Fore.GREEN}History imported from {filepath}")
         except (IOError, json.JSONDecodeError) as e:
@@ -1820,7 +2140,7 @@ class GamePicker:
             elif choice == '3':
                 confirm = input(f"{Fore.RED}Clear all favorites? (y/n): {Fore.WHITE}").strip().lower()
                 if confirm == 'y':
-                    self.favorites = []
+                    self.favorites.clear()
                     self.save_favorites()
                     print(f"{Fore.GREEN}All favorites cleared!")
             else:

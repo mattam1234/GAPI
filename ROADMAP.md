@@ -70,9 +70,9 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] **Friend Activity** - See what friends are playing (Steam API)
 
 #### Social Features
-- [ ] **Discord Rich Presence** - Show currently picked game in Discord status
+- [x] **Discord Rich Presence** - Show currently picked game in Discord status
 - [x] **Game Night Scheduler** - Schedule game sessions with friends
-- [ ] **Voting System Improvements** - Multiple voting rounds, ranked choice
+- [x] **Voting System Improvements** - Multiple voting rounds, ranked choice (Instant Runoff Voting)
 - [x] **Game Reviews** - Add personal notes/reviews to games
 - [x] **Export game recommendations** - Export library / favorites as CSV
 
@@ -88,10 +88,10 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Machine Learning Recommendations** - ML model trained on your playing habits
 - [ ] **Calendar Integration** - Sync game sessions with calendar apps
 - [ ] **Twitch Integration** - Pick games based on what's trending on Twitch
-- [ ] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
-- [ ] **Game Backlog Manager** - Prioritize and track game completion
-- [ ] **Budget Tracking** - Track game purchases and library value
-- [ ] **Sale Alerts** - Notify when wishlist games go on sale
+- [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
+- [x] **Game Backlog Manager** - Prioritize and track game completion
+- [x] **Budget Tracking** - Track game purchases and library value
+- [x] **Sale Alerts** - Notify when wishlist games go on sale
 
 #### API & Integrations
 - [x] **Public API** - RESTful API for third-party integrations (Flask REST API fully implemented)
@@ -103,31 +103,32 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### Long-term Backlog Features
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
 - [x] **Game Backlog Manager** - Track want_to_play / playing / completed / dropped per game
-- [ ] **Budget Tracking** - Track game purchases and library value
-- [ ] **Sale Alerts** - Notify when wishlist games go on sale
+- [x] **Budget Tracking** - Track game purchases and library value
+- [x] **Sale Alerts** - Notify when wishlist games go on sale
 
 ## 🔧 Technical Improvements
 
 ### Code Quality
 - [x] Comprehensive test suite (unit, integration, e2e)
-- [ ] CI/CD pipeline with automated testing
-- [ ] Code coverage reports (target: 80%+)
-- [ ] Type checking with mypy
-- [ ] Automated dependency updates (Dependabot)
+- [x] CI/CD pipeline with automated testing (GitHub Actions)
+- [x] Code coverage reports (target: 80%+)
+- [x] Type checking with mypy
+- [x] Automated dependency updates (Dependabot)
 - [ ] Security scanning (CodeQL, Snyk)
 
 ### Architecture
 - [ ] Plugin system for custom platforms
-- [ ] Database support (SQLite/PostgreSQL) for better data management
+- [x] Database support (SQLite/PostgreSQL) for better data management
+- [x] Service/Repository layer — business logic fully separated from Flask UI layer
 - [ ] Microservices architecture for scalability
 - [ ] GraphQL API alongside REST
 - [ ] WebSocket support for real-time updates
 
 ### Documentation
-- [ ] API documentation (Swagger/OpenAPI)
+- [x] API documentation (Swagger/OpenAPI) — `GET /api/openapi.json` + `GET /api/docs`
 - [ ] Video tutorials
 - [ ] Interactive demo environment
-- [ ] Localization (i18n) - Support for multiple languages
+- [x] Localization (i18n) - Support for multiple languages
 - [ ] Developer guide for contributors
 
 ## 💡 Community Requested Features

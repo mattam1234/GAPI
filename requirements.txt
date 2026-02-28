@@ -17,3 +17,7 @@ galaxy.plugin.api>=0.69,<0.70
 
 # Optional: HowLongToBeat completion-time data
 howlongtobeatpy>=1.0.0
+
+# Optional: Discord Rich Presence (shows currently picked game in Discord status)
+# Install with: pip install pypresence
+pypresence>=4.3.0
