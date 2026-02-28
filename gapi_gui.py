@@ -36,6 +36,39 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+# DB-backed services — instantiated lazily after database import so the
+# module can still start without a database being present.
+try:
+    from app.services import (
+        NotificationService, ChatService, FriendService,
+        LeaderboardService, PluginService, AppSettingsService,
+        IgnoredGamesService, LibraryService, DBFavoritesService, UserService,
+        AchievementService,
+    )
+    _notification_service = NotificationService(database) if DB_AVAILABLE else None
+    _chat_service = ChatService(database) if DB_AVAILABLE else None
+    _friend_service = FriendService(database) if DB_AVAILABLE else None
+    _leaderboard_service = LeaderboardService(database) if DB_AVAILABLE else None
+    _plugin_service = PluginService(database) if DB_AVAILABLE else None
+    _app_settings_service = AppSettingsService(database) if DB_AVAILABLE else None
+    _ignored_games_service = IgnoredGamesService(database) if DB_AVAILABLE else None
+    _library_service = LibraryService(database) if DB_AVAILABLE else None
+    _db_favorites_service = DBFavoritesService(database) if DB_AVAILABLE else None
+    _user_service = UserService(database) if DB_AVAILABLE else None
+    _achievement_service = AchievementService(database) if DB_AVAILABLE else None
+except Exception:
+    _notification_service = None
+    _chat_service = None
+    _friend_service = None
+    _leaderboard_service = None
+    _plugin_service = None
+    _app_settings_service = None
+    _ignored_games_service = None
+    _library_service = None
+    _db_favorites_service = None
+    _user_service = None
+    _achievement_service = None
+
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
     _discord_presence = _DiscordPresence()
@@ -365,7 +398,10 @@ class LibrarySyncScheduler:
         try:
             # Get all users
             db = database.SessionLocal()
-            all_users = database.get_all_users(db)
+            if _user_service:
+                all_users = _user_service.get_all(db)
+            else:
+                all_users = database.get_all_users(db)
             db.close()
             
             for user in all_users:
@@ -858,7 +894,10 @@ def _collect_available_platforms(usernames: List[str]) -> List[str]:
         try:
             db = database.SessionLocal()
             for username in usernames_set:
-                cached_games = database.get_cached_library(db, username)
+                if _library_service:
+                    cached_games = _library_service.get_cached(db, username)
+                else:
+                    cached_games = database.get_cached_library(db, username)
                 for game in cached_games or []:
                     platform = str(game.get('platform', '')).strip().lower()
                     if platform:
@@ -942,34 +981,39 @@ def sync_library_to_db(username: str, force: bool = False) -> Tuple[bool, str]:
         
         # Check cache age unless forced
         db = database.SessionLocal()
-        cache_age = database.get_library_cache_age(db, username)
-        
-        # Don't sync if cache is less than 1 hour old (unless forced)
-        if not force and cache_age is not None and cache_age < 3600:
+        try:
+            if _library_service:
+                cache_age = _library_service.get_cache_age(db, username)
+            else:
+                cache_age = database.get_library_cache_age(db, username)
+
+            # Don't sync if cache is less than 1 hour old (unless forced)
+            if not force and cache_age is not None and cache_age < 3600:
+                gui_logger.debug(f"Library cache for {username} is fresh ({cache_age:.0f}s old), skipping sync")
+                return True, f"Cache is fresh ({int(cache_age/60)}m old)"
+
+            # Fetch library from Steam API
+            base_config = load_base_config()
+            steam_api_key = base_config.get('steam_api_key', '')
+
+            if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
+                return False, "Steam API key not configured"
+
+            gui_logger.info(f"Syncing library for {username} from Steam API...")
+            steam_client = gapi.SteamAPIClient(steam_api_key)
+            games = steam_client.get_owned_games(steam_id)
+
+            if not games:
+                return False, "Failed to fetch games from Steam API"
+
+            # Cache the games in database
+            if _library_service:
+                count = _library_service.cache(db, username, games)
+            else:
+                count = database.cache_user_library(db, username, games)
+        finally:
             db.close()
-            gui_logger.debug(f"Library cache for {username} is fresh ({cache_age:.0f}s old), skipping sync")
-            return True, f"Cache is fresh ({int(cache_age/60)}m old)"
-        
-        # Fetch library from Steam API
-        base_config = load_base_config()
-        steam_api_key = base_config.get('steam_api_key', '')
-        
-        if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
-            db.close()
-            return False, "Steam API key not configured"
-        
-        gui_logger.info(f"Syncing library for {username} from Steam API...")
-        steam_client = gapi.SteamAPIClient(steam_api_key)
-        games = steam_client.get_owned_games(steam_id)
-        
-        if not games:
-            db.close()
-            return False, "Failed to fetch games from Steam API"
-        
-        # Cache the games in database
-        count = database.cache_user_library(db, username, games)
-        db.close()
-        
+
         gui_logger.info(f"Synced {count} games for {username}")
         return True, f"Synced {count} games"
         
@@ -1078,8 +1122,13 @@ def api_setup_status():
         return jsonify({'needs_setup': False, 'error': 'Database not available'}), 503
     try:
         db = database.SessionLocal()
-        count = database.get_user_count(db)
-        db.close()
+        try:
+            if _user_service:
+                count = _user_service.get_count(db)
+            else:
+                count = database.get_user_count(db)
+        finally:
+            db.close()
         return jsonify({'needs_setup': count == 0})
     except Exception as e:
         gui_logger.exception('Setup status check failed: %s', e)
@@ -1101,14 +1150,23 @@ def api_setup_initial_admin():
 
     try:
         db = database.SessionLocal()
-        count = database.get_user_count(db)
-        if count > 0:
-            db.close()
-            return jsonify({'error': 'Users already exist'}), 409
+        try:
+            if _user_service:
+                count = _user_service.get_count(db)
+            else:
+                count = database.get_user_count(db)
+            if count > 0:
+                return jsonify({'error': 'Users already exist'}), 409
 
-        password_hash = user_manager.hash_password(password)
-        user = database.create_or_update_user(db, username, password_hash, '', '', '', role='admin', roles=['admin'])
-        db.close()
+            password_hash = user_manager.hash_password(password)
+            if _user_service:
+                user = _user_service.create_admin(db, username, password_hash)
+            else:
+                user = database.create_or_update_user(
+                    db, username, password_hash, '', '', '',
+                    role='admin', roles=['admin'])
+        finally:
+            db.close()
 
         if user:
             return jsonify({'message': 'Initial admin created'}), 201
@@ -1147,16 +1205,21 @@ def api_auth_login():
     if DB_AVAILABLE:
         try:
             db = database.SessionLocal()
-            db_user = database.get_user_by_username(db, username)
-            if db_user:
-                # override with DB values when present
-                if getattr(db_user, 'steam_id', None):
-                    user_ids['steam_id'] = db_user.steam_id
-                if getattr(db_user, 'epic_id', None):
-                    user_ids['epic_id'] = db_user.epic_id
-                if getattr(db_user, 'gog_id', None):
-                    user_ids['gog_id'] = db_user.gog_id
-            db.close()
+            try:
+                if _user_service:
+                    db_ids = _user_service.get_platform_ids(db, username)
+                else:
+                    db_user = database.get_user_by_username(db, username)
+                    db_ids = {
+                        'steam_id': getattr(db_user, 'steam_id', None) or '',
+                        'epic_id': getattr(db_user, 'epic_id', None) or '',
+                        'gog_id': getattr(db_user, 'gog_id', None) or '',
+                    } if db_user else {}
+            finally:
+                db.close()
+            for key in ('steam_id', 'epic_id', 'gog_id'):
+                if db_ids.get(key):
+                    user_ids[key] = db_ids[key]
         except Exception as e:
             gui_logger.exception('Failed to read user IDs from DB for %s: %s', username, e)
     
@@ -1271,15 +1334,21 @@ def api_auth_get_ids():
     if DB_AVAILABLE:
         try:
             db = database.SessionLocal()
-            db_user = database.get_user_by_username(db, username)
-            if db_user:
-                if getattr(db_user, 'steam_id', None):
-                    user_ids['steam_id'] = db_user.steam_id
-                if getattr(db_user, 'epic_id', None):
-                    user_ids['epic_id'] = db_user.epic_id
-                if getattr(db_user, 'gog_id', None):
-                    user_ids['gog_id'] = db_user.gog_id
-            db.close()
+            try:
+                if _user_service:
+                    db_ids = _user_service.get_platform_ids(db, username)
+                else:
+                    db_user = database.get_user_by_username(db, username)
+                    db_ids = {
+                        'steam_id': getattr(db_user, 'steam_id', None) or '',
+                        'epic_id': getattr(db_user, 'epic_id', None) or '',
+                        'gog_id': getattr(db_user, 'gog_id', None) or '',
+                    } if db_user else {}
+            finally:
+                db.close()
+            for key in ('steam_id', 'epic_id', 'gog_id'):
+                if db_ids.get(key):
+                    user_ids[key] = db_ids[key]
         except Exception as e:
             gui_logger.exception('Failed to read IDs from DB for %s: %s', username, e)
     return jsonify(user_ids)
@@ -1379,8 +1448,11 @@ def api_pick_game():
                 db = None
                 try:
                     db = database.SessionLocal()
-                    cached_games = database.get_cached_library(db, username)
-                    
+                    if _library_service:
+                        cached_games = _library_service.get_cached(db, username)
+                    else:
+                        cached_games = database.get_cached_library(db, username)
+
                     if cached_games:
                         # Convert database format to picker format
                         picker.games = [
@@ -1430,7 +1502,10 @@ def api_pick_game():
             db = None
             try:
                 db = database.SessionLocal()
-                ignored_games = database.get_ignored_games(db, username)
+                if _ignored_games_service:
+                    ignored_games = _ignored_games_service.get_ignored(db, username)
+                else:
+                    ignored_games = database.get_ignored_games(db, username)
                 if ignored_games:
                     if exclude_game_ids:
                         exclude_game_ids.extend(ignored_games)
@@ -1558,7 +1633,10 @@ def api_pick_game():
                                     try:
                                         db = database.SessionLocal()
                                         platform = game.get('platform', 'steam')
-                                        database.update_game_details_cache(db, app_id, platform, response)
+                                        if _library_service:
+                                            _library_service.update_game_details(db, app_id, platform, response)
+                                        else:
+                                            database.update_game_details_cache(db, app_id, platform, response)
                                     except Exception as cache_err:
                                         gui_logger.debug(f"Failed to cache details: {cache_err}")
                                     finally:
@@ -1619,40 +1697,46 @@ def api_game_details(app_id):
     """
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     db = None
     try:
         db = database.SessionLocal()
         global current_user
-        
+
         with current_user_lock:
             username = current_user
-        
+
         # Determine platform: check user's library for this game
         platform = 'steam'  # Default to steam
         try:
-            user = database.get_user_by_username(db, username)
-            if user:
-                lib_entry = db.query(database.GameLibraryCache).filter(
-                    database.GameLibraryCache.user_id == user.id,
-                    database.GameLibraryCache.app_id == str(app_id)
-                ).first()
-                if lib_entry:
-                    platform = lib_entry.platform or 'steam'
+            if _library_service:
+                platform = _library_service.get_game_platform(db, username, app_id)
+            else:
+                user = database.get_user_by_username(db, username)
+                if user:
+                    lib_entry = db.query(database.GameLibraryCache).filter(
+                        database.GameLibraryCache.user_id == user.id,
+                        database.GameLibraryCache.app_id == str(app_id)
+                    ).first()
+                    if lib_entry:
+                        platform = lib_entry.platform or 'steam'
         except Exception as e:
             gui_logger.debug(f"Could not determine platform from library: {e}")
-        
+
         # Step 1: Check database cache first
-        cached_details = database.get_game_details_cache(db, app_id, platform, max_age_hours=1)
-        
+        if _library_service:
+            cached_details = _library_service.get_game_details(db, app_id, platform, max_age_hours=1)
+        else:
+            cached_details = database.get_game_details_cache(db, app_id, platform, max_age_hours=1)
+
         if cached_details:
             # Cache is fresh, return immediately
             return jsonify({**cached_details, 'source': 'cache', 'app_id': app_id, 'platform': platform})
-        
+
         # Step 2: Cache is missing or stale. Try to fetch from API
         api_details = None
         global picker
-        
+
         if picker:
             try:
                 with picker_lock:
@@ -1660,29 +1744,29 @@ def api_game_details(app_id):
                         api_details = picker.steam_client.get_game_details(app_id)
             except Exception as e:
                 gui_logger.debug(f"Could not fetch from Steam API: {e}")
-        
+
         if api_details:
             # Step 3: Format API response
             response = {'app_id': app_id, 'platform': platform, 'source': 'api', 'steam_integration': True}
-            
+
             if 'header_image' in api_details:
                 response['header_image'] = api_details['header_image']
-            
+
             if 'capsule_image' in api_details:
                 response['capsule_image'] = api_details['capsule_image']
-            
+
             if 'short_description' in api_details:
                 response['description'] = api_details['short_description']
-            
+
             if 'genres' in api_details:
                 response['genres'] = [g['description'] for g in api_details['genres']]
-            
+
             if 'release_date' in api_details:
                 response['release_date'] = api_details['release_date'].get('date', 'Unknown')
-            
+
             if 'metacritic' in api_details:
                 response['metacritic_score'] = api_details['metacritic'].get('score')
-            
+
             # Try to get ProtonDB rating
             try:
                 with picker_lock:
@@ -1692,29 +1776,38 @@ def api_game_details(app_id):
                             response['protondb'] = protondb
             except Exception:
                 pass  # ProtonDB is best-effort, don't fail on it
-            
+
             # Update cache with new data (include platform)
-            database.update_game_details_cache(db, app_id, platform, response)
+            if _library_service:
+                _library_service.update_game_details(db, app_id, platform, response)
+            else:
+                database.update_game_details_cache(db, app_id, platform, response)
             return jsonify(response)
-        
+
         # Step 4: No API data available. Return last cached data even if stale, or minimal response
         try:
-            last_cache = db.query(database.GameDetailsCache).filter(
-                database.GameDetailsCache.app_id == str(app_id),
-                database.GameDetailsCache.platform == platform
-            ).first()
-            
-            if last_cache:
-                import json
+            if _library_service:
+                stale_details = _library_service.get_stale_game_details(db, app_id, platform)
+            else:
+                last_cache = db.query(database.GameDetailsCache).filter(
+                    database.GameDetailsCache.app_id == str(app_id),
+                    database.GameDetailsCache.platform == platform
+                ).first()
+                stale_details = None
+                if last_cache:
+                    import json
+                    stale_details = json.loads(last_cache.details_json)
+
+            if stale_details:
                 return jsonify({
-                    **json.loads(last_cache.details_json),
+                    **stale_details,
                     'source': 'cache_stale',
                     'app_id': app_id,
                     'platform': platform
                 })
         except Exception as e:
             gui_logger.debug(f"Could not get last cache: {e}")
-        
+
         # No cache or API data - return minimal response
         return jsonify({
             'app_id': app_id,
@@ -1723,11 +1816,11 @@ def api_game_details(app_id):
             'source': 'none',
             'message': 'Steam integration not configured for this user'
         })
-    
+
     except Exception as e:
         gui_logger.exception(f"Error getting game details: {e}")
         return jsonify({'error': f'Failed to load game details: {str(e)}'}), 500
-    
+
     finally:
         if db:
             try:
@@ -1742,31 +1835,37 @@ def api_toggle_favorite(app_id):
     """Add or remove a game from favorites"""
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not username:
         return jsonify({'error': 'Not authenticated'}), 401
-    
+
     try:
         db = database.SessionLocal()
-        
-        if request.method == 'POST':
-            success = database.add_favorite(db, username, str(app_id))
-            db.close()
-            if success:
-                return jsonify({'success': True, 'action': 'added'})
+        try:
+            if request.method == 'POST':
+                if _db_favorites_service:
+                    success = _db_favorites_service.add(db, username, str(app_id))
+                else:
+                    success = database.add_favorite(db, username, str(app_id))
+                if success:
+                    return jsonify({'success': True, 'action': 'added'})
+                else:
+                    return jsonify({'error': 'Failed to add favorite'}), 500
             else:
-                return jsonify({'error': 'Failed to add favorite'}), 500
-        else:
-            success = database.remove_favorite(db, username, str(app_id))
+                if _db_favorites_service:
+                    success = _db_favorites_service.remove(db, username, str(app_id))
+                else:
+                    success = database.remove_favorite(db, username, str(app_id))
+                if success:
+                    return jsonify({'success': True, 'action': 'removed'})
+                else:
+                    return jsonify({'error': 'Failed to remove favorite'}), 500
+        finally:
             db.close()
-            if success:
-                return jsonify({'success': True, 'action': 'removed'})
-            else:
-                return jsonify({'error': 'Failed to remove favorite'}), 500
     except Exception as e:
         gui_logger.error(f"Error toggling favorite: {e}")
         return jsonify({'error': 'Failed to toggle favorite'}), 500
@@ -1779,7 +1878,7 @@ def api_library():
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not ensure_db_available():
         # Fallback to demo games if DB not available
         return jsonify({'games': [{
@@ -1788,73 +1887,75 @@ def api_library():
             'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
             'is_favorite': False
         } for g in DEMO_GAMES]})
-    
+
     try:
         db = database.SessionLocal()
-        
-        # Get cached library
-        cached_games = database.get_cached_library(db, username)
-        
-        # If cache is empty or old, trigger background sync
-        if not cached_games:
+        try:
+            # Get cached library
+            if _library_service:
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cached_games = database.get_cached_library(db, username)
+
+            # If cache is empty, trigger background sync and return early
+            if not cached_games:
+                def background_sync():
+                    success, msg = sync_library_to_db(username, force=True)
+                    gui_logger.info(f"Background library sync for {username}: {msg}")
+                threading.Thread(target=background_sync, daemon=True).start()
+                return jsonify({
+                    'games': [],
+                    'message': 'Library is being loaded from Steam. Please refresh in a few seconds.'
+                })
+
+            # Check if cache is old (>6 hours) and trigger background refresh
+            if _library_service:
+                cache_age = _library_service.get_cache_age(db, username)
+            else:
+                cache_age = database.get_library_cache_age(db, username)
+            if cache_age and cache_age > 21600:  # 6 hours
+                def background_sync():
+                    success, msg = sync_library_to_db(username, force=False)
+                    gui_logger.info(f"Background library refresh for {username}: {msg}")
+                threading.Thread(target=background_sync, daemon=True).start()
+
+            search = request.args.get('search', '').lower()
+
+            # Get user's favorites from database
+            if _db_favorites_service:
+                favorite_ids = set(str(fav) for fav in _db_favorites_service.get_all(db, username))
+            else:
+                favorite_ids = set(str(fav) for fav in database.get_user_favorites(db, username))
+
+            # Filter and format games
+            games = []
+            for game in cached_games:
+                name = game.get('name', 'Unknown')
+                if search and search not in name.lower():
+                    continue
+
+                app_id = game.get('app_id')
+                try:
+                    app_id_int = int(app_id) if app_id else None
+                except (ValueError, TypeError):
+                    app_id_int = None
+
+                games.append({
+                    'app_id': app_id_int,
+                    'name': name,
+                    'playtime_hours': round(game.get('playtime_hours', 0), 1),
+                    'is_favorite': str(app_id) in favorite_ids if app_id else False,
+                    'platform': game.get('platform', 'steam'),
+                    'last_played': game.get('last_played').isoformat() if game.get('last_played') else None
+                })
+        finally:
             db.close()
-            # Trigger sync in background
-            def background_sync():
-                success, msg = sync_library_to_db(username, force=True)
-                gui_logger.info(f"Background library sync for {username}: {msg}")
-            
-            threading.Thread(target=background_sync, daemon=True).start()
-            
-            # Return empty library with message to refresh
-            return jsonify({
-                'games': [],
-                'message': 'Library is being loaded from Steam. Please refresh in a few seconds.'
-            })
-        
-        # Check if cache is old (>6 hours) and trigger background refresh
-        cache_age = database.get_library_cache_age(db, username)
-        if cache_age and cache_age > 21600:  # 6 hours
-            # Trigger background refresh but return cached data
-            def background_sync():
-                success, msg = sync_library_to_db(username, force=False)
-                gui_logger.info(f"Background library refresh for {username}: {msg}")
-            
-            threading.Thread(target=background_sync, daemon=True).start()
-        
-        search = request.args.get('search', '').lower()
-        
-        # Get user's favorites from database
-        favorite_ids = set(str(fav) for fav in database.get_user_favorites(db, username))
-        
-        # Filter and format games
-        games = []
-        for game in cached_games:
-            name = game.get('name', 'Unknown')
-            if search and search not in name.lower():
-                continue
-            
-            app_id = game.get('app_id')
-            try:
-                app_id_int = int(app_id) if app_id else None
-            except (ValueError, TypeError):
-                app_id_int = None
-            
-            games.append({
-                'app_id': app_id_int,
-                'name': name,
-                'playtime_hours': round(game.get('playtime_hours', 0), 1),
-                'is_favorite': str(app_id) in favorite_ids if app_id else False,
-                'platform': game.get('platform', 'steam'),
-                'last_played': game.get('last_played').isoformat() if game.get('last_played') else None
-            })
-        
-        db.close()
-        
+
         return jsonify({
             'games': games,
             'cache_age_minutes': int(cache_age / 60) if cache_age else 0
         })
-        
+
     except Exception as e:
         gui_logger.exception(f"Error loading library from database: {e}")
         # Fallback to demo games on error
@@ -1931,18 +2032,24 @@ def api_sync_status():
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     try:
         db = database.SessionLocal()
-        cache_age = database.get_library_cache_age(db, username)
-        cached_games = database.get_cached_library(db, username)
-        db.close()
-        
+        try:
+            if _library_service:
+                cache_age = _library_service.get_cache_age(db, username)
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cache_age = database.get_library_cache_age(db, username)
+                cached_games = database.get_cached_library(db, username)
+        finally:
+            db.close()
+
         last_sync = sync_scheduler.last_sync_times.get(username)
-        
+
         return jsonify({
             'last_sync': last_sync.isoformat() if last_sync else None,
             'cache_age_hours': round(cache_age / 3600, 2) if cache_age else None,
@@ -2022,22 +2129,30 @@ def api_favorites():
     """Get all favorite games"""
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not username:
         return jsonify({'error': 'Not authenticated'}), 401
-    
+
     try:
         db = database.SessionLocal()
-        favorite_ids = database.get_user_favorites(db, username)
-        
-        # Get cached library to look up game details
-        cached_games = database.get_cached_library(db, username)
-        db.close()
-        
+        try:
+            if _db_favorites_service:
+                favorite_ids = _db_favorites_service.get_all(db, username)
+            else:
+                favorite_ids = database.get_user_favorites(db, username)
+
+            # Get cached library to look up game details
+            if _library_service:
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cached_games = database.get_cached_library(db, username)
+        finally:
+            db.close()
+
         favorites = []
         for app_id in favorite_ids:
             game = next((g for g in cached_games if str(g.get('app_id')) == str(app_id)), None)
@@ -2053,7 +2168,7 @@ def api_favorites():
                     'name': f'App ID {app_id} (Not in library)',
                     'playtime_hours': 0
                 })
-        
+
         return jsonify({'favorites': favorites})
     except Exception as e:
         gui_logger.error(f"Error loading favorites: {e}")
@@ -2066,17 +2181,25 @@ def api_stats():
     """Get library statistics from database cache"""
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     try:
         db = database.SessionLocal()
-        cached_games = database.get_cached_library(db, username)
-        favorite_count = len(database.get_user_favorites(db, username))
-        db.close()
-        
+        try:
+            if _library_service:
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cached_games = database.get_cached_library(db, username)
+            if _db_favorites_service:
+                favorite_count = len(_db_favorites_service.get_all(db, username))
+            else:
+                favorite_count = len(database.get_user_favorites(db, username))
+        finally:
+            db.close()
+
         if not cached_games:
             return jsonify({
                 'total_games': 0,
@@ -2088,18 +2211,18 @@ def api_stats():
                 'favorite_count': favorite_count,
                 'top_games': []
             })
-        
+
         total_games = len(cached_games)
         unplayed = len([g for g in cached_games if g.get('playtime_hours', 0) == 0])
         total_playtime = sum(g.get('playtime_hours', 0) for g in cached_games)
-        
+
         # Top 10 most played
         sorted_by_playtime = sorted(
             cached_games,
             key=lambda g: g.get('playtime_hours', 0),
             reverse=True
         )[:10]
-        
+
         top_games = []
         for game in sorted_by_playtime:
             top_games.append({
@@ -2278,31 +2401,33 @@ def api_users_list():
 def api_get_ignored_games():
     """Get current user's ignored games list"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'ignored_games': []}), 200
-    
+
     try:
         db = database.SessionLocal()
-        user = database.get_user_by_username(db, username)
-        
-        if not user:
-            return jsonify({'ignored_games': []}), 200
-        
-        ignored = [
-            {
-                'app_id': ig.app_id,
-                'game_name': ig.game_name,
-                'reason': ig.reason,
-                'created_at': ig.created_at.isoformat() if ig.created_at else None
-            }
-            for ig in user.ignored_games
-        ]
-        
-        db.close()
+        try:
+            if _ignored_games_service:
+                ignored = _ignored_games_service.get_detailed(db, username)
+            else:
+                user = database.get_user_by_username(db, username)
+                if not user:
+                    return jsonify({'ignored_games': []}), 200
+                ignored = [
+                    {
+                        'app_id': ig.app_id,
+                        'game_name': ig.game_name,
+                        'reason': ig.reason,
+                        'created_at': ig.created_at.isoformat() if ig.created_at else None
+                    }
+                    for ig in user.ignored_games
+                ]
+        finally:
+            db.close()
         return jsonify({'ignored_games': ignored}), 200
     except Exception as e:
         gui_logger.error(f"Error getting ignored games: {e}")
@@ -2314,39 +2439,48 @@ def api_get_ignored_games():
 def api_toggle_ignored_game():
     """Toggle game ignore status for current user"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
-    
+
     data = request.json or {}
     app_id = data.get('app_id')
     game_name = data.get('game_name', '').strip() if isinstance(data.get('game_name'), str) else ''
     reason = data.get('reason', '').strip() if isinstance(data.get('reason'), str) else ''
-    
+
     if not app_id:
         return jsonify({'error': 'app_id required'}), 400
-    
-    # Convert app_id to int
+
+    # Validate app_id is numeric, then normalize to string for consistency
     try:
-        app_id = int(app_id)
+        int(app_id)  # validate it's a valid integer
+        app_id = str(app_id)
     except (ValueError, TypeError):
         return jsonify({'error': 'app_id must be an integer'}), 400
-    
+
     try:
         db = database.SessionLocal()
-        
+
         # Verify user exists in database
-        user = database.get_user_by_username(db, username)
-        if not user:
+        if _user_service:
+            exists = _user_service.user_exists(db, username)
+        else:
+            exists = database.user_exists(db, username)
+        if not exists:
             db.close()
             return jsonify({'error': 'User not found in database'}), 404
-        
-        success = database.toggle_ignore_game(db, username, app_id, game_name, reason)
+
+        if _ignored_games_service:
+            success = _ignored_games_service.toggle(
+                db, username, app_id, game_name=game_name, reason=reason)
+        else:
+            success = database.toggle_ignore_game(db, username, app_id,
+                                                  game_name, reason)
         db.close()
-        
+
         if success:
             return jsonify({'message': f'Game ignore status toggled'}), 200
         else:
@@ -2365,41 +2499,42 @@ def api_toggle_ignored_game():
 def api_get_achievements():
     """Get achievements for current user"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'achievements': []}), 200
-    
+
     try:
         db = database.SessionLocal()
-        user = database.get_user_by_username(db, username)
-        
-        if not user:
-            return jsonify({'achievements': []}), 200
-        
-        # Group achievements by game
-        achievements_by_game = {}
-        for achievement in user.achievements:
-            if achievement.app_id not in achievements_by_game:
-                achievements_by_game[achievement.app_id] = {
-                    'app_id': achievement.app_id,
-                    'game_name': achievement.game_name,
-                    'achievements': []
-                }
-            
-            achievements_by_game[achievement.app_id]['achievements'].append({
-                'achievement_id': achievement.achievement_id,
-                'name': achievement.achievement_name,
-                'description': achievement.achievement_description,
-                'unlocked': achievement.unlocked,
-                'unlock_time': achievement.unlock_time.isoformat() if achievement.unlock_time else None,
-                'rarity': achievement.rarity
-            })
-        
-        db.close()
-        return jsonify({'achievements': list(achievements_by_game.values())}), 200
+        try:
+            if _achievement_service:
+                achievements = _achievement_service.get_all_by_user(db, username)
+            else:
+                user = database.get_user_by_username(db, username)
+                if not user:
+                    return jsonify({'achievements': []}), 200
+                achievements_by_game = {}
+                for achievement in user.achievements:
+                    if achievement.app_id not in achievements_by_game:
+                        achievements_by_game[achievement.app_id] = {
+                            'app_id': achievement.app_id,
+                            'game_name': achievement.game_name,
+                            'achievements': []
+                        }
+                    achievements_by_game[achievement.app_id]['achievements'].append({
+                        'achievement_id': achievement.achievement_id,
+                        'name': achievement.achievement_name,
+                        'description': achievement.achievement_description,
+                        'unlocked': achievement.unlocked,
+                        'unlock_time': achievement.unlock_time.isoformat() if achievement.unlock_time else None,
+                        'rarity': achievement.rarity
+                    })
+                achievements = list(achievements_by_game.values())
+        finally:
+            db.close()
+        return jsonify({'achievements': achievements}), 200
     except Exception as e:
         gui_logger.error(f"Error getting achievements: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2410,59 +2545,65 @@ def api_get_achievements():
 def api_start_achievement_hunt():
     """Start tracking an achievement hunting session"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
-    
+
     data = request.json or {}
     app_id = data.get('app_id')
     game_name = data.get('game_name', '').strip() if isinstance(data.get('game_name'), str) else ''
     difficulty = data.get('difficulty', 'medium')  # easy, medium, hard, extreme
     target_achievements = data.get('target_achievements', 0)
-    
+
     if not app_id or not game_name:
         return jsonify({'error': 'app_id and game_name required'}), 400
-    
+
     # Convert app_id to int
     try:
         app_id = int(app_id)
     except (ValueError, TypeError):
         return jsonify({'error': 'app_id must be an integer'}), 400
-    
+
     try:
         db = database.SessionLocal()
-        user = database.get_user_by_username(db, username)
-        
-        if not user:
+        try:
+            if _achievement_service:
+                result = _achievement_service.start_hunt(
+                    db, username, app_id, game_name,
+                    difficulty=difficulty,
+                    target_achievements=target_achievements)
+            else:
+                user = database.get_user_by_username(db, username)
+                if not user:
+                    return jsonify({'error': 'User not found in database'}), 404
+                hunt = database.AchievementHunt(
+                    user_id=user.id,
+                    app_id=app_id,
+                    game_name=game_name,
+                    difficulty=difficulty,
+                    target_achievements=target_achievements
+                )
+                db.add(hunt)
+                db.commit()
+                result = {
+                    'hunt_id': hunt.id,
+                    'app_id': hunt.app_id,
+                    'game_name': hunt.game_name,
+                    'difficulty': hunt.difficulty,
+                    'target_achievements': hunt.target_achievements,
+                    'unlocked_achievements': hunt.unlocked_achievements,
+                    'progress_percent': hunt.progress_percent,
+                    'status': hunt.status,
+                    'started_at': hunt.started_at.isoformat()
+                }
+        finally:
             db.close()
+
+        if not result:
             return jsonify({'error': 'User not found in database'}), 404
-        
-        hunt = database.AchievementHunt(
-            user_id=user.id,
-            app_id=app_id,
-            game_name=game_name,
-            difficulty=difficulty,
-            target_achievements=target_achievements
-        )
-        db.add(hunt)
-        db.commit()
-        
-        result = {
-            'hunt_id': hunt.id,
-            'app_id': hunt.app_id,
-            'game_name': hunt.game_name,
-            'difficulty': hunt.difficulty,
-            'target_achievements': hunt.target_achievements,
-            'unlocked_achievements': hunt.unlocked_achievements,
-            'progress_percent': hunt.progress_percent,
-            'status': hunt.status,
-            'started_at': hunt.started_at.isoformat()
-        }
-        
-        db.close()
         return jsonify(result), 201
     except Exception as e:
         gui_logger.error(f"Error starting achievement hunt: {e}")
@@ -2474,51 +2615,57 @@ def api_start_achievement_hunt():
 def api_update_achievement_hunt(hunt_id: str):
     """Update achievement hunt progress"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
-    
+
     data = request.json or {}
     unlocked_achievements = data.get('unlocked_achievements')
     status = data.get('status')
-    
+
     try:
         db = database.SessionLocal()
-        hunt = db.query(database.AchievementHunt).filter(database.AchievementHunt.id == hunt_id).first()
-        
-        if not hunt:
+        try:
+            if _achievement_service:
+                result = _achievement_service.update_hunt(
+                    db, hunt_id,
+                    unlocked_achievements=unlocked_achievements,
+                    status=status)
+            else:
+                hunt = db.query(database.AchievementHunt).filter(
+                    database.AchievementHunt.id == hunt_id).first()
+                if not hunt:
+                    return jsonify({'error': 'Hunt not found'}), 404
+                if unlocked_achievements is not None:
+                    hunt.unlocked_achievements = unlocked_achievements
+                    if hunt.target_achievements > 0:
+                        hunt.progress_percent = (unlocked_achievements / hunt.target_achievements) * 100
+                if status:
+                    hunt.status = status
+                    if status == 'completed':
+                        hunt.completed_at = datetime.now(timezone.utc)
+                hunt.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                result = {
+                    'hunt_id': hunt.id,
+                    'app_id': hunt.app_id,
+                    'game_name': hunt.game_name,
+                    'difficulty': hunt.difficulty,
+                    'target_achievements': hunt.target_achievements,
+                    'unlocked_achievements': hunt.unlocked_achievements,
+                    'progress_percent': hunt.progress_percent,
+                    'status': hunt.status,
+                    'started_at': hunt.started_at.isoformat(),
+                    'completed_at': hunt.completed_at.isoformat() if hunt.completed_at else None
+                }
+        finally:
+            db.close()
+
+        if not result:
             return jsonify({'error': 'Hunt not found'}), 404
-        
-        if unlocked_achievements is not None:
-            hunt.unlocked_achievements = unlocked_achievements
-            if hunt.target_achievements > 0:
-                hunt.progress_percent = (unlocked_achievements / hunt.target_achievements) * 100
-        
-        if status:
-            hunt.status = status
-            if status == 'completed':
-                hunt.completed_at = datetime.now(timezone.utc)
-        
-        hunt.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        
-        result = {
-            'hunt_id': hunt.id,
-            'app_id': hunt.app_id,
-            'game_name': hunt.game_name,
-            'difficulty': hunt.difficulty,
-            'target_achievements': hunt.target_achievements,
-            'unlocked_achievements': hunt.unlocked_achievements,
-            'progress_percent': hunt.progress_percent,
-            'status': hunt.status,
-            'started_at': hunt.started_at.isoformat(),
-            'completed_at': hunt.completed_at.isoformat() if hunt.completed_at else None
-        }
-        
-        db.close()
         return jsonify(result), 200
     except Exception as e:
         gui_logger.error(f"Error updating achievement hunt: {e}")
@@ -2609,8 +2756,13 @@ def api_roles_list():
         return jsonify({'error': 'Database not available'}), 503
     try:
         db = database.SessionLocal()
-        roles = database.get_roles(db)
-        db.close()
+        try:
+            if _user_service:
+                roles = _user_service.get_all_roles(db)
+            else:
+                roles = database.get_roles(db)
+        finally:
+            db.close()
         return jsonify({'roles': roles})
     except Exception as e:
         gui_logger.exception('Error listing roles: %s', e)
@@ -3957,7 +4109,10 @@ def api_user_card(username):
     """
     db = next(database.get_db())
     try:
-        card = database.get_user_card(db, username)
+        if _leaderboard_service:
+            card = _leaderboard_service.get_user_card(db, username)
+        else:
+            card = database.get_user_card(db, username)
     finally:
         if db:
             db.close()
@@ -3982,13 +4137,20 @@ def api_update_profile():
     data = request.get_json() or {}
     db = next(database.get_db())
     try:
-        ok = database.update_user_profile(
-            db,
-            username,
-            display_name=data.get('display_name'),
-            bio=data.get('bio'),
-            avatar_url=data.get('avatar_url'),
-        )
+        if _leaderboard_service:
+            ok = _leaderboard_service.update_profile(
+                db, username,
+                display_name=data.get('display_name'),
+                bio=data.get('bio'),
+                avatar_url=data.get('avatar_url'),
+            )
+        else:
+            ok = database.update_user_profile(
+                db, username,
+                display_name=data.get('display_name'),
+                bio=data.get('bio'),
+                avatar_url=data.get('avatar_url'),
+            )
     finally:
         if db:
             db.close()
@@ -4010,7 +4172,10 @@ def api_app_friends():
         username = current_user
     db = next(database.get_db())
     try:
-        result = database.get_app_friends(db, username)
+        if _friend_service:
+            result = _friend_service.get_friends(db, username)
+        else:
+            result = database.get_app_friends(db, username)
     finally:
         if db:
             db.close()
@@ -4034,7 +4199,10 @@ def api_send_friend_request():
         return jsonify({'error': 'username is required'}), 400
     db = next(database.get_db())
     try:
-        ok, message = database.send_friend_request(db, sender, target)
+        if _friend_service:
+            ok, message = _friend_service.send_request(db, sender, target)
+        else:
+            ok, message = database.send_friend_request(db, sender, target)
     finally:
         if db:
             db.close()
@@ -4064,7 +4232,10 @@ def api_respond_friend_request():
         return jsonify({'error': 'username is required'}), 400
     db = next(database.get_db())
     try:
-        ok, message = database.respond_friend_request(db, username, requester, accept)
+        if _friend_service:
+            ok, message = _friend_service.respond(db, username, requester, accept)
+        else:
+            ok, message = database.respond_friend_request(db, username, requester, accept)
     finally:
         if db:
             db.close()
@@ -4090,7 +4261,10 @@ def api_remove_app_friend():
         return jsonify({'error': 'username is required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.remove_app_friend(db, username, other)
+        if _friend_service:
+            ok = _friend_service.remove(db, username, other)
+        else:
+            ok = database.remove_app_friend(db, username, other)
     finally:
         if db:
             db.close()
@@ -4119,7 +4293,10 @@ def api_leaderboard():
         limit = 20
     db = next(database.get_db())
     try:
-        rows = database.get_leaderboard(db, metric=metric, limit=limit)
+        if _leaderboard_service:
+            rows = _leaderboard_service.get_rankings(db, metric=metric, limit=limit)
+        else:
+            rows = database.get_leaderboard(db, metric=metric, limit=limit)
     finally:
         if db:
             db.close()
@@ -4148,7 +4325,12 @@ def api_chat_messages():
         since_id, limit = 0, 50
     db = next(database.get_db())
     try:
-        messages = database.get_chat_messages(db, room=room, limit=limit, since_id=since_id)
+        if _chat_service:
+            messages = _chat_service.get_messages(db, room=room, limit=limit,
+                                                  since_id=since_id)
+        else:
+            messages = database.get_chat_messages(db, room=room, limit=limit,
+                                                  since_id=since_id)
     finally:
         if db:
             db.close()
@@ -4176,7 +4358,12 @@ def api_chat_send():
         return jsonify({'error': 'message must be 500 characters or fewer'}), 400
     db = next(database.get_db())
     try:
-        msg = database.send_chat_message(db, sender_username=username, message=message, room=room)
+        if _chat_service:
+            msg = _chat_service.send(db, sender_username=username,
+                                     message=message, room=room)
+        else:
+            msg = database.send_chat_message(db, sender_username=username,
+                                             message=message, room=room)
     finally:
         if db:
             db.close()
@@ -4203,7 +4390,10 @@ def api_get_notifications():
     unread_only = request.args.get('unread_only', 'false').lower() == 'true'
     db = next(database.get_db())
     try:
-        notifs = database.get_notifications(db, username, unread_only=unread_only)
+        if _notification_service:
+            notifs = _notification_service.get_all(db, username, unread_only=unread_only)
+        else:
+            notifs = database.get_notifications(db, username, unread_only=unread_only)
     finally:
         if db:
             db.close()
@@ -4225,7 +4415,10 @@ def api_mark_notifications_read():
     ids = data.get('ids')
     db = next(database.get_db())
     try:
-        ok = database.mark_notifications_read(db, username, notification_ids=ids)
+        if _notification_service:
+            ok = _notification_service.mark_read(db, username, ids=ids)
+        else:
+            ok = database.mark_notifications_read(db, username, notification_ids=ids)
     finally:
         if db:
             db.close()
@@ -4251,11 +4444,14 @@ def api_send_notification():
     # Only admins can send notifications to others
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, sender)
+        if _notification_service:
+            is_admin = _notification_service.is_admin(db_check, sender)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, sender)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     username = data.get('username', '').strip()
@@ -4266,7 +4462,12 @@ def api_send_notification():
         return jsonify({'error': 'username, title, and message are required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.create_notification(db, username, title, message, type=notif_type)
+        if _notification_service:
+            ok = _notification_service.create(db, username, title, message,
+                                              notif_type=notif_type)
+        else:
+            ok = database.create_notification(db, username, title, message,
+                                              type=notif_type)
     finally:
         if db:
             db.close()
@@ -4285,7 +4486,10 @@ def api_get_plugins():
     """Return all registered plugins."""
     db = next(database.get_db())
     try:
-        plugins = database.get_plugins(db)
+        if _plugin_service:
+            plugins = _plugin_service.get_all(db)
+        else:
+            plugins = database.get_plugins(db)
     finally:
         if db:
             db.close()
@@ -4309,11 +4513,14 @@ def api_register_plugin():
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _plugin_service:
+            is_admin = _plugin_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     name = data.get('name', '').strip()
@@ -4321,14 +4528,22 @@ def api_register_plugin():
         return jsonify({'error': 'name is required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.register_plugin(
-            db,
-            name=name,
-            description=data.get('description', ''),
-            version=data.get('version', '1.0.0'),
-            author=data.get('author', ''),
-            config=data.get('config'),
-        )
+        if _plugin_service:
+            ok = _plugin_service.register(
+                db, name,
+                description=data.get('description', ''),
+                version=data.get('version', '1.0.0'),
+                author=data.get('author', ''),
+                config=data.get('config'),
+            )
+        else:
+            ok = database.register_plugin(
+                db, name=name,
+                description=data.get('description', ''),
+                version=data.get('version', '1.0.0'),
+                author=data.get('author', ''),
+                config=data.get('config'),
+            )
     finally:
         if db:
             db.close()
@@ -4350,17 +4565,23 @@ def api_toggle_plugin(plugin_id):
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _plugin_service:
+            is_admin = _plugin_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     enabled = bool(data.get('enabled', True))
     db = next(database.get_db())
     try:
-        ok = database.toggle_plugin(db, plugin_id, enabled)
+        if _plugin_service:
+            ok = _plugin_service.toggle(db, plugin_id, enabled)
+        else:
+            ok = database.toggle_plugin(db, plugin_id, enabled)
     finally:
         if db:
             db.close()
@@ -4386,15 +4607,21 @@ def api_get_app_settings():
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _app_settings_service:
+            is_admin = _app_settings_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     db = next(database.get_db())
     try:
-        settings = database.get_settings_with_meta(db)
+        if _app_settings_service:
+            settings = _app_settings_service.get_with_meta(db)
+        else:
+            settings = database.get_settings_with_meta(db)
     finally:
         if db:
             db.close()
@@ -4414,11 +4641,14 @@ def api_save_app_settings():
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _app_settings_service:
+            is_admin = _app_settings_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     updates = data.get('settings', {})
@@ -4426,7 +4656,10 @@ def api_save_app_settings():
         return jsonify({'error': 'settings dict is required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.set_app_settings(db, updates, updated_by=username)
+        if _app_settings_service:
+            ok = _app_settings_service.save(db, updates, updated_by=username)
+        else:
+            ok = database.set_app_settings(db, updates, updated_by=username)
     finally:
         if db:
             db.close()
@@ -4443,10 +4676,16 @@ def api_public_settings():
     """
     db = next(database.get_db())
     try:
-        announcement = database.get_app_setting(db, 'announcement', '')
-        chat_enabled = database.get_app_setting(db, 'chat_enabled', 'true')
-        leaderboard_public = database.get_app_setting(db, 'leaderboard_public', 'true')
-        plugins_enabled = database.get_app_setting(db, 'plugins_enabled', 'true')
+        if _app_settings_service:
+            announcement = _app_settings_service.get(db, 'announcement', '')
+            chat_enabled = _app_settings_service.get(db, 'chat_enabled', 'true')
+            leaderboard_public = _app_settings_service.get(db, 'leaderboard_public', 'true')
+            plugins_enabled = _app_settings_service.get(db, 'plugins_enabled', 'true')
+        else:
+            announcement = database.get_app_setting(db, 'announcement', '')
+            chat_enabled = database.get_app_setting(db, 'chat_enabled', 'true')
+            leaderboard_public = database.get_app_setting(db, 'leaderboard_public', 'true')
+            plugins_enabled = database.get_app_setting(db, 'plugins_enabled', 'true')
     finally:
         if db:
             db.close()
