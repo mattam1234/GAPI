@@ -398,7 +398,10 @@ class LibrarySyncScheduler:
         try:
             # Get all users
             db = database.SessionLocal()
-            all_users = database.get_all_users(db)
+            if _user_service:
+                all_users = _user_service.get_all(db)
+            else:
+                all_users = database.get_all_users(db)
             db.close()
             
             for user in all_users:
@@ -891,7 +894,10 @@ def _collect_available_platforms(usernames: List[str]) -> List[str]:
         try:
             db = database.SessionLocal()
             for username in usernames_set:
-                cached_games = database.get_cached_library(db, username)
+                if _library_service:
+                    cached_games = _library_service.get_cached(db, username)
+                else:
+                    cached_games = database.get_cached_library(db, username)
                 for game in cached_games or []:
                     platform = str(game.get('platform', '')).strip().lower()
                     if platform:
@@ -975,34 +981,39 @@ def sync_library_to_db(username: str, force: bool = False) -> Tuple[bool, str]:
         
         # Check cache age unless forced
         db = database.SessionLocal()
-        cache_age = database.get_library_cache_age(db, username)
-        
-        # Don't sync if cache is less than 1 hour old (unless forced)
-        if not force and cache_age is not None and cache_age < 3600:
+        try:
+            if _library_service:
+                cache_age = _library_service.get_cache_age(db, username)
+            else:
+                cache_age = database.get_library_cache_age(db, username)
+
+            # Don't sync if cache is less than 1 hour old (unless forced)
+            if not force and cache_age is not None and cache_age < 3600:
+                gui_logger.debug(f"Library cache for {username} is fresh ({cache_age:.0f}s old), skipping sync")
+                return True, f"Cache is fresh ({int(cache_age/60)}m old)"
+
+            # Fetch library from Steam API
+            base_config = load_base_config()
+            steam_api_key = base_config.get('steam_api_key', '')
+
+            if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
+                return False, "Steam API key not configured"
+
+            gui_logger.info(f"Syncing library for {username} from Steam API...")
+            steam_client = gapi.SteamAPIClient(steam_api_key)
+            games = steam_client.get_owned_games(steam_id)
+
+            if not games:
+                return False, "Failed to fetch games from Steam API"
+
+            # Cache the games in database
+            if _library_service:
+                count = _library_service.cache(db, username, games)
+            else:
+                count = database.cache_user_library(db, username, games)
+        finally:
             db.close()
-            gui_logger.debug(f"Library cache for {username} is fresh ({cache_age:.0f}s old), skipping sync")
-            return True, f"Cache is fresh ({int(cache_age/60)}m old)"
-        
-        # Fetch library from Steam API
-        base_config = load_base_config()
-        steam_api_key = base_config.get('steam_api_key', '')
-        
-        if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
-            db.close()
-            return False, "Steam API key not configured"
-        
-        gui_logger.info(f"Syncing library for {username} from Steam API...")
-        steam_client = gapi.SteamAPIClient(steam_api_key)
-        games = steam_client.get_owned_games(steam_id)
-        
-        if not games:
-            db.close()
-            return False, "Failed to fetch games from Steam API"
-        
-        # Cache the games in database
-        count = database.cache_user_library(db, username, games)
-        db.close()
-        
+
         gui_logger.info(f"Synced {count} games for {username}")
         return True, f"Synced {count} games"
         
@@ -2454,8 +2465,11 @@ def api_toggle_ignored_game():
         db = database.SessionLocal()
 
         # Verify user exists in database
-        user = database.get_user_by_username(db, username)
-        if not user:
+        if _user_service:
+            exists = _user_service.user_exists(db, username)
+        else:
+            exists = database.user_exists(db, username)
+        if not exists:
             db.close()
             return jsonify({'error': 'User not found in database'}), 404
 

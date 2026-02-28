@@ -10,6 +10,8 @@ class UserService:
     * Role catalogue — listing all available roles.
     * User count — how many registered users exist.
     * Initial admin creation — bootstrapping the first admin account.
+    * Platform-ID retrieval.
+    * User existence check.
 
     All methods accept a *db* SQLAlchemy session as the first argument so
     that callers (Flask route handlers) control the session lifecycle.
@@ -52,6 +54,29 @@ class UserService:
             user is not found.
         """
         return self._db.get_user_platform_ids(db, username)
+
+    def user_exists(self, db, username: str) -> bool:
+        """Return True if *username* exists in the database.
+
+        Args:
+            db:       SQLAlchemy session.
+            username: Username to look up.
+
+        Returns:
+            ``True`` when the user is found, ``False`` otherwise.
+        """
+        return self._db.user_exists(db, username)
+
+    def get_all(self, db) -> list:
+        """Return all registered users.
+
+        Args:
+            db: SQLAlchemy session.
+
+        Returns:
+            List of user ORM instances (may be empty).
+        """
+        return self._db.get_all_users(db)
 
     def get_count(self, db) -> int:
         """Return the total number of registered users.

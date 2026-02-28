@@ -1687,6 +1687,12 @@ class _MockUserServiceDB:
     def get_user_platform_ids(self, db, username):
         return dict(self._platform_ids.get(username, {}))
 
+    def user_exists(self, db, username):
+        return any(u['username'] == username for u in self._created_users)
+
+    def get_all_users(self, db):
+        return list(self._created_users)
+
 
 class TestUserService(unittest.TestCase):
 
@@ -1755,6 +1761,34 @@ class TestUserService(unittest.TestCase):
         self.mock_db._platform_ids['alice'] = {'steam_id': 'S', 'epic_id': '', 'gog_id': ''}
         result = self.svc.get_platform_ids(DB, 'bob')
         self.assertEqual(result, {})
+
+    # --- user_exists ---
+
+    def test_user_exists_false_for_unknown(self):
+        self.assertFalse(self.svc.user_exists(DB, 'nobody'))
+
+    def test_user_exists_true_after_create(self):
+        self.svc.create_admin(DB, 'alice', 'hash')
+        self.assertTrue(self.svc.user_exists(DB, 'alice'))
+
+    def test_user_exists_false_for_different_user(self):
+        self.svc.create_admin(DB, 'alice', 'hash')
+        self.assertFalse(self.svc.user_exists(DB, 'bob'))
+
+    # --- get_all ---
+
+    def test_get_all_empty_initially(self):
+        self.assertEqual(self.svc.get_all(DB), [])
+
+    def test_get_all_after_create(self):
+        self.svc.create_admin(DB, 'alice', 'hash')
+        result = self.svc.get_all(DB)
+        self.assertEqual(len(result), 1)
+
+    def test_get_all_multiple_users(self):
+        self.svc.create_admin(DB, 'alice', 'h1')
+        self.svc.create_admin(DB, 'bob', 'h2')
+        self.assertEqual(len(self.svc.get_all(DB)), 2)
 
 
 # ===========================================================================

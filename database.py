@@ -7,8 +7,7 @@ Handles PostgreSQL connections for user data, ignored games, and achievements.
 import os
 import json
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from datetime import datetime, timezone
 import logging
 
@@ -44,15 +43,15 @@ def _load_database_url() -> str:
 # Database URL - adjust for your PostgreSQL setup
 DATABASE_URL = _load_database_url()
 
+Base = declarative_base()
+
 try:
     engine = create_engine(DATABASE_URL, echo=False)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base = declarative_base()
 except Exception as e:
     logger.warning(f"PostgreSQL not available, will use mock database: {e}")
     engine = None
     SessionLocal = None
-    Base = object
 
 
 user_roles = Table(
@@ -329,6 +328,19 @@ def get_user_by_username(db, username: str):
     except Exception as e:
         logger.error(f"Error getting user: {e}")
         return None
+
+
+def user_exists(db, username: str) -> bool:
+    """Return True if a user with *username* exists in the database.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Username to look up.
+
+    Returns:
+        ``True`` when the user exists, ``False`` otherwise or on error.
+    """
+    return get_user_by_username(db, username) is not None
 
 
 def ensure_role(db, role_name: str) -> Role:
