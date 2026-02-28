@@ -117,7 +117,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] Security scanning (CodeQL, Snyk)
 
 ### Architecture
-- [ ] Plugin system for custom platforms
+- [x] Plugin system for custom platforms
 - [x] Database support (SQLite/PostgreSQL) for better data management
 - [x] Service/Repository layer — business logic fully separated from Flask UI layer
 - [ ] Microservices architecture for scalability

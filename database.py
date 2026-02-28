@@ -1060,6 +1060,188 @@ def toggle_plugin(db, plugin_id: int, enabled: bool) -> bool:
 # Leaderboard helpers
 # ---------------------------------------------------------------------------
 
+def delete_plugin(db, plugin_id: int) -> bool:
+    """Permanently delete a registered plugin.
+
+    Args:
+        db:        SQLAlchemy session.
+        plugin_id: Primary-key ID of the plugin to delete.
+
+    Returns:
+        ``True`` if the plugin was found and deleted, ``False`` otherwise.
+    """
+    if not db:
+        return False
+    try:
+        plugin = db.query(Plugin).filter(Plugin.id == plugin_id).first()
+        if not plugin:
+            return False
+        db.delete(plugin)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error("Error deleting plugin %s: %s", plugin_id, e)
+        db.rollback()
+        return False
+
+
+def get_user_data_export(db, username: str) -> dict:
+    """Collect all persisted data for *username* into a single exportable dict.
+
+    The returned structure is designed to be round-tripped through
+    :func:`import_user_data` to restore a user's data on the same or a
+    different GAPI instance.
+
+    Keys in the returned dict:
+      - ``version``       – schema version string
+      - ``exported_at``   – ISO-8601 UTC timestamp
+      - ``username``      – the exporting user
+      - ``profile``       – ``{steam_id, epic_id, gog_id}``
+      - ``ignored_games`` – list of ``{app_id, game_name, reason}``
+      - ``favorites``     – list of ``{app_id, platform}``
+      - ``achievements``  – list of ``{app_id, game_name, achievement_id, name, unlocked, …}``
+    """
+    if not db:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+
+        profile = {
+            'steam_id': user.steam_id,
+            'epic_id': user.epic_id,
+            'gog_id': user.gog_id,
+        }
+
+        ignored = [
+            {'app_id': ig.app_id, 'game_name': ig.game_name or '', 'reason': ig.reason or ''}
+            for ig in user.ignored_games
+        ]
+
+        favorites = [
+            {'app_id': f.app_id, 'platform': f.platform or 'steam'}
+            for f in user.favorites
+        ]
+
+        achievements_out = []
+        for a in user.achievements:
+            achievements_out.append({
+                'app_id': a.app_id,
+                'game_name': a.game_name or '',
+                'achievement_id': a.achievement_id,
+                'name': a.achievement_name or '',
+                'description': a.achievement_description or '',
+                'unlocked': bool(a.unlocked),
+                'unlock_time': a.unlock_time.isoformat() if a.unlock_time else None,
+                'rarity': a.rarity,
+            })
+
+        return {
+            'version': '1',
+            'exported_at': datetime.utcnow().isoformat(),
+            'username': username,
+            'profile': profile,
+            'ignored_games': ignored,
+            'favorites': favorites,
+            'achievements': achievements_out,
+        }
+    except Exception as e:
+        logger.error("Error building user data export for %s: %s", username, e)
+        return {}
+
+
+def import_user_data(db, username: str, data: dict) -> dict:
+    """Restore a user's data from an export dict produced by :func:`get_user_data_export`.
+
+    This is a **merge** operation — existing records are not removed; new ones
+    are added only if they are not already present.  The function returns a
+    summary dict with counts of items processed.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: The user to import into (must already exist).
+        data:     Export dict as produced by :func:`get_user_data_export`.
+
+    Returns:
+        ``{'ignored_added', 'favorites_added', 'achievements_added'}`` counts,
+        or ``{}`` on failure.
+    """
+    if not db:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+
+        counts = {'ignored_added': 0, 'favorites_added': 0, 'achievements_added': 0}
+
+        # --- ignored games ---
+        existing_ignored = {ig.app_id for ig in user.ignored_games}
+        for item in data.get('ignored_games', []):
+            app_id = str(item.get('app_id', '')).strip()
+            if not app_id or app_id in existing_ignored:
+                continue
+            db.add(IgnoredGame(
+                user_id=user.id,
+                app_id=app_id,
+                game_name=item.get('game_name', ''),
+                reason=item.get('reason', ''),
+            ))
+            existing_ignored.add(app_id)
+            counts['ignored_added'] += 1
+
+        # --- favorites ---
+        existing_favs = {f.app_id for f in user.favorites}
+        for item in data.get('favorites', []):
+            app_id = str(item.get('app_id', '')).strip()
+            if not app_id or app_id in existing_favs:
+                continue
+            db.add(FavoriteGame(
+                user_id=user.id,
+                app_id=app_id,
+                platform=item.get('platform', 'steam'),
+            ))
+            existing_favs.add(app_id)
+            counts['favorites_added'] += 1
+
+        # --- achievements ---
+        existing_ach = {(a.app_id, a.achievement_id) for a in user.achievements}
+        for item in data.get('achievements', []):
+            app_id = str(item.get('app_id', '')).strip()
+            ach_id = str(item.get('achievement_id', '')).strip()
+            if not app_id or not ach_id or (app_id, ach_id) in existing_ach:
+                continue
+            unlock_time = None
+            raw_ts = item.get('unlock_time')
+            if raw_ts:
+                try:
+                    from datetime import datetime as _dt
+                    unlock_time = _dt.fromisoformat(raw_ts)
+                except Exception:
+                    pass
+            db.add(Achievement(
+                user_id=user.id,
+                app_id=app_id,
+                game_name=item.get('game_name', ''),
+                achievement_id=ach_id,
+                achievement_name=item.get('name', ''),
+                achievement_description=item.get('description', ''),
+                unlocked=bool(item.get('unlocked', False)),
+                unlock_time=unlock_time,
+                rarity=item.get('rarity'),
+            ))
+            existing_ach.add((app_id, ach_id))
+            counts['achievements_added'] += 1
+
+        db.commit()
+        return counts
+    except Exception as e:
+        logger.error("Error importing user data for %s: %s", username, e)
+        db.rollback()
+        return {}
+
+
 def get_leaderboard(db, metric: str = 'playtime', limit: int = 20) -> list:
     """Return a leaderboard of users ranked by the given metric.
 

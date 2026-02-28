@@ -155,7 +155,7 @@ If PostgreSQL is not available:
 ### Medium-term
 - [ ] Achievement rarity filters in game picker
 - [ ] Multiplayer achievement challenges
-- [ ] Backup/export user data
+- [x] Backup/export user data
 - [ ] Achievement statistics by platform
 
 ## Database Operations

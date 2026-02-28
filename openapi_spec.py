@@ -1146,4 +1146,603 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
         }
     }
 
+    # -----------------------------------------------------------------------
+    # Presence
+    # -----------------------------------------------------------------------
+    paths["/api/presence"] = {
+        "post": {
+            "tags": ["presence"],
+            "summary": "Heartbeat — update caller's last_seen timestamp",
+            "responses": {"200": _success(), "401": _error(401)},
+        }
+    }
+    paths["/api/users/online"] = {
+        "get": {
+            "tags": ["presence"],
+            "summary": "Return users active within the last 5 minutes",
+            "responses": {
+                "200": _json_resp("Online users", {
+                    "type": "object",
+                    "properties": {
+                        "online_users": {"type": "array", "items": {"type": "string"}},
+                    },
+                }),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # App-friends (in-app social graph)
+    # -----------------------------------------------------------------------
+    paths["/api/app-friends"] = {
+        "get": {
+            "tags": ["friends"],
+            "summary": "List accepted app-friends with platform IDs and online status",
+            "responses": {
+                "200": _json_resp("App friends", {
+                    "type": "object",
+                    "properties": {"friends": {"type": "array", "items": {"type": "object"}}},
+                }),
+            },
+        }
+    }
+    paths["/api/app-friends/request"] = {
+        "post": {
+            "tags": ["friends"],
+            "summary": "Send a friend request to another user",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"to_username": {"type": "string"}},
+                    "required": ["to_username"],
+                }}},
+            },
+            "responses": {"200": _success(), "400": _error(), "404": _error(404)},
+        }
+    }
+    paths["/api/app-friends/respond"] = {
+        "post": {
+            "tags": ["friends"],
+            "summary": "Accept or reject a pending friend request",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "from_username": {"type": "string"},
+                        "action": {"type": "string", "enum": ["accept", "reject"]},
+                    },
+                    "required": ["from_username", "action"],
+                }}},
+            },
+            "responses": {"200": _success(), "400": _error(), "404": _error(404)},
+        }
+    }
+    paths["/api/app-friends/remove"] = {
+        "post": {
+            "tags": ["friends"],
+            "summary": "Remove an existing friendship",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"friend_username": {"type": "string"}},
+                    "required": ["friend_username"],
+                }}},
+            },
+            "responses": {"200": _success(), "404": _error(404)},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Live pick sessions
+    # -----------------------------------------------------------------------
+    _session_schema = {
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "string"},
+            "name": {"type": "string"},
+            "host": {"type": "string"},
+            "participants": {"type": "array", "items": {"type": "string"}},
+            "status": {"type": "string", "enum": ["waiting", "picking", "completed", "closed"]},
+            "picked_game": {"type": "object", "nullable": True},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/live-session/create"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Create a new live pick session (host auto-joined)",
+            "requestBody": {
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                }}},
+            },
+            "responses": {"201": _json_resp("Created session", _session_schema), "400": _error()},
+        }
+    }
+    paths["/api/live-session/active"] = {
+        "get": {
+            "tags": ["live-sessions"],
+            "summary": "List all non-completed live sessions",
+            "responses": {
+                "200": _json_resp("Active sessions", {
+                    "type": "object",
+                    "properties": {"sessions": {"type": "array", "items": _session_schema}},
+                }),
+            },
+        }
+    }
+    paths["/api/live-session/{session_id}"] = {
+        "get": {
+            "tags": ["live-sessions"],
+            "summary": "Get state of a specific live session",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {"200": _json_resp("Session", _session_schema), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/events"] = {
+        "get": {
+            "tags": ["live-sessions"],
+            "summary": "Server-Sent Events stream — pushes session state on every change",
+            "description": (
+                "Connect with `EventSource`. Events: `session` (full session state), "
+                "`heartbeat` (keepalive, every 25 s). Stream ends when session reaches "
+                "`completed` or `closed` status."
+            ),
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _resp("SSE stream", {"text/event-stream": {"schema": {"type": "string"}}}),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/live-session/{session_id}/join"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Join a live session",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {"200": _json_resp("Session view", _session_schema),
+                          "400": _error(), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/leave"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Leave a live session (transfers host; removes session when empty)",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {"200": _success(), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/pick"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Host-only: pick a common game for all participants",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "requestBody": {
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"coop_only": {"type": "boolean"}},
+                }}},
+            },
+            "responses": {"200": _json_resp("Picked game"), "400": _error(),
+                          "403": _error(403), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/invite"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Host-only: send session invitations to other users",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"usernames": {"type": "array", "items": {"type": "string"}}},
+                    "required": ["usernames"],
+                }}},
+            },
+            "responses": {"200": _json_resp("Invite result",
+                          {"type": "object",
+                           "properties": {
+                               "sent": {"type": "array", "items": {"type": "string"}},
+                               "failed": {"type": "array", "items": {"type": "string"}},
+                           }}),
+                          "403": _error(403), "404": _error(404)},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Chat
+    # -----------------------------------------------------------------------
+    _msg_schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer"},
+            "sender": {"type": "string"},
+            "message": {"type": "string"},
+            "room": {"type": "string"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/chat/messages"] = {
+        "get": {
+            "tags": ["chat"],
+            "summary": "Fetch messages from a chat room",
+            "parameters": [
+                {"name": "room", "in": "query", "schema": {"type": "string", "default": "general"},
+                 "description": "Room name. Use `session:<id>` for live-session chat."},
+                {"name": "since_id", "in": "query", "schema": {"type": "integer", "default": 0}},
+                {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 50}},
+            ],
+            "responses": {
+                "200": _json_resp("Messages", {
+                    "type": "object",
+                    "properties": {
+                        "room": {"type": "string"},
+                        "messages": {"type": "array", "items": _msg_schema},
+                    },
+                }),
+            },
+        }
+    }
+    paths["/api/chat/send"] = {
+        "post": {
+            "tags": ["chat"],
+            "summary": "Send a message to a chat room",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "room": {"type": "string"},
+                        "message": {"type": "string", "maxLength": 500},
+                    },
+                    "required": ["message"],
+                }}},
+            },
+            "responses": {"201": _json_resp("Sent message", _msg_schema), "400": _error()},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Notifications
+    # -----------------------------------------------------------------------
+    _notif_schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer"},
+            "title": {"type": "string"},
+            "message": {"type": "string"},
+            "type": {"type": "string"},
+            "read": {"type": "boolean"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/notifications"] = {
+        "get": {
+            "tags": ["notifications"],
+            "summary": "Return notifications for the current user",
+            "parameters": [
+                {"name": "unread_only", "in": "query",
+                 "schema": {"type": "boolean", "default": False}},
+            ],
+            "responses": {
+                "200": _json_resp("Notifications", {
+                    "type": "object",
+                    "properties": {"notifications": {"type": "array", "items": _notif_schema}},
+                }),
+            },
+        }
+    }
+    paths["/api/notifications/read"] = {
+        "post": {
+            "tags": ["notifications"],
+            "summary": "Mark one or all notifications as read",
+            "requestBody": {
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "notification_id": {"type": "integer",
+                                            "description": "Omit to mark all as read"},
+                    },
+                }}},
+            },
+            "responses": {"200": _success()},
+        }
+    }
+    paths["/api/notifications/send"] = {
+        "post": {
+            "tags": ["notifications"],
+            "summary": "Send a notification to a user (admin or self)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "to_username": {"type": "string"},
+                        "title": {"type": "string"},
+                        "message": {"type": "string"},
+                        "type": {"type": "string", "default": "info"},
+                    },
+                    "required": ["to_username", "title", "message"],
+                }}},
+            },
+            "responses": {"201": _success(), "400": _error(), "404": _error(404)},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Leaderboard
+    # -----------------------------------------------------------------------
+    paths["/api/leaderboard"] = {
+        "get": {
+            "tags": ["leaderboard"],
+            "summary": "Ranked leaderboard of users",
+            "parameters": [
+                {"name": "metric", "in": "query",
+                 "schema": {"type": "string", "enum": ["playtime", "games", "achievements"],
+                            "default": "playtime"}},
+                {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20}},
+            ],
+            "responses": {
+                "200": _json_resp("Leaderboard", {
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string"},
+                        "entries": {"type": "array", "items": {"type": "object"}},
+                    },
+                }),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Plugins / Addons
+    # -----------------------------------------------------------------------
+    _plugin_schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer"},
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "version": {"type": "string"},
+            "author": {"type": "string"},
+            "enabled": {"type": "boolean"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/plugins"] = {
+        "get": {
+            "tags": ["plugins"],
+            "summary": "List all registered plugins",
+            "responses": {
+                "200": _json_resp("Plugins", {
+                    "type": "object",
+                    "properties": {"plugins": {"type": "array", "items": _plugin_schema}},
+                }),
+            },
+        },
+        "post": {
+            "tags": ["plugins"],
+            "summary": "Register or update a plugin (admin only)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "version": {"type": "string"},
+                        "author": {"type": "string"},
+                        "config": {"type": "object"},
+                    },
+                    "required": ["name"],
+                }}},
+            },
+            "responses": {"201": _success(), "400": _error(), "403": _error(403)},
+        },
+    }
+    paths["/api/plugins/{plugin_id}"] = {
+        "put": {
+            "tags": ["plugins"],
+            "summary": "Enable or disable a plugin (admin only)",
+            "parameters": [{"name": "plugin_id", "in": "path", "required": True,
+                             "schema": {"type": "integer"}}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"enabled": {"type": "boolean"}},
+                    "required": ["enabled"],
+                }}},
+            },
+            "responses": {"200": _success(), "403": _error(403), "404": _error(404)},
+        },
+        "delete": {
+            "tags": ["plugins"],
+            "summary": "Permanently delete a plugin (admin only)",
+            "parameters": [{"name": "plugin_id", "in": "path", "required": True,
+                             "schema": {"type": "integer"}}],
+            "responses": {"200": _success(), "403": _error(403), "404": _error(404)},
+        },
+    }
+
+    # -----------------------------------------------------------------------
+    # Admin settings
+    # -----------------------------------------------------------------------
+    _setting_schema = {
+        "type": "object",
+        "properties": {
+            "key": {"type": "string"},
+            "value": {"type": "string"},
+            "description": {"type": "string"},
+        },
+    }
+    paths["/api/admin/settings"] = {
+        "get": {
+            "tags": ["admin"],
+            "summary": "Return all admin-controlled settings (admin only)",
+            "responses": {
+                "200": _json_resp("Settings", {
+                    "type": "object",
+                    "properties": {"settings": {"type": "array", "items": _setting_schema}},
+                }),
+                "403": _error(403),
+            },
+        },
+        "post": {
+            "tags": ["admin"],
+            "summary": "Create or update one or more admin settings (admin only)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "description": "Free-form key→value pairs to persist",
+                    "additionalProperties": {"type": "string"},
+                }}},
+            },
+            "responses": {"200": _success(), "403": _error(403)},
+        },
+    }
+    paths["/api/admin/settings/public"] = {
+        "get": {
+            "tags": ["admin"],
+            "summary": "Return publicly-visible settings (no auth required)",
+            "security": [],
+            "responses": {
+                "200": _json_resp("Public settings", {
+                    "type": "object",
+                    "properties": {"settings": {"type": "array", "items": _setting_schema}},
+                }),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # i18n
+    # -----------------------------------------------------------------------
+    paths["/api/i18n"] = {
+        "get": {
+            "tags": ["i18n"],
+            "summary": "Return available locale codes",
+            "security": [],
+            "responses": {
+                "200": _json_resp("Locales", {
+                    "type": "object",
+                    "properties": {"locales": {"type": "array", "items": {"type": "string"}}},
+                }),
+            },
+        }
+    }
+    paths["/api/i18n/{lang}"] = {
+        "get": {
+            "tags": ["i18n"],
+            "summary": "Return translation strings for a locale",
+            "security": [],
+            "parameters": [{"name": "lang", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Translations", {"type": "object",
+                                                   "additionalProperties": {"type": "string"}}),
+                "404": _error(404),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # User profile card
+    # -----------------------------------------------------------------------
+    paths["/api/user/{username}/card"] = {
+        "get": {
+            "tags": ["users"],
+            "summary": "Return the public profile card for a user",
+            "parameters": [{"name": "username", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Profile card", {
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string"},
+                        "steam_id": {"type": "string"},
+                        "total_games": {"type": "integer"},
+                        "total_playtime_hours": {"type": "number"},
+                        "total_achievements": {"type": "integer"},
+                        "joined": {"type": "string", "format": "date-time"},
+                    },
+                }),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/user/profile"] = {
+        "post": {
+            "tags": ["users"],
+            "summary": "Update the current user's profile (steam_id, epic_id, gog_id, bio, etc.)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "steam_id": {"type": "string"},
+                        "epic_id": {"type": "string"},
+                        "gog_id": {"type": "string"},
+                        "bio": {"type": "string"},
+                    },
+                }}},
+            },
+            "responses": {"200": _success(), "400": _error()},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # User data backup / restore
+    # -----------------------------------------------------------------------
+    paths["/api/export/user-data"] = {
+        "get": {
+            "tags": ["export"],
+            "summary": "Download all persisted user data as a JSON backup",
+            "responses": {
+                "200": _resp("JSON backup file",
+                              {"application/json": {"schema": {"type": "object"}}}),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/import/user-data"] = {
+        "post": {
+            "tags": ["export"],
+            "summary": "Restore user data from a JSON backup (merge — existing records kept)",
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {"schema": {"type": "object"}},
+                    "multipart/form-data": {"schema": {
+                        "type": "object",
+                        "properties": {"file": {"type": "string", "format": "binary"}},
+                    }},
+                },
+            },
+            "responses": {
+                "200": _json_resp("Import counts", {
+                    "type": "object",
+                    "properties": {
+                        "ignored_added": {"type": "integer"},
+                        "favorites_added": {"type": "integer"},
+                        "achievements_added": {"type": "integer"},
+                    },
+                }),
+                "400": _error(),
+            },
+        }
+    }
+
     return paths

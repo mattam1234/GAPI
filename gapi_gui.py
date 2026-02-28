@@ -4130,6 +4130,88 @@ def api_export_favorites():
 
 
 # ---------------------------------------------------------------------------
+# User data backup / restore
+# ---------------------------------------------------------------------------
+
+@app.route('/api/export/user-data')
+@require_login
+def api_export_user_data():
+    """Export all persisted data for the current user as a JSON file.
+
+    The downloaded file can be re-imported via ``POST /api/import/user-data``
+    to restore the data on the same or a different GAPI instance.
+
+    Response: ``application/json`` attachment named ``gapi_<username>_backup.json``.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db = next(database.get_db())
+    try:
+        export = database.get_user_data_export(db, username)
+    finally:
+        if db:
+            db.close()
+    if not export:
+        return jsonify({'error': 'No data found for user'}), 404
+    import json as _json
+    payload = _json.dumps(export, indent=2, default=str)
+    from flask import Response as _Response
+    return _Response(
+        payload,
+        mimetype='application/json',
+        headers={
+            'Content-Disposition': f'attachment; filename="gapi_{username}_backup.json"',
+        },
+    )
+
+
+@app.route('/api/import/user-data', methods=['POST'])
+@require_login
+def api_import_user_data():
+    """Restore user data from a JSON backup (merge — existing records kept).
+
+    Accepts either a JSON body or a multipart ``file`` upload.
+
+    Response JSON:
+      - ``ignored_added``     – ignored-game records inserted
+      - ``favorites_added``   – favourite records inserted
+      - ``achievements_added``– achievement records inserted
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    data = None
+    if request.content_type and 'multipart' in request.content_type:
+        f = request.files.get('file')
+        if not f:
+            return jsonify({'error': 'No file uploaded'}), 400
+        try:
+            import json as _json
+            data = _json.load(f)
+        except Exception:
+            return jsonify({'error': 'Invalid JSON file'}), 400
+    else:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body must be JSON'}), 400
+
+    if data.get('username') and data['username'] != username:
+        return jsonify({'error': 'Backup belongs to a different user'}), 400
+
+    db = next(database.get_db())
+    try:
+        counts = database.import_user_data(db, username, data)
+    finally:
+        if db:
+            db.close()
+    if not counts and counts != {}:
+        return jsonify({'error': 'Import failed'}), 500
+    return jsonify(counts)
+
+
+# ---------------------------------------------------------------------------
 # User profile card API
 # ---------------------------------------------------------------------------
 
@@ -4967,6 +5049,35 @@ def api_toggle_plugin(plugin_id):
             ok = _plugin_service.toggle(db, plugin_id, enabled)
         else:
             ok = database.toggle_plugin(db, plugin_id, enabled)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Plugin not found'}), 404
+
+
+@app.route('/api/plugins/<int:plugin_id>', methods=['DELETE'])
+@require_login
+def api_delete_plugin(plugin_id):
+    """Permanently delete a registered plugin (admin only)."""
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        if _plugin_service:
+            is_admin = _plugin_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if not is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    db = next(database.get_db())
+    try:
+        ok = database.delete_plugin(db, plugin_id)
     finally:
         if db:
             db.close()
