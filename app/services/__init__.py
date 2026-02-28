@@ -11,6 +11,10 @@ from .history_service import HistoryService
 from .notification_service import NotificationService
 from .chat_service import ChatService
 from .friend_service import FriendService
+from .leaderboard_service import LeaderboardService
+from .plugin_service import PluginService
+from .app_settings_service import AppSettingsService
+from .ignored_games_service import IgnoredGamesService
 
 __all__ = [
     'ReviewService',
@@ -25,4 +29,8 @@ __all__ = [
     'NotificationService',
     'ChatService',
     'FriendService',
+    'LeaderboardService',
+    'PluginService',
+    'AppSettingsService',
+    'IgnoredGamesService',
 ]

@@ -1122,5 +1122,350 @@ class TestFriendService(unittest.TestCase):
         self.assertEqual(result['received'], [])
 
 
+# ===========================================================================
+# LeaderboardService tests
+# ===========================================================================
+
+class _MockLeaderboardDB:
+    """Minimal stand-in for the database module used by LeaderboardService."""
+
+    def __init__(self):
+        self._board = [
+            {'rank': 1, 'username': 'alice', 'score': 120.5},
+            {'rank': 2, 'username': 'bob', 'score': 60.0},
+        ]
+        self._cards = {
+            'alice': {
+                'username': 'alice',
+                'display_name': 'Alice',
+                'bio': '',
+                'avatar_url': '',
+                'roles': ['user'],
+                'steam_id': '',
+                'stats': {'total_games': 10, 'total_playtime_hours': 120.5,
+                          'total_achievements': 5},
+                'joined': None,
+            }
+        }
+        self._profiles = {}
+
+    def get_leaderboard(self, db, metric='playtime', limit=20):
+        return self._board[:limit]
+
+    def get_user_card(self, db, username):
+        return self._cards.get(username, {})
+
+    def update_user_profile(self, db, username, display_name=None, bio=None,
+                            avatar_url=None):
+        self._profiles[username] = {
+            'display_name': display_name,
+            'bio': bio,
+            'avatar_url': avatar_url,
+        }
+        return True
+
+
+class TestLeaderboardService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockLeaderboardDB()
+        from app.services import LeaderboardService
+        self.svc = LeaderboardService(self.mock_db)
+
+    def test_get_rankings_returns_list(self):
+        rows = self.svc.get_rankings(DB)
+        self.assertIsInstance(rows, list)
+        self.assertEqual(len(rows), 2)
+
+    def test_get_rankings_default_metric_playtime(self):
+        rows = self.svc.get_rankings(DB, metric='playtime')
+        self.assertEqual(rows[0]['username'], 'alice')
+
+    def test_get_rankings_respects_limit(self):
+        rows = self.svc.get_rankings(DB, limit=1)
+        self.assertEqual(len(rows), 1)
+
+    def test_get_user_card_found(self):
+        card = self.svc.get_user_card(DB, 'alice')
+        self.assertIsNotNone(card)
+        self.assertEqual(card['username'], 'alice')
+        self.assertIn('stats', card)
+
+    def test_get_user_card_missing_returns_none(self):
+        card = self.svc.get_user_card(DB, 'nobody')
+        self.assertIsNone(card)
+
+    def test_update_profile_returns_true(self):
+        ok = self.svc.update_profile(DB, 'alice', display_name='Al', bio='Hi')
+        self.assertTrue(ok)
+
+    def test_update_profile_stores_values(self):
+        self.svc.update_profile(DB, 'alice', display_name='Al', bio='gamer',
+                                avatar_url='http://example.com/a.png')
+        stored = self.mock_db._profiles['alice']
+        self.assertEqual(stored['display_name'], 'Al')
+        self.assertEqual(stored['bio'], 'gamer')
+
+
+# ===========================================================================
+# PluginService tests
+# ===========================================================================
+
+class _MockPluginDB:
+    """Minimal stand-in for the database module used by PluginService."""
+
+    def __init__(self):
+        self._plugins = {}
+        self._next_id = 0
+        self._roles = {}
+
+    def _new_id(self):
+        self._next_id += 1
+        return self._next_id
+
+    def get_plugins(self, db):
+        return list(self._plugins.values())
+
+    def register_plugin(self, db, name, description='', version='1.0.0',
+                        author='', config=None):
+        if name in self._plugins:
+            self._plugins[name].update(
+                {'description': description, 'version': version,
+                 'author': author})
+        else:
+            self._plugins[name] = {
+                'id': self._new_id(), 'name': name,
+                'description': description, 'version': version,
+                'author': author, 'enabled': True, 'created_at': None,
+            }
+        return True
+
+    def toggle_plugin(self, db, plugin_id, enabled):
+        for p in self._plugins.values():
+            if p['id'] == plugin_id:
+                p['enabled'] = enabled
+                return True
+        return False
+
+    def get_user_roles(self, db, username):
+        return self._roles.get(username, [])
+
+
+class TestPluginService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockPluginDB()
+        from app.services import PluginService
+        self.svc = PluginService(self.mock_db)
+
+    def test_get_all_empty_initially(self):
+        self.assertEqual(self.svc.get_all(DB), [])
+
+    def test_register_adds_plugin(self):
+        ok = self.svc.register(DB, 'MyPlugin', version='1.2.0')
+        self.assertTrue(ok)
+        plugins = self.svc.get_all(DB)
+        self.assertEqual(len(plugins), 1)
+        self.assertEqual(plugins[0]['name'], 'MyPlugin')
+
+    def test_register_updates_existing(self):
+        self.svc.register(DB, 'MyPlugin', version='1.0.0')
+        self.svc.register(DB, 'MyPlugin', version='2.0.0')
+        plugins = self.svc.get_all(DB)
+        self.assertEqual(len(plugins), 1)
+        self.assertEqual(plugins[0]['version'], '2.0.0')
+
+    def test_toggle_enables_disables(self):
+        self.svc.register(DB, 'P1')
+        pid = self.svc.get_all(DB)[0]['id']
+        ok = self.svc.toggle(DB, pid, enabled=False)
+        self.assertTrue(ok)
+        self.assertFalse(self.svc.get_all(DB)[0]['enabled'])
+
+    def test_toggle_nonexistent_returns_false(self):
+        ok = self.svc.toggle(DB, 9999, enabled=True)
+        self.assertFalse(ok)
+
+    def test_is_admin_true(self):
+        self.mock_db._roles['admin_user'] = ['admin']
+        self.assertTrue(self.svc.is_admin(DB, 'admin_user'))
+
+    def test_is_admin_false(self):
+        self.mock_db._roles['regular'] = ['user']
+        self.assertFalse(self.svc.is_admin(DB, 'regular'))
+
+
+# ===========================================================================
+# AppSettingsService tests
+# ===========================================================================
+
+class _MockSettingsDB:
+    """Minimal stand-in for the database module used by AppSettingsService."""
+
+    _DEFAULTS = {
+        'registration_open': 'true',
+        'announcement': '',
+        'max_pick_count': '10',
+        'leaderboard_public': 'true',
+    }
+
+    def __init__(self):
+        self._settings = {}
+        self._roles = {}
+
+    def get_app_settings(self, db):
+        merged = dict(self._DEFAULTS)
+        merged.update(self._settings)
+        return merged
+
+    def get_app_setting(self, db, key, default=None):
+        return self.get_app_settings(db).get(key, default)
+
+    def set_app_settings(self, db, updates, updated_by=None):
+        self._settings.update({k: str(v) for k, v in updates.items()})
+        return True
+
+    def get_settings_with_meta(self, db):
+        current = self.get_app_settings(db)
+        return [{'key': k, 'value': v, 'description': ''}
+                for k, v in current.items()]
+
+    def get_user_roles(self, db, username):
+        return self._roles.get(username, [])
+
+
+class TestAppSettingsService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockSettingsDB()
+        from app.services import AppSettingsService
+        self.svc = AppSettingsService(self.mock_db)
+
+    def test_get_all_returns_dict(self):
+        settings = self.svc.get_all(DB)
+        self.assertIsInstance(settings, dict)
+        self.assertIn('registration_open', settings)
+
+    def test_get_single_key(self):
+        val = self.svc.get(DB, 'max_pick_count')
+        self.assertEqual(val, '10')
+
+    def test_get_missing_key_returns_default(self):
+        val = self.svc.get(DB, 'nonexistent_key', default='fallback')
+        self.assertEqual(val, 'fallback')
+
+    def test_save_updates_value(self):
+        self.svc.save(DB, {'announcement': 'Server maintenance tonight'})
+        self.assertEqual(self.svc.get(DB, 'announcement'),
+                         'Server maintenance tonight')
+
+    def test_save_returns_true(self):
+        ok = self.svc.save(DB, {'registration_open': 'false'})
+        self.assertTrue(ok)
+
+    def test_get_with_meta_returns_list(self):
+        meta = self.svc.get_with_meta(DB)
+        self.assertIsInstance(meta, list)
+        keys = [m['key'] for m in meta]
+        self.assertIn('registration_open', keys)
+
+    def test_is_admin_true(self):
+        self.mock_db._roles['boss'] = ['admin', 'user']
+        self.assertTrue(self.svc.is_admin(DB, 'boss'))
+
+    def test_is_admin_false(self):
+        self.mock_db._roles['pleb'] = ['user']
+        self.assertFalse(self.svc.is_admin(DB, 'pleb'))
+
+    def test_save_multiple_keys(self):
+        self.svc.save(DB, {'announcement': 'Hi', 'registration_open': 'false'})
+        self.assertEqual(self.svc.get(DB, 'announcement'), 'Hi')
+        self.assertEqual(self.svc.get(DB, 'registration_open'), 'false')
+
+
+# ===========================================================================
+# IgnoredGamesService tests
+# ===========================================================================
+
+class _MockIgnoredGamesDB:
+    """Minimal stand-in for the database module used by IgnoredGamesService."""
+
+    def __init__(self):
+        self._ignored = {}  # {username: set of app_ids}
+
+    def get_ignored_games(self, db, username):
+        return list(self._ignored.get(username, set()))
+
+    def toggle_ignore_game(self, db, username, app_id, game_name='',
+                           reason=''):
+        if username not in self._ignored:
+            self._ignored[username] = set()
+        app_id = str(app_id)
+        if app_id in self._ignored[username]:
+            self._ignored[username].discard(app_id)
+        else:
+            self._ignored[username].add(app_id)
+        return True
+
+    def get_shared_ignore_games(self, db, usernames):
+        if not usernames:
+            return []
+        sets = [self._ignored.get(u, set()) for u in usernames]
+        shared = sets[0].copy()
+        for s in sets[1:]:
+            shared &= s
+        return list(shared)
+
+
+class TestIgnoredGamesService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockIgnoredGamesDB()
+        from app.services import IgnoredGamesService
+        self.svc = IgnoredGamesService(self.mock_db)
+
+    def test_get_ignored_empty_initially(self):
+        self.assertEqual(self.svc.get_ignored(DB, 'alice'), [])
+
+    def test_toggle_adds_game(self):
+        self.svc.toggle(DB, 'alice', '620')
+        self.assertIn('620', self.svc.get_ignored(DB, 'alice'))
+
+    def test_toggle_removes_game_on_second_call(self):
+        self.svc.toggle(DB, 'alice', '620')
+        self.svc.toggle(DB, 'alice', '620')
+        self.assertNotIn('620', self.svc.get_ignored(DB, 'alice'))
+
+    def test_toggle_returns_true(self):
+        ok = self.svc.toggle(DB, 'alice', '620')
+        self.assertTrue(ok)
+
+    def test_get_shared_ignored_intersection(self):
+        self.svc.toggle(DB, 'alice', '620')
+        self.svc.toggle(DB, 'alice', '730')
+        self.svc.toggle(DB, 'bob', '730')
+        shared = self.svc.get_shared_ignored(DB, ['alice', 'bob'])
+        self.assertEqual(shared, ['730'])
+
+    def test_get_shared_ignored_empty_when_no_common(self):
+        self.svc.toggle(DB, 'alice', '620')
+        self.svc.toggle(DB, 'bob', '440')
+        shared = self.svc.get_shared_ignored(DB, ['alice', 'bob'])
+        self.assertEqual(shared, [])
+
+    def test_get_shared_ignored_single_user(self):
+        self.svc.toggle(DB, 'alice', '620')
+        shared = self.svc.get_shared_ignored(DB, ['alice'])
+        self.assertIn('620', shared)
+
+    def test_get_shared_ignored_empty_list_of_users(self):
+        shared = self.svc.get_shared_ignored(DB, [])
+        self.assertEqual(shared, [])
+
+    def test_different_users_isolated(self):
+        self.svc.toggle(DB, 'alice', '620')
+        self.assertEqual(self.svc.get_ignored(DB, 'bob'), [])
+
+
 if __name__ == '__main__':
     unittest.main()

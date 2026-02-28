@@ -39,14 +39,26 @@ except ImportError:
 # DB-backed services — instantiated lazily after database import so the
 # module can still start without a database being present.
 try:
-    from app.services import NotificationService, ChatService, FriendService
+    from app.services import (
+        NotificationService, ChatService, FriendService,
+        LeaderboardService, PluginService, AppSettingsService,
+        IgnoredGamesService,
+    )
     _notification_service = NotificationService(database) if DB_AVAILABLE else None
     _chat_service = ChatService(database) if DB_AVAILABLE else None
     _friend_service = FriendService(database) if DB_AVAILABLE else None
+    _leaderboard_service = LeaderboardService(database) if DB_AVAILABLE else None
+    _plugin_service = PluginService(database) if DB_AVAILABLE else None
+    _app_settings_service = AppSettingsService(database) if DB_AVAILABLE else None
+    _ignored_games_service = IgnoredGamesService(database) if DB_AVAILABLE else None
 except Exception:
     _notification_service = None
     _chat_service = None
     _friend_service = None
+    _leaderboard_service = None
+    _plugin_service = None
+    _app_settings_service = None
+    _ignored_games_service = None
 
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
@@ -1442,7 +1454,10 @@ def api_pick_game():
             db = None
             try:
                 db = database.SessionLocal()
-                ignored_games = database.get_ignored_games(db, username)
+                if _ignored_games_service:
+                    ignored_games = _ignored_games_service.get_ignored(db, username)
+                else:
+                    ignored_games = database.get_ignored_games(db, username)
                 if ignored_games:
                     if exclude_game_ids:
                         exclude_game_ids.extend(ignored_games)
@@ -2290,31 +2305,32 @@ def api_users_list():
 def api_get_ignored_games():
     """Get current user's ignored games list"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'ignored_games': []}), 200
-    
+
     try:
         db = database.SessionLocal()
-        user = database.get_user_by_username(db, username)
-        
-        if not user:
-            return jsonify({'ignored_games': []}), 200
-        
-        ignored = [
-            {
-                'app_id': ig.app_id,
-                'game_name': ig.game_name,
-                'reason': ig.reason,
-                'created_at': ig.created_at.isoformat() if ig.created_at else None
-            }
-            for ig in user.ignored_games
-        ]
-        
-        db.close()
+        try:
+            user = database.get_user_by_username(db, username)
+
+            if not user:
+                return jsonify({'ignored_games': []}), 200
+
+            ignored = [
+                {
+                    'app_id': ig.app_id,
+                    'game_name': ig.game_name,
+                    'reason': ig.reason,
+                    'created_at': ig.created_at.isoformat() if ig.created_at else None
+                }
+                for ig in user.ignored_games
+            ]
+        finally:
+            db.close()
         return jsonify({'ignored_games': ignored}), 200
     except Exception as e:
         gui_logger.error(f"Error getting ignored games: {e}")
@@ -2326,39 +2342,45 @@ def api_get_ignored_games():
 def api_toggle_ignored_game():
     """Toggle game ignore status for current user"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
-    
+
     data = request.json or {}
     app_id = data.get('app_id')
     game_name = data.get('game_name', '').strip() if isinstance(data.get('game_name'), str) else ''
     reason = data.get('reason', '').strip() if isinstance(data.get('reason'), str) else ''
-    
+
     if not app_id:
         return jsonify({'error': 'app_id required'}), 400
-    
-    # Convert app_id to int
+
+    # Validate app_id is numeric, then normalize to string for consistency
     try:
-        app_id = int(app_id)
+        int(app_id)  # validate it's a valid integer
+        app_id = str(app_id)
     except (ValueError, TypeError):
         return jsonify({'error': 'app_id must be an integer'}), 400
-    
+
     try:
         db = database.SessionLocal()
-        
+
         # Verify user exists in database
         user = database.get_user_by_username(db, username)
         if not user:
             db.close()
             return jsonify({'error': 'User not found in database'}), 404
-        
-        success = database.toggle_ignore_game(db, username, app_id, game_name, reason)
+
+        if _ignored_games_service:
+            success = _ignored_games_service.toggle(
+                db, username, app_id, game_name=game_name, reason=reason)
+        else:
+            success = database.toggle_ignore_game(db, username, app_id,
+                                                  game_name, reason)
         db.close()
-        
+
         if success:
             return jsonify({'message': f'Game ignore status toggled'}), 200
         else:
@@ -3969,7 +3991,10 @@ def api_user_card(username):
     """
     db = next(database.get_db())
     try:
-        card = database.get_user_card(db, username)
+        if _leaderboard_service:
+            card = _leaderboard_service.get_user_card(db, username)
+        else:
+            card = database.get_user_card(db, username)
     finally:
         if db:
             db.close()
@@ -3994,13 +4019,20 @@ def api_update_profile():
     data = request.get_json() or {}
     db = next(database.get_db())
     try:
-        ok = database.update_user_profile(
-            db,
-            username,
-            display_name=data.get('display_name'),
-            bio=data.get('bio'),
-            avatar_url=data.get('avatar_url'),
-        )
+        if _leaderboard_service:
+            ok = _leaderboard_service.update_profile(
+                db, username,
+                display_name=data.get('display_name'),
+                bio=data.get('bio'),
+                avatar_url=data.get('avatar_url'),
+            )
+        else:
+            ok = database.update_user_profile(
+                db, username,
+                display_name=data.get('display_name'),
+                bio=data.get('bio'),
+                avatar_url=data.get('avatar_url'),
+            )
     finally:
         if db:
             db.close()
@@ -4143,7 +4175,10 @@ def api_leaderboard():
         limit = 20
     db = next(database.get_db())
     try:
-        rows = database.get_leaderboard(db, metric=metric, limit=limit)
+        if _leaderboard_service:
+            rows = _leaderboard_service.get_rankings(db, metric=metric, limit=limit)
+        else:
+            rows = database.get_leaderboard(db, metric=metric, limit=limit)
     finally:
         if db:
             db.close()
@@ -4333,7 +4368,10 @@ def api_get_plugins():
     """Return all registered plugins."""
     db = next(database.get_db())
     try:
-        plugins = database.get_plugins(db)
+        if _plugin_service:
+            plugins = _plugin_service.get_all(db)
+        else:
+            plugins = database.get_plugins(db)
     finally:
         if db:
             db.close()
@@ -4357,11 +4395,14 @@ def api_register_plugin():
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _plugin_service:
+            is_admin = _plugin_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     name = data.get('name', '').strip()
@@ -4369,14 +4410,22 @@ def api_register_plugin():
         return jsonify({'error': 'name is required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.register_plugin(
-            db,
-            name=name,
-            description=data.get('description', ''),
-            version=data.get('version', '1.0.0'),
-            author=data.get('author', ''),
-            config=data.get('config'),
-        )
+        if _plugin_service:
+            ok = _plugin_service.register(
+                db, name,
+                description=data.get('description', ''),
+                version=data.get('version', '1.0.0'),
+                author=data.get('author', ''),
+                config=data.get('config'),
+            )
+        else:
+            ok = database.register_plugin(
+                db, name=name,
+                description=data.get('description', ''),
+                version=data.get('version', '1.0.0'),
+                author=data.get('author', ''),
+                config=data.get('config'),
+            )
     finally:
         if db:
             db.close()
@@ -4398,17 +4447,23 @@ def api_toggle_plugin(plugin_id):
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _plugin_service:
+            is_admin = _plugin_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     enabled = bool(data.get('enabled', True))
     db = next(database.get_db())
     try:
-        ok = database.toggle_plugin(db, plugin_id, enabled)
+        if _plugin_service:
+            ok = _plugin_service.toggle(db, plugin_id, enabled)
+        else:
+            ok = database.toggle_plugin(db, plugin_id, enabled)
     finally:
         if db:
             db.close()
@@ -4434,15 +4489,21 @@ def api_get_app_settings():
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _app_settings_service:
+            is_admin = _app_settings_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     db = next(database.get_db())
     try:
-        settings = database.get_settings_with_meta(db)
+        if _app_settings_service:
+            settings = _app_settings_service.get_with_meta(db)
+        else:
+            settings = database.get_settings_with_meta(db)
     finally:
         if db:
             db.close()
@@ -4462,11 +4523,14 @@ def api_save_app_settings():
         username = current_user
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, username)
+        if _app_settings_service:
+            is_admin = _app_settings_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     updates = data.get('settings', {})
@@ -4474,7 +4538,10 @@ def api_save_app_settings():
         return jsonify({'error': 'settings dict is required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.set_app_settings(db, updates, updated_by=username)
+        if _app_settings_service:
+            ok = _app_settings_service.save(db, updates, updated_by=username)
+        else:
+            ok = database.set_app_settings(db, updates, updated_by=username)
     finally:
         if db:
             db.close()
@@ -4491,10 +4558,16 @@ def api_public_settings():
     """
     db = next(database.get_db())
     try:
-        announcement = database.get_app_setting(db, 'announcement', '')
-        chat_enabled = database.get_app_setting(db, 'chat_enabled', 'true')
-        leaderboard_public = database.get_app_setting(db, 'leaderboard_public', 'true')
-        plugins_enabled = database.get_app_setting(db, 'plugins_enabled', 'true')
+        if _app_settings_service:
+            announcement = _app_settings_service.get(db, 'announcement', '')
+            chat_enabled = _app_settings_service.get(db, 'chat_enabled', 'true')
+            leaderboard_public = _app_settings_service.get(db, 'leaderboard_public', 'true')
+            plugins_enabled = _app_settings_service.get(db, 'plugins_enabled', 'true')
+        else:
+            announcement = database.get_app_setting(db, 'announcement', '')
+            chat_enabled = database.get_app_setting(db, 'chat_enabled', 'true')
+            leaderboard_public = database.get_app_setting(db, 'leaderboard_public', 'true')
+            plugins_enabled = database.get_app_setting(db, 'plugins_enabled', 'true')
     finally:
         if db:
             db.close()
