@@ -1466,7 +1466,10 @@ def api_pick_game():
 
                 # Apply tag filter on top of other filters (or on whole library)
                 if tag_filter:
-                    filtered_games = picker.filter_by_tag(tag_filter, filtered_games)
+                    filtered_games = picker.tag_service.filter_by_tag(
+                        tag_filter,
+                        filtered_games if filtered_games is not None else picker.games,
+                    )
 
                 # Apply platform/device filter even when no other filter was active
                 if platform_filter or device_filter:
@@ -1497,9 +1500,9 @@ def api_pick_game():
                 playtime_minutes = game.get('playtime_forever', 0)
                 playtime_hours = playtime_minutes / 60
                 is_favorite = app_id in picker.favorites if app_id else False
-                review = picker.get_review(game_id) if game_id else None
-                tags = picker.get_tags(game_id) if game_id else []
-                backlog_status = picker.get_backlog_status(game_id) if game_id else None
+                review = picker.review_service.get(game_id) if game_id else None
+                tags = picker.tag_service.get(game_id) if game_id else []
+                backlog_status = picker.backlog_service.get_status(game_id) if game_id else None
 
                 response = {
                     'app_id': app_id,
@@ -3009,13 +3012,13 @@ def api_voting_close(session_id: str):
 def api_get_reviews():
     """Return all personal game reviews."""
     global picker
-    
+
     if not picker:
         with picker_lock:
             picker = gapi.GamePicker()
             picker.games = DEMO_GAMES
     with picker_lock:
-        return jsonify(picker.reviews)
+        return jsonify(picker.review_service.get_all())
 
 
 @app.route('/api/reviews/<game_id>', methods=['GET'])
@@ -3023,13 +3026,13 @@ def api_get_reviews():
 def api_get_review(game_id: str):
     """Return the review for a specific game."""
     global picker
-    
+
     if not picker:
         with picker_lock:
             picker = gapi.GamePicker()
             picker.games = DEMO_GAMES
     with picker_lock:
-        review = picker.get_review(game_id)
+        review = picker.review_service.get(game_id)
     if review is None:
         return jsonify({'error': 'No review found'}), 404
     return jsonify(review)
@@ -3043,7 +3046,7 @@ def api_save_review(game_id: str):
     Body JSON: {"rating": 1-10, "notes": "optional text"}
     """
     global picker
-    
+
     if not picker:
         with picker_lock:
             picker = gapi.GamePicker()
@@ -3062,7 +3065,7 @@ def api_save_review(game_id: str):
         return jsonify({'error': 'rating must be an integer'}), 400
 
     with picker_lock:
-        success = picker.add_or_update_review(game_id, rating, notes)
+        success = picker.review_service.add_or_update(game_id, rating, notes)
 
     if not success:
         return jsonify({'error': 'rating must be between 1 and 10'}), 400
@@ -3075,14 +3078,14 @@ def api_save_review(game_id: str):
 def api_delete_review(game_id: str):
     """Delete the review for a game."""
     global picker
-    
+
     if not picker:
         with picker_lock:
             picker = gapi.GamePicker()
             picker.games = DEMO_GAMES
 
     with picker_lock:
-        removed = picker.remove_review(game_id)
+        removed = picker.review_service.remove(game_id)
 
     if not removed:
         return jsonify({'error': 'No review found'}), 404
@@ -3099,7 +3102,7 @@ def api_delete_review(game_id: str):
 def api_get_all_tags():
     """Return all unique tags and a mapping of game_id → tags."""
     global picker
-    
+
     try:
         # Ensure picker is initialized for logged-in user
         if not picker:
@@ -3108,9 +3111,10 @@ def api_get_all_tags():
                 picker.games = DEMO_GAMES
         if not picker.games:
             picker.games = DEMO_GAMES
-            
+
         with picker_lock:
-            return jsonify({'tags': picker.all_tags(), 'game_tags': picker.tags})
+            return jsonify({'tags': picker.tag_service.all_tag_names(),
+                            'game_tags': picker.tag_service.get_all()})
     except Exception as e:
         gui_logger.error(f"Error getting tags: {e}")
         return jsonify({'tags': [], 'game_tags': {}})
@@ -3120,14 +3124,14 @@ def api_get_all_tags():
 def api_get_game_tags(game_id: str):
     """Return the tags for a specific game."""
     global picker
-    
+
     try:
         if not picker:
             with picker_lock:
                 picker = gapi.GamePicker()
                 picker.games = DEMO_GAMES
         with picker_lock:
-            return jsonify({'game_id': game_id, 'tags': picker.get_tags(game_id)})
+            return jsonify({'game_id': game_id, 'tags': picker.tag_service.get(game_id)})
     except Exception as e:
         gui_logger.error(f"Error getting game tags: {e}")
         return jsonify({'game_id': game_id, 'tags': []})
@@ -3140,7 +3144,7 @@ def api_add_tag(game_id: str):
     Body JSON: {"tag": "cozy"}
     """
     global picker
-    
+
     try:
         if not picker:
             with picker_lock:
@@ -3153,8 +3157,8 @@ def api_add_tag(game_id: str):
             return jsonify({'error': 'tag is required'}), 400
 
         with picker_lock:
-            added = picker.add_tag(game_id, tag)
-            tags = picker.get_tags(game_id)
+            added = picker.tag_service.add(game_id, tag)
+            tags = picker.tag_service.get(game_id)
 
         return jsonify({'success': True, 'added': added,
                         'game_id': game_id, 'tags': tags})
@@ -3167,7 +3171,7 @@ def api_add_tag(game_id: str):
 def api_remove_tag(game_id: str, tag: str):
     """Remove a tag from a game."""
     global picker
-    
+
     try:
         if not picker:
             with picker_lock:
@@ -3175,8 +3179,8 @@ def api_remove_tag(game_id: str, tag: str):
                 picker.games = DEMO_GAMES
 
         with picker_lock:
-            removed = picker.remove_tag(game_id, tag)
-            tags = picker.get_tags(game_id)
+            removed = picker.tag_service.remove(game_id, tag)
+            tags = picker.tag_service.get(game_id)
 
         if not removed:
             return jsonify({'error': 'Tag not found'}), 404
@@ -3192,7 +3196,7 @@ def api_remove_tag(game_id: str, tag: str):
 def api_library_by_tag(tag: str):
     """Return games that have a specific tag."""
     global picker
-    
+
     # Ensure picker is initialized for logged-in user
     if not picker or not picker.games:
         # Initialize with demo games if not loaded
@@ -3204,14 +3208,14 @@ def api_library_by_tag(tag: str):
             picker.games = DEMO_GAMES
 
     with picker_lock:
-        games = picker.filter_by_tag(tag)
+        games = picker.tag_service.filter_by_tag(tag, picker.games)
         result = [
             {
                 'app_id': g.get('appid'),
                 'game_id': g.get('game_id'),
                 'name': g.get('name', 'Unknown'),
                 'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
-                'tags': picker.get_tags(g.get('game_id', str(g.get('appid', '')))),
+                'tags': picker.tag_service.get(g.get('game_id', str(g.get('appid', '')))),
             }
             for g in games
         ]
@@ -3229,7 +3233,7 @@ def api_get_schedule():
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        events = picker.get_events()
+        events = picker.schedule_service.get_events()
     return jsonify({'events': events, 'count': len(events)})
 
 
@@ -3252,7 +3256,7 @@ def api_create_event():
     game_name = str(data.get('game_name', '')).strip()
     notes = str(data.get('notes', '')).strip()
     with picker_lock:
-        event = picker.add_event(title, date, time_str, attendees, game_name, notes)
+        event = picker.schedule_service.add_event(title, date, time_str, attendees, game_name, notes)
     return jsonify(event), 201
 
 
@@ -3273,7 +3277,7 @@ def api_update_event(event_id: str):
         else:
             safe['attendees'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
     with picker_lock:
-        event = picker.update_event(event_id, **safe)
+        event = picker.schedule_service.update_event(event_id, **safe)
     if event is None:
         return jsonify({'error': 'Event not found'}), 404
     return jsonify(event)
@@ -3285,7 +3289,7 @@ def api_delete_event(event_id: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.remove_event(event_id)
+        removed = picker.schedule_service.remove_event(event_id)
     if not removed:
         return jsonify({'error': 'Event not found'}), 404
     return jsonify({'success': True, 'id': event_id})
@@ -3301,7 +3305,7 @@ def api_list_playlists():
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        return jsonify({'playlists': picker.list_playlists()})
+        return jsonify({'playlists': picker.playlist_service.list_all()})
 
 
 @app.route('/api/playlists', methods=['POST'])
@@ -3314,7 +3318,7 @@ def api_create_playlist():
     if not name:
         return jsonify({'error': 'name is required'}), 400
     with picker_lock:
-        created = picker.create_playlist(name)
+        created = picker.playlist_service.create(name)
     if not created:
         return jsonify({'error': 'Playlist already exists'}), 409
     return jsonify({'success': True, 'name': name}), 201
@@ -3326,7 +3330,7 @@ def api_delete_playlist(name: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        deleted = picker.delete_playlist(name)
+        deleted = picker.playlist_service.delete(name)
     if not deleted:
         return jsonify({'error': 'Playlist not found'}), 404
     return jsonify({'success': True})
@@ -3338,7 +3342,7 @@ def api_get_playlist_games(name: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        games = picker.get_playlist_games(name)
+        games = picker.playlist_service.get_games(name, picker.games)
     if games is None:
         return jsonify({'error': 'Playlist not found'}), 404
     return jsonify({'name': name, 'games': games, 'count': len(games)})
@@ -3354,7 +3358,7 @@ def api_add_to_playlist(name: str):
     if not game_id:
         return jsonify({'error': 'game_id is required'}), 400
     with picker_lock:
-        added = picker.add_to_playlist(name, game_id)
+        added = picker.playlist_service.add_game(name, game_id)
     if not added:
         return jsonify({'error': 'Game already in playlist or invalid playlist'}), 409
     return jsonify({'success': True})
@@ -3366,7 +3370,7 @@ def api_remove_from_playlist(name: str, game_id: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.remove_from_playlist(name, game_id)
+        removed = picker.playlist_service.remove_game(name, game_id)
     if not removed:
         return jsonify({'error': 'Game or playlist not found'}), 404
     return jsonify({'success': True})
@@ -3385,7 +3389,7 @@ def api_list_backlog():
     if status_filter and status_filter not in gapi.GamePicker.BACKLOG_STATUSES:
         return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
     with picker_lock:
-        games = picker.get_backlog_games(status_filter)
+        games = picker.backlog_service.get_games(picker.games, status_filter)
     return jsonify({'games': games, 'count': len(games)})
 
 
@@ -3395,7 +3399,7 @@ def api_get_backlog_status(game_id: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        status = picker.get_backlog_status(game_id)
+        status = picker.backlog_service.get_status(game_id)
     if status is None:
         return jsonify({'game_id': game_id, 'status': None})
     return jsonify({'game_id': game_id, 'status': status})
@@ -3411,7 +3415,7 @@ def api_set_backlog_status(game_id: str):
     if not status:
         return jsonify({'error': 'status is required'}), 400
     with picker_lock:
-        ok = picker.set_backlog_status(game_id, status)
+        ok = picker.backlog_service.set_status(game_id, status)
     if not ok:
         return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
     return jsonify({'success': True, 'game_id': game_id, 'status': status})
@@ -3423,7 +3427,7 @@ def api_delete_backlog_status(game_id: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.remove_backlog_status(game_id)
+        removed = picker.backlog_service.remove(game_id)
     if not removed:
         return jsonify({'error': 'Game not in backlog'}), 404
     return jsonify({'success': True})
@@ -3864,15 +3868,15 @@ def api_export_library():
         for game in sorted(picker.games, key=lambda g: g.get('name', '').lower()):
             app_id = game.get('appid') or game.get('id') or ''
             game_id = game.get('game_id', f"steam:{app_id}")
-            review = picker.get_review(game_id) or {}
+            review = picker.review_service.get(game_id) or {}
             rows.append({
                 'app_id': app_id,
                 'name': game.get('name', ''),
                 'platform': game.get('platform', 'steam'),
                 'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
-                'is_favorite': 'yes' if game_id in picker.favorites else 'no',
-                'backlog_status': picker.get_backlog_status(game_id) or '',
-                'tags': ','.join(picker.get_tags(game_id)),
+                'is_favorite': 'yes' if picker.favorites_service.contains(game_id) else 'no',
+                'backlog_status': picker.backlog_service.get_status(game_id) or '',
+                'tags': ','.join(picker.tag_service.get(game_id)),
                 'review_rating': review.get('rating', ''),
                 'review_notes': review.get('notes', ''),
             })
@@ -3902,15 +3906,15 @@ def api_export_favorites():
         for game in picker.games:
             game_id = game.get('game_id', '')
             app_id = game.get('appid') or game.get('id') or ''
-            if game_id not in picker.favorites:
+            if not picker.favorites_service.contains(game_id):
                 continue
-            review = picker.get_review(game_id) or {}
+            review = picker.review_service.get(game_id) or {}
             rows.append({
                 'app_id': app_id,
                 'name': game.get('name', ''),
                 'platform': game.get('platform', 'steam'),
                 'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
-                'tags': ','.join(picker.get_tags(game_id)),
+                'tags': ','.join(picker.tag_service.get(game_id)),
                 'review_rating': review.get('rating', ''),
                 'review_notes': review.get('notes', ''),
             })
@@ -3922,6 +3926,55 @@ def api_export_favorites():
          'review_rating', 'review_notes'],
         'gapi_favorites.csv',
     )
+
+
+# ---------------------------------------------------------------------------
+# API Documentation — OpenAPI 3.0 + Swagger UI
+# ---------------------------------------------------------------------------
+
+@app.route('/api/openapi.json')
+def api_openapi_spec():
+    """Serve the OpenAPI 3.0 specification as JSON."""
+    try:
+        from openapi_spec import build_spec
+        server_url = request.url_root.rstrip('/')
+        spec = build_spec(server_url=server_url)
+        return jsonify(spec)
+    except Exception as e:
+        gui_logger.error(f"Error building OpenAPI spec: {e}")
+        return jsonify({'error': 'Could not generate spec'}), 500
+
+
+@app.route('/api/docs')
+def api_swagger_ui():
+    """Serve an interactive Swagger UI for the GAPI REST API."""
+    openapi_url = '/api/openapi.json'
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GAPI API Documentation</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({{
+      url: "{openapi_url}",
+      dom_id: "#swagger-ui",
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout",
+      deepLinking: true,
+      defaultModelsExpandDepth: 1,
+      defaultModelExpandDepth: 1,
+    }});
+  </script>
+</body>
+</html>"""
+    return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
 def create_templates():
