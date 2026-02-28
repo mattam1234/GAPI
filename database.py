@@ -283,6 +283,18 @@ class Plugin(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AppSettings(Base):
+    """Admin-controlled global application settings stored as key/value pairs."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, nullable=True)
+    description = Column(String(500), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(255), nullable=True)  # username of last editor
+
+
 def get_db():
     """Get database session."""
     if SessionLocal:
@@ -1196,15 +1208,38 @@ def send_friend_request(db, from_username: str, to_username: str) -> tuple:
             existing.addressee_id = target.id
             existing.updated_at = datetime.utcnow()
             db.commit()
+            # Notify target
+            _notify_friend_request(db, sender.username, target)
             return True, 'Friend request sent'
         friendship = UserFriendship(requester_id=sender.id, addressee_id=target.id, status='pending')
         db.add(friendship)
         db.commit()
+        # Notify target
+        _notify_friend_request(db, sender.username, target)
         return True, 'Friend request sent'
     except Exception as e:
         logger.error(f"Error sending friend request: {e}")
         db.rollback()
         return False, str(e)
+
+
+def _notify_friend_request(db, sender_username: str, target_user) -> None:
+    """Create a friend_request notification for target_user (best-effort)."""
+    try:
+        notif = Notification(
+            user_id=target_user.id,
+            type='friend_request',
+            title='New Friend Request',
+            message=f'{sender_username} sent you a friend request.',
+        )
+        db.add(notif)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Could not create friend-request notification: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 
 def respond_friend_request(db, username: str, requester_username: str, accept: bool) -> tuple:
@@ -1226,6 +1261,23 @@ def respond_friend_request(db, username: str, requester_username: str, accept: b
         friendship.status = 'accepted' if accept else 'declined'
         friendship.updated_at = datetime.utcnow()
         db.commit()
+        # Notify the original requester when their request is accepted
+        if accept:
+            try:
+                notif = Notification(
+                    user_id=requester.id,
+                    type='friend_request',
+                    title='Friend Request Accepted',
+                    message=f'{username} accepted your friend request. You are now friends!',
+                )
+                db.add(notif)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Could not create acceptance notification: {e}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
         return True, 'accepted' if accept else 'declined'
     except Exception as e:
         logger.error(f"Error responding to friend request: {e}")
@@ -1293,3 +1345,90 @@ def remove_app_friend(db, username: str, other_username: str) -> bool:
         logger.error(f"Error removing friend: {e}")
         db.rollback()
         return False
+
+
+# ---------------------------------------------------------------------------
+# AppSettings helpers
+# ---------------------------------------------------------------------------
+
+# Default settings shown in the admin panel.
+_DEFAULT_SETTINGS = {
+    'registration_open': ('true', 'Allow new users to register (true/false)'),
+    'announcement': ('', 'Site-wide announcement shown to all logged-in users'),
+    'max_pick_count': ('10', 'Maximum number of games a user can pick at once'),
+    'default_platform': ('all', 'Default platform filter for game picker (all/steam/epic/gog)'),
+    'leaderboard_public': ('true', 'Show leaderboard to all users (true/false)'),
+    'chat_enabled': ('true', 'Enable the chat feature (true/false)'),
+    'plugins_enabled': ('true', 'Enable the plugins system (true/false)'),
+}
+
+
+def get_app_settings(db) -> dict:
+    """Return all app settings as a key→value dict.
+
+    Missing keys are filled in from ``_DEFAULT_SETTINGS``.
+    """
+    if not db:
+        return {k: v for k, (v, _) in _DEFAULT_SETTINGS.items()}
+    try:
+        rows = db.query(AppSettings).all()
+        settings = {r.key: r.value for r in rows}
+        # Fill missing defaults
+        for key, (default_val, _) in _DEFAULT_SETTINGS.items():
+            if key not in settings:
+                settings[key] = default_val
+        return settings
+    except Exception as e:
+        logger.error(f"Error getting app settings: {e}")
+        return {k: v for k, (v, _) in _DEFAULT_SETTINGS.items()}
+
+
+def get_app_setting(db, key: str, default=None) -> str:
+    """Return a single app setting value by key."""
+    settings = get_app_settings(db)
+    return settings.get(key, default)
+
+
+def set_app_settings(db, updates: dict, updated_by: str = None) -> bool:
+    """Persist a dict of key→value updates.
+
+    Creates missing rows; updates existing ones.
+    """
+    if not db:
+        return False
+    try:
+        for key, value in updates.items():
+            row = db.query(AppSettings).filter(AppSettings.key == key).first()
+            description = _DEFAULT_SETTINGS.get(key, (None, None))[1]
+            if row:
+                row.value = str(value)
+                row.updated_by = updated_by
+                row.updated_at = datetime.utcnow()
+            else:
+                row = AppSettings(
+                    key=key,
+                    value=str(value),
+                    description=description,
+                    updated_by=updated_by,
+                )
+                db.add(row)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error saving app settings: {e}")
+        db.rollback()
+        return False
+
+
+def get_settings_with_meta(db) -> list:
+    """Return settings as a list of dicts with key, value, and description."""
+    current = get_app_settings(db)
+    result = []
+    for key, (default_val, description) in _DEFAULT_SETTINGS.items():
+        result.append({
+            'key': key,
+            'value': current.get(key, default_val),
+            'default': default_val,
+            'description': description,
+        })
+    return result

@@ -660,9 +660,88 @@
             font-size: 0.82em;
             font-weight: 600;
         }
+
+        /* ── Library Grid View ────────────────────────────────────────── */
+        .library-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 14px;
+        }
+        .game-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .game-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(102,126,234,0.25);
+        }
+        .game-card-cover {
+            width: 100%;
+            aspect-ratio: 460 / 215;
+            object-fit: cover;
+            display: block;
+            background: var(--card-border);
+        }
+        .game-card-body {
+            padding: 8px 10px;
+        }
+        .game-card-title {
+            font-size: 0.82em;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .game-card-meta {
+            font-size: 0.73em;
+            color: var(--text-secondary);
+            margin-top: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* ── Site Announcement Banner ─────────────────────────────────── */
+        #site-announcement {
+            display: none;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.95em;
+            position: relative;
+        }
+        #site-announcement button {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255,255,255,0.25);
+            border: none;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            font-size: 0.85em;
+            line-height: 24px;
+            padding: 0;
+        }
     </style>
 </head>
 <body>
+    <!-- Site-wide Announcement Banner -->
+    <div id="site-announcement">
+        <span id="site-announcement-text"></span>
+        <button onclick="document.getElementById('site-announcement').style.display='none'" title="Dismiss">✕</button>
+    </div>
+
     <!-- Login/Register Modal -->
     <div id="auth-modal" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 9999;">
         <div style="background: var(--card-bg); padding: 40px; border-radius: 15px; width: 90%; max-width: 400px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
@@ -750,6 +829,7 @@
             <button id="notifications-tab-btn" class="tab" onclick="switchTab('notifications', event)">🔔 Alerts <span id="notif-badge" style="display:none;background:#e74c3c;color:white;border-radius:50%;padding:1px 6px;font-size:0.75em;margin-left:4px;"></span></button>
             <button class="tab" onclick="switchTab('plugins', event)">🧩 Plugins</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
+            <button id="admin-tab-btn" class="tab" style="display:none;" onclick="switchTab('admin', event)">🛠️ Admin</button>
         </div>        
         <!-- Picker Tab -->
         <div id="picker-tab" class="tab-content active">
@@ -853,7 +933,13 @@
         <div id="library-tab" class="tab-content">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
                 <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibraryDebounced()" style="margin-bottom:0; flex:1; min-width:180px;">
-                <a href="/api/export/library" download="gapi_library.csv" style="padding:9px 18px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.9em; white-space:nowrap;">⬇️ Export CSV</a>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button id="library-view-list-btn" onclick="setLibraryView('list')" title="List view"
+                            style="padding:8px 12px; border:1px solid var(--input-border); border-radius:8px; cursor:pointer; background:linear-gradient(135deg,#667eea,#764ba2); color:white; font-size:1em;">☰</button>
+                    <button id="library-view-grid-btn" onclick="setLibraryView('grid')" title="Grid view"
+                            style="padding:8px 12px; border:1px solid var(--input-border); border-radius:8px; cursor:pointer; background:var(--card-bg); color:var(--text-primary); font-size:1em;">⊞</button>
+                    <a href="/api/export/library" download="gapi_library.csv" style="padding:9px 18px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.9em; white-space:nowrap;">⬇️ Export CSV</a>
+                </div>
             </div>
             <div id="library-list" class="list-container">
                 <div class="loading">Loading library...</div>
@@ -1552,6 +1638,80 @@
         </div>
     </div>
 
+    <!-- Admin Settings Tab -->
+    <div id="admin-tab" class="tab-content" style="display:none;">
+        <h2>🛠️ Admin Settings</h2>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Configure global application settings. Changes take effect immediately.</p>
+
+        <!-- Announcement Banner -->
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-bottom:20px;">
+            <h3 style="margin-top:0;">📢 Announcement Banner</h3>
+            <p style="color:var(--text-secondary); font-size:0.9em; margin-bottom:12px;">Displayed at the top of the app for all logged-in users. Leave blank to hide.</p>
+            <textarea id="admin-announcement" rows="3" maxlength="500"
+                      placeholder="Enter an announcement message…"
+                      style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary); resize:vertical; box-sizing:border-box;"></textarea>
+        </div>
+
+        <!-- Feature Toggles -->
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-bottom:20px;">
+            <h3 style="margin-top:0;">🔧 Feature Toggles</h3>
+            <div style="display:grid; gap:14px;">
+                <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                    <input type="checkbox" id="admin-registration-open" style="width:18px; height:18px;">
+                    <div>
+                        <strong>Open Registration</strong>
+                        <div style="font-size:0.85em; color:var(--text-secondary);">Allow new users to self-register</div>
+                    </div>
+                </label>
+                <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                    <input type="checkbox" id="admin-chat-enabled" style="width:18px; height:18px;">
+                    <div>
+                        <strong>Chat Enabled</strong>
+                        <div style="font-size:0.85em; color:var(--text-secondary);">Enable the chat rooms feature</div>
+                    </div>
+                </label>
+                <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                    <input type="checkbox" id="admin-leaderboard-public" style="width:18px; height:18px;">
+                    <div>
+                        <strong>Public Leaderboard</strong>
+                        <div style="font-size:0.85em; color:var(--text-secondary);">Show leaderboard to all users (not just admin)</div>
+                    </div>
+                </label>
+                <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
+                    <input type="checkbox" id="admin-plugins-enabled" style="width:18px; height:18px;">
+                    <div>
+                        <strong>Plugins Enabled</strong>
+                        <div style="font-size:0.85em; color:var(--text-secondary);">Enable the plugins/addons system</div>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <!-- Numeric/Text Settings -->
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-bottom:20px;">
+            <h3 style="margin-top:0;">⚙️ General Settings</h3>
+            <div style="display:grid; gap:14px;">
+                <label style="display:flex; flex-direction:column; gap:5px;">
+                    <span style="font-weight:600;">Max Pick Count <small style="font-weight:normal; color:var(--text-secondary);">(1–50)</small></span>
+                    <input type="number" id="admin-max-pick-count" min="1" max="50"
+                           style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary); width:120px;">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:5px;">
+                    <span style="font-weight:600;">Default Platform</span>
+                    <select id="admin-default-platform" style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary); width:180px;">
+                        <option value="all">All Platforms</option>
+                        <option value="steam">Steam only</option>
+                        <option value="epic">Epic only</option>
+                        <option value="gog">GOG only</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+
+        <div id="admin-settings-message" style="display:none; padding:10px; border-radius:8px; margin-bottom:14px;"></div>
+        <button onclick="saveAdminSettings()" style="padding:12px 32px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:1em;">💾 Save Settings</button>
+    </div>
+
     <!-- Share Modal -->
     <div id="share-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
         <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:500px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
@@ -1972,6 +2132,11 @@
             const cached = gameDetailsCache.get(appId);
             return (cached && (cached.header_image || cached.capsule_image))
                 || `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+        }
+
+        function handleMissingCover(img) {
+            img.style.background = 'var(--card-border)';
+            img.removeAttribute('src');
         }
 
         function renderGameListThumb(appId, gameName) {
@@ -5386,11 +5551,223 @@
         setInterval(pollNotifications, 30000);
         pollNotifications();
 
-        // Show admin notification sender for admins
+        // Show admin notification sender and admin tab for admins
         checkIfAdmin(isAdmin => {
             const adminSend = document.getElementById('admin-send-notification');
             if (adminSend) adminSend.style.display = isAdmin ? 'block' : 'none';
+            const adminTabBtn = document.getElementById('admin-tab-btn');
+            if (adminTabBtn) adminTabBtn.style.display = isAdmin ? 'inline-block' : 'none';
         });
+
+        // Load and show site announcement banner
+        (async function loadAnnouncement() {
+            try {
+                const resp = await fetch('/api/admin/settings/public');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (data.announcement && data.announcement.trim()) {
+                    const banner = document.getElementById('site-announcement');
+                    const text = document.getElementById('site-announcement-text');
+                    if (banner && text) {
+                        text.textContent = data.announcement;
+                        banner.style.display = 'block';
+                    }
+                }
+            } catch (e) { console.warn('Could not load announcement:', e); }
+        })();
+
+        // ==============================================================================================
+
+        async function loadAdminSettings() {
+            try {
+                const resp = await fetch('/api/admin/settings');
+                if (!resp.ok) {
+                    showMessage('Admin access required', 'error');
+                    return;
+                }
+                const data = await resp.json();
+                const map = {};
+                (data.settings || []).forEach(s => map[s.key] = s.value);
+                // Populate form
+                const ann = document.getElementById('admin-announcement');
+                if (ann) ann.value = map['announcement'] || '';
+                const setChk = (id, key) => {
+                    const el = document.getElementById(id);
+                    if (el) el.checked = (map[key] === 'true');
+                };
+                setChk('admin-registration-open', 'registration_open');
+                setChk('admin-chat-enabled', 'chat_enabled');
+                setChk('admin-leaderboard-public', 'leaderboard_public');
+                setChk('admin-plugins-enabled', 'plugins_enabled');
+                const maxPick = document.getElementById('admin-max-pick-count');
+                if (maxPick) maxPick.value = map['max_pick_count'] || '10';
+                const defPlatform = document.getElementById('admin-default-platform');
+                if (defPlatform) defPlatform.value = map['default_platform'] || 'all';
+            } catch (err) {
+                showMessage('Error loading settings: ' + err.message, 'error');
+            }
+        }
+
+        async function saveAdminSettings() {
+            const msgEl = document.getElementById('admin-settings-message');
+            const getVal = id => { const el = document.getElementById(id); return el ? el.value : null; };
+            const getChk = id => { const el = document.getElementById(id); return el ? String(el.checked) : 'false'; };
+            const settings = {
+                announcement: getVal('admin-announcement') || '',
+                registration_open: getChk('admin-registration-open'),
+                chat_enabled: getChk('admin-chat-enabled'),
+                leaderboard_public: getChk('admin-leaderboard-public'),
+                plugins_enabled: getChk('admin-plugins-enabled'),
+                max_pick_count: getVal('admin-max-pick-count') || '10',
+                default_platform: getVal('admin-default-platform') || 'all',
+            };
+            try {
+                const resp = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = '#d4edda';
+                    msgEl.style.color = '#155724';
+                    msgEl.textContent = '✅ Settings saved successfully!';
+                    setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
+                    // Refresh announcement banner
+                    const annEl = document.getElementById('site-announcement-text');
+                    const banner = document.getElementById('site-announcement');
+                    if (settings.announcement.trim()) {
+                        if (annEl) annEl.textContent = settings.announcement;
+                        if (banner) banner.style.display = 'block';
+                    } else {
+                        if (banner) banner.style.display = 'none';
+                    }
+                } else {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = '#f8d7da';
+                    msgEl.style.color = '#721c24';
+                    msgEl.textContent = data.error || 'Failed to save settings';
+                }
+            } catch (err) {
+                msgEl.style.display = 'block';
+                msgEl.style.background = '#f8d7da';
+                msgEl.style.color = '#721c24';
+                msgEl.textContent = 'Error: ' + err.message;
+            }
+        }
+
+        // ==============================================================================================
+        // Library Grid / List view toggle
+        // ==============================================================================================
+
+        let _libraryView = localStorage.getItem('gapi_library_view') || 'list';
+        let _libraryData = null; // cache last loaded data
+
+        function setLibraryView(view) {
+            _libraryView = view;
+            localStorage.setItem('gapi_library_view', view);
+            const listBtn = document.getElementById('library-view-list-btn');
+            const gridBtn = document.getElementById('library-view-grid-btn');
+            const activeStyle = 'linear-gradient(135deg,#667eea,#764ba2)';
+            const inactiveStyle = 'var(--card-bg)';
+            const activeColor = 'white';
+            const inactiveColor = 'var(--text-primary)';
+            if (listBtn) { listBtn.style.background = view === 'list' ? activeStyle : inactiveStyle; listBtn.style.color = view === 'list' ? activeColor : inactiveColor; }
+            if (gridBtn) { gridBtn.style.background = view === 'grid' ? activeStyle : inactiveStyle; gridBtn.style.color = view === 'grid' ? activeColor : inactiveColor; }
+            if (_libraryData) renderLibraryData(_libraryData);
+        }
+
+        function renderLibraryData(data) {
+            _libraryData = data;
+            const listDiv = document.getElementById('library-list');
+            if (!data.games || data.games.length === 0) {
+                listDiv.innerHTML = '<div class="loading">No games found</div>';
+                return;
+            }
+            if (_libraryView === 'grid') {
+                let html = '<div class="library-grid">';
+                data.games.forEach(game => {
+                    const safeName = escapeHtml(game.name || '');
+                    const safeNameJs = (game.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/`/g, '\\`');
+                    const coverSrc = getGameThumbUrl(game.app_id);
+                    const favIcon = game.is_favorite ? '⭐' : '☆';
+                    html += `
+                        <div class="game-card" onclick="showGameDetails(${game.app_id}, '${safeNameJs}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
+                            <img class="game-card-cover" src="${coverSrc}"
+                                 onerror="handleMissingCover(this)"
+                                 alt="${safeName}" loading="lazy">
+                            <div class="game-card-body">
+                                <div class="game-card-title" title="${safeName}">${safeName}</div>
+                                <div class="game-card-meta">
+                                    <span>${game.playtime_hours || 0}h</span>
+                                    <span onclick="event.stopPropagation(); toggleFavorite(${game.app_id})" style="cursor:pointer;">${favIcon}</span>
+                                </div>
+                            </div>
+                        </div>`;
+                });
+                html += '</div>';
+                listDiv.innerHTML = html;
+            } else {
+                // Original list view
+                let html = '';
+                data.games.forEach(game => {
+                    const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
+                    const safeNameJs = (game.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/`/g, '\\`');
+                    html += `
+                        <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeNameJs}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
+                            <div class="list-item-media">
+                                ${renderGameListThumb(game.app_id, game.name)}
+                                <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
+                            </div>
+                            <div style="display:flex; gap:10px; align-items:center;">
+                                <span>${game.playtime_hours}h</span>
+                                <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
+                                    ${game.is_favorite ? '⭐' : '☆'}
+                                </span>
+                                <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
+                            </div>
+                        </div>`;
+                });
+                listDiv.innerHTML = html;
+            }
+            // Pre-load details for all games in background
+            const appIds = data.games.map(g => g.app_id);
+            preloadGameDetails(appIds).catch(() => {});
+        }
+
+        // ==============================================================================================
+        // Hook admin tab + grid view into existing switchTab + loadLibrary
+        // ==============================================================================================
+
+        // Patch loadLibrary to use renderLibraryData
+        const _origLoadLibrary = window.loadLibrary;
+        window.loadLibrary = async function() {
+            const listDiv = document.getElementById('library-list');
+            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const response = await fetch('/api/library');
+                const data = await response.json();
+                renderLibraryData(data);
+            } catch (error) {
+                listDiv.innerHTML = '<div class="error">Error loading library</div>';
+            }
+            // Also load duplicates if the original function did
+            if (typeof loadDuplicates === 'function') loadDuplicates();
+        };
+
+        // Initialise the view toggle buttons on page load
+        setLibraryView(_libraryView);
+
+        // Extend switchTab to handle admin tab
+        const _origSwitchTab2 = window.switchTab;
+        window.switchTab = function(tabName, event) {
+            if (_origSwitchTab2) _origSwitchTab2(tabName, event);
+            // Show/hide admin-tab div (it's outside the normal tab-content set)
+            const adminDiv = document.getElementById('admin-tab');
+            if (adminDiv) adminDiv.classList.toggle('active', tabName === 'admin');
+            if (tabName === 'admin') loadAdminSettings();
+        };
     </script>
 </body>
 </html>

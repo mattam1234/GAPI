@@ -4178,6 +4178,95 @@ def api_toggle_plugin(plugin_id):
     return jsonify({'error': 'Plugin not found'}), 404
 
 
+# ---------------------------------------------------------------------------
+# App Settings API  (admin only)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/settings', methods=['GET'])
+@require_login
+def api_get_app_settings():
+    """Return all admin-controlled app settings (admin only).
+
+    Response JSON:
+      - ``settings``: list of ``{key, value, default, description}`` objects
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        roles = database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if 'admin' not in roles:
+        return jsonify({'error': 'Admin access required'}), 403
+    db = next(database.get_db())
+    try:
+        settings = database.get_settings_with_meta(db)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'settings': settings})
+
+
+@app.route('/api/admin/settings', methods=['POST'])
+@require_login
+def api_save_app_settings():
+    """Save one or more app settings (admin only).
+
+    Request JSON:
+      - ``settings``: dict of ``{key: value}`` pairs to update
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        roles = database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if 'admin' not in roles:
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json() or {}
+    updates = data.get('settings', {})
+    if not isinstance(updates, dict) or not updates:
+        return jsonify({'error': 'settings dict is required'}), 400
+    db = next(database.get_db())
+    try:
+        ok = database.set_app_settings(db, updates, updated_by=username)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to save settings'}), 500
+
+
+@app.route('/api/admin/settings/public', methods=['GET'])
+def api_public_settings():
+    """Return safe public-facing settings (no auth required).
+
+    Currently returns: announcement message.
+    """
+    db = next(database.get_db())
+    try:
+        announcement = database.get_app_setting(db, 'announcement', '')
+        chat_enabled = database.get_app_setting(db, 'chat_enabled', 'true')
+        leaderboard_public = database.get_app_setting(db, 'leaderboard_public', 'true')
+        plugins_enabled = database.get_app_setting(db, 'plugins_enabled', 'true')
+    finally:
+        if db:
+            db.close()
+    return jsonify({
+        'announcement': announcement,
+        'chat_enabled': chat_enabled == 'true',
+        'leaderboard_public': leaderboard_public == 'true',
+        'plugins_enabled': plugins_enabled == 'true',
+    })
+
+
 def create_templates():
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)
