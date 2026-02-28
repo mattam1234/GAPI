@@ -4481,7 +4481,92 @@ def api_live_session_pick(session_id: str):
 
     if not game:
         return jsonify({'error': 'No common game found for all participants'}), 404
+
+    # Notify all participants that a game was picked (best-effort)
+    if DB_AVAILABLE:
+        game_name = game.get('name', 'a game')
+        for participant in participants:
+            db = next(database.get_db())
+            try:
+                database.create_notification(
+                    db,
+                    participant,
+                    title='Game picked!',
+                    message=f'{username} picked "{game_name}" for your live session.',
+                    type='success',
+                )
+            except Exception as exc:
+                gui_logger.warning('Failed to notify %s after pick: %s', participant, exc)
+            finally:
+                if db:
+                    db.close()
+
     return jsonify(game)
+
+
+@app.route('/api/live-session/<session_id>', methods=['GET'])
+@require_login
+def api_live_session_get(session_id: str):
+    """Return the current state of a specific live pick session."""
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+    return jsonify(_live_session_view(session))
+
+
+@app.route('/api/live-session/<session_id>/invite', methods=['POST'])
+@require_login
+def api_live_session_invite(session_id: str):
+    """Invite one or more users to a live pick session by sending them an
+    in-app notification.
+
+    Only the session host may send invites.
+
+    Request JSON:
+      - ``usernames``: list of usernames to invite (required)
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session['host'] != username:
+            return jsonify({'error': 'Only the session host can invite users'}), 403
+        session_name = session.get('name', session_id)
+    data = request.get_json() or {}
+    usernames = data.get('usernames', [])
+    if not usernames or not isinstance(usernames, list):
+        return jsonify({'error': 'usernames (list) is required'}), 400
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available for notifications'}), 503
+    sent, failed = [], []
+    for target in usernames:
+        target = str(target).strip()
+        if not target:
+            continue
+        db = next(database.get_db())
+        try:
+            ok = database.create_notification(
+                db,
+                target,
+                title=f'Game session invite from {username}',
+                message=(
+                    f'{username} invited you to join their live pick session '
+                    f'"{session_name}". Session ID: {session_id}'
+                ),
+                type='info',
+            )
+            (sent if ok else failed).append(target)
+        except Exception as exc:
+            gui_logger.warning('Failed to send invite notification to %s: %s', target, exc)
+            failed.append(target)
+        finally:
+            if db:
+                db.close()
+    return jsonify({'sent': sent, 'failed': failed})
 
 
 # ---------------------------------------------------------------------------
@@ -5618,14 +5703,44 @@ def create_templates():
                 <p style="color: #888; margin-bottom: 12px; font-size: 0.95em;">
                     Create a session for online friends to join and pick a game together in real-time.
                 </p>
-                <button onclick="createLiveSession()" style="padding: 10px 24px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-right: 10px;">
-                    ➕ Create Live Session
-                </button>
-                <button onclick="refreshLiveSessions()" style="padding: 10px 18px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
-                    🔄 Refresh
-                </button>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
+                    <button onclick="createLiveSession()" style="padding: 10px 24px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                        ➕ Create Live Session
+                    </button>
+                    <button onclick="refreshLiveSessions()" style="padding: 10px 18px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                        🔄 Refresh
+                    </button>
+                    <span style="color: #888; font-size: 0.85em;" id="session-refresh-status"></span>
+                </div>
+                <!-- Join by session ID -->
+                <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                    <input id="join-session-id" type="text" placeholder="Session ID…"
+                           style="flex: 1; max-width: 320px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95em;">
+                    <button onclick="joinBySessionId()" style="padding: 8px 18px; background: #764ba2; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                        🔗 Join by ID
+                    </button>
+                </div>
                 <div id="live-sessions-list" style="margin-top: 15px;">
                     <div class="loading">Loading sessions...</div>
+                </div>
+            </div>
+
+            <!-- Invite Modal -->
+            <div id="invite-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+                 background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+                <div style="background:white; border-radius:10px; padding:24px; min-width:320px; max-width:480px; width:90%;">
+                    <h3 style="margin-bottom:14px;">📨 Invite Friends</h3>
+                    <div id="invite-friends-list" style="max-height:280px; overflow-y:auto; margin-bottom:14px;">
+                        Loading…
+                    </div>
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button onclick="sendInvites()" style="padding:8px 20px; background:#28a745; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                            Send Invites
+                        </button>
+                        <button onclick="closeInviteModal()" style="padding:8px 16px; background:#6c757d; color:white; border:none; border-radius:6px; cursor:pointer;">
+                            Cancel
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -5686,7 +5801,10 @@ def create_templates():
                 loadUsersForMultiUser();
                 loadFriendsForMultiUser();
                 refreshLiveSessions();
+                startLiveSessionPolling();
                 document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
+            } else {
+                stopLiveSessionPolling();
             }
         }
         
@@ -6268,6 +6386,9 @@ def create_templates():
         }
 
         // Live Pick Session Functions
+        let _inviteSessionId = null;
+        let _liveSessionPollTimer = null;
+
         async function createLiveSession() {
             try {
                 const response = await fetch('/api/live-session/create', {
@@ -6281,7 +6402,7 @@ def create_templates():
                     return;
                 }
                 const session = await response.json();
-                alert(`Live session created! Session ID: ${session.session_id}\\nShare this ID with friends so they can join.`);
+                alert(`Live session created! Session ID:\\n${session.session_id}\\n\\nShare this ID with friends so they can join.`);
                 refreshLiveSessions();
             } catch (error) {
                 alert('Error creating session: ' + error.message);
@@ -6303,6 +6424,17 @@ def create_templates():
             } catch (error) {
                 alert('Error joining session: ' + error.message);
             }
+        }
+
+        async function joinBySessionId() {
+            const input = document.getElementById('join-session-id');
+            const sessionId = (input ? input.value : '').trim();
+            if (!sessionId) {
+                alert('Please enter a session ID first.');
+                return;
+            }
+            await joinLiveSession(sessionId);
+            if (input) input.value = '';
         }
 
         async function leaveLiveSession(sessionId) {
@@ -6351,9 +6483,78 @@ def create_templates():
             }
         }
 
+        function openInviteModal(sessionId) {
+            _inviteSessionId = sessionId;
+            const modal = document.getElementById('invite-modal');
+            modal.style.display = 'flex';
+            const listDiv = document.getElementById('invite-friends-list');
+            listDiv.innerHTML = 'Loading friends…';
+            fetch('/api/app-friends')
+                .then(r => r.json())
+                .then(data => {
+                    const friends = (data.friends || []);
+                    if (friends.length === 0) {
+                        listDiv.innerHTML = '<p style="color:#888;">No friends found. Add friends first!</p>';
+                        return;
+                    }
+                    let html = '';
+                    friends.forEach(f => {
+                        const dot = f.is_online
+                            ? '<span style="color:#28a745;">🟢</span>'
+                            : '<span style="color:#aaa;">⚫</span>';
+                        html += `
+                            <label style="display:flex; align-items:center; gap:10px; padding:8px; border-bottom:1px solid #eee; cursor:pointer;">
+                                <input type="checkbox" class="invite-checkbox" value="${f.username}">
+                                ${dot} <strong>${f.display_name}</strong>
+                                <small style="color:#888;">(${f.username})</small>
+                            </label>
+                        `;
+                    });
+                    listDiv.innerHTML = html;
+                })
+                .catch(() => {
+                    listDiv.innerHTML = '<p style="color:red;">Error loading friends</p>';
+                });
+        }
+
+        function closeInviteModal() {
+            document.getElementById('invite-modal').style.display = 'none';
+            _inviteSessionId = null;
+        }
+
+        async function sendInvites() {
+            const sessionId = _inviteSessionId;
+            if (!sessionId) return;
+            const checkboxes = document.querySelectorAll('.invite-checkbox:checked');
+            const usernames = Array.from(checkboxes).map(cb => cb.value);
+            if (usernames.length === 0) {
+                alert('Select at least one friend to invite.');
+                return;
+            }
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/invite`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({usernames})
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'Failed to send invites');
+                    return;
+                }
+                const sentCount = (data.sent || []).length;
+                const failCount = (data.failed || []).length;
+                alert(`Invites sent: ${sentCount}${failCount ? `, failed: ${failCount}` : ''}`);
+                closeInviteModal();
+            } catch (error) {
+                alert('Error sending invites: ' + error.message);
+            }
+        }
+
         async function refreshLiveSessions() {
             const listDiv = document.getElementById('live-sessions-list');
             if (!listDiv) return;
+            const statusEl = document.getElementById('session-refresh-status');
             try {
                 const response = await fetch('/api/live-session/active');
                 if (!response.ok) {
@@ -6362,23 +6563,29 @@ def create_templates():
                 }
                 const data = await response.json();
                 const sessions = data.sessions || [];
+                if (statusEl) statusEl.textContent = `Last updated ${new Date().toLocaleTimeString()}`;
                 if (sessions.length === 0) {
                     listDiv.innerHTML = '<div class="loading">No active sessions. Create one above!</div>';
                     return;
                 }
                 let html = '';
                 sessions.forEach(s => {
+                    const pickedInfo = s.picked_game
+                        ? `<br><small style="color:#28a745;">✅ Game picked: <strong>${s.picked_game.name || s.picked_game.app_id || '?'}</strong></small>`
+                        : '';
                     html += `
                         <div style="padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background: white;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
                                 <div>
                                     <strong>${s.name || s.session_id}</strong>
                                     <span style="font-size:0.8em; color:#888; margin-left: 8px;">${s.status}</span><br>
                                     <small style="color:#555;">Host: ${s.host} &nbsp;|&nbsp; Participants: ${s.participants.join(', ')}</small>
+                                    ${pickedInfo}
                                 </div>
                                 <div style="display:flex; gap:6px; flex-wrap: wrap;">
                                     <button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer;">Join</button>
                                     <button onclick="pickForLiveSession('${s.session_id}')" style="padding:6px 14px; background:#764ba2; color:white; border:none; border-radius:6px; cursor:pointer;">🎲 Pick</button>
+                                    <button onclick="openInviteModal('${s.session_id}')" style="padding:6px 14px; background:#fd7e14; color:white; border:none; border-radius:6px; cursor:pointer;">📨 Invite</button>
                                     <button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 14px; background:#dc3545; color:white; border:none; border-radius:6px; cursor:pointer;">Leave</button>
                                 </div>
                             </div>
@@ -6388,6 +6595,18 @@ def create_templates():
                 listDiv.innerHTML = html;
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading sessions</div>';
+            }
+        }
+
+        function startLiveSessionPolling() {
+            if (_liveSessionPollTimer) return;
+            _liveSessionPollTimer = setInterval(refreshLiveSessions, 5000);
+        }
+
+        function stopLiveSessionPolling() {
+            if (_liveSessionPollTimer) {
+                clearInterval(_liveSessionPollTimer);
+                _liveSessionPollTimer = null;
             }
         }
         

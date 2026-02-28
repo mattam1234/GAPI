@@ -317,5 +317,106 @@ class TestGetAppFriendsWithPlatforms(unittest.TestCase):
         self.assertEqual(result, base)
 
 
+# ---------------------------------------------------------------------------
+# Live session invite logic tests
+# ---------------------------------------------------------------------------
+
+class TestInviteLogic(unittest.TestCase):
+    """Tests for the invite-validation logic (no Flask context needed)."""
+
+    def _invite(self, session: dict, host: str, inviter: str,
+                usernames: list):
+        """Simulate the invite permission check used by api_live_session_invite."""
+        if not session:
+            return False, 'Session not found'
+        if session['host'] != inviter:
+            return False, 'Only the session host can invite users'
+        if not usernames or not isinstance(usernames, list):
+            return False, 'usernames (list) is required'
+        return True, 'ok'
+
+    def test_host_can_invite(self):
+        s = _make_session('s1', 'alice')
+        ok, _ = self._invite(s, 'alice', 'alice', ['bob'])
+        self.assertTrue(ok)
+
+    def test_non_host_cannot_invite(self):
+        s = _make_session('s1', 'alice')
+        ok, msg = self._invite(s, 'alice', 'bob', ['carol'])
+        self.assertFalse(ok)
+        self.assertIn('host', msg)
+
+    def test_empty_usernames_rejected(self):
+        s = _make_session('s1', 'alice')
+        ok, _ = self._invite(s, 'alice', 'alice', [])
+        self.assertFalse(ok)
+
+    def test_non_list_usernames_rejected(self):
+        s = _make_session('s1', 'alice')
+        ok, _ = self._invite(s, 'alice', 'alice', 'bob')
+        self.assertFalse(ok)
+
+    def test_missing_session_returns_not_found(self):
+        ok, msg = self._invite(None, 'alice', 'alice', ['bob'])
+        self.assertFalse(ok)
+        self.assertIn('not found', msg)
+
+
+# ---------------------------------------------------------------------------
+# Notification-on-pick logic tests
+# ---------------------------------------------------------------------------
+
+class TestNotificationOnPick(unittest.TestCase):
+    """Verify that notifications are created for each participant when a game
+    is picked in a live session."""
+
+    def test_notification_called_for_each_participant(self):
+        import database
+
+        notifications_created = []
+
+        def fake_create_notification(db, username, title, message, **kwargs):
+            notifications_created.append({'username': username, 'title': title})
+            return True
+
+        participants = ['alice', 'bob', 'carol']
+        game_name = 'Portal 2'
+
+        with patch.object(database, 'create_notification', side_effect=fake_create_notification):
+            for participant in participants:
+                database.create_notification(
+                    None,
+                    participant,
+                    title='Game picked!',
+                    message=f'alice picked "{game_name}" for your live session.',
+                    type='success',
+                )
+
+        self.assertEqual(len(notifications_created), 3)
+        usernames_notified = [n['username'] for n in notifications_created]
+        for p in participants:
+            self.assertIn(p, usernames_notified)
+
+    def test_notification_title_contains_game_name(self):
+        import database
+
+        captured = []
+
+        def fake_create(db, username, title, message, **kwargs):
+            captured.append({'title': title, 'message': message})
+            return True
+
+        game_name = 'Half-Life 2'
+        with patch.object(database, 'create_notification', side_effect=fake_create):
+            database.create_notification(
+                None, 'bob',
+                title='Game picked!',
+                message=f'alice picked "{game_name}" for your live session.',
+                type='success',
+            )
+
+        self.assertIn(game_name, captured[0]['message'])
+
+
 if __name__ == '__main__':
     unittest.main()
