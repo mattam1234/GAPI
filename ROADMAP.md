@@ -70,7 +70,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] **Friend Activity** - See what friends are playing (Steam API)
 
 #### Social Features
-- [ ] **Discord Rich Presence** - Show currently picked game in Discord status
+- [x] **Discord Rich Presence** - Show currently picked game in Discord status
 - [x] **Game Night Scheduler** - Schedule game sessions with friends
 - [x] **Voting System Improvements** - Multiple voting rounds, ranked choice (Instant Runoff Voting)
 - [x] **Game Reviews** - Add personal notes/reviews to games
@@ -111,7 +111,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### Code Quality
 - [x] Comprehensive test suite (unit, integration, e2e)
 - [x] CI/CD pipeline with automated testing (GitHub Actions)
-- [ ] Code coverage reports (target: 80%+)
+- [x] Code coverage reports (target: 80%+)
 - [x] Type checking with mypy
 - [x] Automated dependency updates (Dependabot)
 - [ ] Security scanning (CodeQL, Snyk)
@@ -128,7 +128,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] API documentation (Swagger/OpenAPI) — `GET /api/openapi.json` + `GET /api/docs`
 - [ ] Video tutorials
 - [ ] Interactive demo environment
-- [ ] Localization (i18n) - Support for multiple languages
+- [x] Localization (i18n) - Support for multiple languages
 - [ ] Developer guide for contributors
 
 ## 💡 Community Requested Features

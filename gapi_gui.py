@@ -36,6 +36,12 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+try:
+    from discord_presence import DiscordPresence as _DiscordPresence
+    _discord_presence = _DiscordPresence()
+except Exception:
+    _discord_presence = None  # type: ignore[assignment]
+
 # Initialize logging early so database module logs are captured
 log_level = os.getenv('GAPI_LOG_LEVEL', 'INFO')
 gapi_logger = gapi.setup_logging(log_level)
@@ -1192,17 +1198,21 @@ def api_auth_login():
 def api_auth_logout():
     """Log out the current user"""
     global current_user, picker, multi_picker
-    
+
     with current_user_lock:
         gui_logger.info('User logged out: %s', current_user)
         current_user = None
-    
+
     with picker_lock:
         picker = None
-    
+
     with multi_picker_lock:
         multi_picker = None
-    
+
+    # Clear Discord Rich Presence on logout (best-effort)
+    if _discord_presence:
+        _discord_presence.clear()
+
     return jsonify({'message': 'Logged out successfully'})
 
 
@@ -1499,6 +1509,11 @@ def api_pick_game():
                 name = game.get('name', 'Unknown Game')
                 playtime_minutes = game.get('playtime_forever', 0)
                 playtime_hours = playtime_minutes / 60
+
+                # Update Discord Rich Presence (non-blocking, best-effort)
+                if _discord_presence:
+                    _discord_presence.update(name, playtime_hours=round(playtime_hours, 1))
+
                 is_favorite = app_id in picker.favorites if app_id else False
                 review = picker.review_service.get(game_id) if game_id else None
                 tags = picker.tag_service.get(game_id) if game_id else []
@@ -3926,6 +3941,57 @@ def api_export_favorites():
          'review_rating', 'review_notes'],
         'gapi_favorites.csv',
     )
+
+
+# ---------------------------------------------------------------------------
+# Localization / i18n endpoints
+# ---------------------------------------------------------------------------
+
+_LOCALES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locales')
+
+
+def _load_locale(lang: str) -> Optional[Dict]:
+    """Load a locale JSON file.  Returns ``None`` if not found or invalid."""
+    # Use basename to strip any directory components, preventing path traversal
+    safe_lang = os.path.basename(lang)[:10]
+    path = os.path.join(_LOCALES_DIR, f'{safe_lang}.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+@app.route('/api/i18n')
+def api_i18n_list():
+    """List all available locales.
+
+    Returns a JSON array of objects with ``lang`` and ``lang_name`` fields,
+    e.g. ``[{"lang": "en", "lang_name": "English"}, ...]``.
+    """
+    locales = []
+    try:
+        for fname in sorted(os.listdir(_LOCALES_DIR)):
+            if not fname.endswith('.json'):
+                continue
+            data = _load_locale(fname[:-5])
+            if data and 'lang' in data:
+                locales.append({'lang': data['lang'], 'lang_name': data.get('lang_name', data['lang'])})
+    except Exception as exc:
+        gui_logger.error('Error listing locales: %s', exc)
+    return jsonify({'locales': locales})
+
+
+@app.route('/api/i18n/<lang>')
+def api_i18n_get(lang: str):
+    """Return the translation strings for *lang* (e.g. ``en``, ``es``).
+
+    A ``404`` is returned when the requested language is not available.
+    """
+    data = _load_locale(lang)
+    if data is None:
+        return jsonify({'error': f"Locale '{lang}' not found"}), 404
+    return jsonify(data)
 
 
 # ---------------------------------------------------------------------------

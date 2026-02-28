@@ -4,6 +4,46 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.8.0] - 2026-02-28
+
+### Added
+- **Discord Rich Presence** (`discord_presence.py`)
+  - New `DiscordPresence` class wraps `pypresence` with a thread-safe, non-blocking
+    design; all IPC work happens in daemon threads so Flask request handlers are never
+    blocked
+  - Opt-in: set `DISCORD_CLIENT_ID` in `.env` to your Discord application's numeric
+    Client ID (create one free at https://discord.com/developers/applications)
+  - Graceful degradation: if `pypresence` is not installed, or if Discord is not
+    running on the host, GAPI logs a debug message and continues normally without
+    raising an exception
+  - The game name, playtime, and a "GAPI picked this game" state line are shown in the
+    Rich Presence panel; details and state lines are fully customisable
+  - `DiscordPresence.update(game_name, playtime_hours, details)` — called automatically
+    inside `POST /api/pick` when a game is successfully picked
+  - `DiscordPresence.clear()` — called automatically on `POST /api/auth/logout`
+  - `DiscordPresence.close()` — for clean shutdown
+  - 16 new unit tests covering disabled mode, missing-pypresence, connect/update/clear,
+    connection failures, thread safety, environment-variable configuration
+  - `pypresence>=4.3.0` added to `requirements.txt` as an optional dependency
+  - `DISCORD_CLIENT_ID` documented in `.env.example`
+
+- **Localization / i18n** (`locales/` directory + two REST endpoints)
+  - `locales/en.json` — full English translation strings for all UI sections:
+    `nav`, `pick`, `library`, `reviews`, `tags`, `backlog`, `playlists`,
+    `schedule`, `budget`, `wishlist`, `voting`, `stats`, `auth`, `common`
+  - `locales/es.json` — complete Spanish (Español) translation with the same
+    structure; all section keys and sub-keys are present
+  - `GET /api/i18n` — lists all available locales (returns `lang` + `lang_name`)
+  - `GET /api/i18n/<lang>` — returns the full translation object for a language;
+    `404` when the requested language is not available; path-traversal is sanitised
+    (directory separators and `..` components are stripped before file lookup)
+  - 13 new tests covering the list/get endpoints, structural parity between locales,
+    404 handling, and path-traversal safety
+
+- **CI: expanded coverage scope**
+  - `--cov` flags now include `discord_presence`, `openapi_spec`, and `app/`
+  - `discord_presence.py` and `openapi_spec.py` added to the syntax-check step
+
 ## [2.7.0] - 2026-02-28
 
 ### Changed
