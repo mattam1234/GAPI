@@ -15,6 +15,9 @@ from .leaderboard_service import LeaderboardService
 from .plugin_service import PluginService
 from .app_settings_service import AppSettingsService
 from .ignored_games_service import IgnoredGamesService
+from .library_service import LibraryService
+from .db_favorites_service import DBFavoritesService
+from .user_service import UserService
 
 __all__ = [
     'ReviewService',
@@ -33,4 +36,7 @@ __all__ = [
     'PluginService',
     'AppSettingsService',
     'IgnoredGamesService',
+    'LibraryService',
+    'DBFavoritesService',
+    'UserService',
 ]

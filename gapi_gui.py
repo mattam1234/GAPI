@@ -42,7 +42,7 @@ try:
     from app.services import (
         NotificationService, ChatService, FriendService,
         LeaderboardService, PluginService, AppSettingsService,
-        IgnoredGamesService,
+        IgnoredGamesService, LibraryService, DBFavoritesService, UserService,
     )
     _notification_service = NotificationService(database) if DB_AVAILABLE else None
     _chat_service = ChatService(database) if DB_AVAILABLE else None
@@ -51,6 +51,9 @@ try:
     _plugin_service = PluginService(database) if DB_AVAILABLE else None
     _app_settings_service = AppSettingsService(database) if DB_AVAILABLE else None
     _ignored_games_service = IgnoredGamesService(database) if DB_AVAILABLE else None
+    _library_service = LibraryService(database) if DB_AVAILABLE else None
+    _db_favorites_service = DBFavoritesService(database) if DB_AVAILABLE else None
+    _user_service = UserService(database) if DB_AVAILABLE else None
 except Exception:
     _notification_service = None
     _chat_service = None
@@ -59,6 +62,9 @@ except Exception:
     _plugin_service = None
     _app_settings_service = None
     _ignored_games_service = None
+    _library_service = None
+    _db_favorites_service = None
+    _user_service = None
 
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
@@ -1102,8 +1108,13 @@ def api_setup_status():
         return jsonify({'needs_setup': False, 'error': 'Database not available'}), 503
     try:
         db = database.SessionLocal()
-        count = database.get_user_count(db)
-        db.close()
+        try:
+            if _user_service:
+                count = _user_service.get_count(db)
+            else:
+                count = database.get_user_count(db)
+        finally:
+            db.close()
         return jsonify({'needs_setup': count == 0})
     except Exception as e:
         gui_logger.exception('Setup status check failed: %s', e)
@@ -1125,14 +1136,23 @@ def api_setup_initial_admin():
 
     try:
         db = database.SessionLocal()
-        count = database.get_user_count(db)
-        if count > 0:
-            db.close()
-            return jsonify({'error': 'Users already exist'}), 409
+        try:
+            if _user_service:
+                count = _user_service.get_count(db)
+            else:
+                count = database.get_user_count(db)
+            if count > 0:
+                return jsonify({'error': 'Users already exist'}), 409
 
-        password_hash = user_manager.hash_password(password)
-        user = database.create_or_update_user(db, username, password_hash, '', '', '', role='admin', roles=['admin'])
-        db.close()
+            password_hash = user_manager.hash_password(password)
+            if _user_service:
+                user = _user_service.create_admin(db, username, password_hash)
+            else:
+                user = database.create_or_update_user(
+                    db, username, password_hash, '', '', '',
+                    role='admin', roles=['admin'])
+        finally:
+            db.close()
 
         if user:
             return jsonify({'message': 'Initial admin created'}), 201
@@ -1646,15 +1666,15 @@ def api_game_details(app_id):
     """
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     db = None
     try:
         db = database.SessionLocal()
         global current_user
-        
+
         with current_user_lock:
             username = current_user
-        
+
         # Determine platform: check user's library for this game
         platform = 'steam'  # Default to steam
         try:
@@ -1668,18 +1688,21 @@ def api_game_details(app_id):
                     platform = lib_entry.platform or 'steam'
         except Exception as e:
             gui_logger.debug(f"Could not determine platform from library: {e}")
-        
+
         # Step 1: Check database cache first
-        cached_details = database.get_game_details_cache(db, app_id, platform, max_age_hours=1)
-        
+        if _library_service:
+            cached_details = _library_service.get_game_details(db, app_id, platform, max_age_hours=1)
+        else:
+            cached_details = database.get_game_details_cache(db, app_id, platform, max_age_hours=1)
+
         if cached_details:
             # Cache is fresh, return immediately
             return jsonify({**cached_details, 'source': 'cache', 'app_id': app_id, 'platform': platform})
-        
+
         # Step 2: Cache is missing or stale. Try to fetch from API
         api_details = None
         global picker
-        
+
         if picker:
             try:
                 with picker_lock:
@@ -1687,29 +1710,29 @@ def api_game_details(app_id):
                         api_details = picker.steam_client.get_game_details(app_id)
             except Exception as e:
                 gui_logger.debug(f"Could not fetch from Steam API: {e}")
-        
+
         if api_details:
             # Step 3: Format API response
             response = {'app_id': app_id, 'platform': platform, 'source': 'api', 'steam_integration': True}
-            
+
             if 'header_image' in api_details:
                 response['header_image'] = api_details['header_image']
-            
+
             if 'capsule_image' in api_details:
                 response['capsule_image'] = api_details['capsule_image']
-            
+
             if 'short_description' in api_details:
                 response['description'] = api_details['short_description']
-            
+
             if 'genres' in api_details:
                 response['genres'] = [g['description'] for g in api_details['genres']]
-            
+
             if 'release_date' in api_details:
                 response['release_date'] = api_details['release_date'].get('date', 'Unknown')
-            
+
             if 'metacritic' in api_details:
                 response['metacritic_score'] = api_details['metacritic'].get('score')
-            
+
             # Try to get ProtonDB rating
             try:
                 with picker_lock:
@@ -1719,18 +1742,21 @@ def api_game_details(app_id):
                             response['protondb'] = protondb
             except Exception:
                 pass  # ProtonDB is best-effort, don't fail on it
-            
+
             # Update cache with new data (include platform)
-            database.update_game_details_cache(db, app_id, platform, response)
+            if _library_service:
+                _library_service.update_game_details(db, app_id, platform, response)
+            else:
+                database.update_game_details_cache(db, app_id, platform, response)
             return jsonify(response)
-        
+
         # Step 4: No API data available. Return last cached data even if stale, or minimal response
         try:
             last_cache = db.query(database.GameDetailsCache).filter(
                 database.GameDetailsCache.app_id == str(app_id),
                 database.GameDetailsCache.platform == platform
             ).first()
-            
+
             if last_cache:
                 import json
                 return jsonify({
@@ -1741,7 +1767,7 @@ def api_game_details(app_id):
                 })
         except Exception as e:
             gui_logger.debug(f"Could not get last cache: {e}")
-        
+
         # No cache or API data - return minimal response
         return jsonify({
             'app_id': app_id,
@@ -1750,11 +1776,11 @@ def api_game_details(app_id):
             'source': 'none',
             'message': 'Steam integration not configured for this user'
         })
-    
+
     except Exception as e:
         gui_logger.exception(f"Error getting game details: {e}")
         return jsonify({'error': f'Failed to load game details: {str(e)}'}), 500
-    
+
     finally:
         if db:
             try:
@@ -1769,31 +1795,37 @@ def api_toggle_favorite(app_id):
     """Add or remove a game from favorites"""
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not username:
         return jsonify({'error': 'Not authenticated'}), 401
-    
+
     try:
         db = database.SessionLocal()
-        
-        if request.method == 'POST':
-            success = database.add_favorite(db, username, str(app_id))
-            db.close()
-            if success:
-                return jsonify({'success': True, 'action': 'added'})
+        try:
+            if request.method == 'POST':
+                if _db_favorites_service:
+                    success = _db_favorites_service.add(db, username, str(app_id))
+                else:
+                    success = database.add_favorite(db, username, str(app_id))
+                if success:
+                    return jsonify({'success': True, 'action': 'added'})
+                else:
+                    return jsonify({'error': 'Failed to add favorite'}), 500
             else:
-                return jsonify({'error': 'Failed to add favorite'}), 500
-        else:
-            success = database.remove_favorite(db, username, str(app_id))
+                if _db_favorites_service:
+                    success = _db_favorites_service.remove(db, username, str(app_id))
+                else:
+                    success = database.remove_favorite(db, username, str(app_id))
+                if success:
+                    return jsonify({'success': True, 'action': 'removed'})
+                else:
+                    return jsonify({'error': 'Failed to remove favorite'}), 500
+        finally:
             db.close()
-            if success:
-                return jsonify({'success': True, 'action': 'removed'})
-            else:
-                return jsonify({'error': 'Failed to remove favorite'}), 500
     except Exception as e:
         gui_logger.error(f"Error toggling favorite: {e}")
         return jsonify({'error': 'Failed to toggle favorite'}), 500
@@ -1806,7 +1838,7 @@ def api_library():
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not ensure_db_available():
         # Fallback to demo games if DB not available
         return jsonify({'games': [{
@@ -1815,73 +1847,75 @@ def api_library():
             'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
             'is_favorite': False
         } for g in DEMO_GAMES]})
-    
+
     try:
         db = database.SessionLocal()
-        
-        # Get cached library
-        cached_games = database.get_cached_library(db, username)
-        
-        # If cache is empty or old, trigger background sync
-        if not cached_games:
+        try:
+            # Get cached library
+            if _library_service:
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cached_games = database.get_cached_library(db, username)
+
+            # If cache is empty, trigger background sync and return early
+            if not cached_games:
+                def background_sync():
+                    success, msg = sync_library_to_db(username, force=True)
+                    gui_logger.info(f"Background library sync for {username}: {msg}")
+                threading.Thread(target=background_sync, daemon=True).start()
+                return jsonify({
+                    'games': [],
+                    'message': 'Library is being loaded from Steam. Please refresh in a few seconds.'
+                })
+
+            # Check if cache is old (>6 hours) and trigger background refresh
+            if _library_service:
+                cache_age = _library_service.get_cache_age(db, username)
+            else:
+                cache_age = database.get_library_cache_age(db, username)
+            if cache_age and cache_age > 21600:  # 6 hours
+                def background_sync():
+                    success, msg = sync_library_to_db(username, force=False)
+                    gui_logger.info(f"Background library refresh for {username}: {msg}")
+                threading.Thread(target=background_sync, daemon=True).start()
+
+            search = request.args.get('search', '').lower()
+
+            # Get user's favorites from database
+            if _db_favorites_service:
+                favorite_ids = set(str(fav) for fav in _db_favorites_service.get_all(db, username))
+            else:
+                favorite_ids = set(str(fav) for fav in database.get_user_favorites(db, username))
+
+            # Filter and format games
+            games = []
+            for game in cached_games:
+                name = game.get('name', 'Unknown')
+                if search and search not in name.lower():
+                    continue
+
+                app_id = game.get('app_id')
+                try:
+                    app_id_int = int(app_id) if app_id else None
+                except (ValueError, TypeError):
+                    app_id_int = None
+
+                games.append({
+                    'app_id': app_id_int,
+                    'name': name,
+                    'playtime_hours': round(game.get('playtime_hours', 0), 1),
+                    'is_favorite': str(app_id) in favorite_ids if app_id else False,
+                    'platform': game.get('platform', 'steam'),
+                    'last_played': game.get('last_played').isoformat() if game.get('last_played') else None
+                })
+        finally:
             db.close()
-            # Trigger sync in background
-            def background_sync():
-                success, msg = sync_library_to_db(username, force=True)
-                gui_logger.info(f"Background library sync for {username}: {msg}")
-            
-            threading.Thread(target=background_sync, daemon=True).start()
-            
-            # Return empty library with message to refresh
-            return jsonify({
-                'games': [],
-                'message': 'Library is being loaded from Steam. Please refresh in a few seconds.'
-            })
-        
-        # Check if cache is old (>6 hours) and trigger background refresh
-        cache_age = database.get_library_cache_age(db, username)
-        if cache_age and cache_age > 21600:  # 6 hours
-            # Trigger background refresh but return cached data
-            def background_sync():
-                success, msg = sync_library_to_db(username, force=False)
-                gui_logger.info(f"Background library refresh for {username}: {msg}")
-            
-            threading.Thread(target=background_sync, daemon=True).start()
-        
-        search = request.args.get('search', '').lower()
-        
-        # Get user's favorites from database
-        favorite_ids = set(str(fav) for fav in database.get_user_favorites(db, username))
-        
-        # Filter and format games
-        games = []
-        for game in cached_games:
-            name = game.get('name', 'Unknown')
-            if search and search not in name.lower():
-                continue
-            
-            app_id = game.get('app_id')
-            try:
-                app_id_int = int(app_id) if app_id else None
-            except (ValueError, TypeError):
-                app_id_int = None
-            
-            games.append({
-                'app_id': app_id_int,
-                'name': name,
-                'playtime_hours': round(game.get('playtime_hours', 0), 1),
-                'is_favorite': str(app_id) in favorite_ids if app_id else False,
-                'platform': game.get('platform', 'steam'),
-                'last_played': game.get('last_played').isoformat() if game.get('last_played') else None
-            })
-        
-        db.close()
-        
+
         return jsonify({
             'games': games,
             'cache_age_minutes': int(cache_age / 60) if cache_age else 0
         })
-        
+
     except Exception as e:
         gui_logger.exception(f"Error loading library from database: {e}")
         # Fallback to demo games on error
@@ -1958,18 +1992,24 @@ def api_sync_status():
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     try:
         db = database.SessionLocal()
-        cache_age = database.get_library_cache_age(db, username)
-        cached_games = database.get_cached_library(db, username)
-        db.close()
-        
+        try:
+            if _library_service:
+                cache_age = _library_service.get_cache_age(db, username)
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cache_age = database.get_library_cache_age(db, username)
+                cached_games = database.get_cached_library(db, username)
+        finally:
+            db.close()
+
         last_sync = sync_scheduler.last_sync_times.get(username)
-        
+
         return jsonify({
             'last_sync': last_sync.isoformat() if last_sync else None,
             'cache_age_hours': round(cache_age / 3600, 2) if cache_age else None,
@@ -2049,22 +2089,30 @@ def api_favorites():
     """Get all favorite games"""
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     if not username:
         return jsonify({'error': 'Not authenticated'}), 401
-    
+
     try:
         db = database.SessionLocal()
-        favorite_ids = database.get_user_favorites(db, username)
-        
-        # Get cached library to look up game details
-        cached_games = database.get_cached_library(db, username)
-        db.close()
-        
+        try:
+            if _db_favorites_service:
+                favorite_ids = _db_favorites_service.get_all(db, username)
+            else:
+                favorite_ids = database.get_user_favorites(db, username)
+
+            # Get cached library to look up game details
+            if _library_service:
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cached_games = database.get_cached_library(db, username)
+        finally:
+            db.close()
+
         favorites = []
         for app_id in favorite_ids:
             game = next((g for g in cached_games if str(g.get('app_id')) == str(app_id)), None)
@@ -2080,7 +2128,7 @@ def api_favorites():
                     'name': f'App ID {app_id} (Not in library)',
                     'playtime_hours': 0
                 })
-        
+
         return jsonify({'favorites': favorites})
     except Exception as e:
         gui_logger.error(f"Error loading favorites: {e}")
@@ -2093,17 +2141,25 @@ def api_stats():
     """Get library statistics from database cache"""
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
-    
+
     global current_user
     with current_user_lock:
         username = current_user
-    
+
     try:
         db = database.SessionLocal()
-        cached_games = database.get_cached_library(db, username)
-        favorite_count = len(database.get_user_favorites(db, username))
-        db.close()
-        
+        try:
+            if _library_service:
+                cached_games = _library_service.get_cached(db, username)
+            else:
+                cached_games = database.get_cached_library(db, username)
+            if _db_favorites_service:
+                favorite_count = len(_db_favorites_service.get_all(db, username))
+            else:
+                favorite_count = len(database.get_user_favorites(db, username))
+        finally:
+            db.close()
+
         if not cached_games:
             return jsonify({
                 'total_games': 0,
@@ -2115,18 +2171,18 @@ def api_stats():
                 'favorite_count': favorite_count,
                 'top_games': []
             })
-        
+
         total_games = len(cached_games)
         unplayed = len([g for g in cached_games if g.get('playtime_hours', 0) == 0])
         total_playtime = sum(g.get('playtime_hours', 0) for g in cached_games)
-        
+
         # Top 10 most played
         sorted_by_playtime = sorted(
             cached_games,
             key=lambda g: g.get('playtime_hours', 0),
             reverse=True
         )[:10]
-        
+
         top_games = []
         for game in sorted_by_playtime:
             top_games.append({
@@ -2643,8 +2699,13 @@ def api_roles_list():
         return jsonify({'error': 'Database not available'}), 503
     try:
         db = database.SessionLocal()
-        roles = database.get_roles(db)
-        db.close()
+        try:
+            if _user_service:
+                roles = _user_service.get_all_roles(db)
+            else:
+                roles = database.get_roles(db)
+        finally:
+            db.close()
         return jsonify({'roles': roles})
     except Exception as e:
         gui_logger.exception('Error listing roles: %s', e)

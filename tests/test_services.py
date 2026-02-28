@@ -1467,5 +1467,224 @@ class TestIgnoredGamesService(unittest.TestCase):
         self.assertEqual(self.svc.get_ignored(DB, 'bob'), [])
 
 
+# ===========================================================================
+# LibraryService tests
+# ===========================================================================
+
+class _MockLibraryDB:
+    """Minimal stand-in for the database module used by LibraryService."""
+
+    def __init__(self):
+        self._libraries = {}   # {username: [game_dict, ...]}
+        self._cache_times = {}  # {username: float seconds}
+        self._details = {}     # {(app_id, platform): dict}
+
+    def get_cached_library(self, db, username):
+        return list(self._libraries.get(username, []))
+
+    def cache_user_library(self, db, username, games):
+        self._libraries[username] = list(games)
+        self._cache_times[username] = 0.0
+        return len(games)
+
+    def get_library_cache_age(self, db, username):
+        return self._cache_times.get(username)
+
+    def get_game_details_cache(self, db, app_id, platform='steam', max_age_hours=1):
+        return self._details.get((str(app_id), platform))
+
+    def update_game_details_cache(self, db, app_id, platform, details):
+        self._details[(str(app_id), platform)] = dict(details)
+        return True
+
+
+class TestLibraryService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockLibraryDB()
+        from app.services import LibraryService
+        self.svc = LibraryService(self.mock_db)
+
+    def test_get_cached_empty_initially(self):
+        self.assertEqual(self.svc.get_cached(DB, 'alice'), [])
+
+    def test_cache_stores_games(self):
+        games = [{'app_id': '220', 'name': 'Half-Life 2', 'playtime_hours': 12}]
+        count = self.svc.cache(DB, 'alice', games)
+        self.assertEqual(count, 1)
+        result = self.svc.get_cached(DB, 'alice')
+        self.assertEqual(result[0]['name'], 'Half-Life 2')
+
+    def test_cache_returns_count(self):
+        games = [
+            {'app_id': '220', 'name': 'Game A', 'playtime_hours': 0},
+            {'app_id': '440', 'name': 'Game B', 'playtime_hours': 5},
+        ]
+        self.assertEqual(self.svc.cache(DB, 'alice', games), 2)
+
+    def test_get_cache_age_none_initially(self):
+        self.assertIsNone(self.svc.get_cache_age(DB, 'alice'))
+
+    def test_get_cache_age_after_cache(self):
+        self.svc.cache(DB, 'alice', [])
+        self.assertIsNotNone(self.svc.get_cache_age(DB, 'alice'))
+
+    def test_get_game_details_missing_returns_none(self):
+        self.assertIsNone(self.svc.get_game_details(DB, '220'))
+
+    def test_update_and_get_game_details(self):
+        details = {'app_id': '220', 'name': 'Half-Life 2', 'genres': ['Action']}
+        ok = self.svc.update_game_details(DB, '220', 'steam', details)
+        self.assertTrue(ok)
+        result = self.svc.get_game_details(DB, '220', 'steam')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['name'], 'Half-Life 2')
+
+    def test_game_details_platform_isolation(self):
+        """Details stored under 'steam' should not appear under 'epic'."""
+        self.svc.update_game_details(DB, '220', 'steam', {'app_id': '220'})
+        self.assertIsNone(self.svc.get_game_details(DB, '220', 'epic'))
+
+    def test_update_game_details_overwrites(self):
+        self.svc.update_game_details(DB, '220', 'steam', {'score': 90})
+        self.svc.update_game_details(DB, '220', 'steam', {'score': 95})
+        result = self.svc.get_game_details(DB, '220', 'steam')
+        self.assertEqual(result['score'], 95)
+
+    def test_different_users_isolated(self):
+        self.svc.cache(DB, 'alice', [{'app_id': '220', 'name': 'Game'}])
+        self.assertEqual(self.svc.get_cached(DB, 'bob'), [])
+
+
+# ===========================================================================
+# DBFavoritesService tests
+# ===========================================================================
+
+class _MockDBFavoritesDB:
+    """Minimal stand-in for the database module used by DBFavoritesService."""
+
+    def __init__(self):
+        self._favorites = {}  # {username: list[str]}
+
+    def get_user_favorites(self, db, username):
+        return list(self._favorites.get(username, []))
+
+    def add_favorite(self, db, username, app_id, platform='steam'):
+        if username not in self._favorites:
+            self._favorites[username] = []
+        if app_id not in self._favorites[username]:
+            self._favorites[username].append(app_id)
+        return True
+
+    def remove_favorite(self, db, username, app_id):
+        if username in self._favorites and app_id in self._favorites[username]:
+            self._favorites[username].remove(app_id)
+        return True
+
+
+class TestDBFavoritesService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockDBFavoritesDB()
+        from app.services import DBFavoritesService
+        self.svc = DBFavoritesService(self.mock_db)
+
+    def test_get_all_empty_initially(self):
+        self.assertEqual(self.svc.get_all(DB, 'alice'), [])
+
+    def test_add_game(self):
+        self.svc.add(DB, 'alice', '220')
+        self.assertIn('220', self.svc.get_all(DB, 'alice'))
+
+    def test_add_idempotent(self):
+        self.svc.add(DB, 'alice', '220')
+        self.svc.add(DB, 'alice', '220')
+        self.assertEqual(self.svc.get_all(DB, 'alice').count('220'), 1)
+
+    def test_remove_game(self):
+        self.svc.add(DB, 'alice', '220')
+        self.svc.remove(DB, 'alice', '220')
+        self.assertNotIn('220', self.svc.get_all(DB, 'alice'))
+
+    def test_remove_absent_game_returns_true(self):
+        ok = self.svc.remove(DB, 'alice', '999')
+        self.assertTrue(ok)
+
+    def test_add_multiple_games(self):
+        self.svc.add(DB, 'alice', '220')
+        self.svc.add(DB, 'alice', '440')
+        self.assertEqual(len(self.svc.get_all(DB, 'alice')), 2)
+
+    def test_different_users_isolated(self):
+        self.svc.add(DB, 'alice', '220')
+        self.assertEqual(self.svc.get_all(DB, 'bob'), [])
+
+
+# ===========================================================================
+# UserService tests
+# ===========================================================================
+
+class _MockUserServiceDB:
+    """Minimal stand-in for the database module used by UserService."""
+
+    def __init__(self):
+        self._roles = ['admin', 'moderator', 'user']
+        self._user_count = 0
+        self._created_users = []
+
+    def get_roles(self, db):
+        return list(self._roles)
+
+    def get_user_count(self, db):
+        return self._user_count
+
+    def create_or_update_user(self, db, username, password_hash, *args, **kwargs):
+        self._created_users.append({'username': username, 'hash': password_hash,
+                                    'role': kwargs.get('role', 'user')})
+        self._user_count += 1
+        return self._created_users[-1]  # return a truthy dict as the "user"
+
+
+class TestUserService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockUserServiceDB()
+        from app.services import UserService
+        self.svc = UserService(self.mock_db)
+
+    def test_get_all_roles_returns_list(self):
+        roles = self.svc.get_all_roles(DB)
+        self.assertIsInstance(roles, list)
+        self.assertIn('admin', roles)
+
+    def test_get_all_roles_contains_all_defined(self):
+        roles = self.svc.get_all_roles(DB)
+        self.assertEqual(set(roles), {'admin', 'moderator', 'user'})
+
+    def test_get_count_returns_integer(self):
+        count = self.svc.get_count(DB)
+        self.assertIsInstance(count, int)
+
+    def test_get_count_initial_zero(self):
+        self.assertEqual(self.svc.get_count(DB), 0)
+
+    def test_create_admin_returns_truthy(self):
+        result = self.svc.create_admin(DB, 'boss', 'hash123')
+        self.assertTrue(result)
+
+    def test_create_admin_stores_username(self):
+        self.svc.create_admin(DB, 'boss', 'hash123')
+        self.assertEqual(self.mock_db._created_users[-1]['username'], 'boss')
+
+    def test_create_admin_sets_admin_role(self):
+        self.svc.create_admin(DB, 'boss', 'hash123')
+        self.assertEqual(self.mock_db._created_users[-1]['role'], 'admin')
+
+    def test_create_admin_increments_user_count(self):
+        before = self.svc.get_count(DB)
+        self.svc.create_admin(DB, 'boss', 'hash123')
+        self.assertEqual(self.svc.get_count(DB), before + 1)
+
+
 if __name__ == '__main__':
     unittest.main()
