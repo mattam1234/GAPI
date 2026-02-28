@@ -354,6 +354,15 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
                         "min_score":     {"type": "integer", "minimum": 0, "maximum": 100},
                         "min_year":      {"type": "integer"},
                         "max_year":      {"type": "integer"},
+                        "min_rarity":    {"type": "number", "minimum": 0, "maximum": 100,
+                                          "description": "Lower bound for achievement rarity % — "
+                                                         "only pick games with uncompleted "
+                                                         "achievements at or above this rarity"},
+                        "max_rarity":    {"type": "number", "minimum": 0, "maximum": 100,
+                                          "description": "Upper bound for achievement rarity % — "
+                                                         "only pick games with uncompleted "
+                                                         "achievements at or below this rarity "
+                                                         "(e.g. 5 = only rare achievements)"},
                     },
                 }}},
             },
@@ -728,6 +737,23 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
         },
     }
 
+    paths["/api/schedule/export.ics"] = {
+        "get": {
+            "tags": ["schedule"],
+            "summary": "Download game-night schedule as an iCalendar (.ics) file",
+            "description": (
+                "Produces a standards-compliant RFC 5545 VCALENDAR document.  "
+                "Each game-night event is a VEVENT with DTSTART, SUMMARY, and "
+                "DESCRIPTION (notes, game name, attendees)."
+            ),
+            "responses": {
+                "200": _resp("iCalendar file",
+                              {"text/calendar": {"schema": {"type": "string"}}}),
+                "400": _error(400),
+            },
+        }
+    }
+
     # ------------------------------------------------------------------
     # Multi-user
     # ------------------------------------------------------------------
@@ -1075,6 +1101,108 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
             },
             "responses": {"201": _json_resp("Hunt started", {"type": "object"})},
         }
+    }
+    paths["/api/achievements/stats"] = {
+        "get": {
+            "tags": ["achievements"],
+            "summary": "Achievement statistics dashboard for the current user",
+            "description": (
+                "Returns total tracked/unlocked counts, overall completion %, the "
+                "rarest achievement, and a per-game breakdown."
+            ),
+            "responses": {
+                "200": _json_resp("Achievement stats", {
+                    "type": "object",
+                    "properties": {
+                        "total_tracked":      {"type": "integer"},
+                        "total_unlocked":     {"type": "integer"},
+                        "completion_percent": {"type": "number"},
+                        "rarest_achievement": {
+                            "type": "object", "nullable": True,
+                            "properties": {
+                                "app_id":         {"type": "string"},
+                                "game_name":      {"type": "string"},
+                                "achievement_id": {"type": "string"},
+                                "name":           {"type": "string"},
+                                "rarity":         {"type": "number"},
+                                "unlocked":       {"type": "boolean"},
+                            },
+                        },
+                        "games": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "app_id":             {"type": "string"},
+                                    "game_name":          {"type": "string"},
+                                    "total":              {"type": "integer"},
+                                    "unlocked":           {"type": "integer"},
+                                    "completion_percent": {"type": "number"},
+                                    "rarest_rarity":      {"type": "number", "nullable": True},
+                                },
+                            },
+                        },
+                    },
+                }),
+                "503": _error(503),
+            },
+        }
+    }
+    paths["/api/ignored-games"] = {
+        "get": {
+            "tags": ["library"],
+            "summary": "Full ignored-games list for the current user",
+            "description": "Returns games the user has chosen to hide from the picker, with reason and date added.",
+            "responses": {
+                "200": _json_resp("Ignored games", {
+                    "type": "object",
+                    "properties": {
+                        "ignored_games": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "app_id":     {"type": "string"},
+                                    "game_name":  {"type": "string"},
+                                    "reason":     {"type": "string"},
+                                    "created_at": {"type": "string", "format": "date-time"},
+                                },
+                            },
+                        },
+                    },
+                }),
+                "503": _error(503),
+            },
+        },
+        "post": {
+            "tags": ["library"],
+            "summary": "Toggle ignore status for a game (add if not ignored, remove if already ignored)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["app_id"],
+                    "properties": {
+                        "app_id":    {"type": "integer"},
+                        "game_name": {"type": "string"},
+                        "reason":    {"type": "string"},
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Toggle result", {
+                    "type": "object",
+                    "properties": {
+                        "ignored":    {"type": "boolean",
+                                       "description": "true = game is now ignored, false = removed"},
+                        "app_id":     {"type": "string"},
+                        "game_name":  {"type": "string"},
+                    },
+                }),
+                "400": _error(400),
+                "503": _error(503),
+            },
+        },
     }
 
     # ------------------------------------------------------------------

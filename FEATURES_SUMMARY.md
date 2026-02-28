@@ -145,15 +145,15 @@ If PostgreSQL is not available:
 ### Immediate (Recommended)
 - [x] Add UI tabs for "Ignore List" and "Achievements"
 - [x] Create quick-ignore buttons in game library
-- [ ] Show ignored games in separate section
+- [x] Show ignored games in separate section
 
 ### Short-term
 - [ ] Sync with actual Steam achievementdata
 - [ ] Add Discord bot commands (`/hunt`, `/ignore`)
-- [ ] Statistics dashboard (completion %, rarity)
+- [x] Statistics dashboard (completion %, rarity)
 
 ### Medium-term
-- [ ] Achievement rarity filters in game picker
+- [x] Achievement rarity filters in game picker
 - [ ] Multiplayer achievement challenges
 - [x] Backup/export user data
 - [ ] Achievement statistics by platform

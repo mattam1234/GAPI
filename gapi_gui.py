@@ -1531,13 +1531,16 @@ def api_pick_game():
         tag_filter = data.get('tag', '').strip() or None
         platform_filter = data.get('platform_filter', '').strip().lower() or None
         device_filter = data.get('device_filter', '').strip().lower() or None
-        
+        min_rarity = data.get('min_rarity')
+        max_rarity = data.get('max_rarity')
+
         if DB_AVAILABLE:
             db = None
             try:
                 db = database.SessionLocal()
                 if _ignored_games_service:
                     ignored_games = _ignored_games_service.get_ignored(db, username)
+
                 else:
                     ignored_games = database.get_ignored_games(db, username)
                 if ignored_games:
@@ -1545,6 +1548,37 @@ def api_pick_game():
                         exclude_game_ids.extend(ignored_games)
                     else:
                         exclude_game_ids = ignored_games
+
+                # Rarity filter: restrict to games that still have unfinished
+                # achievements within the requested rarity band.
+                if min_rarity is not None or max_rarity is not None:
+                    try:
+                        rarity_app_ids = database.get_games_with_rare_achievements(
+                            db, username,
+                            max_rarity=float(max_rarity) if max_rarity is not None else 100.0,
+                            min_rarity=float(min_rarity) if min_rarity is not None else 0.0,
+                        )
+                        if rarity_app_ids:
+                            # Narrow exclude list: keep only games in the rarity set
+                            # by excluding everything else
+                            rarity_set = set(str(aid) for aid in rarity_app_ids)
+                            extra_excludes = [
+                                str(g.get('appid', g.get('id', '')))
+                                for g in picker.games
+                                if str(g.get('appid', g.get('id', ''))) not in rarity_set
+                            ]
+                            if exclude_game_ids:
+                                exclude_game_ids.extend(extra_excludes)
+                            else:
+                                exclude_game_ids = extra_excludes
+                        else:
+                            # No games match the rarity filter — set impossible exclude
+                            gui_logger.info(
+                                "No games found matching rarity filter "
+                                "[%s, %s] for %s", min_rarity, max_rarity, username)
+                    except Exception as e:
+                        gui_logger.warning("Could not apply rarity filter: %s", e)
+
             except Exception as e:
                 gui_logger.warning(f"Could not fetch ignored games: {e}")
             finally:
@@ -3814,6 +3848,141 @@ def api_get_steam_achievements(app_id: int):
     if stats is None:
         return jsonify({'error': 'Achievements unavailable for this game'}), 404
     return jsonify({'app_id': app_id, **stats})
+
+
+# ---------------------------------------------------------------------------
+# Achievement statistics dashboard
+# ---------------------------------------------------------------------------
+
+@app.route('/api/achievements/stats')
+@require_login
+def api_achievement_stats():
+    """Return achievement statistics for the current user.
+
+    Response JSON::
+
+        {
+          "total_tracked": 120,
+          "total_unlocked": 45,
+          "completion_percent": 37.5,
+          "rarest_achievement": {
+            "app_id": "620",
+            "game_name": "Portal 2",
+            "achievement_id": "ACH_WIN_HARD",
+            "name": "Hard Mode",
+            "rarity": 0.3,
+            "unlocked": false
+          },
+          "games": [
+            {
+              "app_id": "620",
+              "game_name": "Portal 2",
+              "total": 50,
+              "unlocked": 30,
+              "completion_percent": 60.0,
+              "rarest_rarity": 0.3
+            }
+          ]
+        }
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        stats = database.get_achievement_stats(db, username)
+    finally:
+        if db:
+            db.close()
+
+    if not stats:
+        return jsonify({
+            'total_tracked': 0, 'total_unlocked': 0,
+            'completion_percent': 0.0, 'rarest_achievement': None, 'games': [],
+        })
+    return jsonify(stats)
+
+
+# ---------------------------------------------------------------------------
+# iCalendar export for the game-night schedule
+# ---------------------------------------------------------------------------
+
+@app.route('/api/schedule/export.ics')
+@require_login
+def api_export_schedule_ics():
+    """Download the game-night schedule as an iCalendar (.ics) file.
+
+    Produces a standards-compliant RFC 5545 ``VCALENDAR`` document.
+    Each game-night event becomes a ``VEVENT`` with ``DTSTART``, ``SUMMARY``,
+    ``DESCRIPTION`` (notes + game name + attendees), and a ``UID`` derived
+    from the event ID.
+
+    Response: ``text/calendar`` attachment named ``gapi_schedule.ics``.
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+
+    with picker_lock:
+        events = picker.schedule_service.get_events()
+
+    lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//GAPI//Game Night Schedule//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+    ]
+
+    for ev in events:
+        date_str = ev.get('date', '')
+        time_str = ev.get('time', '00:00')
+        dtstart = ''
+        if date_str:
+            # Produce DTSTART in basic format: YYYYMMDDTHHMMSS
+            clean_date = date_str.replace('-', '')
+            clean_time = time_str.replace(':', '')
+            if len(clean_time) == 4:
+                clean_time += '00'
+            dtstart = f'{clean_date}T{clean_time}'
+        attendees = ', '.join(ev.get('attendees', []))
+        game_name = ev.get('game_name', '')
+        notes = ev.get('notes', '')
+        desc_parts = []
+        if game_name:
+            desc_parts.append(f'Game: {game_name}')
+        if attendees:
+            desc_parts.append(f'Attendees: {attendees}')
+        if notes:
+            desc_parts.append(notes)
+        description = '\\n'.join(desc_parts)
+        uid = f"{ev.get('id', 'unknown')}@gapi"
+
+        lines.append('BEGIN:VEVENT')
+        lines.append(f'UID:{uid}')
+        lines.append(f'SUMMARY:{ev.get("title", "Game Night")}')
+        if dtstart:
+            lines.append(f'DTSTART:{dtstart}')
+        if description:
+            lines.append(f'DESCRIPTION:{description}')
+        lines.append('END:VEVENT')
+
+    lines.append('END:VCALENDAR')
+
+    ical_body = '\r\n'.join(lines) + '\r\n'
+
+    from flask import Response as _Response
+    return _Response(
+        ical_body,
+        mimetype='text/calendar',
+        headers={
+            'Content-Disposition': 'attachment; filename="gapi_schedule.ics"',
+            'Content-Type': 'text/calendar; charset=utf-8',
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

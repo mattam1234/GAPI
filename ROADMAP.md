@@ -86,7 +86,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 
 #### Advanced Features
 - [ ] **Machine Learning Recommendations** - ML model trained on your playing habits
-- [ ] **Calendar Integration** - Sync game sessions with calendar apps
+- [x] **Calendar Integration** - Sync game sessions with calendar apps
 - [ ] **Twitch Integration** - Pick games based on what's trending on Twitch
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
 - [x] **Game Backlog Manager** - Prioritize and track game completion

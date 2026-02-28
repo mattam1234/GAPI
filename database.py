@@ -1707,6 +1707,128 @@ def get_user_achievements_grouped(db, username: str) -> list:
         return []
 
 
+def get_achievement_stats(db, username: str) -> dict:
+    """Compute achievement statistics for *username*.
+
+    Returns a dict with:
+      - ``total_tracked``      – achievements tracked in the DB
+      - ``total_unlocked``     – achievements marked as unlocked
+      - ``completion_percent`` – unlocked / tracked × 100 (0 if none tracked)
+      - ``rarest_achievement`` – the achievement with the lowest rarity value
+        (i.e. fewest players have it), as a dict or ``None``
+      - ``games``              – list of per-game summaries:
+        ``{app_id, game_name, total, unlocked, completion_percent,
+           rarest_rarity}``
+    """
+    if not db:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+
+        all_ach = list(user.achievements)
+        total = len(all_ach)
+        unlocked = sum(1 for a in all_ach if a.unlocked)
+        completion = round(unlocked / total * 100, 1) if total else 0.0
+
+        # Rarest unlocked achievement (lowest rarity %)
+        with_rarity = [a for a in all_ach if a.rarity is not None]
+        rarest = None
+        if with_rarity:
+            candidate = min(with_rarity, key=lambda a: a.rarity)
+            rarest = {
+                'app_id': candidate.app_id,
+                'game_name': candidate.game_name or '',
+                'achievement_id': candidate.achievement_id,
+                'name': candidate.achievement_name or '',
+                'rarity': candidate.rarity,
+                'unlocked': bool(candidate.unlocked),
+            }
+
+        # Per-game summary
+        grouped: dict = {}
+        for a in all_ach:
+            key = a.app_id
+            if key not in grouped:
+                grouped[key] = {
+                    'app_id': key,
+                    'game_name': a.game_name or '',
+                    'total': 0,
+                    'unlocked': 0,
+                    'rarities': [],
+                }
+            grouped[key]['total'] += 1
+            if a.unlocked:
+                grouped[key]['unlocked'] += 1
+            if a.rarity is not None:
+                grouped[key]['rarities'].append(a.rarity)
+
+        games = []
+        for g in sorted(grouped.values(), key=lambda x: x['game_name'].lower()):
+            pct = round(g['unlocked'] / g['total'] * 100, 1) if g['total'] else 0.0
+            min_rarity = min(g['rarities']) if g['rarities'] else None
+            games.append({
+                'app_id': g['app_id'],
+                'game_name': g['game_name'],
+                'total': g['total'],
+                'unlocked': g['unlocked'],
+                'completion_percent': pct,
+                'rarest_rarity': min_rarity,
+            })
+
+        return {
+            'total_tracked': total,
+            'total_unlocked': unlocked,
+            'completion_percent': completion,
+            'rarest_achievement': rarest,
+            'games': games,
+        }
+    except Exception as e:
+        logger.error("Error computing achievement stats for %s: %s", username, e)
+        return {}
+
+
+def get_games_with_rare_achievements(
+    db, username: str,
+    max_rarity: float = 100.0,
+    min_rarity: float = 0.0,
+) -> list:
+    """Return app_ids that have at least one *unlocked=False* achievement whose
+    rarity falls within ``[min_rarity, max_rarity]``.
+
+    This is used by the game-picker rarity filter to surface games where the
+    user still has rare (or semi-rare) achievements left to earn.
+
+    Args:
+        db:          SQLAlchemy session.
+        username:    Target username.
+        max_rarity:  Inclusive upper bound for rarity % (default 100).
+        min_rarity:  Inclusive lower bound for rarity % (default 0).
+
+    Returns:
+        List of app_id strings.
+    """
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        app_ids = set()
+        for a in user.achievements:
+            if a.unlocked:
+                continue
+            if a.rarity is None:
+                continue
+            if min_rarity <= a.rarity <= max_rarity:
+                app_ids.add(str(a.app_id))
+        return list(app_ids)
+    except Exception as e:
+        logger.error("Error getting rare-achievement games for %s: %s", username, e)
+        return []
+
+
 def start_achievement_hunt(db, username: str, app_id: int, game_name: str,
                            difficulty: str = 'medium',
                            target_achievements: int = 0) -> dict:
