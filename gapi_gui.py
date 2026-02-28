@@ -3944,6 +3944,518 @@ def api_export_favorites():
 
 
 # ---------------------------------------------------------------------------
+# User profile card API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/user/<username>/card')
+@require_login
+def api_user_card(username):
+    """Return the profile card for *username*.
+
+    Response JSON includes display_name, bio, avatar_url, roles, stats
+    (total_games, total_playtime_hours, total_achievements), and joined date.
+    """
+    db = next(database.get_db())
+    try:
+        card = database.get_user_card(db, username)
+    finally:
+        if db:
+            db.close()
+    if not card:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify(card)
+
+
+@app.route('/api/user/profile', methods=['POST'])
+@require_login
+def api_update_profile():
+    """Update the current user's profile card fields.
+
+    Request JSON (all optional):
+      - ``display_name``: display name shown on cards
+      - ``bio``:          short bio / status line (max 500 chars)
+      - ``avatar_url``:   URL to a profile picture
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    data = request.get_json() or {}
+    db = next(database.get_db())
+    try:
+        ok = database.update_user_profile(
+            db,
+            username,
+            display_name=data.get('display_name'),
+            bio=data.get('bio'),
+            avatar_url=data.get('avatar_url'),
+        )
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to update profile'}), 500
+
+
+# ---------------------------------------------------------------------------
+# In-app Friends API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/app-friends')
+@require_login
+def api_app_friends():
+    """Return the current user's in-app friends, sent requests, and received requests."""
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db = next(database.get_db())
+    try:
+        result = database.get_app_friends(db, username)
+    finally:
+        if db:
+            db.close()
+    return jsonify(result)
+
+
+@app.route('/api/app-friends/request', methods=['POST'])
+@require_login
+def api_send_friend_request():
+    """Send a friend request to another GAPI user.
+
+    Request JSON:
+      - ``username``: target username (required)
+    """
+    global current_user
+    with current_user_lock:
+        sender = current_user
+    data = request.get_json() or {}
+    target = data.get('username', '').strip()
+    if not target:
+        return jsonify({'error': 'username is required'}), 400
+    db = next(database.get_db())
+    try:
+        ok, message = database.send_friend_request(db, sender, target)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True, 'message': message})
+    return jsonify({'error': message}), 400
+
+
+@app.route('/api/app-friends/respond', methods=['POST'])
+@require_login
+def api_respond_friend_request():
+    """Accept or decline a pending friend request.
+
+    Request JSON:
+      - ``username``: the requester's username (required)
+      - ``accept``:   boolean (required)
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    data = request.get_json() or {}
+    requester = data.get('username', '').strip()
+    if 'accept' not in data:
+        return jsonify({'error': 'accept is required'}), 400
+    accept = bool(data.get('accept'))
+    if not requester:
+        return jsonify({'error': 'username is required'}), 400
+    db = next(database.get_db())
+    try:
+        ok, message = database.respond_friend_request(db, username, requester, accept)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True, 'message': message})
+    return jsonify({'error': message}), 400
+
+
+@app.route('/api/app-friends/remove', methods=['POST'])
+@require_login
+def api_remove_app_friend():
+    """Remove a GAPI friend.
+
+    Request JSON:
+      - ``username``: the friend's username (required)
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    data = request.get_json() or {}
+    other = data.get('username', '').strip()
+    if not other:
+        return jsonify({'error': 'username is required'}), 400
+    db = next(database.get_db())
+    try:
+        ok = database.remove_app_friend(db, username, other)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to remove friend'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/leaderboard')
+@require_login
+def api_leaderboard():
+    """Return a ranked leaderboard of users.
+
+    Query params:
+      - ``metric``: 'playtime' (default), 'games', or 'achievements'
+      - ``limit``:  max entries (default 20)
+    """
+    metric = request.args.get('metric', 'playtime')
+    try:
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        limit = 20
+    db = next(database.get_db())
+    try:
+        rows = database.get_leaderboard(db, metric=metric, limit=limit)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'metric': metric, 'entries': rows})
+
+
+# ---------------------------------------------------------------------------
+# Chat API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/chat/messages')
+@require_login
+def api_chat_messages():
+    """Fetch messages from a chat room.
+
+    Query params:
+      - ``room``:     room name (default 'general')
+      - ``since_id``: return only messages with id > this value (default 0)
+      - ``limit``:    max messages to return (default 50)
+    """
+    room = request.args.get('room', 'general')
+    try:
+        since_id = int(request.args.get('since_id', 0))
+        limit = int(request.args.get('limit', 50))
+    except ValueError:
+        since_id, limit = 0, 50
+    db = next(database.get_db())
+    try:
+        messages = database.get_chat_messages(db, room=room, limit=limit, since_id=since_id)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'room': room, 'messages': messages})
+
+
+@app.route('/api/chat/send', methods=['POST'])
+@require_login
+def api_chat_send():
+    """Send a chat message to a room.
+
+    Request JSON:
+      - ``room``:    room name (default 'general')
+      - ``message``: message text (required)
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    data = request.get_json() or {}
+    message = data.get('message', '').strip()
+    room = data.get('room', 'general').strip() or 'general'
+    if not message:
+        return jsonify({'error': 'message is required'}), 400
+    if len(message) > 500:
+        return jsonify({'error': 'message must be 500 characters or fewer'}), 400
+    db = next(database.get_db())
+    try:
+        msg = database.send_chat_message(db, sender_username=username, message=message, room=room)
+    finally:
+        if db:
+            db.close()
+    if not msg:
+        return jsonify({'error': 'Failed to send message'}), 500
+    return jsonify(msg), 201
+
+
+# ---------------------------------------------------------------------------
+# Notifications / Alerts API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/notifications')
+@require_login
+def api_get_notifications():
+    """Return notifications for the current user.
+
+    Query params:
+      - ``unread_only``: 'true' to return only unread (default false)
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    unread_only = request.args.get('unread_only', 'false').lower() == 'true'
+    db = next(database.get_db())
+    try:
+        notifs = database.get_notifications(db, username, unread_only=unread_only)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'notifications': notifs, 'unread_count': sum(1 for n in notifs if not n['is_read'])})
+
+
+@app.route('/api/notifications/read', methods=['POST'])
+@require_login
+def api_mark_notifications_read():
+    """Mark notifications as read.
+
+    Request JSON (optional):
+      - ``ids``: list of notification IDs. If omitted, marks all as read.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    data = request.get_json() or {}
+    ids = data.get('ids')
+    db = next(database.get_db())
+    try:
+        ok = database.mark_notifications_read(db, username, notification_ids=ids)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to mark notifications read'}), 500
+
+
+@app.route('/api/notifications/send', methods=['POST'])
+@require_login
+def api_send_notification():
+    """Send a notification to a user (admin only).
+
+    Request JSON:
+      - ``username``: target username (required)
+      - ``title``:    notification title (required)
+      - ``message``:  notification message (required)
+      - ``type``:     'info' | 'warning' | 'success' | 'error' (default 'info')
+    """
+    global current_user
+    with current_user_lock:
+        sender = current_user
+    # Only admins can send notifications to others
+    db_check = next(database.get_db())
+    try:
+        roles = database.get_user_roles(db_check, sender)
+    finally:
+        if db_check:
+            db_check.close()
+    if 'admin' not in roles:
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    title = data.get('title', '').strip()
+    message = data.get('message', '').strip()
+    notif_type = data.get('type', 'info')
+    if not username or not title or not message:
+        return jsonify({'error': 'username, title, and message are required'}), 400
+    db = next(database.get_db())
+    try:
+        ok = database.create_notification(db, username, title, message, type=notif_type)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to send notification'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Plugins / Addons API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/plugins')
+@require_login
+def api_get_plugins():
+    """Return all registered plugins."""
+    db = next(database.get_db())
+    try:
+        plugins = database.get_plugins(db)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'plugins': plugins})
+
+
+@app.route('/api/plugins', methods=['POST'])
+@require_login
+def api_register_plugin():
+    """Register or update a plugin (admin only).
+
+    Request JSON:
+      - ``name``:        plugin name (required, unique)
+      - ``description``: short description
+      - ``version``:     semver string (default '1.0.0')
+      - ``author``:      author name
+      - ``config``:      optional config object
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        roles = database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if 'admin' not in roles:
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    db = next(database.get_db())
+    try:
+        ok = database.register_plugin(
+            db,
+            name=name,
+            description=data.get('description', ''),
+            version=data.get('version', '1.0.0'),
+            author=data.get('author', ''),
+            config=data.get('config'),
+        )
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True}), 201
+    return jsonify({'error': 'Failed to register plugin'}), 500
+
+
+@app.route('/api/plugins/<int:plugin_id>', methods=['PUT'])
+@require_login
+def api_toggle_plugin(plugin_id):
+    """Enable or disable a plugin (admin only).
+
+    Request JSON:
+      - ``enabled``: boolean
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        roles = database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if 'admin' not in roles:
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json() or {}
+    enabled = bool(data.get('enabled', True))
+    db = next(database.get_db())
+    try:
+        ok = database.toggle_plugin(db, plugin_id, enabled)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Plugin not found'}), 404
+
+
+# ---------------------------------------------------------------------------
+# App Settings API  (admin only)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/settings', methods=['GET'])
+@require_login
+def api_get_app_settings():
+    """Return all admin-controlled app settings (admin only).
+
+    Response JSON:
+      - ``settings``: list of ``{key, value, default, description}`` objects
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        roles = database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if 'admin' not in roles:
+        return jsonify({'error': 'Admin access required'}), 403
+    db = next(database.get_db())
+    try:
+        settings = database.get_settings_with_meta(db)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'settings': settings})
+
+
+@app.route('/api/admin/settings', methods=['POST'])
+@require_login
+def api_save_app_settings():
+    """Save one or more app settings (admin only).
+
+    Request JSON:
+      - ``settings``: dict of ``{key: value}`` pairs to update
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        roles = database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if 'admin' not in roles:
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json() or {}
+    updates = data.get('settings', {})
+    if not isinstance(updates, dict) or not updates:
+        return jsonify({'error': 'settings dict is required'}), 400
+    db = next(database.get_db())
+    try:
+        ok = database.set_app_settings(db, updates, updated_by=username)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to save settings'}), 500
+
+
+@app.route('/api/admin/settings/public', methods=['GET'])
+def api_public_settings():
+    """Return safe public-facing settings (no auth required).
+
+    Currently returns: announcement message.
+    """
+    db = next(database.get_db())
+    try:
+        announcement = database.get_app_setting(db, 'announcement', '')
+        chat_enabled = database.get_app_setting(db, 'chat_enabled', 'true')
+        leaderboard_public = database.get_app_setting(db, 'leaderboard_public', 'true')
+        plugins_enabled = database.get_app_setting(db, 'plugins_enabled', 'true')
+    finally:
+        if db:
+            db.close()
+    return jsonify({
+        'announcement': announcement,
+        'chat_enabled': chat_enabled == 'true',
+        'leaderboard_public': leaderboard_public == 'true',
+        'plugins_enabled': plugins_enabled == 'true',
+    })
 # Localization / i18n endpoints
 # ---------------------------------------------------------------------------
 

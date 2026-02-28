@@ -83,6 +83,10 @@ class User(Base):
     steam_id = Column(String(20), nullable=True)
     epic_id = Column(String(255), nullable=True)
     gog_id = Column(String(255), nullable=True)
+    # Profile card fields
+    display_name = Column(String(255), nullable=True)       # shown instead of username
+    bio = Column(String(500), nullable=True)                # short status / bio
+    avatar_url = Column(String(500), nullable=True)         # custom avatar image URL
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -211,6 +215,84 @@ class MultiUserSession(Base):
     shared_ignores = Column(Boolean, default=False)  # Whether to use shared ignore rules
     game_picked = Column(String(50), nullable=True)
     picked_at = Column(DateTime, nullable=True)
+
+
+class UserFriendship(Base):
+    """In-app friendship between two GAPI users (with request/accept flow)."""
+    __tablename__ = "user_friendships"
+
+    id = Column(Integer, primary_key=True)
+    requester_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    addressee_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # status: 'pending' | 'accepted' | 'declined'
+    status = Column(String(20), default='pending', nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    requester = relationship("User", foreign_keys=[requester_id])
+    addressee = relationship("User", foreign_keys=[addressee_id])
+
+    __table_args__ = (
+        UniqueConstraint('requester_id', 'addressee_id', name='uq_friendship_pair'),
+    )
+
+
+class Notification(Base):
+    """In-app notifications / alerts for users."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    type = Column(String(50), default='info')   # 'info', 'warning', 'success', 'error', 'friend_request'
+    title = Column(String(255))
+    message = Column(Text)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class ChatMessage(Base):
+    """In-app chat messages between users."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # recipient_id=None means it's a global/room message
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    room = Column(String(100), default='general')  # channel / room name
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    sender = relationship("User", foreign_keys=[sender_id])
+    recipient = relationship("User", foreign_keys=[recipient_id])
+
+
+class Plugin(Base):
+    """Registered addons / plugins."""
+    __tablename__ = "plugins"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), unique=True, nullable=False)
+    description = Column(Text, nullable=True)
+    version = Column(String(50), default='1.0.0')
+    author = Column(String(255), nullable=True)
+    enabled = Column(Boolean, default=True)
+    config_json = Column(Text, nullable=True)  # JSON plugin config/settings
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AppSettings(Base):
+    """Admin-controlled global application settings stored as key/value pairs."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, nullable=True)
+    description = Column(String(500), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(255), nullable=True)  # username of last editor
 
 
 def get_db():
@@ -752,3 +834,601 @@ def update_game_details_cache(db, app_id: str, platform: str, details: dict) -> 
         logger.error(f"Error updating game details cache: {e}")
         db.rollback()
         return False
+
+
+# ---------------------------------------------------------------------------
+# Notification helpers
+# ---------------------------------------------------------------------------
+
+def create_notification(db, username: str, title: str, message: str, type: str = 'info') -> bool:
+    """Create a notification for the given user."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        notif = Notification(user_id=user.id, type=type, title=title, message=message)
+        db.add(notif)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error creating notification: {e}")
+        db.rollback()
+        return False
+
+
+def get_notifications(db, username: str, unread_only: bool = False) -> list:
+    """Return notifications for the given user."""
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        q = db.query(Notification).filter(Notification.user_id == user.id)
+        if unread_only:
+            q = q.filter(Notification.is_read.is_(False))
+        notifs = q.order_by(Notification.created_at.desc()).limit(50).all()
+        return [
+            {
+                'id': n.id,
+                'type': n.type,
+                'title': n.title,
+                'message': n.message,
+                'is_read': n.is_read,
+                'created_at': n.created_at.isoformat() if n.created_at else None,
+            }
+            for n in notifs
+        ]
+    except Exception as e:
+        logger.error(f"Error getting notifications: {e}")
+        return []
+
+
+def mark_notifications_read(db, username: str, notification_ids: list = None) -> bool:
+    """Mark notifications as read. If notification_ids is None, marks all."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        q = db.query(Notification).filter(Notification.user_id == user.id)
+        if notification_ids:
+            q = q.filter(Notification.id.in_(notification_ids))
+        q.update({'is_read': True}, synchronize_session=False)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error marking notifications read: {e}")
+        db.rollback()
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Chat helpers
+# ---------------------------------------------------------------------------
+
+def send_chat_message(db, sender_username: str, message: str, room: str = 'general', recipient_username: str = None) -> dict:
+    """Save a chat message and return it as a dict."""
+    if not db:
+        return {}
+    try:
+        sender = db.query(User).filter(User.username == sender_username).first()
+        if not sender:
+            return {}
+        recipient_id = None
+        if recipient_username:
+            recipient = db.query(User).filter(User.username == recipient_username).first()
+            if recipient:
+                recipient_id = recipient.id
+        msg = ChatMessage(
+            sender_id=sender.id,
+            recipient_id=recipient_id,
+            room=room,
+            message=message,
+        )
+        db.add(msg)
+        db.commit()
+        db.refresh(msg)
+        return {
+            'id': msg.id,
+            'sender': sender_username,
+            'room': msg.room,
+            'message': msg.message,
+            'created_at': msg.created_at.isoformat() if msg.created_at else None,
+        }
+    except Exception as e:
+        logger.error(f"Error sending chat message: {e}")
+        db.rollback()
+        return {}
+
+
+def get_chat_messages(db, room: str = 'general', limit: int = 50, since_id: int = 0) -> list:
+    """Return recent messages from a room."""
+    if not db:
+        return []
+    try:
+        q = db.query(ChatMessage).filter(ChatMessage.room == room)
+        if since_id:
+            q = q.filter(ChatMessage.id > since_id)
+        msgs = q.order_by(ChatMessage.created_at.asc()).limit(limit).all()
+        result = []
+        for m in msgs:
+            result.append({
+                'id': m.id,
+                'sender': m.sender.username if m.sender else 'unknown',
+                'room': m.room,
+                'message': m.message,
+                'created_at': m.created_at.isoformat() if m.created_at else None,
+            })
+        return result
+    except Exception as e:
+        logger.error(f"Error getting chat messages: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Plugin helpers
+# ---------------------------------------------------------------------------
+
+def get_plugins(db) -> list:
+    """Return all registered plugins."""
+    if not db:
+        return []
+    try:
+        plugins = db.query(Plugin).order_by(Plugin.name).all()
+        return [
+            {
+                'id': p.id,
+                'name': p.name,
+                'description': p.description,
+                'version': p.version,
+                'author': p.author,
+                'enabled': p.enabled,
+                'created_at': p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in plugins
+        ]
+    except Exception as e:
+        logger.error(f"Error getting plugins: {e}")
+        return []
+
+
+def register_plugin(db, name: str, description: str = '', version: str = '1.0.0', author: str = '', config: dict = None) -> bool:
+    """Register a new plugin or update an existing one."""
+    if not db:
+        return False
+    try:
+        existing = db.query(Plugin).filter(Plugin.name == name).first()
+        if existing:
+            existing.description = description
+            existing.version = version
+            existing.author = author
+            existing.config_json = json.dumps(config) if config else None
+            existing.updated_at = datetime.utcnow()
+        else:
+            plugin = Plugin(
+                name=name,
+                description=description,
+                version=version,
+                author=author,
+                config_json=json.dumps(config) if config else None,
+            )
+            db.add(plugin)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error registering plugin: {e}")
+        db.rollback()
+        return False
+
+
+def toggle_plugin(db, plugin_id: int, enabled: bool) -> bool:
+    """Enable or disable a plugin."""
+    if not db:
+        return False
+    try:
+        plugin = db.query(Plugin).filter(Plugin.id == plugin_id).first()
+        if not plugin:
+            return False
+        plugin.enabled = enabled
+        plugin.updated_at = datetime.utcnow()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error toggling plugin: {e}")
+        db.rollback()
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard helpers
+# ---------------------------------------------------------------------------
+
+def get_leaderboard(db, metric: str = 'playtime', limit: int = 20) -> list:
+    """Return a leaderboard of users ranked by the given metric.
+
+    Supported metrics: 'playtime', 'games', 'achievements'.
+    """
+    if not db:
+        return []
+    try:
+        from sqlalchemy import func
+        if metric == 'playtime':
+            rows = (
+                db.query(User.username, func.coalesce(func.sum(GameLibraryCache.playtime_hours), 0).label('score'))
+                .outerjoin(GameLibraryCache, GameLibraryCache.user_id == User.id)
+                .group_by(User.id, User.username)
+                .order_by(func.coalesce(func.sum(GameLibraryCache.playtime_hours), 0).desc())
+                .limit(limit)
+                .all()
+            )
+        elif metric == 'games':
+            rows = (
+                db.query(User.username, func.count(GameLibraryCache.id).label('score'))
+                .outerjoin(GameLibraryCache, GameLibraryCache.user_id == User.id)
+                .group_by(User.id, User.username)
+                .order_by(func.count(GameLibraryCache.id).desc())
+                .limit(limit)
+                .all()
+            )
+        elif metric == 'achievements':
+            rows = (
+                db.query(User.username, func.count(Achievement.id).label('score'))
+                .outerjoin(Achievement, Achievement.user_id == User.id)
+                .filter((Achievement.unlocked.is_(True)) | (Achievement.id.is_(None)))
+                .group_by(User.id, User.username)
+                .order_by(func.count(Achievement.id).desc())
+                .limit(limit)
+                .all()
+            )
+        else:
+            return []
+        return [
+            {'rank': i + 1, 'username': row.username, 'score': round(float(row.score), 1)}
+            for i, row in enumerate(rows)
+        ]
+    except Exception as e:
+        logger.error(f"Error getting leaderboard: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# User profile card helpers
+# ---------------------------------------------------------------------------
+
+def get_user_card(db, username: str) -> dict:
+    """Return a rich profile-card dict for the given user.
+
+    Includes display name, bio, avatar, roles, stats (games, playtime,
+    achievements), join date, and platform IDs.
+    """
+    if not db:
+        return {}
+    try:
+        from sqlalchemy import func
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+
+        # Aggregate stats
+        total_games = db.query(func.count(GameLibraryCache.id)).filter(
+            GameLibraryCache.user_id == user.id
+        ).scalar() or 0
+
+        total_playtime = db.query(func.coalesce(func.sum(GameLibraryCache.playtime_hours), 0)).filter(
+            GameLibraryCache.user_id == user.id
+        ).scalar() or 0
+
+        total_achievements = db.query(func.count(Achievement.id)).filter(
+            Achievement.user_id == user.id,
+            Achievement.unlocked.is_(True)
+        ).scalar() or 0
+
+        roles = [r.name for r in user.roles]
+
+        return {
+            'username': user.username,
+            'display_name': user.display_name or user.username,
+            'bio': user.bio or '',
+            'avatar_url': user.avatar_url or '',
+            'roles': roles,
+            'steam_id': user.steam_id or '',
+            'stats': {
+                'total_games': int(total_games),
+                'total_playtime_hours': round(float(total_playtime), 1),
+                'total_achievements': int(total_achievements),
+            },
+            'joined': user.created_at.isoformat() if user.created_at else None,
+        }
+    except Exception as e:
+        logger.error(f"Error getting user card: {e}")
+        return {}
+
+
+def update_user_profile(db, username: str, display_name: str = None,
+                         bio: str = None, avatar_url: str = None) -> bool:
+    """Update editable profile-card fields for a user."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        if display_name is not None:
+            user.display_name = display_name[:255] if display_name else None
+        if bio is not None:
+            user.bio = bio[:500] if bio else None
+        if avatar_url is not None:
+            # Only allow safe http/https URLs; reject anything else
+            if avatar_url and not avatar_url.lower().startswith(('http://', 'https://')):
+                avatar_url = ''
+            user.avatar_url = avatar_url[:500] if avatar_url else None
+        user.updated_at = datetime.utcnow()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error updating user profile: {e}")
+        db.rollback()
+        return False
+
+
+# ---------------------------------------------------------------------------
+# In-app friendship helpers
+# ---------------------------------------------------------------------------
+
+def send_friend_request(db, from_username: str, to_username: str) -> tuple:
+    """Send a friend request. Returns (success, message)."""
+    if not db:
+        return False, 'Database not available'
+    try:
+        sender = db.query(User).filter(User.username == from_username).first()
+        target = db.query(User).filter(User.username == to_username).first()
+        if not sender:
+            return False, 'Sender not found'
+        if not target:
+            return False, f'User "{to_username}" not found'
+        if sender.id == target.id:
+            return False, 'Cannot send a friend request to yourself'
+        # Check existing
+        existing = db.query(UserFriendship).filter(
+            ((UserFriendship.requester_id == sender.id) & (UserFriendship.addressee_id == target.id)) |
+            ((UserFriendship.requester_id == target.id) & (UserFriendship.addressee_id == sender.id))
+        ).first()
+        if existing:
+            if existing.status == 'accepted':
+                return False, 'Already friends'
+            if existing.status == 'pending':
+                return False, 'Friend request already pending'
+            # declined — re-request
+            existing.status = 'pending'
+            existing.requester_id = sender.id
+            existing.addressee_id = target.id
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            # Notify target
+            _notify_friend_request(db, sender.username, target)
+            return True, 'Friend request sent'
+        friendship = UserFriendship(requester_id=sender.id, addressee_id=target.id, status='pending')
+        db.add(friendship)
+        db.commit()
+        # Notify target
+        _notify_friend_request(db, sender.username, target)
+        return True, 'Friend request sent'
+    except Exception as e:
+        logger.error(f"Error sending friend request: {e}")
+        db.rollback()
+        return False, str(e)
+
+
+def _notify_friend_request(db, sender_username: str, target_user) -> None:
+    """Create a friend_request notification for target_user (best-effort)."""
+    try:
+        notif = Notification(
+            user_id=target_user.id,
+            type='friend_request',
+            title='New Friend Request',
+            message=f'{sender_username} sent you a friend request.',
+        )
+        db.add(notif)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Could not create friend-request notification: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
+def respond_friend_request(db, username: str, requester_username: str, accept: bool) -> tuple:
+    """Accept or decline a pending friend request."""
+    if not db:
+        return False, 'Database not available'
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        requester = db.query(User).filter(User.username == requester_username).first()
+        if not user or not requester:
+            return False, 'User not found'
+        friendship = db.query(UserFriendship).filter(
+            UserFriendship.requester_id == requester.id,
+            UserFriendship.addressee_id == user.id,
+            UserFriendship.status == 'pending',
+        ).first()
+        if not friendship:
+            return False, 'No pending friend request found'
+        friendship.status = 'accepted' if accept else 'declined'
+        friendship.updated_at = datetime.utcnow()
+        db.commit()
+        # Notify the original requester when their request is accepted
+        if accept:
+            try:
+                notif = Notification(
+                    user_id=requester.id,
+                    type='friend_request',
+                    title='Friend Request Accepted',
+                    message=f'{username} accepted your friend request. You are now friends!',
+                )
+                db.add(notif)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Could not create acceptance notification: {e}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+        return True, 'accepted' if accept else 'declined'
+    except Exception as e:
+        logger.error(f"Error responding to friend request: {e}")
+        db.rollback()
+        return False, str(e)
+
+
+def get_app_friends(db, username: str) -> dict:
+    """Return accepted friends, pending sent requests, and pending received requests."""
+    if not db:
+        return {'friends': [], 'sent': [], 'received': []}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {'friends': [], 'sent': [], 'received': []}
+
+        friends, sent, received = [], [], []
+
+        rows = db.query(UserFriendship).filter(
+            (UserFriendship.requester_id == user.id) | (UserFriendship.addressee_id == user.id)
+        ).all()
+
+        for row in rows:
+            is_requester = row.requester_id == user.id
+            other_id = row.addressee_id if is_requester else row.requester_id
+            other = db.query(User).filter(User.id == other_id).first()
+            if not other:
+                continue
+            entry = {
+                'username': other.username,
+                'display_name': other.display_name or other.username,
+                'avatar_url': other.avatar_url or '',
+                'bio': other.bio or '',
+            }
+            if row.status == 'accepted':
+                friends.append(entry)
+            elif row.status == 'pending':
+                if is_requester:
+                    sent.append(entry)
+                else:
+                    received.append({**entry, 'requester': other.username})
+
+        return {'friends': friends, 'sent': sent, 'received': received}
+    except Exception as e:
+        logger.error(f"Error getting app friends: {e}")
+        return {'friends': [], 'sent': [], 'received': []}
+
+
+def remove_app_friend(db, username: str, other_username: str) -> bool:
+    """Remove a friendship (both directions)."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        other = db.query(User).filter(User.username == other_username).first()
+        if not user or not other:
+            return False
+        db.query(UserFriendship).filter(
+            ((UserFriendship.requester_id == user.id) & (UserFriendship.addressee_id == other.id)) |
+            ((UserFriendship.requester_id == other.id) & (UserFriendship.addressee_id == user.id))
+        ).delete(synchronize_session=False)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error removing friend: {e}")
+        db.rollback()
+        return False
+
+
+# ---------------------------------------------------------------------------
+# AppSettings helpers
+# ---------------------------------------------------------------------------
+
+# Default settings shown in the admin panel.
+_DEFAULT_SETTINGS = {
+    'registration_open': ('true', 'Allow new users to register (true/false)'),
+    'announcement': ('', 'Site-wide announcement shown to all logged-in users'),
+    'max_pick_count': ('10', 'Maximum number of games a user can pick at once'),
+    'default_platform': ('all', 'Default platform filter for game picker (all/steam/epic/gog)'),
+    'leaderboard_public': ('true', 'Show leaderboard to all users (true/false)'),
+    'chat_enabled': ('true', 'Enable the chat feature (true/false)'),
+    'plugins_enabled': ('true', 'Enable the plugins system (true/false)'),
+}
+
+
+def get_app_settings(db) -> dict:
+    """Return all app settings as a key→value dict.
+
+    Missing keys are filled in from ``_DEFAULT_SETTINGS``.
+    """
+    if not db:
+        return {k: v for k, (v, _) in _DEFAULT_SETTINGS.items()}
+    try:
+        rows = db.query(AppSettings).all()
+        settings = {r.key: r.value for r in rows}
+        # Fill missing defaults
+        for key, (default_val, _) in _DEFAULT_SETTINGS.items():
+            if key not in settings:
+                settings[key] = default_val
+        return settings
+    except Exception as e:
+        logger.error(f"Error getting app settings: {e}")
+        return {k: v for k, (v, _) in _DEFAULT_SETTINGS.items()}
+
+
+def get_app_setting(db, key: str, default=None) -> str:
+    """Return a single app setting value by key."""
+    settings = get_app_settings(db)
+    return settings.get(key, default)
+
+
+def set_app_settings(db, updates: dict, updated_by: str = None) -> bool:
+    """Persist a dict of key→value updates.
+
+    Creates missing rows; updates existing ones.
+    """
+    if not db:
+        return False
+    try:
+        for key, value in updates.items():
+            row = db.query(AppSettings).filter(AppSettings.key == key).first()
+            description = _DEFAULT_SETTINGS.get(key, (None, None))[1]
+            if row:
+                row.value = str(value)
+                row.updated_by = updated_by
+                row.updated_at = datetime.utcnow()
+            else:
+                row = AppSettings(
+                    key=key,
+                    value=str(value),
+                    description=description,
+                    updated_by=updated_by,
+                )
+                db.add(row)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error saving app settings: {e}")
+        db.rollback()
+        return False
+
+
+def get_settings_with_meta(db) -> list:
+    """Return settings as a list of dicts with key, value, and description."""
+    current = get_app_settings(db)
+    result = []
+    for key, (default_val, description) in _DEFAULT_SETTINGS.items():
+        result.append({
+            'key': key,
+            'value': current.get(key, default_val),
+            'default': default_val,
+            'description': description,
+        })
+    return result
