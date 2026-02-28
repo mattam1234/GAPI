@@ -43,6 +43,7 @@ try:
         NotificationService, ChatService, FriendService,
         LeaderboardService, PluginService, AppSettingsService,
         IgnoredGamesService, LibraryService, DBFavoritesService, UserService,
+        AchievementService,
     )
     _notification_service = NotificationService(database) if DB_AVAILABLE else None
     _chat_service = ChatService(database) if DB_AVAILABLE else None
@@ -54,6 +55,7 @@ try:
     _library_service = LibraryService(database) if DB_AVAILABLE else None
     _db_favorites_service = DBFavoritesService(database) if DB_AVAILABLE else None
     _user_service = UserService(database) if DB_AVAILABLE else None
+    _achievement_service = AchievementService(database) if DB_AVAILABLE else None
 except Exception:
     _notification_service = None
     _chat_service = None
@@ -65,6 +67,7 @@ except Exception:
     _library_service = None
     _db_favorites_service = None
     _user_service = None
+    _achievement_service = None
 
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
@@ -2371,20 +2374,21 @@ def api_get_ignored_games():
     try:
         db = database.SessionLocal()
         try:
-            user = database.get_user_by_username(db, username)
-
-            if not user:
-                return jsonify({'ignored_games': []}), 200
-
-            ignored = [
-                {
-                    'app_id': ig.app_id,
-                    'game_name': ig.game_name,
-                    'reason': ig.reason,
-                    'created_at': ig.created_at.isoformat() if ig.created_at else None
-                }
-                for ig in user.ignored_games
-            ]
+            if _ignored_games_service:
+                ignored = _ignored_games_service.get_detailed(db, username)
+            else:
+                user = database.get_user_by_username(db, username)
+                if not user:
+                    return jsonify({'ignored_games': []}), 200
+                ignored = [
+                    {
+                        'app_id': ig.app_id,
+                        'game_name': ig.game_name,
+                        'reason': ig.reason,
+                        'created_at': ig.created_at.isoformat() if ig.created_at else None
+                    }
+                    for ig in user.ignored_games
+                ]
         finally:
             db.close()
         return jsonify({'ignored_games': ignored}), 200
@@ -2455,41 +2459,42 @@ def api_toggle_ignored_game():
 def api_get_achievements():
     """Get achievements for current user"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'achievements': []}), 200
-    
+
     try:
         db = database.SessionLocal()
-        user = database.get_user_by_username(db, username)
-        
-        if not user:
-            return jsonify({'achievements': []}), 200
-        
-        # Group achievements by game
-        achievements_by_game = {}
-        for achievement in user.achievements:
-            if achievement.app_id not in achievements_by_game:
-                achievements_by_game[achievement.app_id] = {
-                    'app_id': achievement.app_id,
-                    'game_name': achievement.game_name,
-                    'achievements': []
-                }
-            
-            achievements_by_game[achievement.app_id]['achievements'].append({
-                'achievement_id': achievement.achievement_id,
-                'name': achievement.achievement_name,
-                'description': achievement.achievement_description,
-                'unlocked': achievement.unlocked,
-                'unlock_time': achievement.unlock_time.isoformat() if achievement.unlock_time else None,
-                'rarity': achievement.rarity
-            })
-        
-        db.close()
-        return jsonify({'achievements': list(achievements_by_game.values())}), 200
+        try:
+            if _achievement_service:
+                achievements = _achievement_service.get_all_by_user(db, username)
+            else:
+                user = database.get_user_by_username(db, username)
+                if not user:
+                    return jsonify({'achievements': []}), 200
+                achievements_by_game = {}
+                for achievement in user.achievements:
+                    if achievement.app_id not in achievements_by_game:
+                        achievements_by_game[achievement.app_id] = {
+                            'app_id': achievement.app_id,
+                            'game_name': achievement.game_name,
+                            'achievements': []
+                        }
+                    achievements_by_game[achievement.app_id]['achievements'].append({
+                        'achievement_id': achievement.achievement_id,
+                        'name': achievement.achievement_name,
+                        'description': achievement.achievement_description,
+                        'unlocked': achievement.unlocked,
+                        'unlock_time': achievement.unlock_time.isoformat() if achievement.unlock_time else None,
+                        'rarity': achievement.rarity
+                    })
+                achievements = list(achievements_by_game.values())
+        finally:
+            db.close()
+        return jsonify({'achievements': achievements}), 200
     except Exception as e:
         gui_logger.error(f"Error getting achievements: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2500,59 +2505,65 @@ def api_get_achievements():
 def api_start_achievement_hunt():
     """Start tracking an achievement hunting session"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
-    
+
     data = request.json or {}
     app_id = data.get('app_id')
     game_name = data.get('game_name', '').strip() if isinstance(data.get('game_name'), str) else ''
     difficulty = data.get('difficulty', 'medium')  # easy, medium, hard, extreme
     target_achievements = data.get('target_achievements', 0)
-    
+
     if not app_id or not game_name:
         return jsonify({'error': 'app_id and game_name required'}), 400
-    
+
     # Convert app_id to int
     try:
         app_id = int(app_id)
     except (ValueError, TypeError):
         return jsonify({'error': 'app_id must be an integer'}), 400
-    
+
     try:
         db = database.SessionLocal()
-        user = database.get_user_by_username(db, username)
-        
-        if not user:
+        try:
+            if _achievement_service:
+                result = _achievement_service.start_hunt(
+                    db, username, app_id, game_name,
+                    difficulty=difficulty,
+                    target_achievements=target_achievements)
+            else:
+                user = database.get_user_by_username(db, username)
+                if not user:
+                    return jsonify({'error': 'User not found in database'}), 404
+                hunt = database.AchievementHunt(
+                    user_id=user.id,
+                    app_id=app_id,
+                    game_name=game_name,
+                    difficulty=difficulty,
+                    target_achievements=target_achievements
+                )
+                db.add(hunt)
+                db.commit()
+                result = {
+                    'hunt_id': hunt.id,
+                    'app_id': hunt.app_id,
+                    'game_name': hunt.game_name,
+                    'difficulty': hunt.difficulty,
+                    'target_achievements': hunt.target_achievements,
+                    'unlocked_achievements': hunt.unlocked_achievements,
+                    'progress_percent': hunt.progress_percent,
+                    'status': hunt.status,
+                    'started_at': hunt.started_at.isoformat()
+                }
+        finally:
             db.close()
+
+        if not result:
             return jsonify({'error': 'User not found in database'}), 404
-        
-        hunt = database.AchievementHunt(
-            user_id=user.id,
-            app_id=app_id,
-            game_name=game_name,
-            difficulty=difficulty,
-            target_achievements=target_achievements
-        )
-        db.add(hunt)
-        db.commit()
-        
-        result = {
-            'hunt_id': hunt.id,
-            'app_id': hunt.app_id,
-            'game_name': hunt.game_name,
-            'difficulty': hunt.difficulty,
-            'target_achievements': hunt.target_achievements,
-            'unlocked_achievements': hunt.unlocked_achievements,
-            'progress_percent': hunt.progress_percent,
-            'status': hunt.status,
-            'started_at': hunt.started_at.isoformat()
-        }
-        
-        db.close()
         return jsonify(result), 201
     except Exception as e:
         gui_logger.error(f"Error starting achievement hunt: {e}")
@@ -2564,51 +2575,57 @@ def api_start_achievement_hunt():
 def api_update_achievement_hunt(hunt_id: str):
     """Update achievement hunt progress"""
     global current_user
-    
+
     with current_user_lock:
         username = current_user
-    
+
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
-    
+
     data = request.json or {}
     unlocked_achievements = data.get('unlocked_achievements')
     status = data.get('status')
-    
+
     try:
         db = database.SessionLocal()
-        hunt = db.query(database.AchievementHunt).filter(database.AchievementHunt.id == hunt_id).first()
-        
-        if not hunt:
+        try:
+            if _achievement_service:
+                result = _achievement_service.update_hunt(
+                    db, hunt_id,
+                    unlocked_achievements=unlocked_achievements,
+                    status=status)
+            else:
+                hunt = db.query(database.AchievementHunt).filter(
+                    database.AchievementHunt.id == hunt_id).first()
+                if not hunt:
+                    return jsonify({'error': 'Hunt not found'}), 404
+                if unlocked_achievements is not None:
+                    hunt.unlocked_achievements = unlocked_achievements
+                    if hunt.target_achievements > 0:
+                        hunt.progress_percent = (unlocked_achievements / hunt.target_achievements) * 100
+                if status:
+                    hunt.status = status
+                    if status == 'completed':
+                        hunt.completed_at = datetime.now(timezone.utc)
+                hunt.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                result = {
+                    'hunt_id': hunt.id,
+                    'app_id': hunt.app_id,
+                    'game_name': hunt.game_name,
+                    'difficulty': hunt.difficulty,
+                    'target_achievements': hunt.target_achievements,
+                    'unlocked_achievements': hunt.unlocked_achievements,
+                    'progress_percent': hunt.progress_percent,
+                    'status': hunt.status,
+                    'started_at': hunt.started_at.isoformat(),
+                    'completed_at': hunt.completed_at.isoformat() if hunt.completed_at else None
+                }
+        finally:
+            db.close()
+
+        if not result:
             return jsonify({'error': 'Hunt not found'}), 404
-        
-        if unlocked_achievements is not None:
-            hunt.unlocked_achievements = unlocked_achievements
-            if hunt.target_achievements > 0:
-                hunt.progress_percent = (unlocked_achievements / hunt.target_achievements) * 100
-        
-        if status:
-            hunt.status = status
-            if status == 'completed':
-                hunt.completed_at = datetime.now(timezone.utc)
-        
-        hunt.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        
-        result = {
-            'hunt_id': hunt.id,
-            'app_id': hunt.app_id,
-            'game_name': hunt.game_name,
-            'difficulty': hunt.difficulty,
-            'target_achievements': hunt.target_achievements,
-            'unlocked_achievements': hunt.unlocked_achievements,
-            'progress_percent': hunt.progress_percent,
-            'status': hunt.status,
-            'started_at': hunt.started_at.isoformat(),
-            'completed_at': hunt.completed_at.isoformat() if hunt.completed_at else None
-        }
-        
-        db.close()
         return jsonify(result), 200
     except Exception as e:
         gui_logger.error(f"Error updating achievement hunt: {e}")

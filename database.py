@@ -9,7 +9,7 @@ import json
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger('gapi.database')
@@ -1432,3 +1432,185 @@ def get_settings_with_meta(db) -> list:
             'description': description,
         })
     return result
+
+
+# ---------------------------------------------------------------------------
+# Ignored-games full-detail helper
+# ---------------------------------------------------------------------------
+
+def get_ignored_games_full(db, username: str) -> list:
+    """Get full detail records for all games ignored by *username*.
+
+    Unlike :func:`get_ignored_games`, which returns only a list of app-ID
+    strings, this function returns a list of dicts that include
+    ``app_id``, ``game_name``, ``reason``, and ``created_at``.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Target username.
+
+    Returns:
+        List of dicts (may be empty).
+    """
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        return [
+            {
+                'app_id': ig.app_id,
+                'game_name': ig.game_name,
+                'reason': ig.reason,
+                'created_at': ig.created_at.isoformat() if ig.created_at else None,
+            }
+            for ig in user.ignored_games
+        ]
+    except Exception as e:
+        logger.error("Error getting full ignored games for %s: %s", username, e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Achievement hunt helpers
+# ---------------------------------------------------------------------------
+
+def get_user_achievements_grouped(db, username: str) -> list:
+    """Return achievements for *username* grouped by game.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Target username.
+
+    Returns:
+        List of ``{'app_id', 'game_name', 'achievements': [...]}`` dicts.
+    """
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+
+        grouped = {}
+        for a in user.achievements:
+            if a.app_id not in grouped:
+                grouped[a.app_id] = {'app_id': a.app_id, 'game_name': a.game_name,
+                                     'achievements': []}
+            grouped[a.app_id]['achievements'].append({
+                'achievement_id': a.achievement_id,
+                'name': a.achievement_name,
+                'description': a.achievement_description,
+                'unlocked': a.unlocked,
+                'unlock_time': a.unlock_time.isoformat() if a.unlock_time else None,
+                'rarity': a.rarity,
+            })
+        return list(grouped.values())
+    except Exception as e:
+        logger.error("Error getting achievements for %s: %s", username, e)
+        return []
+
+
+def start_achievement_hunt(db, username: str, app_id: int, game_name: str,
+                           difficulty: str = 'medium',
+                           target_achievements: int = 0) -> dict:
+    """Create a new achievement-hunt session for *username*.
+
+    Args:
+        db:                   SQLAlchemy session.
+        username:             Target username.
+        app_id:               Integer Steam app ID.
+        game_name:            Human-readable game name.
+        difficulty:           One of ``'easy'``, ``'medium'``, ``'hard'``,
+                              ``'extreme'``.
+        target_achievements:  Total number of achievements to unlock (0 = all).
+
+    Returns:
+        Dict with hunt details on success, empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+
+        hunt = AchievementHunt(
+            user_id=user.id,
+            app_id=app_id,
+            game_name=game_name,
+            difficulty=difficulty,
+            target_achievements=target_achievements,
+        )
+        db.add(hunt)
+        db.commit()
+        return {
+            'hunt_id': hunt.id,
+            'app_id': hunt.app_id,
+            'game_name': hunt.game_name,
+            'difficulty': hunt.difficulty,
+            'target_achievements': hunt.target_achievements,
+            'unlocked_achievements': hunt.unlocked_achievements,
+            'progress_percent': hunt.progress_percent,
+            'status': hunt.status,
+            'started_at': hunt.started_at.isoformat(),
+        }
+    except Exception as e:
+        logger.error("Error starting achievement hunt for %s: %s", username, e)
+        db.rollback()
+        return {}
+
+
+def update_achievement_hunt(db, hunt_id, unlocked_achievements=None,
+                            status: str = None) -> dict:
+    """Update progress or status of an existing achievement hunt.
+
+    Args:
+        db:                    SQLAlchemy session.
+        hunt_id:               Primary-key ID of the hunt record.
+        unlocked_achievements: New unlocked count (``None`` → unchanged).
+        status:                New status string (``None`` → unchanged).
+
+    Returns:
+        Dict with updated hunt details on success, empty dict if not found or
+        on error.
+    """
+    if not db:
+        return {}
+    try:
+        hunt = db.query(AchievementHunt).filter(
+            AchievementHunt.id == hunt_id).first()
+        if not hunt:
+            return {}
+
+        if unlocked_achievements is not None:
+            hunt.unlocked_achievements = unlocked_achievements
+            if hunt.target_achievements > 0:
+                hunt.progress_percent = (
+                    unlocked_achievements / hunt.target_achievements * 100)
+
+        if status:
+            hunt.status = status
+            if status == 'completed':
+                hunt.completed_at = datetime.now(timezone.utc)
+
+        hunt.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        return {
+            'hunt_id': hunt.id,
+            'app_id': hunt.app_id,
+            'game_name': hunt.game_name,
+            'difficulty': hunt.difficulty,
+            'target_achievements': hunt.target_achievements,
+            'unlocked_achievements': hunt.unlocked_achievements,
+            'progress_percent': hunt.progress_percent,
+            'status': hunt.status,
+            'started_at': hunt.started_at.isoformat(),
+            'completed_at': (hunt.completed_at.isoformat()
+                             if hunt.completed_at else None),
+        }
+    except Exception as e:
+        logger.error("Error updating achievement hunt %s: %s", hunt_id, e)
+        db.rollback()
+        return {}

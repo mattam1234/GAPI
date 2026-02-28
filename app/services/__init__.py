@@ -18,6 +18,7 @@ from .ignored_games_service import IgnoredGamesService
 from .library_service import LibraryService
 from .db_favorites_service import DBFavoritesService
 from .user_service import UserService
+from .achievement_service import AchievementService
 
 __all__ = [
     'ReviewService',
@@ -39,4 +40,5 @@ __all__ = [
     'LibraryService',
     'DBFavoritesService',
     'UserService',
+    'AchievementService',
 ]

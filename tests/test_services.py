@@ -1686,5 +1686,218 @@ class TestUserService(unittest.TestCase):
         self.assertEqual(self.svc.get_count(DB), before + 1)
 
 
+# ===========================================================================
+# IgnoredGamesService.get_detailed tests
+# ===========================================================================
+
+class _MockIgnoredDetailDB:
+    """Minimal stand-in for the database module used by get_detailed."""
+
+    def __init__(self):
+        self._games = {}  # {username: [{'app_id', 'game_name', 'reason', 'created_at'}]}
+
+    def get_ignored_games_full(self, db, username):
+        return list(self._games.get(username, []))
+
+    # (unused by get_detailed, but IgnoredGamesService constructor needs these)
+    def get_ignored_games(self, db, username):
+        return [g['app_id'] for g in self._games.get(username, [])]
+
+    def toggle_ignore_game(self, db, username, app_id, game_name='', reason=''):
+        if username not in self._games:
+            self._games[username] = []
+        ids = [g['app_id'] for g in self._games[username]]
+        if app_id in ids:
+            self._games[username] = [g for g in self._games[username] if g['app_id'] != app_id]
+        else:
+            self._games[username].append(
+                {'app_id': app_id, 'game_name': game_name, 'reason': reason, 'created_at': None})
+        return True
+
+    def get_shared_ignore_games(self, db, usernames):
+        return []
+
+
+class TestIgnoredGamesServiceGetDetailed(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockIgnoredDetailDB()
+        from app.services import IgnoredGamesService
+        self.svc = IgnoredGamesService(self.mock_db)
+
+    def test_get_detailed_empty_initially(self):
+        self.assertEqual(self.svc.get_detailed(DB, 'alice'), [])
+
+    def test_get_detailed_returns_full_objects(self):
+        self.mock_db.toggle_ignore_game(DB, 'alice', '220', 'Half-Life 2', 'Not interested')
+        result = self.svc.get_detailed(DB, 'alice')
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['app_id'], '220')
+        self.assertEqual(result[0]['game_name'], 'Half-Life 2')
+        self.assertEqual(result[0]['reason'], 'Not interested')
+
+    def test_get_detailed_multiple_games(self):
+        self.mock_db.toggle_ignore_game(DB, 'alice', '220', 'Game A', '')
+        self.mock_db.toggle_ignore_game(DB, 'alice', '440', 'Game B', '')
+        result = self.svc.get_detailed(DB, 'alice')
+        self.assertEqual(len(result), 2)
+
+    def test_get_detailed_user_isolation(self):
+        self.mock_db.toggle_ignore_game(DB, 'alice', '220', 'Half-Life 2', '')
+        self.assertEqual(self.svc.get_detailed(DB, 'bob'), [])
+
+    def test_get_detailed_removed_game_not_present(self):
+        self.mock_db.toggle_ignore_game(DB, 'alice', '220', 'Half-Life 2', '')
+        self.mock_db.toggle_ignore_game(DB, 'alice', '220', 'Half-Life 2', '')  # toggles off
+        self.assertEqual(self.svc.get_detailed(DB, 'alice'), [])
+
+    def test_get_detailed_contains_created_at_key(self):
+        self.mock_db.toggle_ignore_game(DB, 'alice', '220', 'Game', '')
+        result = self.svc.get_detailed(DB, 'alice')
+        self.assertIn('created_at', result[0])
+
+
+# ===========================================================================
+# AchievementService tests
+# ===========================================================================
+
+class _MockAchievementDB:
+    """Minimal stand-in for the database module used by AchievementService."""
+
+    def __init__(self):
+        self._achievements = {}   # {username: [{'app_id', 'game_name', 'achievements': [...]}]}
+        self._hunts = {}          # {hunt_id: dict}
+        self._next_hunt_id = 1
+
+    def get_user_achievements_grouped(self, db, username):
+        return list(self._achievements.get(username, []))
+
+    def start_achievement_hunt(self, db, username, app_id, game_name,
+                               difficulty='medium', target_achievements=0):
+        hunt_id = self._next_hunt_id
+        self._next_hunt_id += 1
+        hunt = {
+            'hunt_id': hunt_id,
+            'app_id': app_id,
+            'game_name': game_name,
+            'difficulty': difficulty,
+            'target_achievements': target_achievements,
+            'unlocked_achievements': 0,
+            'progress_percent': 0.0,
+            'status': 'in_progress',
+            'started_at': '2025-01-01T00:00:00',
+        }
+        self._hunts[hunt_id] = hunt
+        return dict(hunt)
+
+    def update_achievement_hunt(self, db, hunt_id, unlocked_achievements=None, status=None):
+        hunt = self._hunts.get(hunt_id)
+        if not hunt:
+            return {}
+        if unlocked_achievements is not None:
+            hunt['unlocked_achievements'] = unlocked_achievements
+            if hunt['target_achievements'] > 0:
+                hunt['progress_percent'] = (unlocked_achievements / hunt['target_achievements'] * 100)
+        if status:
+            hunt['status'] = status
+            hunt['completed_at'] = '2025-06-01T00:00:00' if status == 'completed' else None
+        return dict(hunt)
+
+
+class TestAchievementService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockAchievementDB()
+        from app.services import AchievementService
+        self.svc = AchievementService(self.mock_db)
+
+    # --- get_all_by_user ---
+
+    def test_get_all_by_user_empty(self):
+        self.assertEqual(self.svc.get_all_by_user(DB, 'alice'), [])
+
+    def test_get_all_by_user_returns_list(self):
+        self.mock_db._achievements['alice'] = [
+            {'app_id': '220', 'game_name': 'Half-Life 2', 'achievements': []}
+        ]
+        result = self.svc.get_all_by_user(DB, 'alice')
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['app_id'], '220')
+
+    def test_get_all_by_user_isolation(self):
+        self.mock_db._achievements['alice'] = [
+            {'app_id': '220', 'game_name': 'HL2', 'achievements': []}
+        ]
+        self.assertEqual(self.svc.get_all_by_user(DB, 'bob'), [])
+
+    # --- start_hunt ---
+
+    def test_start_hunt_returns_dict(self):
+        result = self.svc.start_hunt(DB, 'alice', 220, 'Half-Life 2')
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, dict)
+
+    def test_start_hunt_contains_required_keys(self):
+        result = self.svc.start_hunt(DB, 'alice', 220, 'Half-Life 2')
+        for key in ('hunt_id', 'app_id', 'game_name', 'status', 'started_at'):
+            self.assertIn(key, result)
+
+    def test_start_hunt_stores_game_name(self):
+        result = self.svc.start_hunt(DB, 'alice', 220, 'Half-Life 2')
+        self.assertEqual(result['game_name'], 'Half-Life 2')
+
+    def test_start_hunt_stores_difficulty(self):
+        result = self.svc.start_hunt(DB, 'alice', 220, 'HL2', difficulty='hard')
+        self.assertEqual(result['difficulty'], 'hard')
+
+    def test_start_hunt_default_status_in_progress(self):
+        result = self.svc.start_hunt(DB, 'alice', 220, 'HL2')
+        self.assertEqual(result['status'], 'in_progress')
+
+    def test_start_hunt_target_achievements(self):
+        result = self.svc.start_hunt(DB, 'alice', 220, 'HL2', target_achievements=50)
+        self.assertEqual(result['target_achievements'], 50)
+
+    def test_start_hunt_unlocked_starts_at_zero(self):
+        result = self.svc.start_hunt(DB, 'alice', 220, 'HL2', target_achievements=10)
+        self.assertEqual(result['unlocked_achievements'], 0)
+
+    def test_start_hunt_user_not_found_returns_none(self):
+        # Simulate DB returning empty dict (user not found)
+        self.mock_db._achievements = {}  # not relevant; we monkeypatch start
+        original = self.mock_db.start_achievement_hunt
+        self.mock_db.start_achievement_hunt = lambda *a, **k: {}
+        result = self.svc.start_hunt(DB, 'ghost', 220, 'HL2')
+        self.assertIsNone(result)
+        self.mock_db.start_achievement_hunt = original
+
+    # --- update_hunt ---
+
+    def test_update_hunt_updates_progress(self):
+        started = self.svc.start_hunt(DB, 'alice', 220, 'HL2', target_achievements=10)
+        hunt_id = started['hunt_id']
+        result = self.svc.update_hunt(DB, hunt_id, unlocked_achievements=5)
+        self.assertEqual(result['unlocked_achievements'], 5)
+        self.assertAlmostEqual(result['progress_percent'], 50.0)
+
+    def test_update_hunt_updates_status(self):
+        started = self.svc.start_hunt(DB, 'alice', 220, 'HL2')
+        hunt_id = started['hunt_id']
+        result = self.svc.update_hunt(DB, hunt_id, status='completed')
+        self.assertEqual(result['status'], 'completed')
+
+    def test_update_hunt_not_found_returns_none(self):
+        result = self.svc.update_hunt(DB, 9999)
+        self.assertIsNone(result)
+
+    def test_update_hunt_partial_update_status_only(self):
+        started = self.svc.start_hunt(DB, 'alice', 220, 'HL2', target_achievements=4)
+        hunt_id = started['hunt_id']
+        self.svc.update_hunt(DB, hunt_id, unlocked_achievements=2)
+        result = self.svc.update_hunt(DB, hunt_id, status='abandoned')
+        self.assertEqual(result['status'], 'abandoned')
+        self.assertEqual(result['unlocked_achievements'], 2)
+
+
 if __name__ == '__main__':
     unittest.main()

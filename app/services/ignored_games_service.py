@@ -57,6 +57,23 @@ class IgnoredGamesService:
             game_name=game_name, reason=reason,
         )
 
+    def get_detailed(self, db, username: str) -> List[dict]:
+        """Return full detail records for all games ignored by *username*.
+
+        Unlike :meth:`get_ignored`, which returns only app-ID strings, this
+        method returns a list of dicts containing ``app_id``, ``game_name``,
+        ``reason``, and ``created_at`` — the same fields exposed by the REST
+        API.
+
+        Args:
+            db:       SQLAlchemy session.
+            username: Target username.
+
+        Returns:
+            List of dicts (may be empty).
+        """
+        return self._db.get_ignored_games_full(db, username)
+
     def get_shared_ignored(self, db, usernames: List[str]) -> List[str]:
         """Return app IDs that are ignored by *all* of the given users.
 
