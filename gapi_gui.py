@@ -1194,16 +1194,21 @@ def api_auth_login():
     if DB_AVAILABLE:
         try:
             db = database.SessionLocal()
-            db_user = database.get_user_by_username(db, username)
-            if db_user:
-                # override with DB values when present
-                if getattr(db_user, 'steam_id', None):
-                    user_ids['steam_id'] = db_user.steam_id
-                if getattr(db_user, 'epic_id', None):
-                    user_ids['epic_id'] = db_user.epic_id
-                if getattr(db_user, 'gog_id', None):
-                    user_ids['gog_id'] = db_user.gog_id
-            db.close()
+            try:
+                if _user_service:
+                    db_ids = _user_service.get_platform_ids(db, username)
+                else:
+                    db_user = database.get_user_by_username(db, username)
+                    db_ids = {
+                        'steam_id': getattr(db_user, 'steam_id', None) or '',
+                        'epic_id': getattr(db_user, 'epic_id', None) or '',
+                        'gog_id': getattr(db_user, 'gog_id', None) or '',
+                    } if db_user else {}
+            finally:
+                db.close()
+            for key in ('steam_id', 'epic_id', 'gog_id'):
+                if db_ids.get(key):
+                    user_ids[key] = db_ids[key]
         except Exception as e:
             gui_logger.exception('Failed to read user IDs from DB for %s: %s', username, e)
     
@@ -1318,15 +1323,21 @@ def api_auth_get_ids():
     if DB_AVAILABLE:
         try:
             db = database.SessionLocal()
-            db_user = database.get_user_by_username(db, username)
-            if db_user:
-                if getattr(db_user, 'steam_id', None):
-                    user_ids['steam_id'] = db_user.steam_id
-                if getattr(db_user, 'epic_id', None):
-                    user_ids['epic_id'] = db_user.epic_id
-                if getattr(db_user, 'gog_id', None):
-                    user_ids['gog_id'] = db_user.gog_id
-            db.close()
+            try:
+                if _user_service:
+                    db_ids = _user_service.get_platform_ids(db, username)
+                else:
+                    db_user = database.get_user_by_username(db, username)
+                    db_ids = {
+                        'steam_id': getattr(db_user, 'steam_id', None) or '',
+                        'epic_id': getattr(db_user, 'epic_id', None) or '',
+                        'gog_id': getattr(db_user, 'gog_id', None) or '',
+                    } if db_user else {}
+            finally:
+                db.close()
+            for key in ('steam_id', 'epic_id', 'gog_id'):
+                if db_ids.get(key):
+                    user_ids[key] = db_ids[key]
         except Exception as e:
             gui_logger.exception('Failed to read IDs from DB for %s: %s', username, e)
     return jsonify(user_ids)
@@ -1426,8 +1437,11 @@ def api_pick_game():
                 db = None
                 try:
                     db = database.SessionLocal()
-                    cached_games = database.get_cached_library(db, username)
-                    
+                    if _library_service:
+                        cached_games = _library_service.get_cached(db, username)
+                    else:
+                        cached_games = database.get_cached_library(db, username)
+
                     if cached_games:
                         # Convert database format to picker format
                         picker.games = [
@@ -1608,7 +1622,10 @@ def api_pick_game():
                                     try:
                                         db = database.SessionLocal()
                                         platform = game.get('platform', 'steam')
-                                        database.update_game_details_cache(db, app_id, platform, response)
+                                        if _library_service:
+                                            _library_service.update_game_details(db, app_id, platform, response)
+                                        else:
+                                            database.update_game_details_cache(db, app_id, platform, response)
                                     except Exception as cache_err:
                                         gui_logger.debug(f"Failed to cache details: {cache_err}")
                                     finally:
@@ -1681,14 +1698,17 @@ def api_game_details(app_id):
         # Determine platform: check user's library for this game
         platform = 'steam'  # Default to steam
         try:
-            user = database.get_user_by_username(db, username)
-            if user:
-                lib_entry = db.query(database.GameLibraryCache).filter(
-                    database.GameLibraryCache.user_id == user.id,
-                    database.GameLibraryCache.app_id == str(app_id)
-                ).first()
-                if lib_entry:
-                    platform = lib_entry.platform or 'steam'
+            if _library_service:
+                platform = _library_service.get_game_platform(db, username, app_id)
+            else:
+                user = database.get_user_by_username(db, username)
+                if user:
+                    lib_entry = db.query(database.GameLibraryCache).filter(
+                        database.GameLibraryCache.user_id == user.id,
+                        database.GameLibraryCache.app_id == str(app_id)
+                    ).first()
+                    if lib_entry:
+                        platform = lib_entry.platform or 'steam'
         except Exception as e:
             gui_logger.debug(f"Could not determine platform from library: {e}")
 
@@ -1755,15 +1775,21 @@ def api_game_details(app_id):
 
         # Step 4: No API data available. Return last cached data even if stale, or minimal response
         try:
-            last_cache = db.query(database.GameDetailsCache).filter(
-                database.GameDetailsCache.app_id == str(app_id),
-                database.GameDetailsCache.platform == platform
-            ).first()
+            if _library_service:
+                stale_details = _library_service.get_stale_game_details(db, app_id, platform)
+            else:
+                last_cache = db.query(database.GameDetailsCache).filter(
+                    database.GameDetailsCache.app_id == str(app_id),
+                    database.GameDetailsCache.platform == platform
+                ).first()
+                stale_details = None
+                if last_cache:
+                    import json
+                    stale_details = json.loads(last_cache.details_json)
 
-            if last_cache:
-                import json
+            if stale_details:
                 return jsonify({
-                    **json.loads(last_cache.details_json),
+                    **stale_details,
                     'source': 'cache_stale',
                     'app_id': app_id,
                     'platform': platform

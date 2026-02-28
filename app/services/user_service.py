@@ -39,6 +39,20 @@ class UserService:
         """
         return self._db.get_roles(db)
 
+    def get_platform_ids(self, db, username: str) -> dict:
+        """Return the platform IDs (steam_id, epic_id, gog_id) for *username*.
+
+        Args:
+            db:       SQLAlchemy session.
+            username: Target username.
+
+        Returns:
+            Dict with ``steam_id``, ``epic_id``, and ``gog_id`` keys.  Any
+            missing value is an empty string.  Returns an empty dict when the
+            user is not found.
+        """
+        return self._db.get_user_platform_ids(db, username)
+
     def get_count(self, db) -> int:
         """Return the total number of registered users.
 

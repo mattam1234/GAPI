@@ -96,3 +96,33 @@ class LibraryService:
             ``True`` on success, ``False`` otherwise.
         """
         return self._db.update_game_details_cache(db, app_id, platform, details)
+
+    def get_game_platform(self, db, username: str, app_id) -> str:
+        """Return the platform for *app_id* in *username*'s library cache.
+
+        Args:
+            db:       SQLAlchemy session.
+            username: Target username.
+            app_id:   Game app ID (string or int).
+
+        Returns:
+            Platform string (e.g. ``'steam'``, ``'epic'``).  Falls back to
+            ``'steam'`` when no matching entry is found.
+        """
+        return self._db.get_game_platform_for_user(db, username, app_id)
+
+    def get_stale_game_details(self, db, app_id, platform: str = 'steam') -> Optional[Dict]:
+        """Return the last cached game-details entry regardless of age.
+
+        Useful as a last-resort fallback when no fresh cache or API data
+        is available.
+
+        Args:
+            db:       SQLAlchemy session.
+            app_id:   Game app ID.
+            platform: Platform name.
+
+        Returns:
+            Parsed details dict, or ``None`` when no entry exists.
+        """
+        return self._db.get_game_details_stale(db, app_id, platform)

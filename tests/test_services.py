@@ -1478,6 +1478,7 @@ class _MockLibraryDB:
         self._libraries = {}   # {username: [game_dict, ...]}
         self._cache_times = {}  # {username: float seconds}
         self._details = {}     # {(app_id, platform): dict}
+        self._platforms = {}   # {(username, app_id): platform}
 
     def get_cached_library(self, db, username):
         return list(self._libraries.get(username, []))
@@ -1496,6 +1497,12 @@ class _MockLibraryDB:
     def update_game_details_cache(self, db, app_id, platform, details):
         self._details[(str(app_id), platform)] = dict(details)
         return True
+
+    def get_game_platform_for_user(self, db, username, app_id):
+        return self._platforms.get((username, str(app_id)), 'steam')
+
+    def get_game_details_stale(self, db, app_id, platform='steam'):
+        return self._details.get((str(app_id), platform))
 
 
 class TestLibraryService(unittest.TestCase):
@@ -1554,6 +1561,38 @@ class TestLibraryService(unittest.TestCase):
     def test_different_users_isolated(self):
         self.svc.cache(DB, 'alice', [{'app_id': '220', 'name': 'Game'}])
         self.assertEqual(self.svc.get_cached(DB, 'bob'), [])
+
+    # --- get_game_platform ---
+
+    def test_get_game_platform_default_steam(self):
+        self.assertEqual(self.svc.get_game_platform(DB, 'alice', '220'), 'steam')
+
+    def test_get_game_platform_returns_stored_platform(self):
+        self.mock_db._platforms[('alice', '220')] = 'epic'
+        self.assertEqual(self.svc.get_game_platform(DB, 'alice', '220'), 'epic')
+
+    def test_get_game_platform_user_isolation(self):
+        self.mock_db._platforms[('alice', '220')] = 'gog'
+        self.assertEqual(self.svc.get_game_platform(DB, 'bob', '220'), 'steam')
+
+    def test_get_game_platform_int_app_id(self):
+        self.mock_db._platforms[('alice', '220')] = 'epic'
+        self.assertEqual(self.svc.get_game_platform(DB, 'alice', 220), 'epic')
+
+    # --- get_stale_game_details ---
+
+    def test_get_stale_game_details_none_when_missing(self):
+        self.assertIsNone(self.svc.get_stale_game_details(DB, '220'))
+
+    def test_get_stale_game_details_returns_cached(self):
+        self.svc.update_game_details(DB, '220', 'steam', {'name': 'Half-Life 2'})
+        result = self.svc.get_stale_game_details(DB, '220', 'steam')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['name'], 'Half-Life 2')
+
+    def test_get_stale_game_details_platform_isolation(self):
+        self.svc.update_game_details(DB, '220', 'steam', {'name': 'HL2'})
+        self.assertIsNone(self.svc.get_stale_game_details(DB, '220', 'epic'))
 
 
 # ===========================================================================
@@ -1631,6 +1670,7 @@ class _MockUserServiceDB:
         self._roles = ['admin', 'moderator', 'user']
         self._user_count = 0
         self._created_users = []
+        self._platform_ids = {}  # {username: {steam_id, epic_id, gog_id}}
 
     def get_roles(self, db):
         return list(self._roles)
@@ -1643,6 +1683,9 @@ class _MockUserServiceDB:
                                     'role': kwargs.get('role', 'user')})
         self._user_count += 1
         return self._created_users[-1]  # return a truthy dict as the "user"
+
+    def get_user_platform_ids(self, db, username):
+        return dict(self._platform_ids.get(username, {}))
 
 
 class TestUserService(unittest.TestCase):
@@ -1684,6 +1727,34 @@ class TestUserService(unittest.TestCase):
         before = self.svc.get_count(DB)
         self.svc.create_admin(DB, 'boss', 'hash123')
         self.assertEqual(self.svc.get_count(DB), before + 1)
+
+    # --- get_platform_ids ---
+
+    def test_get_platform_ids_empty_for_unknown_user(self):
+        result = self.svc.get_platform_ids(DB, 'unknown')
+        self.assertEqual(result, {})
+
+    def test_get_platform_ids_returns_stored_ids(self):
+        self.mock_db._platform_ids['alice'] = {
+            'steam_id': '76561198000000001',
+            'epic_id': '',
+            'gog_id': '',
+        }
+        result = self.svc.get_platform_ids(DB, 'alice')
+        self.assertEqual(result['steam_id'], '76561198000000001')
+
+    def test_get_platform_ids_has_all_keys(self):
+        self.mock_db._platform_ids['alice'] = {
+            'steam_id': 'S', 'epic_id': 'E', 'gog_id': 'G'
+        }
+        result = self.svc.get_platform_ids(DB, 'alice')
+        for key in ('steam_id', 'epic_id', 'gog_id'):
+            self.assertIn(key, result)
+
+    def test_get_platform_ids_user_isolation(self):
+        self.mock_db._platform_ids['alice'] = {'steam_id': 'S', 'epic_id': '', 'gog_id': ''}
+        result = self.svc.get_platform_ids(DB, 'bob')
+        self.assertEqual(result, {})
 
 
 # ===========================================================================

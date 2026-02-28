@@ -1614,3 +1614,100 @@ def update_achievement_hunt(db, hunt_id, unlocked_achievements=None,
         logger.error("Error updating achievement hunt %s: %s", hunt_id, e)
         db.rollback()
         return {}
+
+
+# ---------------------------------------------------------------------------
+# User platform-IDs helper
+# ---------------------------------------------------------------------------
+
+def get_user_platform_ids(db, username: str) -> dict:
+    """Return the platform IDs stored for *username*.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Target username.
+
+    Returns:
+        Dict with ``steam_id``, ``epic_id``, and ``gog_id`` keys.  Any
+        missing value is returned as an empty string.  Returns an empty
+        dict when the user is not found or on error.
+    """
+    if not db:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+        return {
+            'steam_id': user.steam_id or '',
+            'epic_id': user.epic_id or '',
+            'gog_id': user.gog_id or '',
+        }
+    except Exception as e:
+        logger.error("Error getting platform IDs for %s: %s", username, e)
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Game-platform and stale-details helpers
+# ---------------------------------------------------------------------------
+
+def get_game_platform_for_user(db, username: str, app_id) -> str:
+    """Return the platform stored in the library cache for *app_id*.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Target username.
+        app_id:   App ID to look up (coerced to string for the query).
+
+    Returns:
+        Platform string (e.g. ``'steam'``, ``'epic'``).  Falls back to
+        ``'steam'`` when no matching entry is found or on error.
+    """
+    if not db:
+        return 'steam'
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return 'steam'
+        entry = db.query(GameLibraryCache).filter(
+            GameLibraryCache.user_id == user.id,
+            GameLibraryCache.app_id == str(app_id),
+        ).first()
+        return (entry.platform or 'steam') if entry else 'steam'
+    except Exception as e:
+        logger.error("Error getting game platform for user %s / app %s: %s",
+                     username, app_id, e)
+        return 'steam'
+
+
+def get_game_details_stale(db, app_id, platform: str = 'steam') -> 'dict | None':
+    """Return the last cached game-details entry regardless of age.
+
+    Unlike :func:`get_game_details_cache` (which enforces a freshness
+    limit), this function always returns the most-recent entry if one
+    exists.  Useful as a last-resort fallback when no API data is
+    available.
+
+    Args:
+        db:       SQLAlchemy session.
+        app_id:   Game app ID.
+        platform: Platform name.
+
+    Returns:
+        Parsed details dict, or ``None`` when no entry exists or on error.
+    """
+    if not db:
+        return None
+    try:
+        import json as _json
+        entry = db.query(GameDetailsCache).filter(
+            GameDetailsCache.app_id == str(app_id),
+            GameDetailsCache.platform == platform,
+        ).first()
+        if entry:
+            return _json.loads(entry.details_json)
+        return None
+    except Exception as e:
+        logger.error("Error getting stale game details for app %s: %s", app_id, e)
+        return None
