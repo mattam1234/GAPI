@@ -4,6 +4,34 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.0] - 2026-02-28
+
+### Added
+- **Service/Repository architecture** — separates business logic from the Flask UI layer
+  - `app/repositories/` package: `BaseRepository` (atomic JSON write/read) + nine concrete
+    repository classes: `ReviewRepository`, `TagRepository`, `ScheduleRepository`,
+    `PlaylistRepository`, `BacklogRepository`, `BudgetRepository`, `WishlistRepository`,
+    `FavoritesRepository`, `HistoryRepository`
+  - `app/services/` package: eight service classes containing all domain/business logic:
+    `ReviewService`, `TagService`, `ScheduleService`, `PlaylistService`, `BacklogService`,
+    `BudgetService`, `WishlistService`, `FavoritesService`
+  - `GamePicker.__init__` wires repositories and services; exposes them as
+    `picker.review_service`, `picker.budget_service`, `picker.wishlist_service`, etc.
+  - Legacy `picker.xxx` dict/list attributes now point at the same in-memory object as
+    the corresponding repository — full backward compatibility, zero test regressions
+  - Budget API endpoints (`GET/POST/DELETE /api/budget`) refactored to use
+    `picker.budget_service` directly, demonstrating the pattern
+  - Wishlist API endpoints (`GET/POST/DELETE /api/wishlist`, `GET /api/wishlist/sales`)
+    refactored to use `picker.wishlist_service` directly
+  - 104 new unit/integration tests in `tests/test_services.py` covering all repos and
+    services (total test count: 265, up from 161)
+- **Dependabot** — `.github/dependabot.yml` for automated dependency updates (pip + actions)
+- **Code coverage configuration** — `setup.cfg` with `[coverage:run]` / `[coverage:report]`
+  sections; CI now produces `coverage.xml` and uploads it as a build artefact
+- **Type checking (mypy)** — `mypy.ini` settings in `setup.cfg`; new `typecheck` job in CI
+- **OpenAPI 3.0 documentation** — `openapi_spec.py` builds a full spec dict for all 83
+  API endpoints; serves at `GET /api/openapi.json` and `GET /api/docs` (Swagger UI via CDN)
+
 ## [2.5.0] - 2026-02-27
 
 ### Added

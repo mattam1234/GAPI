@@ -112,19 +112,20 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] Comprehensive test suite (unit, integration, e2e)
 - [x] CI/CD pipeline with automated testing (GitHub Actions)
 - [ ] Code coverage reports (target: 80%+)
-- [ ] Type checking with mypy
-- [ ] Automated dependency updates (Dependabot)
+- [x] Type checking with mypy
+- [x] Automated dependency updates (Dependabot)
 - [ ] Security scanning (CodeQL, Snyk)
 
 ### Architecture
 - [ ] Plugin system for custom platforms
-- [ ] Database support (SQLite/PostgreSQL) for better data management
+- [x] Database support (SQLite/PostgreSQL) for better data management
+- [x] Service/Repository layer — business logic separated from Flask UI layer
 - [ ] Microservices architecture for scalability
 - [ ] GraphQL API alongside REST
 - [ ] WebSocket support for real-time updates
 
 ### Documentation
-- [ ] API documentation (Swagger/OpenAPI)
+- [x] API documentation (Swagger/OpenAPI)
 - [ ] Video tutorials
 - [ ] Interactive demo environment
 - [ ] Localization (i18n) - Support for multiple languages

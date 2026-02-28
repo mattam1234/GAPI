@@ -3440,7 +3440,7 @@ def api_get_budget():
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        summary = picker.get_budget_summary()
+        summary = picker.budget_service.get_summary(picker.games)
     return jsonify(summary)
 
 
@@ -3468,7 +3468,7 @@ def api_set_budget(game_id: str):
     except (TypeError, ValueError):
         return jsonify({'error': 'price must be a number'}), 400
     with picker_lock:
-        ok = picker.set_game_budget(
+        ok = picker.budget_service.set_entry(
             game_id,
             price=price,
             currency=str(data.get('currency', 'USD')),
@@ -3487,7 +3487,7 @@ def api_delete_budget(game_id: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.remove_game_budget(game_id)
+        removed = picker.budget_service.remove_entry(game_id)
     if not removed:
         return jsonify({'error': 'No budget entry found for this game'}), 404
     return jsonify({'success': True})
@@ -3504,7 +3504,7 @@ def api_get_wishlist():
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        entries = list(picker.wishlist.values())
+        entries = list(picker.wishlist_service.get_all().values())
     return jsonify({'entries': entries, 'count': len(entries)})
 
 
@@ -3541,8 +3541,8 @@ def api_add_to_wishlist():
         except (TypeError, ValueError):
             return jsonify({'error': 'target_price must be a number'}), 400
     with picker_lock:
-        ok = picker.add_to_wishlist(game_id, name, platform=platform,
-                                    target_price=target_price, notes=notes)
+        ok = picker.wishlist_service.add(game_id, name, platform=platform,
+                                         target_price=target_price, notes=notes)
     if not ok:
         return jsonify({'error': 'target_price must not be negative'}), 400
     return jsonify({'success': True, 'game_id': game_id}), 201
@@ -3555,7 +3555,7 @@ def api_remove_from_wishlist(game_id: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.remove_from_wishlist(game_id)
+        removed = picker.wishlist_service.remove(game_id)
     if not removed:
         return jsonify({'error': 'Game not found in wishlist'}), 404
     return jsonify({'success': True})
@@ -3572,13 +3572,13 @@ def api_check_wishlist_sales():
     """
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
-    if not picker.wishlist:
+    if not picker.wishlist_service.get_all():
         return jsonify({'sales': [], 'checked': 0})
     if not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
         return jsonify({'error': 'Steam client not available; cannot check prices'}), 503
     with picker_lock:
-        sales = picker.check_wishlist_sales()
-        checked = len([e for e in picker.wishlist.values()
+        sales = picker.wishlist_service.check_sales(picker.steam_client)
+        checked = len([e for e in picker.wishlist_service.get_all().values()
                        if e.get('platform', 'steam') == 'steam'])
     return jsonify({'sales': sales, 'checked': checked, 'on_sale_count': len(sales)})
 

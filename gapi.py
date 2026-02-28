@@ -653,15 +653,57 @@ class GamePicker:
         self.steam_client = self.clients.get('steam')
 
         self.games: List[Dict] = []
-        self.history: List[str] = self.load_history()  # Now stores composite IDs
-        self.favorites: List[str] = self.load_favorites()  # Now stores composite IDs
-        self.reviews: Dict[str, Dict] = self.load_reviews()  # game_id -> review dict
-        self.tags: Dict[str, List[str]] = self.load_tags()  # game_id -> [tag, ...]
-        self.schedule: Dict[str, Dict] = self.load_schedule()  # event_id -> event dict
-        self.playlists: Dict[str, List[str]] = self.load_playlists()  # name -> [game_id, ...]
-        self.backlog: Dict[str, str] = self.load_backlog()  # game_id -> status
-        self.budget: Dict[str, Dict] = self.load_budget()  # game_id -> {price, currency, ...}
-        self.wishlist: Dict[str, Dict] = self.load_wishlist()  # game_id -> wishlist entry
+
+        # ----------------------------------------------------------------
+        # Repositories — own the in-memory data and JSON persistence.
+        # ----------------------------------------------------------------
+        from app.repositories import (
+            ReviewRepository, TagRepository, ScheduleRepository,
+            PlaylistRepository, BacklogRepository, BudgetRepository,
+            WishlistRepository, FavoritesRepository, HistoryRepository,
+        )
+        self._history_repo = HistoryRepository(self.HISTORY_FILE, self.MAX_HISTORY)
+        self._favorites_repo = FavoritesRepository(self.FAVORITES_FILE)
+        self._review_repo = ReviewRepository(self.REVIEWS_FILE)
+        self._tag_repo = TagRepository(self.TAGS_FILE)
+        self._schedule_repo = ScheduleRepository(self.SCHEDULE_FILE)
+        self._playlist_repo = PlaylistRepository(self.PLAYLISTS_FILE)
+        self._backlog_repo = BacklogRepository(self.BACKLOG_FILE)
+        self._budget_repo = BudgetRepository(self.BUDGET_FILE)
+        self._wishlist_repo = WishlistRepository(self.WISHLIST_FILE)
+
+        # ----------------------------------------------------------------
+        # Services — contain all business / domain logic.
+        # Exposed as public attributes so Flask route handlers can use them
+        # directly (e.g. ``picker.review_service.add_or_update(...)``).
+        # ----------------------------------------------------------------
+        from app.services import (
+            ReviewService, TagService, ScheduleService, PlaylistService,
+            BacklogService, BudgetService, WishlistService, FavoritesService,
+        )
+        self.review_service = ReviewService(self._review_repo)
+        self.tag_service = TagService(self._tag_repo)
+        self.schedule_service = ScheduleService(self._schedule_repo)
+        self.playlist_service = PlaylistService(self._playlist_repo)
+        self.backlog_service = BacklogService(self._backlog_repo)
+        self.budget_service = BudgetService(self._budget_repo)
+        self.wishlist_service = WishlistService(self._wishlist_repo)
+        self.favorites_service = FavoritesService(self._favorites_repo)
+
+        # ----------------------------------------------------------------
+        # Backward-compatible attributes — point directly at the repo's
+        # in-memory data object so mutations via self.xxx[key] = val
+        # are immediately visible to the corresponding repository and service.
+        # ----------------------------------------------------------------
+        self.history: List[str] = self._history_repo.data
+        self.favorites: List[str] = self._favorites_repo.data
+        self.reviews: Dict[str, Dict] = self._review_repo.data
+        self.tags: Dict[str, List[str]] = self._tag_repo.data
+        self.schedule: Dict[str, Dict] = self._schedule_repo.data
+        self.playlists: Dict[str, List[str]] = self._playlist_repo.data
+        self.backlog: Dict[str, str] = self._backlog_repo.data
+        self.budget: Dict[str, Dict] = self._budget_repo.data
+        self.wishlist: Dict[str, Dict] = self._wishlist_repo.data
 
         # Load persistent details cache and push it into all platform clients
         self._load_details_cache()
@@ -1566,13 +1608,16 @@ class GamePicker:
                 data = json.load(f)
 
             if isinstance(data, dict) and 'history' in data:
-                self.history = data['history']
+                new_history = data['history']
             elif isinstance(data, list):
-                self.history = data
+                new_history = data
             else:
                 print(f"{Fore.RED}Invalid history file format")
                 return
 
+            # Mutate in-place to maintain the shared reference with the repo
+            self.history.clear()
+            self.history.extend(new_history)
             self.save_history()
             print(f"{Fore.GREEN}History imported from {filepath}")
         except (IOError, json.JSONDecodeError) as e:
@@ -2095,7 +2140,7 @@ class GamePicker:
             elif choice == '3':
                 confirm = input(f"{Fore.RED}Clear all favorites? (y/n): {Fore.WHITE}").strip().lower()
                 if confirm == 'y':
-                    self.favorites = []
+                    self.favorites.clear()
                     self.save_favorites()
                     print(f"{Fore.GREEN}All favorites cleared!")
             else:

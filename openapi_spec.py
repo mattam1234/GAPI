@@ -693,12 +693,12 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
                 "required": True,
                 "content": {"application/json": {"schema": {
                     "type": "object",
-                    "required": ["title", "datetime"],
+                    "required": ["title", "event_datetime"],
                     "properties": {
-                        "title":    {"type": "string"},
-                        "datetime": {"type": "string", "format": "date-time"},
-                        "game_id":  {"type": "string"},
-                        "notes":    {"type": "string"},
+                        "title":          {"type": "string"},
+                        "event_datetime": {"type": "string", "format": "date-time"},
+                        "game_id":        {"type": "string"},
+                        "notes":          {"type": "string"},
                     },
                 }}},
             },
