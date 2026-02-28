@@ -8,6 +8,9 @@ from .budget_service import BudgetService
 from .wishlist_service import WishlistService
 from .favorites_service import FavoritesService
 from .history_service import HistoryService
+from .notification_service import NotificationService
+from .chat_service import ChatService
+from .friend_service import FriendService
 
 __all__ = [
     'ReviewService',
@@ -19,4 +22,7 @@ __all__ = [
     'WishlistService',
     'FavoritesService',
     'HistoryService',
+    'NotificationService',
+    'ChatService',
+    'FriendService',
 ]

@@ -855,5 +855,272 @@ class TestGamePickerServiceIntegration(TmpDirMixin):
         self.assertIn('steam:620', picker.history)
 
 
+# ===========================================================================
+# DB-backed service tests (NotificationService, ChatService, FriendService)
+# ===========================================================================
+
+class _MockDB:
+    """Minimal stand-in for the database module so service tests don't
+    need a real PostgreSQL connection."""
+
+    def __init__(self):
+        self._notifications = {}  # {username: [notif_dict, ...]}
+        self._messages = {}       # {room: [msg_dict, ...]}
+        self._friends = {}        # {username: {status, other}}
+        self._roles = {}          # {username: [roles]}
+        self._next_id = 0
+
+    def _new_id(self):
+        self._next_id += 1
+        return self._next_id
+
+    # Notification helpers
+    def create_notification(self, db, username, title, message, type='info'):
+        if username not in self._notifications:
+            self._notifications[username] = []
+        self._notifications[username].append({
+            'id': self._new_id(), 'type': type, 'title': title,
+            'message': message, 'is_read': False, 'created_at': None,
+        })
+        return True
+
+    def get_notifications(self, db, username, unread_only=False):
+        notifs = self._notifications.get(username, [])
+        if unread_only:
+            return [n for n in notifs if not n['is_read']]
+        return list(notifs)
+
+    def mark_notifications_read(self, db, username, notification_ids=None):
+        for n in self._notifications.get(username, []):
+            if notification_ids is None or n['id'] in notification_ids:
+                n['is_read'] = True
+        return True
+
+    def get_user_roles(self, db, username):
+        return self._roles.get(username, [])
+
+    # Chat helpers
+    def send_chat_message(self, db, sender_username, message, room='general',
+                          recipient_username=None):
+        if room not in self._messages:
+            self._messages[room] = []
+        msg = {'id': self._new_id(), 'sender': sender_username,
+               'room': room, 'message': message, 'created_at': None}
+        self._messages[room].append(msg)
+        return msg
+
+    def get_chat_messages(self, db, room='general', limit=50, since_id=0):
+        msgs = self._messages.get(room, [])
+        if since_id:
+            msgs = [m for m in msgs if m['id'] > since_id]
+        return msgs[:limit]
+
+    # Friend helpers
+    def send_friend_request(self, db, from_username, to_username):
+        key = (from_username, to_username)
+        self._friends[key] = 'pending'
+        return True, 'Friend request sent'
+
+    def respond_friend_request(self, db, username, requester_username, accept):
+        key = (requester_username, username)
+        if key not in self._friends:
+            return False, 'No pending friend request found'
+        self._friends[key] = 'accepted' if accept else 'declined'
+        return True, 'accepted' if accept else 'declined'
+
+    def get_app_friends(self, db, username):
+        friends, sent, received = [], [], []
+        for (fr, to), status in self._friends.items():
+            if status == 'accepted':
+                if fr == username:
+                    friends.append({'username': to, 'display_name': to})
+                elif to == username:
+                    friends.append({'username': fr, 'display_name': fr})
+            elif status == 'pending':
+                if fr == username:
+                    sent.append({'username': to, 'display_name': to})
+                elif to == username:
+                    received.append({'username': fr, 'display_name': fr,
+                                     'requester': fr})
+        return {'friends': friends, 'sent': sent, 'received': received}
+
+    def remove_app_friend(self, db, username, other_username):
+        removed = False
+        for key in list(self._friends.keys()):
+            if set(key) == {username, other_username}:
+                del self._friends[key]
+                removed = True
+        return removed
+
+
+DB = None  # dummy session placeholder — MockDB ignores it
+
+
+class TestNotificationService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockDB()
+        from app.services import NotificationService
+        self.svc = NotificationService(self.mock_db)
+
+    def test_create_and_get_all(self):
+        self.svc.create(DB, 'alice', 'Hello', 'World')
+        notifs = self.svc.get_all(DB, 'alice')
+        self.assertEqual(len(notifs), 1)
+        self.assertEqual(notifs[0]['title'], 'Hello')
+
+    def test_get_all_unread_only(self):
+        self.svc.create(DB, 'alice', 'T1', 'M1')
+        self.svc.create(DB, 'alice', 'T2', 'M2')
+        # mark first one read
+        nid = self.svc.get_all(DB, 'alice')[0]['id']
+        self.svc.mark_read(DB, 'alice', ids=[nid])
+        unread = self.svc.get_all(DB, 'alice', unread_only=True)
+        self.assertEqual(len(unread), 1)
+        self.assertFalse(unread[0]['is_read'])
+
+    def test_mark_read_all(self):
+        self.svc.create(DB, 'alice', 'T1', 'M1')
+        self.svc.create(DB, 'alice', 'T2', 'M2')
+        self.svc.mark_read(DB, 'alice')
+        notifs = self.svc.get_all(DB, 'alice', unread_only=True)
+        self.assertEqual(notifs, [])
+
+    def test_mark_read_specific(self):
+        self.svc.create(DB, 'alice', 'T1', 'M1')
+        self.svc.create(DB, 'alice', 'T2', 'M2')
+        nids = [n['id'] for n in self.svc.get_all(DB, 'alice')]
+        self.svc.mark_read(DB, 'alice', ids=[nids[0]])
+        all_notifs = self.svc.get_all(DB, 'alice')
+        read_count = sum(1 for n in all_notifs if n['is_read'])
+        self.assertEqual(read_count, 1)
+
+    def test_is_admin_true(self):
+        self.mock_db._roles['alice'] = ['admin', 'user']
+        self.assertTrue(self.svc.is_admin(DB, 'alice'))
+
+    def test_is_admin_false(self):
+        self.mock_db._roles['bob'] = ['user']
+        self.assertFalse(self.svc.is_admin(DB, 'bob'))
+
+    def test_is_admin_no_roles(self):
+        self.assertFalse(self.svc.is_admin(DB, 'unknown'))
+
+    def test_create_returns_true(self):
+        self.assertTrue(self.svc.create(DB, 'alice', 'T', 'M'))
+
+    def test_notif_type_stored(self):
+        self.svc.create(DB, 'alice', 'T', 'M', notif_type='warning')
+        self.assertEqual(self.svc.get_all(DB, 'alice')[0]['type'], 'warning')
+
+    def test_different_users_isolated(self):
+        self.svc.create(DB, 'alice', 'T', 'M')
+        self.assertEqual(self.svc.get_all(DB, 'bob'), [])
+
+
+class TestChatService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockDB()
+        from app.services import ChatService
+        self.svc = ChatService(self.mock_db)
+
+    def test_send_and_get(self):
+        self.svc.send(DB, 'alice', 'Hello!')
+        msgs = self.svc.get_messages(DB)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]['message'], 'Hello!')
+        self.assertEqual(msgs[0]['sender'], 'alice')
+
+    def test_send_returns_dict(self):
+        result = self.svc.send(DB, 'alice', 'Hi')
+        self.assertIn('id', result)
+        self.assertIn('message', result)
+
+    def test_get_messages_room_filter(self):
+        self.svc.send(DB, 'alice', 'general msg', room='general')
+        self.svc.send(DB, 'bob', 'private msg', room='lobby')
+        general = self.svc.get_messages(DB, room='general')
+        self.assertEqual(len(general), 1)
+        self.assertEqual(general[0]['room'], 'general')
+
+    def test_get_messages_since_id(self):
+        msg1 = self.svc.send(DB, 'alice', 'first')
+        self.svc.send(DB, 'alice', 'second')
+        newer = self.svc.get_messages(DB, since_id=msg1['id'])
+        self.assertEqual(len(newer), 1)
+        self.assertEqual(newer[0]['message'], 'second')
+
+    def test_get_messages_limit(self):
+        for i in range(5):
+            self.svc.send(DB, 'alice', f'msg {i}')
+        msgs = self.svc.get_messages(DB, limit=3)
+        self.assertEqual(len(msgs), 3)
+
+    def test_empty_room_returns_empty_list(self):
+        self.assertEqual(self.svc.get_messages(DB, room='empty'), [])
+
+
+class TestFriendService(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_db = _MockDB()
+        from app.services import FriendService
+        self.svc = FriendService(self.mock_db)
+
+    def test_send_request(self):
+        ok, msg = self.svc.send_request(DB, 'alice', 'bob')
+        self.assertTrue(ok)
+        self.assertIn('sent', msg.lower())
+
+    def test_get_friends_pending_sent(self):
+        self.svc.send_request(DB, 'alice', 'bob')
+        result = self.svc.get_friends(DB, 'alice')
+        self.assertEqual(len(result['sent']), 1)
+        self.assertEqual(result['sent'][0]['username'], 'bob')
+
+    def test_get_friends_pending_received(self):
+        self.svc.send_request(DB, 'alice', 'bob')
+        result = self.svc.get_friends(DB, 'bob')
+        self.assertEqual(len(result['received']), 1)
+        self.assertEqual(result['received'][0]['username'], 'alice')
+
+    def test_respond_accept(self):
+        self.svc.send_request(DB, 'alice', 'bob')
+        ok, msg = self.svc.respond(DB, 'bob', 'alice', accept=True)
+        self.assertTrue(ok)
+        result = self.svc.get_friends(DB, 'bob')
+        self.assertEqual(len(result['friends']), 1)
+
+    def test_respond_decline(self):
+        self.svc.send_request(DB, 'alice', 'bob')
+        ok, msg = self.svc.respond(DB, 'bob', 'alice', accept=False)
+        self.assertTrue(ok)
+        result = self.svc.get_friends(DB, 'bob')
+        self.assertEqual(len(result['friends']), 0)
+
+    def test_respond_no_pending_returns_false(self):
+        ok, msg = self.svc.respond(DB, 'bob', 'charlie', accept=True)
+        self.assertFalse(ok)
+
+    def test_remove_friend(self):
+        self.svc.send_request(DB, 'alice', 'bob')
+        self.svc.respond(DB, 'bob', 'alice', accept=True)
+        ok = self.svc.remove(DB, 'alice', 'bob')
+        self.assertTrue(ok)
+        result = self.svc.get_friends(DB, 'alice')
+        self.assertEqual(result['friends'], [])
+
+    def test_remove_nonexistent_returns_false(self):
+        ok = self.svc.remove(DB, 'alice', 'nobody')
+        self.assertFalse(ok)
+
+    def test_friends_list_empty_initially(self):
+        result = self.svc.get_friends(DB, 'alice')
+        self.assertEqual(result['friends'], [])
+        self.assertEqual(result['sent'], [])
+        self.assertEqual(result['received'], [])
+
+
 if __name__ == '__main__':
     unittest.main()

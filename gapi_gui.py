@@ -36,6 +36,18 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+# DB-backed services — instantiated lazily after database import so the
+# module can still start without a database being present.
+try:
+    from app.services import NotificationService, ChatService, FriendService
+    _notification_service = NotificationService(database) if DB_AVAILABLE else None
+    _chat_service = ChatService(database) if DB_AVAILABLE else None
+    _friend_service = FriendService(database) if DB_AVAILABLE else None
+except Exception:
+    _notification_service = None
+    _chat_service = None
+    _friend_service = None
+
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
     _discord_presence = _DiscordPresence()
@@ -4010,7 +4022,10 @@ def api_app_friends():
         username = current_user
     db = next(database.get_db())
     try:
-        result = database.get_app_friends(db, username)
+        if _friend_service:
+            result = _friend_service.get_friends(db, username)
+        else:
+            result = database.get_app_friends(db, username)
     finally:
         if db:
             db.close()
@@ -4034,7 +4049,10 @@ def api_send_friend_request():
         return jsonify({'error': 'username is required'}), 400
     db = next(database.get_db())
     try:
-        ok, message = database.send_friend_request(db, sender, target)
+        if _friend_service:
+            ok, message = _friend_service.send_request(db, sender, target)
+        else:
+            ok, message = database.send_friend_request(db, sender, target)
     finally:
         if db:
             db.close()
@@ -4064,7 +4082,10 @@ def api_respond_friend_request():
         return jsonify({'error': 'username is required'}), 400
     db = next(database.get_db())
     try:
-        ok, message = database.respond_friend_request(db, username, requester, accept)
+        if _friend_service:
+            ok, message = _friend_service.respond(db, username, requester, accept)
+        else:
+            ok, message = database.respond_friend_request(db, username, requester, accept)
     finally:
         if db:
             db.close()
@@ -4090,7 +4111,10 @@ def api_remove_app_friend():
         return jsonify({'error': 'username is required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.remove_app_friend(db, username, other)
+        if _friend_service:
+            ok = _friend_service.remove(db, username, other)
+        else:
+            ok = database.remove_app_friend(db, username, other)
     finally:
         if db:
             db.close()
@@ -4148,7 +4172,12 @@ def api_chat_messages():
         since_id, limit = 0, 50
     db = next(database.get_db())
     try:
-        messages = database.get_chat_messages(db, room=room, limit=limit, since_id=since_id)
+        if _chat_service:
+            messages = _chat_service.get_messages(db, room=room, limit=limit,
+                                                  since_id=since_id)
+        else:
+            messages = database.get_chat_messages(db, room=room, limit=limit,
+                                                  since_id=since_id)
     finally:
         if db:
             db.close()
@@ -4176,7 +4205,12 @@ def api_chat_send():
         return jsonify({'error': 'message must be 500 characters or fewer'}), 400
     db = next(database.get_db())
     try:
-        msg = database.send_chat_message(db, sender_username=username, message=message, room=room)
+        if _chat_service:
+            msg = _chat_service.send(db, sender_username=username,
+                                     message=message, room=room)
+        else:
+            msg = database.send_chat_message(db, sender_username=username,
+                                             message=message, room=room)
     finally:
         if db:
             db.close()
@@ -4203,7 +4237,10 @@ def api_get_notifications():
     unread_only = request.args.get('unread_only', 'false').lower() == 'true'
     db = next(database.get_db())
     try:
-        notifs = database.get_notifications(db, username, unread_only=unread_only)
+        if _notification_service:
+            notifs = _notification_service.get_all(db, username, unread_only=unread_only)
+        else:
+            notifs = database.get_notifications(db, username, unread_only=unread_only)
     finally:
         if db:
             db.close()
@@ -4225,7 +4262,10 @@ def api_mark_notifications_read():
     ids = data.get('ids')
     db = next(database.get_db())
     try:
-        ok = database.mark_notifications_read(db, username, notification_ids=ids)
+        if _notification_service:
+            ok = _notification_service.mark_read(db, username, ids=ids)
+        else:
+            ok = database.mark_notifications_read(db, username, notification_ids=ids)
     finally:
         if db:
             db.close()
@@ -4251,11 +4291,14 @@ def api_send_notification():
     # Only admins can send notifications to others
     db_check = next(database.get_db())
     try:
-        roles = database.get_user_roles(db_check, sender)
+        if _notification_service:
+            is_admin = _notification_service.is_admin(db_check, sender)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, sender)
     finally:
         if db_check:
             db_check.close()
-    if 'admin' not in roles:
+    if not is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json() or {}
     username = data.get('username', '').strip()
@@ -4266,7 +4309,12 @@ def api_send_notification():
         return jsonify({'error': 'username, title, and message are required'}), 400
     db = next(database.get_db())
     try:
-        ok = database.create_notification(db, username, title, message, type=notif_type)
+        if _notification_service:
+            ok = _notification_service.create(db, username, title, message,
+                                              notif_type=notif_type)
+        else:
+            ok = database.create_notification(db, username, title, message,
+                                              type=notif_type)
     finally:
         if db:
             db.close()

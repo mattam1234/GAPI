@@ -25,11 +25,14 @@ class TagService:
     def add(self, game_id: str, tag: str) -> bool:
         """Add *tag* to *game_id*.
 
+        Tags are normalised to lower-case and stripped of surrounding whitespace
+        before storage so that comparisons are always case-insensitive.
+
         Returns:
             ``True`` if added; ``False`` if it was already present or the tag
             is empty after stripping.
         """
-        tag = tag.strip()
+        tag = tag.strip().lower()
         if not tag:
             return False
         gid = str(game_id)
@@ -46,6 +49,7 @@ class TagService:
         Returns:
             ``True`` if removed; ``False`` if not found.
         """
+        tag = tag.strip().lower()
         gid = str(game_id)
         current = list(self._repo.find(gid))
         if tag not in current:
@@ -74,6 +78,11 @@ class TagService:
 
     def filter_by_tag(self, tag: str,
                       all_games: List[Dict]) -> List[Dict]:
-        """Return games from *all_games* that have *tag* attached."""
+        """Return games from *all_games* that have *tag* attached.
+
+        The tag is normalised to lower-case before matching so that
+        filtering is always case-insensitive.
+        """
+        tag = tag.strip().lower()
         tagged = {gid for gid, tags in self._repo.data.items() if tag in tags}
         return [g for g in all_games if g.get('game_id') in tagged]
