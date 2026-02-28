@@ -6,6 +6,7 @@ A modern web GUI for randomly picking games from your Steam library.
 
 import logging
 import argparse
+import uuid
 from flask import Flask, render_template, jsonify, request, session, Response
 import threading
 import json
@@ -133,6 +134,10 @@ current_game: Optional[Dict] = None
 # Multi-user picker instance
 multi_picker: Optional[multiuser.MultiUserPicker] = None
 multi_picker_lock = threading.Lock()
+
+# In-memory live pick sessions keyed by session_id
+live_sessions: Dict[str, Dict] = {}
+live_sessions_lock = threading.Lock()
 
 # User authentication
 current_user: Optional[str] = None
@@ -290,6 +295,13 @@ ADMIN_MIGRATIONS = {
             "    game_picked VARCHAR(50),\n"
             "    picked_at TIMESTAMP\n"
             ");"
+        )
+    },
+    'users_last_seen_column': {
+        'label': 'Add last_seen to users table',
+        'description': 'Add last_seen column to users table for online presence tracking.',
+        'sql': (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP;"
         )
     },
     'favorite_games_table': {
@@ -4166,16 +4178,18 @@ def api_update_profile():
 @app.route('/api/app-friends')
 @require_login
 def api_app_friends():
-    """Return the current user's in-app friends, sent requests, and received requests."""
+    """Return the current user's in-app friends, sent requests, and received requests.
+
+    The ``friends`` list includes ``steam_id``, ``epic_id``, ``gog_id``, and
+    ``is_online`` (active within the last 5 minutes) so that callers can use
+    friends directly in the multi-user game picker.
+    """
     global current_user
     with current_user_lock:
         username = current_user
     db = next(database.get_db())
     try:
-        if _friend_service:
-            result = _friend_service.get_friends(db, username)
-        else:
-            result = database.get_app_friends(db, username)
+        result = database.get_app_friends_with_platforms(db, username)
     finally:
         if db:
             db.close()
@@ -4271,6 +4285,203 @@ def api_remove_app_friend():
     if ok:
         return jsonify({'success': True})
     return jsonify({'error': 'Failed to remove friend'}), 500
+
+
+# ---------------------------------------------------------------------------
+# User presence API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/presence', methods=['POST'])
+@require_login
+def api_update_presence():
+    """Heartbeat endpoint – update the current user's ``last_seen`` timestamp.
+
+    Clients should call this periodically (e.g. every 60 s) while the user
+    has the app open so that other users can see them as online.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    if not DB_AVAILABLE:
+        return jsonify({'success': True})
+    db = next(database.get_db())
+    try:
+        database.update_user_presence(db, username)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/users/online')
+@require_login
+def api_online_users():
+    """Return users who have been active within the last 5 minutes."""
+    if not DB_AVAILABLE:
+        return jsonify({'users': []})
+    db = next(database.get_db())
+    try:
+        users = database.get_online_users(db)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'users': users})
+
+
+# ---------------------------------------------------------------------------
+# Live Pick Sessions API
+# ---------------------------------------------------------------------------
+
+def _live_session_view(session: Dict) -> Dict:
+    """Return a JSON-serialisable view of a live session dict."""
+    return {
+        'session_id': session['session_id'],
+        'name': session.get('name', session['session_id']),
+        'host': session['host'],
+        'participants': session['participants'],
+        'status': session['status'],
+        'created_at': session['created_at'].isoformat(),
+        'picked_game': session.get('picked_game'),
+    }
+
+
+@app.route('/api/live-session/create', methods=['POST'])
+@require_login
+def api_live_session_create():
+    """Create a new live pick session.
+
+    The creating user is automatically added as host and first participant.
+
+    Request JSON (all optional):
+      - ``name``: human-readable session label
+
+    Returns the newly created session.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    data = request.get_json() or {}
+    session_id = str(uuid.uuid4())
+    session = {
+        'session_id': session_id,
+        'host': username,
+        'name': data.get('name', f"{username}'s session"),
+        'participants': [username],
+        'status': 'waiting',
+        'created_at': datetime.utcnow(),
+        'picked_game': None,
+    }
+    with live_sessions_lock:
+        live_sessions[session_id] = session
+    return jsonify(_live_session_view(session)), 201
+
+
+@app.route('/api/live-session/active')
+@require_login
+def api_live_session_active():
+    """Return all active (non-completed) live pick sessions."""
+    with live_sessions_lock:
+        active = [
+            _live_session_view(s)
+            for s in live_sessions.values()
+            if s['status'] != 'completed'
+        ]
+    return jsonify({'sessions': active})
+
+
+@app.route('/api/live-session/<session_id>/join', methods=['POST'])
+@require_login
+def api_live_session_join(session_id: str):
+    """Join an existing live pick session."""
+    global current_user
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session['status'] == 'completed':
+            return jsonify({'error': 'Session has already completed'}), 400
+        if username not in session['participants']:
+            session['participants'].append(username)
+    return jsonify(_live_session_view(session))
+
+
+@app.route('/api/live-session/<session_id>/leave', methods=['POST'])
+@require_login
+def api_live_session_leave(session_id: str):
+    """Leave an active live pick session.
+
+    If the host leaves and there are remaining participants, the oldest
+    participant becomes the new host.  If no participants remain the session
+    is removed entirely.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if username in session['participants']:
+            session['participants'].remove(username)
+        if not session['participants']:
+            del live_sessions[session_id]
+            return jsonify({'success': True, 'message': 'Session closed (no participants left)'})
+        if session['host'] == username:
+            session['host'] = session['participants'][0]
+    return jsonify({'success': True, 'session': _live_session_view(session)})
+
+
+@app.route('/api/live-session/<session_id>/pick', methods=['POST'])
+@require_login
+def api_live_session_pick(session_id: str):
+    """Pick a common game for all participants in the live session.
+
+    Only the session host may start a pick.  Delegates to the multi-user
+    picker using each participant's platform library.
+
+    Request JSON (all optional):
+      - ``coop_only``: boolean, default false
+    """
+    global current_user, multi_picker
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session['host'] != username:
+            return jsonify({'error': 'Only the session host can start a pick'}), 403
+        if session['status'] == 'completed':
+            return jsonify({'error': 'Session has already completed'}), 400
+        participants = list(session['participants'])
+        session['status'] = 'picking'
+
+    data = request.get_json() or {}
+    coop_only = bool(data.get('coop_only', False))
+
+    _ensure_multi_picker()
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    with multi_picker_lock:
+        game = multi_picker.pick_common_game(
+            user_names=participants,
+            coop_only=coop_only,
+            max_players=len(participants),
+        )
+
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if session:
+            if game:
+                session['picked_game'] = game
+            session['status'] = 'completed'
+
+    if not game:
+        return jsonify({'error': 'No common game found for all participants'}), 404
+    return jsonify(game)
 
 
 # ---------------------------------------------------------------------------
@@ -5356,8 +5567,21 @@ def create_templates():
             <!-- User Selection -->
             <div style="padding: 20px; border-radius: 10px; margin-bottom: 20px;">
                 <h3 style="margin-bottom: 15px;">Select Players</h3>
-                <div id="user-checkboxes" style="margin-top: 15px;">
-                    <div class="loading">Loading users...</div>
+
+                <!-- Friends section -->
+                <div style="margin-bottom: 12px;">
+                    <strong>👥 Friends</strong>
+                    <div id="friends-checkboxes" style="margin-top: 8px;">
+                        <div class="loading">Loading friends...</div>
+                    </div>
+                </div>
+
+                <!-- All users section -->
+                <div>
+                    <strong>👤 All Users</strong>
+                    <div id="user-checkboxes" style="margin-top: 8px;">
+                        <div class="loading">Loading users...</div>
+                    </div>
                 </div>
                 
                 <div style="margin-top: 15px;">
@@ -5387,6 +5611,23 @@ def create_templates():
                     🔍 Show Common Games
                 </button>
             </div>
+
+            <!-- Live Pick Sessions -->
+            <div style="margin-top: 30px; padding: 20px; border-radius: 10px; border: 2px solid #667eea;">
+                <h3 style="margin-bottom: 15px;">🔴 Live Pick Sessions</h3>
+                <p style="color: #888; margin-bottom: 12px; font-size: 0.95em;">
+                    Create a session for online friends to join and pick a game together in real-time.
+                </p>
+                <button onclick="createLiveSession()" style="padding: 10px 24px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-right: 10px;">
+                    ➕ Create Live Session
+                </button>
+                <button onclick="refreshLiveSessions()" style="padding: 10px 18px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    🔄 Refresh
+                </button>
+                <div id="live-sessions-list" style="margin-top: 15px;">
+                    <div class="loading">Loading sessions...</div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -5400,6 +5641,15 @@ def create_templates():
             loadFavorites();
             loadStats();
             loadUsers();
+            // Send an initial presence heartbeat and repeat every 60 s
+            sendPresenceHeartbeat();
+            setInterval(sendPresenceHeartbeat, 60000);
+        }
+
+        async function sendPresenceHeartbeat() {
+            try {
+                await fetch('/api/presence', {method: 'POST'});
+            } catch (_) {}
         }
         
         async function updateStatus() {
@@ -5434,6 +5684,8 @@ def create_templates():
             if (tabName === 'users') loadUsers();
             if (tabName === 'multiuser') {
                 loadUsersForMultiUser();
+                loadFriendsForMultiUser();
+                refreshLiveSessions();
                 document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
             }
         }
@@ -5880,6 +6132,42 @@ def create_templates():
                 checkboxDiv.innerHTML = '<div class="error">Error loading users</div>';
             }
         }
+
+        async function loadFriendsForMultiUser() {
+            const div = document.getElementById('friends-checkboxes');
+            div.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const response = await fetch('/api/app-friends');
+                if (!response.ok) {
+                    div.innerHTML = '<div class="loading">Log in to see friends.</div>';
+                    return;
+                }
+                const data = await response.json();
+                const friends = data.friends || [];
+                if (friends.length === 0) {
+                    div.innerHTML = '<div class="loading">No friends yet. Add friends in your profile!</div>';
+                    return;
+                }
+                let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">';
+                friends.forEach(friend => {
+                    const onlineDot = friend.is_online
+                        ? '<span style="color:#28a745;font-size:0.8em;" title="Online">🟢</span>'
+                        : '<span style="color:#aaa;font-size:0.8em;" title="Offline">⚫</span>';
+                    const hasPlatform = friend.steam_id || friend.epic_id || friend.gog_id;
+                    const disabledAttr = hasPlatform ? '' : 'disabled title="No platform ID linked"';
+                    html += `
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 10px; background: white; border-radius: 8px; cursor: ${hasPlatform ? 'pointer' : 'default'}; opacity: ${hasPlatform ? '1' : '0.5'};">
+                            <input type="checkbox" class="user-checkbox" value="${friend.username}" style="width: 18px; height: 18px;" ${disabledAttr}>
+                            <span>${onlineDot} <strong>${friend.display_name}</strong></span>
+                        </label>
+                    `;
+                });
+                html += '</div>';
+                div.innerHTML = html;
+            } catch (error) {
+                div.innerHTML = '<div class="error">Error loading friends</div>';
+            }
+        }
         
         function getSelectedUsers() {
             const checkboxes = document.querySelectorAll('.user-checkbox:checked');
@@ -5976,6 +6264,130 @@ def create_templates():
                 }
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading common games</div>';
+            }
+        }
+
+        // Live Pick Session Functions
+        async function createLiveSession() {
+            try {
+                const response = await fetch('/api/live-session/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to create session');
+                    return;
+                }
+                const session = await response.json();
+                alert(`Live session created! Session ID: ${session.session_id}\\nShare this ID with friends so they can join.`);
+                refreshLiveSessions();
+            } catch (error) {
+                alert('Error creating session: ' + error.message);
+            }
+        }
+
+        async function joinLiveSession(sessionId) {
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/join`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to join session');
+                    return;
+                }
+                refreshLiveSessions();
+            } catch (error) {
+                alert('Error joining session: ' + error.message);
+            }
+        }
+
+        async function leaveLiveSession(sessionId) {
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/leave`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to leave session');
+                    return;
+                }
+                refreshLiveSessions();
+            } catch (error) {
+                alert('Error leaving session: ' + error.message);
+            }
+        }
+
+        async function pickForLiveSession(sessionId) {
+            const coopOnly = document.getElementById('coop-only').checked;
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/pick`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({coop_only: coopOnly})
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'No common game found');
+                    return;
+                }
+                const resultDiv = document.getElementById('multiuser-result');
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `
+                    <h3 style="color: #667eea; margin-bottom: 15px;">🎮 ${data.name}</h3>
+                    <p>Picked for live session <em>${sessionId}</em></p>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <a href="${data.steam_url}" target="_blank" class="btn btn-link">🔗 Steam Store</a>
+                        <a href="${data.steamdb_url}" target="_blank" class="btn btn-link">📊 SteamDB</a>
+                    </div>
+                `;
+                refreshLiveSessions();
+            } catch (error) {
+                alert('Error picking game: ' + error.message);
+            }
+        }
+
+        async function refreshLiveSessions() {
+            const listDiv = document.getElementById('live-sessions-list');
+            if (!listDiv) return;
+            try {
+                const response = await fetch('/api/live-session/active');
+                if (!response.ok) {
+                    listDiv.innerHTML = '<div class="loading">Could not load sessions.</div>';
+                    return;
+                }
+                const data = await response.json();
+                const sessions = data.sessions || [];
+                if (sessions.length === 0) {
+                    listDiv.innerHTML = '<div class="loading">No active sessions. Create one above!</div>';
+                    return;
+                }
+                let html = '';
+                sessions.forEach(s => {
+                    html += `
+                        <div style="padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background: white;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                                <div>
+                                    <strong>${s.name || s.session_id}</strong>
+                                    <span style="font-size:0.8em; color:#888; margin-left: 8px;">${s.status}</span><br>
+                                    <small style="color:#555;">Host: ${s.host} &nbsp;|&nbsp; Participants: ${s.participants.join(', ')}</small>
+                                </div>
+                                <div style="display:flex; gap:6px; flex-wrap: wrap;">
+                                    <button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer;">Join</button>
+                                    <button onclick="pickForLiveSession('${s.session_id}')" style="padding:6px 14px; background:#764ba2; color:white; border:none; border-radius:6px; cursor:pointer;">🎲 Pick</button>
+                                    <button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 14px; background:#dc3545; color:white; border:none; border-radius:6px; cursor:pointer;">Leave</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                listDiv.innerHTML = html;
+            } catch (error) {
+                listDiv.innerHTML = '<div class="error">Error loading sessions</div>';
             }
         }
         

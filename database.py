@@ -88,6 +88,7 @@ class User(Base):
     avatar_url = Column(String(500), nullable=True)         # custom avatar image URL
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_seen = Column(DateTime, nullable=True)  # Last activity timestamp for presence
     
     # Relationships
     roles = relationship("Role", secondary=user_roles, back_populates="users")
@@ -1723,3 +1724,89 @@ def get_game_details_stale(db, app_id, platform: str = 'steam') -> 'dict | None'
     except Exception as e:
         logger.error("Error getting stale game details for app %s: %s", app_id, e)
         return None
+
+
+# ---------------------------------------------------------------------------
+# User presence helpers
+# ---------------------------------------------------------------------------
+
+def update_user_presence(db, username: str) -> bool:
+    """Update the ``last_seen`` timestamp for *username* to now.
+
+    Returns ``True`` on success, ``False`` otherwise.
+    """
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        user.last_seen = datetime.utcnow()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error("Error updating presence for %s: %s", username, e)
+        db.rollback()
+        return False
+
+
+def get_online_users(db, threshold_minutes: int = 5) -> list:
+    """Return a list of users who were active within *threshold_minutes*.
+
+    Each entry is a dict with ``username``, ``display_name``, ``avatar_url``,
+    ``steam_id``, ``epic_id``, and ``gog_id``.
+    """
+    if not db:
+        return []
+    try:
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(minutes=threshold_minutes)
+        users = db.query(User).filter(User.last_seen >= cutoff).all()
+        return [
+            {
+                'username': u.username,
+                'display_name': u.display_name or u.username,
+                'avatar_url': u.avatar_url or '',
+                'steam_id': u.steam_id or '',
+                'epic_id': u.epic_id or '',
+                'gog_id': u.gog_id or '',
+            }
+            for u in users
+        ]
+    except Exception as e:
+        logger.error("Error getting online users: %s", e)
+        return []
+
+
+def get_app_friends_with_platforms(db, username: str) -> dict:
+    """Return accepted friends for *username*, including platform IDs.
+
+    Extends :func:`get_app_friends` by adding ``steam_id``, ``epic_id``,
+    ``gog_id``, and ``is_online`` (active within 5 minutes) to each friend
+    entry in the ``'friends'`` list.  The ``'sent'`` and ``'received'``
+    lists are returned as-is from :func:`get_app_friends`.
+    """
+    result = get_app_friends(db, username)
+    if not db:
+        return result
+    try:
+        from datetime import timedelta
+        online_cutoff = datetime.utcnow() - timedelta(minutes=5)
+        enriched = []
+        for entry in result.get('friends', []):
+            friend_user = db.query(User).filter(
+                User.username == entry['username']
+            ).first()
+            if friend_user:
+                entry = dict(entry)
+                entry['steam_id'] = friend_user.steam_id or ''
+                entry['epic_id'] = friend_user.epic_id or ''
+                entry['gog_id'] = friend_user.gog_id or ''
+                entry['is_online'] = bool(
+                    friend_user.last_seen and friend_user.last_seen >= online_cutoff
+                )
+            enriched.append(entry)
+        result['friends'] = enriched
+    except Exception as e:
+        logger.error("Error enriching friends with platform info: %s", e)
+    return result
