@@ -139,6 +139,28 @@ multi_picker_lock = threading.Lock()
 live_sessions: Dict[str, Dict] = {}
 live_sessions_lock = threading.Lock()
 
+# SSE subscriber queues: session_id -> list of queue.Queue
+import queue as _queue
+_sse_subscribers: Dict[str, list] = {}
+_sse_subscribers_lock = threading.Lock()
+
+
+def _sse_publish(session_id: str, event_type: str, data: Dict) -> None:
+    """Push a JSON event to all SSE subscribers of *session_id*."""
+    import json as _json
+    payload = _json.dumps({'event': event_type, 'data': data})
+    with _sse_subscribers_lock:
+        dead = []
+        for q in _sse_subscribers.get(session_id, []):
+            try:
+                q.put_nowait(payload)
+            except _queue.Full:
+                dead.append(q)
+        if dead:
+            _sse_subscribers[session_id] = [
+                q for q in _sse_subscribers.get(session_id, []) if q not in dead
+            ]
+
 # User authentication
 current_user: Optional[str] = None
 current_user_lock = threading.Lock()
@@ -4404,7 +4426,9 @@ def api_live_session_join(session_id: str):
             return jsonify({'error': 'Session has already completed'}), 400
         if username not in session['participants']:
             session['participants'].append(username)
-    return jsonify(_live_session_view(session))
+        view = _live_session_view(session)
+    _sse_publish(session_id, 'session', view)
+    return jsonify(view)
 
 
 @app.route('/api/live-session/<session_id>/leave', methods=['POST'])
@@ -4427,10 +4451,13 @@ def api_live_session_leave(session_id: str):
             session['participants'].remove(username)
         if not session['participants']:
             del live_sessions[session_id]
+            _sse_publish(session_id, 'session', {'status': 'closed', 'session_id': session_id})
             return jsonify({'success': True, 'message': 'Session closed (no participants left)'})
         if session['host'] == username:
             session['host'] = session['participants'][0]
-    return jsonify({'success': True, 'session': _live_session_view(session)})
+        view = _live_session_view(session)
+    _sse_publish(session_id, 'session', view)
+    return jsonify({'success': True, 'session': view})
 
 
 @app.route('/api/live-session/<session_id>/pick', methods=['POST'])
@@ -4501,10 +4528,13 @@ def api_live_session_pick(session_id: str):
                 if db:
                     db.close()
 
+    # Publish completed session state to SSE subscribers
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if session:
+            _sse_publish(session_id, 'session', _live_session_view(session))
+
     return jsonify(game)
-
-
-@app.route('/api/live-session/<session_id>', methods=['GET'])
 @require_login
 def api_live_session_get(session_id: str):
     """Return the current state of a specific live pick session."""
@@ -4567,6 +4597,65 @@ def api_live_session_invite(session_id: str):
             if db:
                 db.close()
     return jsonify({'sent': sent, 'failed': failed})
+
+
+@app.route('/api/live-session/<session_id>/events')
+@require_login
+def api_live_session_events(session_id: str):
+    """Server-Sent Events stream for a live pick session.
+
+    Clients connect once; the server pushes a ``session`` event whenever
+    the session state changes (join, leave, pick, invite).  A ``heartbeat``
+    event is sent every 25 seconds to keep the connection alive through
+    proxies and load-balancers.
+
+    The stream ends when the session is completed or no longer exists.
+    """
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        initial_data = _live_session_view(session)
+
+    sub_queue: _queue.Queue = _queue.Queue(maxsize=64)
+    with _sse_subscribers_lock:
+        _sse_subscribers.setdefault(session_id, []).append(sub_queue)
+
+    def _generate():
+        import json as _json
+        # Send initial state immediately
+        yield f"event: session\ndata: {_json.dumps(initial_data)}\n\n"
+        while True:
+            try:
+                payload = sub_queue.get(timeout=25)
+                yield f"event: session\ndata: {payload}\n\n"
+                # Stop streaming when the session is completed or closed
+                try:
+                    parsed = _json.loads(payload)
+                    if isinstance(parsed, dict):
+                        data_part = parsed.get('data', {})
+                        if data_part.get('status') in ('completed', 'closed'):
+                            break
+                except Exception:
+                    pass
+            except _queue.Empty:
+                yield "event: heartbeat\ndata: {}\n\n"
+        with _sse_subscribers_lock:
+            if session_id in _sse_subscribers:
+                try:
+                    _sse_subscribers[session_id].remove(sub_queue)
+                except ValueError:
+                    pass
+
+    from flask import Response as _Response, stream_with_context as _swc
+    return _Response(
+        _swc(_generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -5743,6 +5832,26 @@ def create_templates():
                     </div>
                 </div>
             </div>
+
+            <!-- Session Chat Modal -->
+            <div id="session-chat-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+                 background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+                <div style="background:white; border-radius:10px; padding:24px; min-width:340px; max-width:520px; width:92%; display:flex; flex-direction:column; max-height:80vh;">
+                    <h3 style="margin-bottom:10px;">💬 Session Chat – <span id="chat-session-name" style="color:#667eea;"></span></h3>
+                    <div id="chat-messages" style="flex:1; overflow-y:auto; border:1px solid #ddd; border-radius:6px; padding:10px; margin-bottom:10px; min-height:200px; font-size:0.9em;">
+                        <div class="loading">Loading messages…</div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <input id="chat-input" type="text" placeholder="Type a message…" maxlength="500"
+                               style="flex:1; padding:8px 12px; border:1px solid #ccc; border-radius:6px; font-size:0.9em;"
+                               onkeydown="if(event.key==='Enter') sendSessionChatMessage()">
+                        <button onclick="sendSessionChatMessage()" style="padding:8px 16px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Send</button>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+                        <button onclick="closeSessionChat()" style="padding:6px 16px; background:#6c757d; color:white; border:none; border-radius:6px; cursor:pointer;">Close</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -6388,6 +6497,88 @@ def create_templates():
         // Live Pick Session Functions
         let _inviteSessionId = null;
         let _liveSessionPollTimer = null;
+        let _liveSessionSSE = null;   // active EventSource (per-session)
+        let _activeSessions = {};     // sessionId -> session object (updated by SSE / poll)
+
+        // ---- SSE helpers ----
+
+        function _subscribeSessionSSE(sessionId) {
+            if (_liveSessionSSE) {
+                _liveSessionSSE.close();
+                _liveSessionSSE = null;
+            }
+            if (!window.EventSource) return;  // browser doesn't support SSE
+            const es = new EventSource(`/api/live-session/${sessionId}/events`);
+            es.addEventListener('session', (e) => {
+                try {
+                    const raw = JSON.parse(e.data);
+                    // Payload is {event, data} from _sse_publish; fall back to raw for
+                    // the initial state message which is sent as a plain session dict.
+                    const data = (raw && raw.data) ? raw.data : raw;
+                    if (!data || typeof data !== 'object') return;
+                    if (data.status === 'closed') {
+                        delete _activeSessions[sessionId];
+                    } else {
+                        _activeSessions[sessionId] = data;
+                    }
+                    _renderLiveSessions();
+                } catch (err) {
+                    console.error('SSE session parse error:', err);
+                }
+            });
+            es.onerror = () => {
+                es.close();
+                if (_liveSessionSSE === es) _liveSessionSSE = null;
+            };
+            _liveSessionSSE = es;
+        }
+
+        function _closeSessionSSE() {
+            if (_liveSessionSSE) {
+                _liveSessionSSE.close();
+                _liveSessionSSE = null;
+            }
+        }
+
+        // ---- Render the sessions list from _activeSessions ----
+
+        function _renderLiveSessions() {
+            const listDiv = document.getElementById('live-sessions-list');
+            if (!listDiv) return;
+            const sessions = Object.values(_activeSessions);
+            const statusEl = document.getElementById('session-refresh-status');
+            if (statusEl) statusEl.textContent = `Last updated ${new Date().toLocaleTimeString()}`;
+            if (sessions.length === 0) {
+                listDiv.innerHTML = '<div class="loading">No active sessions. Create one above!</div>';
+                return;
+            }
+            let html = '';
+            sessions.forEach(s => {
+                const pickedInfo = s.picked_game
+                    ? `<br><small style="color:#28a745;">✅ Game picked: <strong>${s.picked_game.name || s.picked_game.app_id || '?'}</strong></small>`
+                    : '';
+                html += `
+                    <div style="padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background: white;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
+                            <div>
+                                <strong>${s.name || s.session_id}</strong>
+                                <span style="font-size:0.8em; color:#888; margin-left: 8px;">${s.status}</span><br>
+                                <small style="color:#555;">Host: ${s.host} &nbsp;|&nbsp; Participants: ${s.participants.join(', ')}</small>
+                                ${pickedInfo}
+                            </div>
+                            <div style="display:flex; gap:6px; flex-wrap: wrap;">
+                                <button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer;">Join</button>
+                                <button onclick="pickForLiveSession('${s.session_id}')" style="padding:6px 14px; background:#764ba2; color:white; border:none; border-radius:6px; cursor:pointer;">🎲 Pick</button>
+                                <button onclick="openInviteModal('${s.session_id}')" style="padding:6px 14px; background:#fd7e14; color:white; border:none; border-radius:6px; cursor:pointer;">📨 Invite</button>
+                                <button onclick="openSessionChat('${s.session_id}')" style="padding:6px 14px; background:#20c997; color:white; border:none; border-radius:6px; cursor:pointer;">💬 Chat</button>
+                                <button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 14px; background:#dc3545; color:white; border:none; border-radius:6px; cursor:pointer;">Leave</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            listDiv.innerHTML = html;
+        }
 
         async function createLiveSession() {
             try {
@@ -6403,7 +6594,9 @@ def create_templates():
                 }
                 const session = await response.json();
                 alert(`Live session created! Session ID:\\n${session.session_id}\\n\\nShare this ID with friends so they can join.`);
-                refreshLiveSessions();
+                _activeSessions[session.session_id] = session;
+                _subscribeSessionSSE(session.session_id);
+                _renderLiveSessions();
             } catch (error) {
                 alert('Error creating session: ' + error.message);
             }
@@ -6420,7 +6613,15 @@ def create_templates():
                     alert(err.error || 'Failed to join session');
                     return;
                 }
-                refreshLiveSessions();
+                const data = await response.json();
+                const session = data.session || data;
+                if (session.session_id) {
+                    _activeSessions[session.session_id] = session;
+                    _subscribeSessionSSE(session.session_id);
+                    _renderLiveSessions();
+                } else {
+                    refreshLiveSessions();
+                }
             } catch (error) {
                 alert('Error joining session: ' + error.message);
             }
@@ -6522,6 +6723,89 @@ def create_templates():
             _inviteSessionId = null;
         }
 
+        // ---- Session Chat ----
+
+        let _chatSessionId = null;
+        let _chatPollTimer = null;
+        let _chatLastId = 0;
+
+        function openSessionChat(sessionId) {
+            _chatSessionId = sessionId;
+            _chatLastId = 0;
+            const modal = document.getElementById('session-chat-modal');
+            modal.style.display = 'flex';
+            const session = _activeSessions[sessionId] || {};
+            document.getElementById('chat-session-name').textContent = session.name || sessionId;
+            document.getElementById('chat-messages').innerHTML = '<div class="loading">Loading messages…</div>';
+            _loadChatMessages(true);
+            if (_chatPollTimer) clearInterval(_chatPollTimer);
+            _chatPollTimer = setInterval(() => _loadChatMessages(false), 3000);
+        }
+
+        function closeSessionChat() {
+            document.getElementById('session-chat-modal').style.display = 'none';
+            if (_chatPollTimer) { clearInterval(_chatPollTimer); _chatPollTimer = null; }
+            _chatSessionId = null;
+        }
+
+        async function _loadChatMessages(initial) {
+            if (!_chatSessionId) return;
+            const room = `session:${_chatSessionId}`;
+            try {
+                const url = `/api/chat/messages?room=${encodeURIComponent(room)}&since_id=${_chatLastId}&limit=50`;
+                const response = await fetch(url);
+                if (!response.ok) return;
+                const data = await response.json();
+                const msgs = data.messages || [];
+                if (!msgs.length && initial) {
+                    document.getElementById('chat-messages').innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No messages yet. Say hello!</div>';
+                    return;
+                }
+                if (!msgs.length) return;
+                _chatLastId = msgs[msgs.length - 1].id;
+                const container = document.getElementById('chat-messages');
+                const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 10;
+                msgs.forEach(m => {
+                    const el = document.createElement('div');
+                    el.style.cssText = 'padding:4px 0; border-bottom:1px solid #f0f0f0;';
+                    const ts = new Date(m.created_at).toLocaleTimeString();
+                    el.innerHTML = `<strong style="color:#667eea;">${_escapeHtml(m.sender)}</strong> <small style="color:#aaa;">${ts}</small><br>${_escapeHtml(m.message)}`;
+                    container.appendChild(el);
+                });
+                if (atBottom || initial) container.scrollTop = container.scrollHeight;
+            } catch (_) {}
+        }
+
+        async function sendSessionChatMessage() {
+            if (!_chatSessionId) return;
+            const input = document.getElementById('chat-input');
+            const message = (input ? input.value : '').trim();
+            if (!message) return;
+            const room = `session:${_chatSessionId}`;
+            try {
+                const response = await fetch('/api/chat/send', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({room, message})
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to send message');
+                    return;
+                }
+                if (input) input.value = '';
+                await _loadChatMessages(false);
+            } catch (error) {
+                alert('Error sending message: ' + error.message);
+            }
+        }
+
+        function _escapeHtml(str) {
+            return String(str)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
         async function sendInvites() {
             const sessionId = _inviteSessionId;
             if (!sessionId) return;
@@ -6554,7 +6838,6 @@ def create_templates():
         async function refreshLiveSessions() {
             const listDiv = document.getElementById('live-sessions-list');
             if (!listDiv) return;
-            const statusEl = document.getElementById('session-refresh-status');
             try {
                 const response = await fetch('/api/live-session/active');
                 if (!response.ok) {
@@ -6562,43 +6845,17 @@ def create_templates():
                     return;
                 }
                 const data = await response.json();
-                const sessions = data.sessions || [];
-                if (statusEl) statusEl.textContent = `Last updated ${new Date().toLocaleTimeString()}`;
-                if (sessions.length === 0) {
-                    listDiv.innerHTML = '<div class="loading">No active sessions. Create one above!</div>';
-                    return;
-                }
-                let html = '';
-                sessions.forEach(s => {
-                    const pickedInfo = s.picked_game
-                        ? `<br><small style="color:#28a745;">✅ Game picked: <strong>${s.picked_game.name || s.picked_game.app_id || '?'}</strong></small>`
-                        : '';
-                    html += `
-                        <div style="padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background: white;">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
-                                <div>
-                                    <strong>${s.name || s.session_id}</strong>
-                                    <span style="font-size:0.8em; color:#888; margin-left: 8px;">${s.status}</span><br>
-                                    <small style="color:#555;">Host: ${s.host} &nbsp;|&nbsp; Participants: ${s.participants.join(', ')}</small>
-                                    ${pickedInfo}
-                                </div>
-                                <div style="display:flex; gap:6px; flex-wrap: wrap;">
-                                    <button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer;">Join</button>
-                                    <button onclick="pickForLiveSession('${s.session_id}')" style="padding:6px 14px; background:#764ba2; color:white; border:none; border-radius:6px; cursor:pointer;">🎲 Pick</button>
-                                    <button onclick="openInviteModal('${s.session_id}')" style="padding:6px 14px; background:#fd7e14; color:white; border:none; border-radius:6px; cursor:pointer;">📨 Invite</button>
-                                    <button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 14px; background:#dc3545; color:white; border:none; border-radius:6px; cursor:pointer;">Leave</button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-                listDiv.innerHTML = html;
+                _activeSessions = {};
+                (data.sessions || []).forEach(s => { _activeSessions[s.session_id] = s; });
+                _renderLiveSessions();
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading sessions</div>';
             }
         }
 
         function startLiveSessionPolling() {
+            // Use SSE for individual session we just joined/created when possible.
+            // Fall back to 5-second polling for the full active list (covers sessions we're not subscribed to).
             if (_liveSessionPollTimer) return;
             _liveSessionPollTimer = setInterval(refreshLiveSessions, 5000);
         }
@@ -6608,6 +6865,7 @@ def create_templates():
                 clearInterval(_liveSessionPollTimer);
                 _liveSessionPollTimer = null;
             }
+            _closeSessionSSE();
         }
         
         // Initialize on page load

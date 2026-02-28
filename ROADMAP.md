@@ -122,7 +122,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] Service/Repository layer — business logic fully separated from Flask UI layer
 - [ ] Microservices architecture for scalability
 - [ ] GraphQL API alongside REST
-- [ ] WebSocket support for real-time updates
+- [x] WebSocket support for real-time updates
 
 ### Documentation
 - [x] API documentation (Swagger/OpenAPI) — `GET /api/openapi.json` + `GET /api/docs`

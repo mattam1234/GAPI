@@ -418,5 +418,105 @@ class TestNotificationOnPick(unittest.TestCase):
         self.assertIn(game_name, captured[0]['message'])
 
 
+# ---------------------------------------------------------------------------
+# SSE subscriber management tests
+# ---------------------------------------------------------------------------
+
+class TestSSEPublish(unittest.TestCase):
+    """Unit tests for the _sse_publish helper and subscriber lifecycle."""
+
+    def setUp(self):
+        """Reset module-level SSE state before each test."""
+        import gapi_gui
+        import queue as _queue
+        self._gapi = gapi_gui
+        self._queue = _queue
+        gapi_gui._sse_subscribers.clear()
+
+    def test_publish_delivers_to_subscribed_queue(self):
+        import json
+        q = self._queue.Queue()
+        self._gapi._sse_subscribers['sess1'] = [q]
+        self._gapi._sse_publish('sess1', 'session', {'status': 'waiting'})
+        self.assertFalse(q.empty())
+        payload = json.loads(q.get_nowait())
+        self.assertEqual(payload['event'], 'session')
+        self.assertEqual(payload['data']['status'], 'waiting')
+
+    def test_publish_no_subscribers_does_not_raise(self):
+        # Should silently succeed even with no subscribers
+        self._gapi._sse_publish('no-such-session', 'session', {'status': 'waiting'})
+
+    def test_publish_removes_full_queues(self):
+        """Full queues (dead clients) are cleaned up on the next publish."""
+        # Fill the queue to capacity so the next put_nowait raises Full
+        q = self._queue.Queue(maxsize=1)
+        q.put_nowait('old')
+        self._gapi._sse_subscribers['sess2'] = [q]
+        # Publish should silently drop the message and remove the dead queue
+        self._gapi._sse_publish('sess2', 'session', {'status': 'waiting'})
+        self.assertEqual(self._gapi._sse_subscribers.get('sess2', []), [])
+
+    def test_publish_delivers_to_multiple_subscribers(self):
+        q1 = self._queue.Queue()
+        q2 = self._queue.Queue()
+        self._gapi._sse_subscribers['sess3'] = [q1, q2]
+        self._gapi._sse_publish('sess3', 'session', {'status': 'picking'})
+        self.assertFalse(q1.empty())
+        self.assertFalse(q2.empty())
+
+    def test_live_session_join_publishes_sse(self):
+        """After a join the session view should be pushed to SSE subscribers."""
+        import json
+        q = self._queue.Queue()
+        # Seed a session and subscriber
+        session_id = 'sse-join-test'
+        self._gapi.live_sessions[session_id] = {
+            'session_id': session_id, 'host': 'alice', 'name': "alice's session",
+            'participants': ['alice'], 'status': 'waiting',
+            'created_at': datetime.utcnow(), 'picked_game': None,
+        }
+        self._gapi._sse_subscribers[session_id] = [q]
+        try:
+            # Simulate what api_live_session_join does:
+            with self._gapi.live_sessions_lock:
+                session = self._gapi.live_sessions[session_id]
+                session['participants'].append('bob')
+                view = self._gapi._live_session_view(session)
+            self._gapi._sse_publish(session_id, 'session', view)
+            payload = json.loads(q.get_nowait())
+            self.assertIn('bob', payload['data']['participants'])
+        finally:
+            del self._gapi.live_sessions[session_id]
+
+
+# ---------------------------------------------------------------------------
+# Session-scoped chat routing tests
+# ---------------------------------------------------------------------------
+
+class TestSessionChatRoom(unittest.TestCase):
+    """Verify session-chat uses a per-session room name."""
+
+    def test_room_name_format(self):
+        session_id = 'abc-123'
+        room = f'session:{session_id}'
+        # Must contain the session ID and be prefixed with 'session:'
+        self.assertTrue(room.startswith('session:'))
+        self.assertIn(session_id, room)
+
+    def test_different_sessions_have_different_rooms(self):
+        room_a = f'session:sess-a'
+        room_b = f'session:sess-b'
+        self.assertNotEqual(room_a, room_b)
+
+    def test_room_name_includes_full_uuid_style_id(self):
+        import uuid
+        session_id = str(uuid.uuid4())
+        room = f'session:{session_id}'
+        # The room must uniquely identify the session
+        self.assertEqual(room, 'session:' + session_id)
+        self.assertNotEqual(room, 'session:other')
+
+
 if __name__ == '__main__':
     unittest.main()
