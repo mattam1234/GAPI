@@ -84,6 +84,7 @@ def build_spec(server_url: str = "/") -> Dict[str, Any]:
             {"name": "export",        "description": "CSV export"},
             {"name": "achievements",  "description": "Steam achievement tracking"},
             {"name": "friends",       "description": "Steam friend activity"},
+            {"name": "graphql",       "description": "GraphQL API"},
             {"name": "admin",         "description": "Admin-only operations"},
             {"name": "docs",          "description": "API documentation"},
         ],
@@ -1108,7 +1109,7 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
             "summary": "Achievement statistics dashboard for the current user",
             "description": (
                 "Returns total tracked/unlocked counts, overall completion %, the "
-                "rarest achievement, and a per-game breakdown."
+                "rarest achievement, a per-game breakdown, and a per-platform breakdown."
             ),
             "responses": {
                 "200": _json_resp("Achievement stats", {
@@ -1139,6 +1140,20 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
                                     "unlocked":           {"type": "integer"},
                                     "completion_percent": {"type": "number"},
                                     "rarest_rarity":      {"type": "number", "nullable": True},
+                                },
+                            },
+                        },
+                        "by_platform": {
+                            "type": "array",
+                            "description": "Per-platform achievement breakdown",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "platform":           {"type": "string"},
+                                    "total_tracked":      {"type": "integer"},
+                                    "total_unlocked":     {"type": "integer"},
+                                    "completion_percent": {"type": "number"},
+                                    "game_count":         {"type": "integer"},
                                 },
                             },
                         },
@@ -1203,6 +1218,176 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
                 "503": _error(503),
             },
         },
+    }
+
+    # ------------------------------------------------------------------
+    # Multiplayer Achievement Challenges
+    # ------------------------------------------------------------------
+    _challenge_schema = {
+        "type": "object",
+        "properties": {
+            "id":          {"type": "string"},
+            "title":       {"type": "string"},
+            "app_id":      {"type": "string"},
+            "game_name":   {"type": "string"},
+            "status":      {"type": "string",
+                             "enum": ["open", "in_progress", "completed", "cancelled"]},
+            "created_by":  {"type": "string"},
+            "winner":      {"type": "string", "nullable": True},
+            "starts_at":   {"type": "string", "format": "date-time", "nullable": True},
+            "ends_at":     {"type": "string", "format": "date-time", "nullable": True},
+            "created_at":  {"type": "string", "format": "date-time"},
+            "target_achievement_ids": {"type": "array", "items": {"type": "string"}},
+            "participants": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "username":       {"type": "string"},
+                        "unlocked_count": {"type": "integer"},
+                        "completed":      {"type": "boolean"},
+                        "joined_at":      {"type": "string", "format": "date-time"},
+                        "completed_at":   {"type": "string", "format": "date-time", "nullable": True},
+                    },
+                },
+            },
+        },
+    }
+    paths["/api/achievement-challenges"] = {
+        "get": {
+            "tags": ["achievements"],
+            "summary": "List achievement challenges for the current user",
+            "responses": {
+                "200": _json_resp("Challenges", {
+                    "type": "object",
+                    "properties": {
+                        "challenges": {"type": "array", "items": _challenge_schema},
+                    },
+                }),
+            },
+        },
+        "post": {
+            "tags": ["achievements"],
+            "summary": "Create a new multiplayer achievement challenge",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["title", "app_id", "game_name"],
+                    "properties": {
+                        "title":                  {"type": "string"},
+                        "app_id":                 {"type": "string"},
+                        "game_name":              {"type": "string"},
+                        "target_achievement_ids": {"type": "array", "items": {"type": "string"}},
+                        "starts_at":              {"type": "string", "format": "date-time"},
+                        "ends_at":                {"type": "string", "format": "date-time"},
+                    },
+                }}},
+            },
+            "responses": {
+                "201": _json_resp("Challenge created", _challenge_schema),
+                "400": _error(400),
+            },
+        },
+    }
+    paths["/api/achievement-challenges/{challenge_id}"] = {
+        "get": {
+            "tags": ["achievements"],
+            "summary": "Get a single achievement challenge by ID",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Challenge", _challenge_schema),
+                "404": _error(404),
+            },
+        },
+        "delete": {
+            "tags": ["achievements"],
+            "summary": "Cancel an achievement challenge (creator only)",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Cancelled", _ref("Success")),
+                "404": _error(404),
+            },
+        },
+    }
+    paths["/api/achievement-challenges/{challenge_id}/join"] = {
+        "post": {
+            "tags": ["achievements"],
+            "summary": "Join an existing achievement challenge",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Updated challenge", _challenge_schema),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/achievement-challenges/{challenge_id}/progress"] = {
+        "put": {
+            "tags": ["achievements"],
+            "summary": "Update the current user's unlocked count for a challenge",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["unlocked_count"],
+                    "properties": {
+                        "unlocked_count": {"type": "integer", "minimum": 0},
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Updated challenge", _challenge_schema),
+                "400": _error(400),
+                "404": _error(404),
+            },
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # GraphQL API
+    # ------------------------------------------------------------------
+    paths["/api/graphql"] = {
+        "post": {
+            "tags": ["graphql"],
+            "summary": "Execute a GraphQL query against the GAPI schema",
+            "description": (
+                "Accepts a standard GraphQL request body and returns ``data`` and/or "
+                "``errors``.  Requires ``graphene>=3.0.0``.  "
+                "Exposed fields: ``games(platform, limit)``, ``stats``, "
+                "``achievements(app_id, unlocked_only)``."
+            ),
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["query"],
+                    "properties": {
+                        "query":         {"type": "string",
+                                          "example": "{ stats { total_games total_playtime } }"},
+                        "variables":     {"type": "object", "nullable": True},
+                        "operationName": {"type": "string", "nullable": True},
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("GraphQL response", {
+                    "type": "object",
+                    "properties": {
+                        "data":   {"type": "object", "nullable": True},
+                        "errors": {"type": "array",
+                                   "items": {"type": "object",
+                                             "properties": {"message": {"type": "string"}}}},
+                    },
+                }),
+                "400": _error(400),
+                "503": _json_resp("graphene not installed", _ref("Error")),
+            },
+        }
     }
 
     # ------------------------------------------------------------------

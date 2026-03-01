@@ -21,3 +21,6 @@ howlongtobeatpy>=1.0.0
 # Optional: Discord Rich Presence (shows currently picked game in Discord status)
 # Install with: pip install pypresence
 pypresence>=4.3.0
+
+# Optional: GraphQL API (POST /api/graphql)
+graphene>=3.0.0

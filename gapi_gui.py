@@ -3865,22 +3865,15 @@ def api_achievement_stats():
           "total_tracked": 120,
           "total_unlocked": 45,
           "completion_percent": 37.5,
-          "rarest_achievement": {
-            "app_id": "620",
-            "game_name": "Portal 2",
-            "achievement_id": "ACH_WIN_HARD",
-            "name": "Hard Mode",
-            "rarity": 0.3,
-            "unlocked": false
-          },
-          "games": [
+          "rarest_achievement": { ... },
+          "games": [ ... ],
+          "by_platform": [
             {
-              "app_id": "620",
-              "game_name": "Portal 2",
-              "total": 50,
-              "unlocked": 30,
-              "completion_percent": 60.0,
-              "rarest_rarity": 0.3
+              "platform": "steam",
+              "total_tracked": 100,
+              "total_unlocked": 40,
+              "completion_percent": 40.0,
+              "game_count": 12
             }
           ]
         }
@@ -3895,6 +3888,7 @@ def api_achievement_stats():
     db = next(database.get_db())
     try:
         stats = database.get_achievement_stats(db, username)
+        by_platform = database.get_achievement_stats_by_platform(db, username)
     finally:
         if db:
             db.close()
@@ -3902,8 +3896,10 @@ def api_achievement_stats():
     if not stats:
         return jsonify({
             'total_tracked': 0, 'total_unlocked': 0,
-            'completion_percent': 0.0, 'rarest_achievement': None, 'games': [],
+            'completion_percent': 0.0, 'rarest_achievement': None,
+            'games': [], 'by_platform': [],
         })
+    stats['by_platform'] = by_platform
     return jsonify(stats)
 
 
@@ -3983,6 +3979,204 @@ def api_export_schedule_ics():
             'Content-Type': 'text/calendar; charset=utf-8',
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Multiplayer Achievement Challenges
+# ---------------------------------------------------------------------------
+
+@app.route('/api/achievement-challenges', methods=['POST'])
+@require_login
+def api_create_achievement_challenge():
+    """Create a new multiplayer achievement challenge.
+
+    Request JSON::
+
+        {
+          "title": "Who completes Portal 2 first?",
+          "app_id": "620",
+          "game_name": "Portal 2",
+          "target_achievement_ids": ["ACH_WIN", "ACH_PARTNER"],   // optional
+          "starts_at": "2026-03-01T20:00:00",                     // optional
+          "ends_at":   "2026-03-08T20:00:00"                      // optional
+        }
+
+    Response JSON: the created challenge object (status 201).
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    title = str(data.get('title', '')).strip()
+    app_id = str(data.get('app_id', '')).strip()
+    game_name = str(data.get('game_name', '')).strip()
+    if not title or not app_id or not game_name:
+        return jsonify({'error': 'title, app_id, and game_name are required'}), 400
+
+    targets_raw = data.get('target_achievement_ids', [])
+    if isinstance(targets_raw, str):
+        target_ids = [t.strip() for t in targets_raw.split(',') if t.strip()]
+    else:
+        target_ids = [str(t).strip() for t in (targets_raw or []) if str(t).strip()]
+
+    db = next(database.get_db())
+    try:
+        challenge = database.create_achievement_challenge(
+            db, username, title, app_id, game_name,
+            target_achievement_ids=target_ids or None,
+            starts_at=str(data.get('starts_at', '')).strip(),
+            ends_at=str(data.get('ends_at', '')).strip(),
+        )
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Failed to create challenge'}), 500
+    return jsonify(challenge), 201
+
+
+@app.route('/api/achievement-challenges', methods=['GET'])
+@require_login
+def api_list_achievement_challenges():
+    """List achievement challenges for the current user (created or joined).
+
+    Response JSON::
+
+        {"challenges": [ {...}, ... ]}
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        challenges = database.get_achievement_challenges(db, username)
+    finally:
+        if db:
+            db.close()
+
+    return jsonify({'challenges': challenges})
+
+
+@app.route('/api/achievement-challenges/<challenge_id>', methods=['GET'])
+@require_login
+def api_get_achievement_challenge(challenge_id: str):
+    """Get details of a single achievement challenge by its ID.
+
+    Response JSON: the challenge object or 404 if not found.
+    """
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        challenge = database.get_achievement_challenge(db, challenge_id)
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Challenge not found'}), 404
+    return jsonify(challenge)
+
+
+@app.route('/api/achievement-challenges/<challenge_id>/join', methods=['POST'])
+@require_login
+def api_join_achievement_challenge(challenge_id: str):
+    """Join an existing achievement challenge.
+
+    Response JSON: updated challenge object.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        challenge = database.join_achievement_challenge(db, challenge_id, username)
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Challenge not found or could not join'}), 404
+    return jsonify(challenge)
+
+
+@app.route('/api/achievement-challenges/<challenge_id>/progress', methods=['PUT'])
+@require_login
+def api_update_challenge_progress(challenge_id: str):
+    """Update the current user's unlocked count for a challenge.
+
+    Request JSON::
+
+        {"unlocked_count": 3}
+
+    Response JSON: updated challenge object.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    try:
+        unlocked_count = int(data.get('unlocked_count', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'unlocked_count must be an integer'}), 400
+
+    db = next(database.get_db())
+    try:
+        challenge = database.record_challenge_unlock(
+            db, challenge_id, username, unlocked_count)
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Challenge or participant not found'}), 404
+    return jsonify(challenge)
+
+
+@app.route('/api/achievement-challenges/<challenge_id>', methods=['DELETE'])
+@require_login
+def api_cancel_achievement_challenge(challenge_id: str):
+    """Cancel an achievement challenge (creator only).
+
+    Response JSON::
+
+        {"success": true, "id": "<challenge_id>"}
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        ok = database.cancel_achievement_challenge(db, challenge_id, username)
+    finally:
+        if db:
+            db.close()
+
+    if not ok:
+        return jsonify({'error': 'Challenge not found or permission denied'}), 404
+    return jsonify({'success': True, 'id': challenge_id})
 
 
 # ---------------------------------------------------------------------------
@@ -5408,6 +5602,241 @@ def api_i18n_get(lang: str):
     if data is None:
         return jsonify({'error': f"Locale '{lang}' not found"}), 404
     return jsonify(data)
+
+
+# ---------------------------------------------------------------------------
+# GraphQL API (POST /api/graphql)
+# ---------------------------------------------------------------------------
+
+def _build_graphql_schema():
+    """Build and return the GAPI GraphQL schema using graphene.
+
+    Exposed types:
+    * **GameType** — a game in the user's library
+    * **AchievementType** — a single achievement row
+    * **StatsType** — library statistics
+    * **Query** — root type with ``games``, ``stats``, ``achievements`` fields
+    """
+    import graphene
+
+    class GameType(graphene.ObjectType):
+        app_id     = graphene.String()
+        name       = graphene.String()
+        platform   = graphene.String()
+        playtime_hours = graphene.Float()
+
+    class AchievementType(graphene.ObjectType):
+        app_id       = graphene.String()
+        game_name    = graphene.String()
+        achievement_id = graphene.String()
+        name         = graphene.String()
+        unlocked     = graphene.Boolean()
+        rarity       = graphene.Float()
+
+    class StatsType(graphene.ObjectType):
+        total_games        = graphene.Int()
+        unplayed_games     = graphene.Int()
+        played_games       = graphene.Int()
+        unplayed_percentage = graphene.Float()
+        total_playtime     = graphene.Float()
+        average_playtime   = graphene.Float()
+        total_achievements_tracked  = graphene.Int()
+        total_achievements_unlocked = graphene.Int()
+        achievement_completion_percent = graphene.Float()
+
+    class Query(graphene.ObjectType):
+        games = graphene.List(
+            GameType,
+            platform=graphene.String(default_value=''),
+            limit=graphene.Int(default_value=100),
+            description='Games in the current user\'s library',
+        )
+        stats = graphene.Field(
+            StatsType,
+            description='Library and achievement statistics for the current user',
+        )
+        achievements = graphene.List(
+            AchievementType,
+            app_id=graphene.String(default_value=''),
+            unlocked_only=graphene.Boolean(default_value=False),
+            description='Achievements tracked for the current user',
+        )
+
+        def resolve_games(root, info, platform='', limit=100):
+            username = info.context.get('username', '')
+            if not DB_AVAILABLE or not ensure_db_available():
+                return []
+            db = None
+            try:
+                db = database.SessionLocal()
+                cached = (
+                    _library_service.get_cached(db, username)
+                    if _library_service
+                    else database.get_cached_library(db, username)
+                )
+            finally:
+                if db:
+                    db.close()
+            games = cached or []
+            if platform:
+                games = [g for g in games if g.get('platform', 'steam').lower() == platform.lower()]
+            return [
+                GameType(
+                    app_id=str(g.get('app_id', '')),
+                    name=g.get('name', ''),
+                    platform=g.get('platform', 'steam'),
+                    playtime_hours=float(g.get('playtime_hours', 0)),
+                )
+                for g in games[:limit]
+            ]
+
+        def resolve_stats(root, info):
+            username = info.context.get('username', '')
+            lib_stats: dict = {}
+            ach_stats: dict = {}
+            if DB_AVAILABLE and ensure_db_available():
+                db = None
+                try:
+                    db = database.SessionLocal()
+                    cached = (
+                        _library_service.get_cached(db, username)
+                        if _library_service
+                        else database.get_cached_library(db, username)
+                    )
+                    cached = cached or []
+                    total = len(cached)
+                    unplayed = sum(1 for g in cached if g.get('playtime_hours', 0) == 0)
+                    total_pt = sum(g.get('playtime_hours', 0) for g in cached)
+                    lib_stats = {
+                        'total_games': total,
+                        'unplayed_games': unplayed,
+                        'played_games': total - unplayed,
+                        'unplayed_percentage': round(unplayed / total * 100, 1) if total else 0.0,
+                        'total_playtime': round(total_pt, 1),
+                        'average_playtime': round(total_pt / total, 1) if total else 0.0,
+                    }
+                    ach_stats = database.get_achievement_stats(db, username) or {}
+                finally:
+                    if db:
+                        db.close()
+            return StatsType(
+                total_games=lib_stats.get('total_games', 0),
+                unplayed_games=lib_stats.get('unplayed_games', 0),
+                played_games=lib_stats.get('played_games', 0),
+                unplayed_percentage=lib_stats.get('unplayed_percentage', 0.0),
+                total_playtime=lib_stats.get('total_playtime', 0.0),
+                average_playtime=lib_stats.get('average_playtime', 0.0),
+                total_achievements_tracked=ach_stats.get('total_tracked', 0),
+                total_achievements_unlocked=ach_stats.get('total_unlocked', 0),
+                achievement_completion_percent=ach_stats.get('completion_percent', 0.0),
+            )
+
+        def resolve_achievements(root, info, app_id='', unlocked_only=False):
+            username = info.context.get('username', '')
+            if not DB_AVAILABLE or not ensure_db_available():
+                return []
+            db = None
+            try:
+                db = database.SessionLocal()
+                grouped = database.get_user_achievements_grouped(db, username)
+            finally:
+                if db:
+                    db.close()
+            results = []
+            for game in (grouped or []):
+                if app_id and str(game.get('app_id', '')) != str(app_id):
+                    continue
+                for a in game.get('achievements', []):
+                    if unlocked_only and not a.get('unlocked'):
+                        continue
+                    results.append(AchievementType(
+                        app_id=str(game.get('app_id', '')),
+                        game_name=game.get('game_name', ''),
+                        achievement_id=a.get('achievement_id', ''),
+                        name=a.get('name', ''),
+                        unlocked=bool(a.get('unlocked')),
+                        rarity=a.get('rarity'),
+                    ))
+            return results
+
+    return graphene.Schema(query=Query)
+
+
+_graphql_schema = None
+_graphql_schema_lock = threading.Lock()
+
+
+def _get_graphql_schema():
+    global _graphql_schema
+    if _graphql_schema is None:
+        with _graphql_schema_lock:
+            if _graphql_schema is None:
+                try:
+                    _graphql_schema = _build_graphql_schema()
+                except Exception as exc:
+                    gui_logger.warning("GraphQL schema build failed: %s", exc)
+    return _graphql_schema
+
+
+@app.route('/api/graphql', methods=['POST'])
+@require_login
+def api_graphql():
+    """Execute a GraphQL query against the GAPI schema.
+
+    Request JSON::
+
+        {"query": "{ stats { total_games total_playtime } }"}
+
+    Optional variables::
+
+        {"query": "...", "variables": {"limit": 5}}
+
+    Response JSON::
+
+        {"data": { ... }}        // on success
+        {"errors": [ ... ]}     // on error
+
+    GraphQL schema:
+        - ``games(platform: String, limit: Int)`` → ``[GameType]``
+        - ``stats`` → ``StatsType``
+        - ``achievements(app_id: String, unlocked_only: Boolean)`` → ``[AchievementType]``
+
+    Requires `graphene` (``pip install graphene``).  Returns 503 if the
+    library is not available.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    schema = _get_graphql_schema()
+    if schema is None:
+        return jsonify({'errors': [{'message': 'graphene library not available'}]}), 503
+
+    data = request.json or {}
+    query = data.get('query', '')
+    variables = data.get('variables') or {}
+    operation_name = data.get('operationName')
+
+    if not query:
+        return jsonify({'errors': [{'message': 'query is required'}]}), 400
+
+    try:
+        result = schema.execute(
+            query,
+            variables=variables,
+            operation_name=operation_name,
+            context={'username': username},
+        )
+        response: Dict = {}
+        if result.errors:
+            response['errors'] = [{'message': str(e)} for e in result.errors]
+        if result.data is not None:
+            response['data'] = result.data
+        status = 400 if result.errors and result.data is None else 200
+        return jsonify(response), status
+    except Exception as exc:
+        gui_logger.error("GraphQL execution error: %s", exc)
+        return jsonify({'errors': [{'message': str(exc)}]}), 500
 
 
 # ---------------------------------------------------------------------------

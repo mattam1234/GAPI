@@ -167,6 +167,49 @@ class AchievementHunt(Base):
     user = relationship("User", foreign_keys=[user_id])
 
 
+class AchievementChallenge(Base):
+    """Multiplayer achievement challenge shared between users."""
+    __tablename__ = "achievement_challenges"
+
+    id = Column(Integer, primary_key=True)
+    challenge_id = Column(String(20), unique=True, index=True)  # short human-readable ID
+    title = Column(String(255), nullable=False)
+    app_id = Column(String(50), nullable=False)
+    game_name = Column(String(500), nullable=False)
+    # comma-separated achievement_ids; NULL means all achievements count
+    target_achievement_ids = Column(Text, nullable=True)
+    status = Column(String(50), default='open')  # 'open', 'in_progress', 'completed', 'cancelled'
+    created_by = Column(Integer, ForeignKey("users.id"))
+    winner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    starts_at = Column(DateTime, nullable=True)
+    ends_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
+    winner = relationship("User", foreign_keys=[winner_user_id])
+    participants = relationship(
+        "ChallengeParticipant", back_populates="challenge", cascade="all, delete-orphan"
+    )
+
+
+class ChallengeParticipant(Base):
+    """Participation record for a single user in an AchievementChallenge."""
+    __tablename__ = "challenge_participants"
+
+    id = Column(Integer, primary_key=True)
+    challenge_id = Column(Integer, ForeignKey("achievement_challenges.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    unlocked_count = Column(Integer, default=0)
+    completed = Column(Boolean, default=False)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    challenge = relationship("AchievementChallenge", back_populates="participants")
+    user = relationship("User", foreign_keys=[user_id])
+
+
 class GameLibraryCache(Base):
     """Cache user's Steam/Epic/GOG game library for faster access."""
     __tablename__ = "game_library_cache"
@@ -1827,6 +1870,332 @@ def get_games_with_rare_achievements(
     except Exception as e:
         logger.error("Error getting rare-achievement games for %s: %s", username, e)
         return []
+
+
+def get_achievement_stats_by_platform(db, username: str) -> list:
+    """Return achievement statistics grouped by platform for *username*.
+
+    Joins ``Achievement`` rows with ``GameLibraryCache`` to resolve the
+    platform for each game.  Games not found in the library cache default
+    to ``'steam'``.
+
+    Returns:
+        List of ``{'platform', 'total_tracked', 'total_unlocked',
+        'completion_percent', 'game_count'}`` dicts sorted by platform name.
+    """
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+
+        # Build {app_id -> platform} map from cached library
+        library_map: dict = {}
+        for g in user.game_libraries:
+            if g.app_id and g.platform:
+                library_map[str(g.app_id)] = g.platform.lower()
+
+        grouped: dict = {}
+        for a in user.achievements:
+            platform = library_map.get(str(a.app_id), 'steam')
+            if platform not in grouped:
+                grouped[platform] = {
+                    'platform': platform,
+                    'total_tracked': 0,
+                    'total_unlocked': 0,
+                    'app_ids': set(),
+                }
+            grouped[platform]['total_tracked'] += 1
+            if a.unlocked:
+                grouped[platform]['total_unlocked'] += 1
+            grouped[platform]['app_ids'].add(str(a.app_id))
+
+        result = []
+        for entry in sorted(grouped.values(), key=lambda x: x['platform']):
+            total = entry['total_tracked']
+            unlocked = entry['total_unlocked']
+            result.append({
+                'platform': entry['platform'],
+                'total_tracked': total,
+                'total_unlocked': unlocked,
+                'completion_percent': round(unlocked / total * 100, 1) if total else 0.0,
+                'game_count': len(entry['app_ids']),
+            })
+        return result
+    except Exception as e:
+        logger.error("Error computing platform achievement stats for %s: %s", username, e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Achievement challenge helpers
+# ---------------------------------------------------------------------------
+
+def _challenge_to_dict(challenge: 'AchievementChallenge') -> dict:
+    """Serialise an AchievementChallenge to a plain dict."""
+    return {
+        'id': challenge.challenge_id,
+        'title': challenge.title,
+        'app_id': challenge.app_id,
+        'game_name': challenge.game_name,
+        'target_achievement_ids': (
+            [a.strip() for a in challenge.target_achievement_ids.split(',')
+             if a.strip()]
+            if challenge.target_achievement_ids else []
+        ),
+        'status': challenge.status,
+        'created_by': challenge.creator.username if challenge.creator else None,
+        'winner': challenge.winner.username if challenge.winner else None,
+        'starts_at': challenge.starts_at.isoformat() if challenge.starts_at else None,
+        'ends_at': challenge.ends_at.isoformat() if challenge.ends_at else None,
+        'created_at': challenge.created_at.isoformat() if challenge.created_at else None,
+        'participants': [
+            {
+                'username': p.user.username if p.user else None,
+                'unlocked_count': p.unlocked_count,
+                'completed': bool(p.completed),
+                'joined_at': p.joined_at.isoformat() if p.joined_at else None,
+                'completed_at': p.completed_at.isoformat() if p.completed_at else None,
+            }
+            for p in challenge.participants
+        ],
+    }
+
+
+def create_achievement_challenge(
+    db,
+    creator_username: str,
+    title: str,
+    app_id: str,
+    game_name: str,
+    target_achievement_ids: list = None,
+    starts_at: str = '',
+    ends_at: str = '',
+) -> dict:
+    """Create a new multiplayer achievement challenge.
+
+    The creator is automatically added as the first participant.
+
+    Args:
+        db:                      SQLAlchemy session.
+        creator_username:        Username of the user creating the challenge.
+        title:                   Short challenge title.
+        app_id:                  Steam/platform app ID.
+        game_name:               Human-readable game name.
+        target_achievement_ids:  List of achievement IDs to complete (empty = all).
+        starts_at:               ISO date-time string for challenge start (optional).
+        ends_at:                 ISO date-time string for challenge end (optional).
+
+    Returns:
+        Challenge dict on success, empty dict on failure.
+    """
+    if not db:
+        return {}
+    import uuid as _uuid
+    try:
+        user = db.query(User).filter(User.username == creator_username).first()
+        if not user:
+            return {}
+
+        def _parse_dt(s: str):
+            if not s:
+                return None
+            import datetime as _dt
+            for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M', '%Y-%m-%d'):
+                try:
+                    return _dt.datetime.strptime(s.strip(), fmt)
+                except ValueError:
+                    pass
+            return None
+
+        challenge_id = str(_uuid.uuid4())[:12]
+        challenge = AchievementChallenge(
+            challenge_id=challenge_id,
+            title=title.strip(),
+            app_id=str(app_id).strip(),
+            game_name=game_name.strip(),
+            target_achievement_ids=','.join(target_achievement_ids) if target_achievement_ids else None,
+            status='open',
+            created_by=user.id,
+            starts_at=_parse_dt(starts_at),
+            ends_at=_parse_dt(ends_at),
+        )
+        db.add(challenge)
+        db.flush()  # get challenge.id
+
+        # Add creator as first participant
+        participant = ChallengeParticipant(
+            challenge_id=challenge.id,
+            user_id=user.id,
+        )
+        db.add(participant)
+        db.commit()
+        db.refresh(challenge)
+        return _challenge_to_dict(challenge)
+    except Exception as e:
+        logger.error("Error creating achievement challenge: %s", e)
+        db.rollback()
+        return {}
+
+
+def get_achievement_challenges(db, username: str) -> list:
+    """Return all challenges where *username* is creator or participant.
+
+    Returns:
+        List of challenge dicts sorted by ``created_at`` descending.
+    """
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        # Challenges created by user
+        created = db.query(AchievementChallenge).filter(
+            AchievementChallenge.created_by == user.id
+        ).all()
+        # Challenges user participates in (but didn't create)
+        participating = (
+            db.query(AchievementChallenge)
+            .join(ChallengeParticipant,
+                  ChallengeParticipant.challenge_id == AchievementChallenge.id)
+            .filter(
+                ChallengeParticipant.user_id == user.id,
+                AchievementChallenge.created_by != user.id,
+            )
+            .all()
+        )
+        all_challenges = {c.id: c for c in created + participating}
+        return sorted(
+            [_challenge_to_dict(c) for c in all_challenges.values()],
+            key=lambda c: c['created_at'] or '',
+            reverse=True,
+        )
+    except Exception as e:
+        logger.error("Error getting challenges for %s: %s", username, e)
+        return []
+
+
+def get_achievement_challenge(db, challenge_id: str) -> dict:
+    """Return a single challenge dict by *challenge_id*, or empty dict if not found."""
+    if not db:
+        return {}
+    try:
+        c = db.query(AchievementChallenge).filter(
+            AchievementChallenge.challenge_id == challenge_id
+        ).first()
+        return _challenge_to_dict(c) if c else {}
+    except Exception as e:
+        logger.error("Error getting challenge %s: %s", challenge_id, e)
+        return {}
+
+
+def join_achievement_challenge(db, challenge_id: str, username: str) -> dict:
+    """Add *username* as a participant in *challenge_id*.
+
+    Returns the updated challenge dict, or empty dict on failure.
+    No-ops if the user is already a participant.
+    """
+    if not db:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        challenge = db.query(AchievementChallenge).filter(
+            AchievementChallenge.challenge_id == challenge_id
+        ).first()
+        if not user or not challenge:
+            return {}
+        already = db.query(ChallengeParticipant).filter(
+            ChallengeParticipant.challenge_id == challenge.id,
+            ChallengeParticipant.user_id == user.id,
+        ).first()
+        if not already:
+            db.add(ChallengeParticipant(challenge_id=challenge.id, user_id=user.id))
+            if challenge.status == 'open':
+                challenge.status = 'in_progress'
+            db.commit()
+            db.refresh(challenge)
+        return _challenge_to_dict(challenge)
+    except Exception as e:
+        logger.error("Error joining challenge %s: %s", challenge_id, e)
+        db.rollback()
+        return {}
+
+
+def record_challenge_unlock(
+    db, challenge_id: str, username: str, unlocked_count: int
+) -> dict:
+    """Update the participant's unlocked count and check for completion.
+
+    Marks the challenge as completed + sets the winner when any participant
+    reaches the target achievement count (or unlocked_count >= total targets).
+
+    Returns the updated challenge dict.
+    """
+    if not db:
+        return {}
+    import datetime as _dt
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        challenge = db.query(AchievementChallenge).filter(
+            AchievementChallenge.challenge_id == challenge_id
+        ).first()
+        if not user or not challenge:
+            return {}
+        participant = db.query(ChallengeParticipant).filter(
+            ChallengeParticipant.challenge_id == challenge.id,
+            ChallengeParticipant.user_id == user.id,
+        ).first()
+        if not participant:
+            return {}
+        participant.unlocked_count = unlocked_count
+
+        # Determine target count
+        target = 0
+        if challenge.target_achievement_ids:
+            target = len([a for a in challenge.target_achievement_ids.split(',') if a.strip()])
+
+        if target > 0 and unlocked_count >= target and not participant.completed:
+            participant.completed = True
+            participant.completed_at = _dt.datetime.utcnow()
+            # First to complete wins
+            if challenge.status != 'completed':
+                challenge.status = 'completed'
+                challenge.winner_user_id = user.id
+
+        db.commit()
+        db.refresh(challenge)
+        return _challenge_to_dict(challenge)
+    except Exception as e:
+        logger.error("Error recording challenge unlock for %s: %s", challenge_id, e)
+        db.rollback()
+        return {}
+
+
+def cancel_achievement_challenge(db, challenge_id: str, requester_username: str) -> bool:
+    """Cancel a challenge. Only the creator may cancel.
+
+    Returns True if cancelled, False otherwise.
+    """
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == requester_username).first()
+        challenge = db.query(AchievementChallenge).filter(
+            AchievementChallenge.challenge_id == challenge_id
+        ).first()
+        if not user or not challenge:
+            return False
+        if challenge.created_by != user.id:
+            return False
+        challenge.status = 'cancelled'
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error("Error cancelling challenge %s: %s", challenge_id, e)
+        db.rollback()
+        return False
 
 
 def start_achievement_hunt(db, username: str, app_id: int, game_name: str,
