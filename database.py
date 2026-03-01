@@ -362,6 +362,92 @@ class AppSettings(Base):
     updated_by = Column(String(255), nullable=True)  # username of last editor
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 9: ADMIN EXCELLENCE & USER EXPERIENCE FEATURES
+# ═══════════════════════════════════════════════════════════════════════════
+
+class AuditLog(Base):
+    """Audit trail for tracking all admin actions and user activities."""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    action = Column(String(100), nullable=False)  # 'login', 'pick', 'review', 'delete_user', etc.
+    resource_type = Column(String(100), nullable=True)  # 'game', 'user', 'review', 'chat', etc.
+    resource_id = Column(String(255), nullable=True)  # game_id, user_id, etc.
+    description = Column(Text, nullable=True)  # Human-readable description
+    old_value = Column(Text, nullable=True)  # JSON string of old data
+    new_value = Column(Text, nullable=True)  # JSON string of new data
+    ip_address = Column(String(255), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    status = Column(String(50), default='success')  # success, failure, error
+    error_message = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class UserReport(Base):
+    """User-generated reports for moderation."""
+    __tablename__ = "user_reports"
+
+    id = Column(Integer, primary_key=True)
+    reporter_username = Column(String(255), nullable=False, index=True)
+    reported_username = Column(String(255), nullable=True)  # Null if reporting content
+    report_type = Column(String(50), nullable=False)  # 'user', 'chat', 'review', 'game_pick'
+    resource_type = Column(String(100), nullable=True)  # 'chat_message', 'review', etc.
+    resource_id = Column(String(255), nullable=True)
+    reason = Column(String(255), nullable=False)  # 'spam', 'profanity', 'harassment', 'cheating', etc.
+    description = Column(Text, nullable=True)
+    status = Column(String(50), default='pending')  # pending, investigating, resolved, dismissed
+    priority = Column(Integer, default=0)  # 0=low, 1=medium, 2=high
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by = Column(String(255), nullable=True)  # Moderator username
+
+
+class ModerationLog(Base):
+    """Log of moderation actions taken by admins."""
+    __tablename__ = "moderation_logs"
+
+    id = Column(Integer, primary_key=True)
+    moderator_username = Column(String(255), nullable=False, index=True)
+    action = Column(String(100), nullable=False)  # 'warn', 'mute', 'ban', 'suspend', 'delete_content', etc.
+    target_username = Column(String(255), nullable=True)
+    target_content_id = Column(String(255), nullable=True)  # If action is on content
+    reason = Column(String(255), nullable=False)
+    duration = Column(Integer, nullable=True)  # Duration in minutes (for temp bans/mutes)
+    notes = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    expires_at = Column(DateTime, nullable=True)  # When temporary moderation expires
+
+
+class ProfanityFilter(Base):
+    """Configurable profanity filter word list."""
+    __tablename__ = "profanity_filters"
+
+    id = Column(Integer, primary_key=True)
+    word = Column(String(255), unique=True, nullable=False, index=True)
+    severity = Column(Integer, default=1)  # 1=low, 2=medium, 3=high
+    auto_action = Column(String(50), default='flag')  # flag, warn, mute, none
+    enabled = Column(Boolean, default=True)
+    added_by = Column(String(255), nullable=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SavedSearch(Base):
+    """User-saved searches for quick access."""
+    __tablename__ = "saved_searches"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    search_name = Column(String(255), nullable=False)
+    query = Column(String(500), nullable=False)  # Search query string
+    filters = Column(Text, nullable=True)  # JSON filters (genre, year, etc.)
+    pinned = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    use_count = Column(Integer, default=0)
+
+
 def get_db():
     """Get database session."""
     if SessionLocal:
@@ -3023,5 +3109,270 @@ class AIRecommendationCache(Base):
     match_score = Column(Integer)  # 0-100
     reason = Column(String(255))
     recommended_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+# ==================== PHASE 7: Advanced Features ====================
+
+class BattlePass(Base):
+    """Seasonal battle pass system"""
+    __tablename__ = "battle_passes"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, index=True)
+    season = Column(Integer, index=True)
+    duration_days = Column(Integer)
+    max_level = Column(Integer, default=100)
+    free_tier_reward = Column(String(255))
+    premium_price = Column(Integer, default=999)  # In points
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserBattlePass(Base):
+    """User progress in battle pass"""
+    __tablename__ = "user_battle_passes"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    battle_pass_id = Column(Integer, ForeignKey("battle_passes.id"))
+    current_level = Column(Integer, default=1)
+    experience = Column(Integer, default=0)
+    has_premium = Column(Boolean, default=False)
+    purchased_at = Column(DateTime)
+    
+    user = relationship("User")
+    battle_pass = relationship("BattlePass")
+    UniqueConstraint('user_id', 'battle_pass_id', name='uq_user_battle_pass')
+
+
+class Tournament(Base):
+    """Tournament brackets and management"""
+    __tablename__ = "tournaments"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, index=True)
+    game = Column(String(255), index=True)
+    tournament_type = Column(String(50), default='bracket')  # bracket, round-robin, swiss
+    start_date = Column(DateTime)
+    end_date = Column(DateTime)
+    max_participants = Column(Integer, default=64)
+    entry_fee = Column(Integer, default=0)
+    total_prize_pool = Column(Integer, default=0)
+    status = Column(String(50), default='registration')  # registration, active, completed
+    organizer_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    organizer = relationship("User")
+
+
+class TournamentParticipant(Base):
+    """Tournament participants"""
+    __tablename__ = "tournament_participants"
+    
+    id = Column(Integer, primary_key=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    bracket_position = Column(Integer)
+    wins = Column(Integer, default=0)
+    losses = Column(Integer, default=0)
+    prize_earned = Column(Integer, default=0)
+    registered_at = Column(DateTime, default=datetime.utcnow)
+    
+    tournament = relationship("Tournament")
+    user = relationship("User")
+    UniqueConstraint('tournament_id', 'user_id', name='uq_tournament_user')
+
+
+class ContentCreatorPass(Base):
+    """Creator program membership"""
+    __tablename__ = "creator_passes"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True)
+    tier = Column(String(50), default='bronze')  # bronze, silver, gold, platinum
+    total_followers = Column(Integer, default=0)
+    total_views = Column(Integer, default=0)
+    revenue_share_percent = Column(Integer, default=20)
+    verification_status = Column(String(50), default='pending')
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class ReferralCode(Base):
+    """Referral system and rewards"""
+    __tablename__ = "referral_codes"
+    
+    id = Column(Integer, primary_key=True)
+    referrer_id = Column(Integer, ForeignKey("users.id"), index=True)
+    code = Column(String(32), unique=True, index=True)
+    reward_points = Column(Integer, default=500)
+    uses_remaining = Column(Integer, default=-1)  # -1 = unlimited
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    referrer = relationship("User")
+
+
+class ReferralUse(Base):
+    """Tracking of referral code uses"""
+    __tablename__ = "referral_uses"
+    
+    id = Column(Integer, primary_key=True)
+    referral_code_id = Column(Integer, ForeignKey("referral_codes.id"))
+    referrer_id = Column(Integer, ForeignKey("users.id"))
+    referred_user_id = Column(Integer, ForeignKey("users.id"))
+    reward_claimed = Column(Boolean, default=False)
+    used_at = Column(DateTime, default=datetime.utcnow)
+    
+    referral_code = relationship("ReferralCode")
+    referrer = relationship("User", foreign_keys=[referrer_id])
+    referred_user = relationship("User", foreign_keys=[referred_user_id])
+
+
+class SeasonalEvent(Base):
+    """Limited-time seasonal events"""
+    __tablename__ = "seasonal_events"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, index=True)
+    description = Column(Text)
+    season = Column(String(50), index=True)  # spring, summer, fall, winter
+    start_date = Column(DateTime)
+    end_date = Column(DateTime)
+    reward_type = Column(String(50), default='cosmetics')  # cosmetics, points, currency
+    max_reward_quantity = Column(Integer)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EventParticipation(Base):
+    """User participation in seasonal events"""
+    __tablename__ = "event_participations"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    event_id = Column(Integer, ForeignKey("seasonal_events.id"))
+    progress = Column(Integer, default=0)
+    completed = Column(Boolean, default=False)
+    reward_claimed = Column(Boolean, default=False)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+    event = relationship("SeasonalEvent")
+    UniqueConstraint('user_id', 'event_id', name='uq_user_event')
+
+
+class Guild(Base):
+    """Guild/clan organization and economy"""
+    __tablename__ = "guilds"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, index=True)
+    leader_id = Column(Integer, ForeignKey("users.id"))
+    description = Column(Text)
+    max_members = Column(Integer, default=50)
+    member_count = Column(Integer, default=1)
+    guild_level = Column(Integer, default=1)
+    treasury_balance = Column(Integer, default=0)
+    tax_rate = Column(Integer, default=10)  # Percentage on member transactions
+    is_recruiting = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    leader = relationship("User")
+
+
+class GuildMember(Base):
+    """Guild membership"""
+    __tablename__ = "guild_members"
+    
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer, ForeignKey("guilds.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    role = Column(String(50), default='member')  # leader, officer, member
+    contribution_points = Column(Integer, default=0)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    
+    guild = relationship("Guild")
+    user = relationship("User")
+    UniqueConstraint('guild_id', 'user_id', name='uq_guild_user')
+
+
+class ProgressionPath(Base):
+    """Career progression paths and roles"""
+    __tablename__ = "progression_paths"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, index=True)
+    description = Column(Text)
+    min_level = Column(Integer, default=1)
+    total_steps = Column(Integer, default=10)
+    rewards_per_step = Column(String(255))  # JSON: {cosmetics, points, titles}
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserProgressionPath(Base):
+    """User progress on a path"""
+    __tablename__ = "user_progression_paths"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    path_id = Column(Integer, ForeignKey("progression_paths.id"))
+    current_step = Column(Integer, default=1)
+    completed_steps = Column(Integer, default=0)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+    
+    user = relationship("User")
+    path = relationship("ProgressionPath")
+    UniqueConstraint('user_id', 'path_id', name='uq_user_path')
+
+
+class TradingMarket(Base):
+    """Player-to-player trading marketplace"""
+    __tablename__ = "trading_markets"
+    
+    id = Column(Integer, primary_key=True)
+    seller_id = Column(Integer, ForeignKey("users.id"), index=True)
+    item_name = Column(String(255), index=True)
+    item_description = Column(Text)
+    asking_price = Column(Integer)
+    item_rarity = Column(String(50), default='common')  # common, rare, epic, legendary
+    status = Column(String(50), default='active')  # active, sold, cancelled
+    created_at = Column(DateTime, default=datetime.utcnow)
+    sold_at = Column(DateTime)
+    
+    seller = relationship("User")
+
+
+class MarketOffer(Base):
+    """Offers on marketplace items"""
+    __tablename__ = "market_offers"
+    
+    id = Column(Integer, primary_key=True)
+    market_item_id = Column(Integer, ForeignKey("trading_markets.id"))
+    buyer_id = Column(Integer, ForeignKey("users.id"))
+    offered_price = Column(Integer)
+    status = Column(String(50), default='pending')  # pending, accepted, rejected
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    item = relationship("TradingMarket")
+    buyer = relationship("User")
+
+
+class CosmeticCollection(Base):
+    """Cosmetic item collections and albums"""
+    __tablename__ = "cosmetic_collections"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    collection_name = Column(String(255))
+    cosmetic_type = Column(String(50), index=True)  # theme, title, banner, frame
+    owned_count = Column(Integer, default=0)
+    total_rarity_points = Column(Integer, default=0)
+    collection_completion_percent = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User")

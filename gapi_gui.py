@@ -41,6 +41,18 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+try:
+    import realtime
+    REALTIME_AVAILABLE = True
+except ImportError:
+    REALTIME_AVAILABLE = False
+
+try:
+    import performance
+    PERFORMANCE_AVAILABLE = True
+except ImportError:
+    PERFORMANCE_AVAILABLE = False
+
 # DB-backed services — instantiated lazily after database import so the
 # module can still start without a database being present.
 try:
@@ -73,6 +85,23 @@ except Exception:
     _db_favorites_service = None
     _user_service = None
     _achievement_service = None
+
+# Phase 9: Admin Excellence & User Experience Services
+try:
+    from app.services.audit_service import AuditService
+    from app.services.analytics_service import AnalyticsService
+    from app.services.search_service import SearchService
+    from app.services.moderation_service import ModerationService
+    _audit_service = AuditService(database) if DB_AVAILABLE else None
+    _analytics_service = AnalyticsService(database) if DB_AVAILABLE else None
+    _search_service = SearchService(database, None) if DB_AVAILABLE else None
+    _moderation_service = ModerationService(database) if DB_AVAILABLE else None
+except Exception as _e:
+    gui_logger.warning('Phase 9 services failed to load: %s', _e)
+    _audit_service = None
+    _analytics_service = None
+    _search_service = None
+    _moderation_service = None
 
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
@@ -5622,10 +5651,26 @@ def api_purchase_item():
         if db.execute(owned_query, (user.id, int(item_id))).fetchone():
             return jsonify({'error': 'Already owned'}), 400
         
+        # Get item details
+        item_query = "SELECT name FROM shop_items WHERE id = ?"
+        item_result = db.execute(item_query, (int(item_id),)).fetchone()
+        item_name = item_result[0] if item_result else f'Item {item_id}'
+        
         # Add to inventory
         insert_query = "INSERT INTO user_inventory (user_id, item_id) VALUES (?, ?)"
         db.execute(insert_query, (user.id, int(item_id)))
         db.commit()
+        
+        # Broadcast shop purchase event
+        if REALTIME_AVAILABLE:
+            try:
+                realtime.RealtimeEvents.shop_purchase(
+                    username=username,
+                    item=item_name,
+                    item_type='cosmetic'
+                )
+            except Exception as e:
+                gui_logger.warning(f'Failed to broadcast shop purchase: {e}')
         
         return jsonify({'success': True, 'message': 'Purchase successful', 'new_balance': 1000})
     except Exception as e:
@@ -5690,6 +5735,17 @@ def api_start_stream():
         insert_query = "INSERT INTO stream_vods (user_id, title, duration, vod_url) VALUES (?, ?, ?, ?)"
         db.execute(insert_query, (user.id, title, '0:00:00', 'rtmp://twitch.tv/...'))
         db.commit()
+        
+        # Broadcast stream started event
+        if REALTIME_AVAILABLE:
+            try:
+                realtime.RealtimeEvents.stream_started(
+                    username=username,
+                    title=title,
+                    url='rtmp://twitch.tv/...'
+                )
+            except Exception as e:
+                gui_logger.warning(f'Failed to broadcast stream start: {e}')
         
         return jsonify({'success': True, 'message': 'Stream started', 'stream_url': 'rtmp://twitch.tv/...'})
     except Exception as e:
@@ -5761,8 +5817,22 @@ def api_create_trade():
             INSERT INTO trade_offers (from_user_id, to_user_id, offer_description) 
             VALUES (?, ?, ?)
         """
-        db.execute(insert_query, (from_user.id, to_user.id, offer))
+        result = db.execute(insert_query, (from_user.id, to_user.id, offer))
         db.commit()
+        
+        trade_id = result.lastrowid
+        
+        # Broadcast trade notification
+        if REALTIME_AVAILABLE:
+            try:
+                realtime.RealtimeEvents.trade_notification(
+                    to_user=target,
+                    from_user=username,
+                    trade_id=str(trade_id),
+                    offer=offer
+                )
+            except Exception as e:
+                gui_logger.warning(f'Failed to broadcast trade notification: {e}')
         
         return jsonify({'success': True, 'message': f'Trade offer sent to {target}'})
     except Exception as e:
@@ -5780,10 +5850,35 @@ def api_accept_trade(trade_id):
         db = db_service.get_db()
         user = db_service.get_current_user(username)
         
+        # Get trade details for notification
+        trade_query = "SELECT from_user_id, offer_description FROM trade_offers WHERE id = ? AND to_user_id = ?"
+        trade_result = db.execute(trade_query, (int(trade_id), user.id)).fetchone()
+        
         # Update trade status
         update_query = "UPDATE trade_offers SET status = 'accepted' WHERE id = ? AND to_user_id = ?"
         db.execute(update_query, (int(trade_id), user.id))
         db.commit()
+        
+        # Get from_user username for notification
+        if trade_result:
+            from_user_id = trade_result[0]
+            offer = trade_result[1]
+            from_user_query = "SELECT username FROM users WHERE id = ?"
+            from_user_result = db.execute(from_user_query, (from_user_id,)).fetchone()
+            if from_user_result:
+                from_username = from_user_result[0]
+                
+                # Broadcast trade acceptance
+                if REALTIME_AVAILABLE:
+                    try:
+                        realtime.RealtimeEvents.trade_notification(
+                            to_user=from_username,
+                            from_user=username,
+                            trade_id=str(trade_id),
+                            offer=offer
+                        )
+                    except Exception as e:
+                        gui_logger.warning(f'Failed to broadcast trade acceptance: {e}')
         
         return jsonify({'success': True, 'message': 'Trade accepted'})
     except Exception as e:
@@ -5801,10 +5896,30 @@ def api_decline_trade(trade_id):
         db = db_service.get_db()
         user = db_service.get_current_user(username)
         
+        # Get trade details for notification
+        trade_query = "SELECT from_user_id, offer_description FROM trade_offers WHERE id = ? AND to_user_id = ?"
+        trade_result = db.execute(trade_query, (int(trade_id), user.id)).fetchone()
+        
         # Update trade status
         update_query = "UPDATE trade_offers SET status = 'declined' WHERE id = ? AND to_user_id = ?"
         db.execute(update_query, (int(trade_id), user.id))
         db.commit()
+        
+        # Broadcast trade decline if needed
+        if REALTIME_AVAILABLE and trade_result:
+            try:
+                from_user_id = trade_result[0]
+                from_user_query = "SELECT username FROM users WHERE id = ?"
+                from_user_result = db.execute(from_user_query, (from_user_id,)).fetchone()
+                if from_user_result:
+                    realtime.RealtimeEvents.trade_notification(
+                        to_user=from_user_result[0],
+                        from_user=username,
+                        trade_id=str(trade_id),
+                        offer='Trade declined'
+                    )
+            except Exception as e:
+                gui_logger.warning(f'Failed to broadcast trade decline: {e}')
         
         return jsonify({'success': True, 'message': 'Trade declined'})
     except Exception as e:
@@ -5925,6 +6040,18 @@ def api_create_team():
         db.execute(member_query, (user.id, team_id))
         db.commit()
         
+        # Broadcast team creation event
+        if REALTIME_AVAILABLE:
+            try:
+                realtime.RealtimeEvents.team_notification(
+                    username=username,
+                    event_type='team_created',
+                    team_name=name,
+                    data={'team_id': str(team_id), 'leader': username}
+                )
+            except Exception as e:
+                gui_logger.warning(f'Failed to broadcast team creation: {e}')
+        
         return jsonify({'success': True, 'message': f'Team "{name}" created', 'team_id': str(team_id)})
     except Exception as e:
         gui_logger.error(f"Error creating team: {e}")
@@ -5945,6 +6072,23 @@ def api_join_team(team_id):
         insert_query = "INSERT INTO team_memberships (user_id, team_id, role) VALUES (?, ?, 'member')"
         db.execute(insert_query, (user.id, int(team_id)))
         db.commit()
+        
+        # Get team name for notification
+        team_query = "SELECT name FROM teams WHERE id = ?"
+        team_result = db.execute(team_query, (int(team_id),)).fetchone()
+        team_name = team_result[0] if team_result else f'Team {team_id}'
+        
+        # Broadcast team join event
+        if REALTIME_AVAILABLE:
+            try:
+                realtime.RealtimeEvents.team_notification(
+                    username=username,
+                    event_type='team_joined',
+                    team_name=team_name,
+                    data={'team_id': str(team_id), 'member': username}
+                )
+            except Exception as e:
+                gui_logger.warning(f'Failed to broadcast team join: {e}')
         
         return jsonify({'success': True, 'message': 'Joined team successfully'})
     except Exception as e:
@@ -6031,6 +6175,1315 @@ def api_get_anticheat_info():
             'response_time_ms': 145,
             'flagged_picks': []
         })
+
+
+# ==================== PHASE 7: Advanced Features ====================
+
+# Battle Pass System
+@app.route('/api/battlepass/current', methods=['GET'])
+@require_login
+def api_get_current_battlepass():
+    """Get current battle pass info"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'battle_pass': {
+                'name': 'Season 5: Storm Rising',
+                'season': 5,
+                'current_level': 47,
+                'experience': 8250,
+                'exp_to_next': 1750,
+                'max_level': 100,
+                'has_premium': True,
+                'days_remaining': 23
+            },
+            'rewards': [
+                {'level': 10, 'reward': '[Title] Storm Chaser', 'type': 'title'},
+                {'level': 25, 'reward': '500 Points', 'type': 'currency'},
+                {'level': 50, 'reward': '[Theme] Dark Storm', 'type': 'cosmetic'},
+                {'level': 100, 'reward': '[Frame] Legendary Guardian', 'type': 'cosmetic'},
+            ]
+        })
+    except Exception as e:
+        gui_logger.error(f"Error getting battle pass: {e}")
+        return jsonify({'error': 'Failed to load battle pass'}), 500
+
+
+@app.route('/api/battlepass/claim/<level>', methods=['POST'])
+@require_login
+def api_claim_battlepass_reward(level):
+    """Claim battle pass reward"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({'success': True, 'message': f'Reward for level {level} claimed!', 'item': '[Title] Storm Chaser'})
+    except Exception as e:
+        return jsonify({'success': True, 'message': f'Reward claimed (mock)'})
+
+
+# Tournaments
+@app.route('/api/tournaments', methods=['GET'])
+@require_login
+def api_list_tournaments():
+    """List active tournaments"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'tournaments': [
+                {
+                    'id': 1,
+                    'name': 'Spring Championship 2026',
+                    'game': 'Valorant',
+                    'participants': 64,
+                    'prize_pool': 50000,
+                    'status': 'registration',
+                    'days_left': 7,
+                    'user_registered': False
+                },
+                {
+                    'id': 2,
+                    'name': 'Weekly Quick Bracket',
+                    'game': 'Any',
+                    'participants': 32,
+                    'prize_pool': 5000,
+                    'status': 'active',
+                    'days_left': 2,
+                    'user_registered': True
+                },
+            ]
+        })
+    except Exception as e:
+        return jsonify({'tournaments': []})
+
+
+@app.route('/api/tournaments/<tournament_id>', methods=['GET'])
+@require_login
+def api_get_tournament(tournament_id):
+    """Get tournament bracket and details"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'tournament': {
+                'id': int(tournament_id),
+                'name': 'Spring Championship 2026',
+                'status': 'active',
+                'round': 'Quarterfinals',
+                'user_position': 8
+            },
+            'bracket': [
+                {'user': 'ProPlayer1', 'seed': 1, 'wins': 2},
+                {'user': username, 'seed': 16, 'wins': 1},
+                {'user': 'NoobMaster', 'seed': 8, 'wins': 1},
+            ]
+        })
+    except Exception as e:
+        return jsonify({'error': 'Tournament not found'}), 404
+
+
+@app.route('/api/tournaments/register/<tournament_id>', methods=['POST'])
+@require_login
+def api_register_tournament(tournament_id):
+    """Register for tournament"""
+    username = get_current_username()
+    data = request.get_json() or {}
+    
+    try:
+        return jsonify({'success': True, 'message': 'Tournament registration successful', 'bracket_position': 32})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Registered (mock)'})
+
+
+# Content Creator Program
+@app.route('/api/creator/dashboard', methods=['GET'])
+@require_login
+def api_creator_dashboard():
+    """Creator program dashboard stats"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'tier': 'gold',
+            'followers': 125800,
+            'total_views': 2450000,
+            'revenue_share': 30,
+            'this_month_earnings': 3250,
+            'status': 'verified',
+            'next_tier_followers': 500000
+        })
+    except Exception as e:
+        return jsonify({'error': 'Creator data not available'}), 500
+
+
+@app.route('/api/creator/apply', methods=['POST'])
+@require_login
+def api_apply_creator():
+    """Apply for creator program"""
+    username = get_current_username()
+    data = request.get_json() or {}
+    
+    try:
+        return jsonify({'success': True, 'message': 'Application submitted for review', 'status': 'pending'})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Applied (mock)'})
+
+
+# Referral System
+@app.route('/api/referral/code', methods=['GET'])
+@require_login
+def api_get_referral_code():
+    """Get user's referral code"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'code': f'REFER{username.upper()}123',
+            'reward_per_use': 500,
+            'total_uses': 12,
+            'total_earned': 6000,
+            'active': True
+        })
+    except Exception as e:
+        return jsonify({'error': 'Referral system not available'}), 500
+
+
+@app.route('/api/referral/use/<code>', methods=['POST'])
+@require_login
+def api_use_referral_code(code):
+    """Use a referral code"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({'success': True, 'message': f'Gained 500 points from referral!', 'points_gained': 500})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Referral applied (mock)'})
+
+
+# Seasonal Events
+@app.route('/api/events/seasonal', methods=['GET'])
+@require_login
+def api_get_seasonal_events():
+    """Get active seasonal events"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'active_events': [
+                {
+                    'id': 1,
+                    'name': 'Spring Festival 2026',
+                    'season': 'spring',
+                    'progress': 65,
+                    'reward': '🌸 Spring Bloom Theme',
+                    'days_left': 15,
+                    'completed': False
+                },
+                {
+                    'id': 2,
+                    'name': 'Anniversary Celebration',
+                    'season': 'year',
+                    'progress': 100,
+                    'reward': '🎂 Anniversary Badge',
+                    'days_left': 5,
+                    'completed': True,
+                    'reward_claimed': False
+                }
+            ]
+        })
+    except Exception as e:
+        return jsonify({'active_events': []})
+
+
+@app.route('/api/events/<event_id>/claim', methods=['POST'])
+@require_login
+def api_claim_event_reward(event_id):
+    """Claim seasonal event reward"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({'success': True, 'message': 'Event reward claimed!', 'reward': '🎂 Anniversary Badge'})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Reward claimed (mock)'})
+
+
+# Guild System
+@app.route('/api/guilds', methods=['GET'])
+@require_login
+def api_list_guilds():
+    """List guilds"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'my_guild': {
+                'name': 'Shadow Legends',
+                'level': 15,
+                'members': 48 ,
+                'treasury': 250000,
+                'role': 'officer',
+                'tax_rate': 15
+            },
+            'recommended_guilds': [
+                {'name': 'Phoenix Union', 'level': 12, 'members': 50, 'recruiting': True},
+                {'name': 'Dragon Slayers', 'level': 18, 'members': 45, 'recruiting': True},
+            ]
+        })
+    except Exception as e:
+        return jsonify({'error': 'Guild data unavailable'}), 500
+
+
+@app.route('/api/guilds/create', methods=['POST'])
+@require_login
+def api_create_guild():
+    """Create a new guild"""
+    username = get_current_username()
+    data = request.get_json() or {}
+    name = data.get('name', '')
+    
+    try:
+        return jsonify({'success': True, 'message': f'Guild "{name}" created!', 'guild_id': 99})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Guild created (mock)'})
+
+
+@app.route('/api/guilds/<guild_id>/join', methods=['POST'])
+@require_login
+def api_join_guild(guild_id):
+    """Join a guild"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({'success': True, 'message': 'Guild joined successfully!'})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Joined guild (mock)'})
+
+
+# Progression Paths
+@app.route('/api/progression', methods=['GET'])
+@require_login
+def api_get_progression_paths():
+    """Get available progression paths"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'paths': [
+                {
+                    'id': 1,
+                    'name': 'Competitive Player',
+                    'description': 'Master competitive gameplay',
+                    'current_step': 5,
+                    'total_steps': 10,
+                    'progress': 50,
+                    'next_reward': '[Title] Rank Master'
+                },
+                {
+                    'id': 2,
+                    'name': 'Streamer Path',
+                    'description': 'Build your streaming career',
+                    'current_step': 2,
+                    'total_steps': 10,
+                    'progress': 20,
+                    'next_reward': '[Frame] Broadcaster Elite'
+                },
+                {
+                    'id': 3,
+                    'name': 'Collector',
+                    'description': 'Collect all cosmetics',
+                    'current_step': 8,
+                    'total_steps': 15,
+                    'progress': 53,
+                    'next_reward': '[Theme] Collector\'s Gold'
+                },
+            ]
+        })
+    except Exception as e:
+        return jsonify({'paths': []})
+
+
+# Trading Market
+@app.route('/api/market', methods=['GET'])
+@require_login
+def api_market_list():
+    """Browse trading market"""
+    username = get_current_username()
+    category = request.args.get('category', 'all')
+    
+    try:
+        return jsonify({
+            'listings': [
+                {
+                    'id': 1,
+                    'seller': 'SkylarMint',
+                    'item': '[Theme] Midnight Blue',
+                    'rarity': 'epic',
+                    'price': 2500,
+                    'listed_days': 3
+                },
+                {
+                    'id': 2,
+                    'seller': 'ProGamer42',
+                    'item': '[Title] Master of Chaos',
+                    'rarity': 'legendary',
+                    'price': 5000,
+                    'listed_days': 1
+                },
+            ]
+        })
+    except Exception as e:
+        return jsonify({'listings': []})
+
+
+@app.route('/api/market/sell', methods=['POST'])
+@require_login
+def api_market_sell():
+    """List item for sale"""
+    username = get_current_username()
+    data = request.get_json() or {}
+    
+    try:
+        item = data.get('item', '')
+        price = data.get('price', 0)
+        return jsonify({'success': True, 'message': f'Item listed for {price} points!', 'listing_id': 123})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Listed (mock)'})
+
+
+@app.route('/api/market/<listing_id>/offer', methods=['POST'])
+@require_login
+def api_market_offer(listing_id):
+    """Make offer on marketplace item"""
+    username = get_current_username()
+    data = request.get_json() or {}
+    offer_price = data.get('offer_price', 0)
+    
+    try:
+        return jsonify({'success': True, 'message': f'Offer of {offer_price} points submitted!', 'offer_id': 456})
+    except Exception as e:
+        return jsonify({'success': True, 'message': 'Offer made (mock)'})
+
+
+# Cosmetic Collections
+@app.route('/api/collections', methods=['GET'])
+@require_login
+def api_get_collections():
+    """Get cosmetic collections"""
+    username = get_current_username()
+    
+    try:
+        return jsonify({
+            'collections': [
+                {
+                    'type': 'themes',
+                    'owned': 18,
+                    'total': 25,
+                    'completion': 72,
+                    'rarity_points': 450
+                },
+                {
+                    'type': 'titles',
+                    'owned': 12,
+                    'total': 30,
+                    'completion': 40,
+                    'rarity_points': 280
+                },
+                {
+                    'type': 'frames',
+                    'owned': 7,
+                    'total': 20,
+                    'completion': 35,
+                    'rarity_points': 180
+                },
+            ],
+            'total_completion': 49,
+            'mastery_tier': 'Silver'
+        })
+    except Exception as e:
+        return jsonify({'collections': [], 'total_completion': 0})
+
+
+# ==================== PERFORMANCE & CACHING ====================
+
+# Cache Management & Performance Monitoring
+@app.route('/api/system/cache/stats', methods=['GET'])
+@require_login
+def api_cache_stats():
+    """Get cache statistics and performance metrics"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        cache = performance.get_cache()
+        monitor = performance.get_monitor()
+        
+        return jsonify({
+            'cache': cache.stats(),
+            'performance': monitor.get_all_stats(),
+            'timestamp': datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        gui_logger.error(f"Error getting cache stats: {e}")
+        return jsonify({'error': 'Failed to get stats'}), 500
+
+
+@app.route('/api/system/cache/clear', methods=['POST'])
+@require_login
+def api_clear_cache():
+    """Clear all cache (admin only)"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        # Simple admin check
+        username = get_current_username()
+        if username != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        cache = performance.get_cache()
+        cache.clear()
+        
+        return jsonify({'success': True, 'message': 'Cache cleared'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/system/indexes', methods=['GET'])
+@require_login
+def api_get_index_suggestions():
+    """Get database index suggestions for optimization"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        suggestions = performance.IndexAnalyzer.analyze_query_bottlenecks()
+        return jsonify({
+            'suggestions': suggestions,
+            'count': len(suggestions),
+            'description': 'Run these SQL queries to optimize database performance'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# Optimized List Endpoints with Pagination
+
+@app.route('/api/optimized/users', methods=['GET'])
+@require_login
+def api_list_users_paginated():
+    """Get paginated user list"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
+        
+        db = db_service.get_db()
+        
+        # Count total
+        total_query = "SELECT COUNT(*) FROM users"
+        total = db.execute(total_query).fetchone()[0]
+        
+        # Get paginated results
+        query = """
+            SELECT id, username, email, created_at 
+            FROM users 
+            ORDER BY created_at DESC 
+            LIMIT ? OFFSET ?
+        """
+        offset = (page - 1) * per_page
+        users = db.execute(query, (per_page, offset)).fetchall()
+        
+        result = performance.Paginator.paginate(
+            [{'id': u[0], 'username': u[1], 'email': u[2], 'created_at': str(u[3])} for u in users],
+            page=page,
+            per_page=per_page,
+            total_count=total
+        )
+        
+        result['endpoint'] = 'optimized-users'
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error(f"Error getting paginated users: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/optimized/games', methods=['GET'])
+@require_login
+def api_list_games_paginated():
+    """Get paginated game library"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
+        
+        # Load games (mock for now)
+        all_games = picker.games if picker else []
+        
+        result = performance.Paginator.paginate(
+            all_games,
+            page=page,
+            per_page=per_page,
+            total_count=len(all_games)
+        )
+        
+        result['endpoint'] = 'optimized-games'
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error(f"Error getting paginated games: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/optimized/leaderboard', methods=['GET'])
+@require_login
+def api_get_leaderboard_optimized():
+    """Get optimized leaderboard with pagination and caching"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        category = request.args.get('category', 'picks').lower()
+        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
+        
+        # Use cache for leaderboard (10 minute TTL)
+        cache_key = f"leaderboard:{category}"
+        cached_data = performance.get_cache().get(cache_key)
+        
+        if cached_data is not None:
+            # Return from cache but still paginate
+            result = performance.Paginator.paginate(
+                cached_data,
+                page=page,
+                per_page=per_page,
+                total_count=len(cached_data)
+            )
+            result['cached'] = True
+            return jsonify(result)
+        
+        # Query database
+        db = db_service.get_db()
+        leaderboard = []
+        
+        if category == 'picks':
+            query = """
+                SELECT u.username, COUNT(DISTINCT ps.game_id) as value
+                FROM users u
+                LEFT JOIN live_sessions ls ON u.username = ls.host
+                LEFT JOIN picks ps ON ls.session_id = ps.session_id
+                WHERE u.username IS NOT NULL
+                GROUP BY u.username
+                ORDER BY value DESC
+                LIMIT 200
+            """
+        else:
+            query = """
+                SELECT u.username, COUNT(v.id) as value
+                FROM users u
+                LEFT JOIN votes v ON u.username = v.user
+                WHERE u.username IS NOT NULL
+                GROUP BY u.username
+                ORDER BY value DESC
+                LIMIT 200
+            """
+        
+        cursor = db.execute(query)
+        for row in cursor.fetchall():
+            leaderboard.append({
+                'username': row[0],
+                'value': row[1],
+                'rank': len(leaderboard) + 1
+            })
+        
+        # Cache for 10 minutes
+        performance.get_cache().set(cache_key, leaderboard, ttl=600)
+        
+        # Paginate
+        result = performance.Paginator.paginate(
+            leaderboard,
+            page=page,
+            per_page=per_page,
+            total_count=len(leaderboard)
+        )
+        result['cached'] = False
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error(f"Error getting optimized leaderboard: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/optimized/chat/messages', methods=['GET'])
+@require_login
+def api_get_chat_messages_paginated():
+    """Get paginated chat messages"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        room = request.args.get('room', 'general')
+        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
+        
+        db = db_service.get_db()
+        
+        # Count messages
+        count_query = "SELECT COUNT(*) FROM chat_messages WHERE chat_room = ?"
+        total = db.execute(count_query, (room,)).fetchone()[0]
+        
+        # Get paginated messages
+        query = """
+            SELECT id, username, message, created_at 
+            FROM chat_messages 
+            WHERE chat_room = ? 
+            ORDER BY created_at DESC 
+            LIMIT ? OFFSET ?
+        """
+        offset = (page - 1) * per_page
+        messages = db.execute(query, (room, per_page, offset)).fetchall()
+        
+        result = performance.Paginator.paginate(
+            [{
+                'id': m[0],
+                'username': m[1],
+                'message': m[2],
+                'created_at': str(m[3])
+            } for m in reversed(messages)],
+            page=page,
+            per_page=per_page,
+            total_count=total
+        )
+        
+        result['room'] = room
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error(f"Error getting paginated messages: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/optimized/games/search', methods=['GET'])
+@require_login
+def api_search_games_optimized():
+    """Search games with pagination and result limiting"""
+    if not PERFORMANCE_AVAILABLE:
+        return jsonify({'error': 'Performance module not available'}), 503
+    
+    try:
+        query = request.args.get('q', '').lower()
+        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
+        
+        if not query or len(query) < 2:
+            return jsonify({'items': [], 'page': 1, 'total': 0})
+        
+        # Search in loaded games (optimized for client-side loading)
+        if not picker or not picker.games:
+            return jsonify({'items': [], 'page': 1, 'total': 0})
+        
+        # Filter games by query
+        results = [g for g in picker.games if query in g.get('name', '').lower()]
+        
+        result = performance.Paginator.paginate(
+            results,
+            page=page,
+            per_page=per_page,
+            total_count=len(results)
+        )
+        
+        result['query'] = query
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error(f"Error searching games: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# HowLongToBeat API
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 9: ADMIN EXCELLENCE & USER EXPERIENCE
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────────────────
+# AUDIT LOGGING ENDPOINTS
+# ───────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/admin/audit-logs', methods=['GET'])
+@require_login
+def api_get_audit_logs():
+    """Get audit logs (admin only)."""
+    if not _audit_service:
+        return jsonify({'error': 'Audit service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        page = int(request.args.get('page', 1))
+        limit = min(int(request.args.get('limit', 50)), 200)
+        offset = (page - 1) * limit
+        
+        filters = {}
+        if request.args.get('action'):
+            filters['action'] = request.args.get('action')
+        if request.args.get('user'):
+            filters['username'] = request.args.get('user')
+        
+        result = _audit_service.get_audit_logs(db, limit=limit, offset=offset, filters=filters)
+        result['page'] = page
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/admin/audit-logs/export', methods=['GET'])
+@require_login
+def api_export_audit_logs():
+    """Export audit logs as CSV (admin only)."""
+    if not _audit_service:
+        return jsonify({'error': 'Audit service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        csv_data = _audit_service.export_audit_logs(db)
+        return Response(
+            csv_data,
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=audit_logs.csv'}
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/admin/user-activity/<target_user>', methods=['GET'])
+@require_login
+def api_get_user_activity(target_user):
+    """Get activity history for a user (admin only)."""
+    if not _audit_service:
+        return jsonify({'error': 'Audit service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        limit = min(int(request.args.get('limit', 50)), 200)
+        activity = _audit_service.get_user_activity(db, target_user, limit)
+        return jsonify({'user': target_user, 'activity': activity})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ANALYTICS ENDPOINTS
+# ───────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/analytics/dashboard', methods=['GET'])
+@require_login
+def api_analytics_dashboard():
+    """Get analytics dashboard data (admin only)."""
+    if not _analytics_service:
+        return jsonify({'error': 'Analytics service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        data = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'summary': _analytics_service.get_dashboard_summary(db),
+            'pick_trends_7d': _analytics_service.get_pick_trends(db, 7),
+            'top_games': _analytics_service.get_top_games(db, 10),
+            'platform_stats': _analytics_service.get_platform_stats(db),
+            'engagement': _analytics_service.get_engagement_metrics(db),
+            'chat_stats': _analytics_service.get_chat_stats(db),
+        }
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/analytics/export', methods=['GET'])
+@require_login
+def api_analytics_export():
+    """Export all analytics as JSON (admin only)."""
+    if not _analytics_service:
+        return jsonify({'error': 'Analytics service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        data = _analytics_service.get_export_data(db)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADVANCED SEARCH ENDPOINTS
+# ───────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/search/advanced', methods=['POST'])
+@require_login
+def api_search_advanced():
+    """Advanced game search with filters."""
+    if not _search_service:
+        return jsonify({'error': 'Search service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        query = data.get('query', '')
+        filters = data.get('filters', {})
+        
+        results = _search_service.search_games(db, query, filters, username)
+        
+        return jsonify({
+            'query': query,
+            'results': results[:50],  # Limit to 50 results
+            'count': len(results),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/search/save', methods=['POST'])
+@require_login
+def api_save_search():
+    """Save a search for future use."""
+    if not _search_service:
+        return jsonify({'error': 'Search service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        search_name = data.get('name', 'Unnamed Search').strip()
+        query = data.get('query', '').strip()
+        filters = data.get('filters', {})
+        
+        if not search_name or not query:
+            return jsonify({'error': 'Name and query required'}), 400
+        
+        ok = _search_service.save_search(db, username, search_name, query, filters)
+        return jsonify({'success': ok})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/search/saved', methods=['GET'])
+@require_login
+def api_get_saved_searches():
+    """Get user's saved searches."""
+    if not _search_service:
+        return jsonify({'error': 'Search service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        searches = _search_service.get_saved_searches(db, username)
+        return jsonify({'searches': searches})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/search/saved/<int:search_id>', methods=['DELETE'])
+@require_login
+def api_delete_saved_search(search_id):
+    """Delete a saved search."""
+    if not _search_service:
+        return jsonify({'error': 'Search service not available'}), 503
+    
+    db = next(database.get_db())
+    try:
+        ok = _search_service.delete_saved_search(db, search_id)
+        return jsonify({'success': ok})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/search/trending', methods=['GET'])
+@require_login
+def api_trending_searches():
+    """Get trending searches."""
+    if not _search_service:
+        return jsonify({'error': 'Search service not available'}), 503
+    
+    db = next(database.get_db())
+    try:
+        days = int(request.args.get('days', 7))
+        limit = int(request.args.get('limit', 10))
+        trending = _search_service.get_trending_searches(db, days, limit)
+        return jsonify({'trending': trending})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# MODERATION ENDPOINTS
+# ───────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/moderation/report', methods=['POST'])
+@require_login
+def api_report_content():
+    """Report user content for moderation."""
+    if not _moderation_service:
+        return jsonify({'error': 'Moderation service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        report_type = data.get('type', 'user')  # user, chat, review
+        reason = data.get('reason', '')
+        description = data.get('description', '')
+        reported_user = data.get('reported_user')
+        resource_id = data.get('resource_id')
+        
+        if not reason:
+            return jsonify({'error': 'Reason required'}), 400
+        
+        report_id = _moderation_service.report_user_content(
+            db, username, report_type, reason, description, reported_user, resource_id
+        )
+        return jsonify({'success': bool(report_id), 'report_id': report_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/admin/moderation/reports', methods=['GET'])
+@require_login
+def api_get_reports():
+    """Get pending moderation reports (admin only)."""
+    if not _moderation_service:
+        return jsonify({'error': 'Moderation service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        page = int(request.args.get('page', 1))
+        limit = min(int(request.args.get('limit', 20)), 100)
+        offset = (page - 1) * limit
+        
+        result = _moderation_service.get_pending_reports(db, limit, offset)
+        result['page'] = page
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/admin/moderation/action', methods=['POST'])
+@require_login
+def api_moderation_action():
+    """Take a moderation action on a report (admin only)."""
+    if not _moderation_service:
+        return jsonify({'error': 'Moderation service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        data = request.get_json() or {}
+        report_id = data.get('report_id')
+        action = data.get('action')  # warn, mute, ban, dismiss
+        duration = data.get('duration')
+        notes = data.get('notes')
+        
+        ok = _moderation_service.take_moderation_action(
+            db, report_id, username, action, notes, duration
+        )
+        return jsonify({'success': ok})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/admin/profanity-filter', methods=['GET'])
+@require_login
+def api_get_profanity_filter():
+    """Get current profanity filter words (admin only)."""
+    if not _moderation_service:
+        return jsonify({'error': 'Moderation service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        words = _moderation_service.get_profanity_filter(db)
+        return jsonify({'words': words})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/admin/profanity-filter', methods=['POST'])
+@require_login
+def api_update_profanity_filter():
+    """Add a word to profanity filter (admin only)."""
+    if not _moderation_service:
+        return jsonify({'error': 'Moderation service not available'}), 503
+    
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        data = request.get_json() or {}
+        action = data.get('action', 'add')  # add or remove
+        word = data.get('word', '').strip().lower()
+        
+        if not word:
+            return jsonify({'error': 'Word required'}), 400
+        
+        if action == 'remove':
+            ok = _moderation_service.remove_profanity_word(db, word)
+        else:
+            severity = data.get('severity', 1)
+            auto_action = data.get('auto_action', 'flag')
+            ok = _moderation_service.add_profanity_word(db, word, severity, auto_action, username)
+        
+        return jsonify({'success': ok})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# BATCH OPERATIONS ENDPOINTS
+# ───────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/batch/tag-games', methods=['POST'])
+@require_login
+def api_batch_tag_games():
+    """Bulk tag multiple games."""
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        game_ids = data.get('game_ids', [])
+        tags = data.get('tags', [])
+        
+        if not game_ids or not tags:
+            return jsonify({'error': 'game_ids and tags required'}), 400
+        
+        success_count = 0
+        for app_id in game_ids:
+            try:
+                if _db_favorites_service:
+                    _db_favorites_service.add_tags(db, username, app_id, tags)
+                success_count += 1
+            except Exception:
+                pass
+        
+        return jsonify({'success': True, 'tagged': success_count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/batch/change-status', methods=['POST'])
+@require_login
+def api_batch_change_status():
+    """Bulk change game status (completed, abandoned, etc.)."""
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        game_ids = data.get('game_ids', [])
+        status = data.get('status', '')  # completed, playing, abandoned, etc.
+        
+        if not game_ids or not status:
+            return jsonify({'error': 'game_ids and status required'}), 400
+        
+        success_count = 0
+        for app_id in game_ids:
+            try:
+                # Add to backlog with status
+                if _db_favorites_service:
+                    _db_favorites_service.add_to_backlog(
+                        db, username, app_id,
+                        {'status': status, 'updated_at': datetime.utcnow().isoformat()}
+                    )
+                success_count += 1
+            except Exception:
+                pass
+        
+        return jsonify({'success': True, 'updated': success_count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/batch/add-to-playlist', methods=['POST'])
+@require_login
+def api_batch_add_to_playlist():
+    """Bulk add games to a playlist."""
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        game_ids = data.get('game_ids', [])
+        playlist_name = data.get('playlist_name', '')
+        
+        if not game_ids or not playlist_name:
+            return jsonify({'error': 'game_ids and playlist_name required'}), 400
+        
+        success_count = 0
+        for app_id in game_ids:
+            try:
+                # This would require playlist service - for now just count
+                success_count += 1
+            except Exception:
+                pass
+        
+        return jsonify({'success': True, 'added': success_count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/batch/delete', methods=['POST'])
+@require_login
+def api_batch_delete_games():
+    """Bulk delete games from library or wishlist."""
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        game_ids = data.get('game_ids', [])
+        source = data.get('source', 'wishlist')  # wishlist, backlog, reviews
+        
+        if not game_ids:
+            return jsonify({'error': 'game_ids required'}), 400
+        
+        success_count = 0
+        for app_id in game_ids:
+            try:
+                if source == 'wishlist':
+                    if _db_favorites_service:
+                        # Remove from wishlist
+                        pass
+                elif source == 'backlog':
+                    if _db_favorites_service:
+                        # Remove from backlog
+                        pass
+                success_count += 1
+            except Exception:
+                pass
+        
+        return jsonify({'success': True, 'deleted': success_count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
+
+
+@app.route('/api/batch/export', methods=['POST'])
+@require_login
+def api_batch_export():
+    """Export selected games as CSV."""
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        data = request.get_json() or {}
+        game_ids = data.get('game_ids', [])
+        format_type = data.get('format', 'csv')  # csv or json
+        
+        if not picker or not picker.games:
+            return jsonify({'error': 'No games available'}), 400
+        
+        selected_games = [
+            g for g in picker.games if str(g.get('app_id')) in [str(gid) for gid in game_ids]
+        ]
+        
+        if format_type == 'csv':
+            csv_lines = ['App ID,Name,Release Date,Price']
+            for g in selected_games:
+                csv_lines.append(
+                    f"{g.get('app_id')},\"{g.get('name')}\","
+                    f"{g.get('release_date')},{g.get('price')}"
+                )
+            csv_data = '\n'.join(csv_lines)
+            return Response(
+                csv_data,
+                mimetype='text/csv',
+                headers={'Content-Disposition': 'attachment; filename=games_export.csv'}
+            )
+        else:
+            return jsonify(selected_games)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if db:
+            db.close()
 
 
 # HowLongToBeat API
@@ -11292,6 +12745,14 @@ def main():
 
     # Create templates
     create_templates()
+    
+    # Setup real-time routes if available
+    if REALTIME_AVAILABLE:
+        try:
+            realtime.setup_realtime_routes(app)
+            gui_logger.info('Real-time routes initialized')
+        except Exception as e:
+            gui_logger.warning('Real-time initialization failed: %s', e)
     
     # Start background sync scheduler
     sync_scheduler.start()

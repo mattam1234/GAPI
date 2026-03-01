@@ -750,6 +750,16 @@
             padding: 0;
         }
     </style>
+    <!-- Enhanced UI Styles & Animations -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='enhanced_styles.css') }}">
+    <!-- Real-time Client Module -->
+    <script src="{{ url_for('static', filename='realtime-client.js') }}"></script>
+    <!-- Frontend Optimization Module -->
+    <script src="{{ url_for('static', filename='frontend-optimization.js') }}"></script>
+    <!-- UX Enhancements (Toasts, Tooltips, Shortcuts, FAB, etc.) -->
+    <script src="{{ url_for('static', filename='ux_enhancements.js') }}"></script>
+    <!-- Interactive Features (Charts, Search, Auto-save, Drag&Drop) -->
+    <script src="{{ url_for('static', filename='interactive_features.js') }}"></script>
 </head>
 <body>
     <!-- Site-wide Announcement Banner -->
@@ -821,7 +831,7 @@
                     <button onclick="handleLogout()" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Logout</button>
                 </div>
             </div>
-            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode">🌙 Dark Mode</button>
+            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode" data-tooltip="Switch between light and dark themes">🌙 Dark Mode</button>
         </header>
 
         <div class="status-bar" id="status">Loading...</div>
@@ -837,12 +847,12 @@
             <button class="tab" onclick="switchTab('playlists', event)">📋 Playlists</button>
             <button class="tab" onclick="switchTab('backlog', event)">📚 Backlog</button>
             <button class="tab" onclick="switchTab('ignored', event)">No-Play List</button>
-            <button class="tab" onclick="switchTab('achievements', event)">Achievements</button>
-            <button class="tab" onclick="switchTab('friends', event)">👥 Friends</button>
-            <button class="tab" onclick="switchTab('recommendations', event)">💡 For You</button>
-            <button class="tab" onclick="switchTab('leaderboard', event)">🏆 Leaderboard</button>
-            <button class="tab" onclick="switchTab('chat', event)">💬 Chat</button>
-            <button class="tab" onclick="switchTab('sessions', event)">🎯 Sessions</button>
+            <button class="tab" onclick="switchTab('achievements', event)" data-tooltip="Track your gaming achievements">Achievements</button>
+            <button class="tab" onclick="switchTab('friends', event)" data-tooltip="Manage your friends list">👥 Friends</button>
+            <button class="tab" onclick="switchTab('recommendations', event)" data-tooltip="Get personalized game recommendations">💡 For You</button>
+            <button class="tab" onclick="switchTab('leaderboard', event)" data-tooltip="View top players and rankings">🏆 Leaderboard</button>
+            <button class="tab" onclick="switchTab('chat', event)" data-tooltip="Chat with other users">💬 Chat</button>
+            <button class="tab" onclick="switchTab('sessions', event)" data-tooltip="Join multiplayer sessions">🎯 Sessions</button>
             <a href="/game-sessions" class="tab" style="text-decoration: none; display: inline-flex; align-items: center;">🎬 Full Sessions Page</a>
             <button id="notifications-tab-btn" class="tab" onclick="switchTab('notifications', event)">🔔 Alerts <span id="notif-badge" style="display:none;background:#e74c3c;color:white;border-radius:50%;padding:1px 6px;font-size:0.75em;margin-left:4px;"></span></button>
             <button class="tab" onclick="switchTab('plugins', event)">🧩 Plugins</button>
@@ -940,7 +950,7 @@
                 </div>
             </div>
 
-            <button class="pick-button" onclick="pickGame()">🎲 Pick Random Game</button>
+            <button class="pick-button" onclick="pickGame()" data-tooltip="Randomly pick a game (Ctrl+P)">🎲 Pick Random Game</button>
 
             <div id="game-result" class="game-display" style="display: none;">
                 <!-- Game info will be displayed here -->
@@ -1491,6 +1501,15 @@
                 <button onclick="showRanked()" style="padding:6px 12px; background:#d4af37; color:black; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🏆 Ranked</button>
                 <button onclick="showAntiCheat()" style="padding:6px 12px; background:#95a5a6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔒 Fairness</button>
                 <button onclick="showAdvancedNotif()" style="padding:6px 12px; background:#16a085; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Settings</button>
+                <button onclick="showBattlePass()" style="padding:6px 12px; background:#9b59b6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎖️ Battle Pass</button>
+                <button onclick="showTournaments()" style="padding:6px 12px; background:#e67e22; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🏆 Tournaments</button>
+                <button onclick="showCreator()" style="padding:6px 12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">⭐ Creator</button>
+                <button onclick="showReferral()" style="padding:6px 12px; background:#2980b9; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎁 Referral</button>
+                <button onclick="showEvents()" style="padding:6px 12px; background:#f1c40f; color:black; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎪 Events</button>
+                <button onclick="showGuilds()" style="padding:6px 12px; background:#c0392b; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👥 Guilds</button>
+                <button onclick="showProgression()" style="padding:6px 12px; background:#16a085; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📈 Paths</button>
+                <button onclick="showMarket()" style="padding:6px 12px; background:#34495e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💳 Market</button>
+                <button onclick="showCollections()" style="padding:6px 12px; background:#e91e63; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✨ Collections</button>
             </div>
             <div style="display:flex; gap:12px; flex:1;">
                 <!-- Chat column -->
@@ -2011,6 +2030,16 @@
                 await updateStatus();
                 await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter(), refreshPlatformFilters()]);
                 checkInitialSetup();
+                
+                // Initialize real-time updates
+                const username = document.getElementById('current-username').textContent;
+                if (username && typeof initRealtime !== 'undefined') {
+                    try {
+                        initRealtime(username);
+                    } catch (err) {
+                        console.error('Real-time initialization failed:', err);
+                    }
+                }
             } finally {
                 hideSpinner();
             }
@@ -8810,6 +8839,371 @@
             const modal = document.getElementById('notifications-advanced-modal');
             if (modal) modal.style.display = 'none';
         }
+
+        // ==================== PHASE 7 FUNCTIONS ====================
+
+        // Battle Pass Functions
+        async function showBattlePass() {
+            const modal = document.getElementById('battlepass-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/battlepass/current');
+                const data = await resp.json();
+                const bp = data.battle_pass;
+                
+                document.getElementById('bp-name').textContent = bp.name + ` (${bp.current_level}/${bp.max_level})`;
+                const progressPercent = (bp.current_level / bp.max_level) * 100;
+                document.getElementById('bp-progress').style.width = progressPercent + '%';
+                document.getElementById('bp-level').textContent = `${bp.experience} XP (${bp.exp_to_next} to next level)`;
+                
+                const rewardsHtml = data.rewards.map(r => `
+                    <div style="background:rgba(102,126,234,0.1); padding:10px; border-radius:6px; text-align:center;">
+                        <p style="color:var(--text-secondary); font-size:0.8em; margin:0;">Level ${r.level}</p>
+                        <p style="color:var(--text-primary); margin:5px 0 0 0; font-size:0.9em;">${r.reward}</p>
+                    </div>
+                `).join('');
+                document.getElementById('bp-rewards').innerHTML = rewardsHtml;
+            } catch (e) {
+                showNotification('Failed to load battle pass', 'error');
+            }
+        }
+
+        function closeBattlePass() {
+            const modal = document.getElementById('battlepass-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Tournament Functions
+        async function showTournaments() {
+            const modal = document.getElementById('tournaments-modal');
+            modal.style.display = 'flex';
+            await loadTournaments();
+        }
+
+        async function loadTournaments() {
+            try {
+                const resp = await fetch('/api/tournaments');
+                const data = await resp.json();
+                const html = data.tournaments.map(t => `
+                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border-left:3px solid #e67e22;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <p style="margin:0; color:var(--text-primary); font-weight:bold;">${t.name}</p>
+                                <p style="margin:4px 0 0 0; font-size:0.85em; color:var(--text-secondary);">${t.game} • ${t.participants} players</p>
+                            </div>
+                            <button onclick="registerTournament(${t.id})" style="padding:6px 12px; background:#e67e22; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">${t.user_registered ? '✓ Registered' : 'Register'}</button>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('tournaments-list').innerHTML = html;
+            } catch (e) {
+                showNotification('Failed to load tournaments', 'error');
+            }
+        }
+
+        async function registerTournament(id) {
+            try {
+                const resp = await fetch(`/api/tournaments/${id}/register`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    showNotification('Tournament registered!', 'success');
+                    await loadTournaments();
+                }
+            } catch (e) {
+                showNotification('Failed to register', 'error');
+            }
+        }
+
+        function showTournamentBracket() {
+            showNotification('🏆 View your tournament bracket', 'info');
+        }
+
+        function closeTournaments() {
+            const modal = document.getElementById('tournaments-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Creator Program Functions
+        async function showCreator() {
+            const modal = document.getElementById('creator-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/creator/dashboard');
+                const data = await resp.json();
+                
+                document.getElementById('creator-followers').textContent = data.followers.toLocaleString();
+                document.getElementById('creator-earnings').textContent = `$${data.this_month_earnings}`;
+                document.getElementById('creator-tier').textContent = `⭐ ${data.tier.toUpperCase()} Creator (${data.status})`;
+                document.getElementById('creator-next-tier').textContent = `${data.next_tier_followers.toLocaleString()} followers to next tier`;
+            } catch (e) {
+                showNotification('Failed to load creator data', 'error');
+            }
+        }
+
+        async function applyCreatorProgram() {
+            try {
+                const resp = await fetch('/api/creator/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                const data = await resp.json();
+                if (data.success) showNotification('Application submitted! Review status in 24 hours.', 'success');
+            } catch (e) {
+                showNotification('Failed to apply', 'error');
+            }
+        }
+
+        function closeCreator() {
+            const modal = document.getElementById('creator-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Referral Functions
+        async function showReferral() {
+            const modal = document.getElementById('referral-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/referral/code');
+                const data = await resp.json();
+                
+                document.getElementById('referral-code').value = data.code;
+                document.getElementById('referral-uses').textContent = data.total_uses;
+                document.getElementById('referral-earned').textContent = `${data.total_earned} pts`;
+            } catch (e) {
+                showNotification('Failed to load referral data', 'error');
+            }
+        }
+
+        function copyReferralCode() {
+            const code = document.getElementById('referral-code').value;
+            navigator.clipboard.writeText(code);
+            showNotification('✓ Referral code copied!', 'success');
+        }
+
+        function closeReferral() {
+            const modal = document.getElementById('referral-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Seasonal Events Functions
+        async function showEvents() {
+            const modal = document.getElementById('events-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/events/seasonal');
+                const data = await resp.json();
+                
+                const html = data.active_events.map(e => `
+                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <p style="margin:0; color:var(--text-primary); font-weight:bold;">${e.name}</p>
+                            <span style="font-size:0.8em; color:var(--text-secondary);">${e.days_left} days</span>
+                        </div>
+                        <div style="background:rgba(0,0,0,0.3); height:8px; border-radius:4px; margin-bottom:8px;">
+                            <div style="background:#667eea; height:100%; width:${e.progress}%; border-radius:4px;"></div>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <p style="margin:0; font-size:0.85em; color:var(--text-secondary);">Reward: ${e.reward}</p>
+                            <button onclick="claimEventReward(${e.id})" style="padding:4px 10px; background:${e.completed ? '#27ae60' : '#95a5a6'}; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.8em;">${e.reward_claimed ? '✓ Claimed' : e.completed ? 'Claim' : 'In Progress'}</button>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('events-list').innerHTML = html;
+            } catch (e) {
+                showNotification('Failed to load events', 'error');
+            }
+        }
+
+        async function claimEventReward(eventId) {
+            try {
+                const resp = await fetch(`/api/events/${eventId}/claim`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    showNotification(`Claimed: ${data.reward}`, 'success');
+                    await showEvents();
+                }
+            } catch (e) {
+                showNotification('Failed to claim', 'error');
+            }
+        }
+
+        function closeEvents() {
+            const modal = document.getElementById('events-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Guild Functions
+        async function showGuilds() {
+            const modal = document.getElementById('guilds-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/guilds');
+                const data = await resp.json();
+                
+                if (data.my_guild) {
+                    const container = document.getElementById('my-guild-container');
+                    container.style.display = 'block';
+                    document.getElementById('my-guild-name').textContent = `📍 ${data.my_guild.name}`;
+                    document.getElementById('my-guild-level').textContent = data.my_guild.level;
+                    document.getElementById('my-guild-members').textContent = `${data.my_guild.members}/50`;
+                }
+                
+                const html = data.recommended_guilds.map(g => `
+                    <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <p style="margin:0; color:var(--text-primary);">${g.name}</p>
+                            <p style="margin:4px 0 0 0; font-size:0.8em; color:var(--text-secondary);">Lv ${g.level} • ${g.members} members</p>
+                        </div>
+                        <button onclick="joinGuild()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer;">Join</button>
+                    </div>
+                `).join('');
+                document.getElementById('guilds-list').innerHTML = html;
+            } catch (e) {
+                showNotification('Failed to load guilds', 'error');
+            }
+        }
+
+        async function createGuild() {
+            const name = document.getElementById('guild-name-input').value.trim();
+            if (!name) {
+                showNotification('Enter a guild name', 'warning');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/guilds/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showNotification('Guild created!', 'success');
+                    document.getElementById('guild-name-input').value = '';
+                    await showGuilds();
+                }
+            } catch (e) {
+                showNotification('Failed to create guild', 'error');
+            }
+        }
+
+        async function joinGuild() {
+            try {
+                const resp = await fetch('/api/guilds/1/join', { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    showNotification('Guild joined!', 'success');
+                    await showGuilds();
+                }
+            } catch (e) {
+                showNotification('Failed to join', 'error');
+            }
+        }
+
+        function closeGuilds() {
+            const modal = document.getElementById('guilds-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Progression Path Functions
+        async function showProgression() {
+            const modal = document.getElementById('progression-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/progression');
+                const data = await resp.json();
+                
+                const html = data.paths.map(p => `
+                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
+                        <p style="margin:0 0 8px 0; color:var(--text-primary); font-weight:bold;">${p.name}</p>
+                        <p style="margin:0 0 10px 0; font-size:0.85em; color:var(--text-secondary);">${p.description}</p>
+                        <div style="background:rgba(0,0,0,0.3); height:10px; border-radius:5px; margin-bottom:8px;">
+                            <div style="background:#667eea; height:100%; width:${p.progress}%; border-radius:5px;"></div>
+                        </div>
+                        <p style="margin:0; font-size:0.8em; color:var(--text-secondary);">Step ${p.current_step}/${p.total_steps} • Next: ${p.next_reward}</p>
+                    </div>
+                `).join('');
+                document.getElementById('progression-list').innerHTML = html;
+            } catch (e) {
+                showNotification('Failed to load progression', 'error');
+            }
+        }
+
+        function closeProgression() {
+            const modal = document.getElementById('progression-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Trading Market Functions
+        async function showMarket() {
+            const modal = document.getElementById('market-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/market');
+                const data = await resp.json();
+                
+                const html = data.listings.map(l => `
+                    <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
+                        <div style="flex:1;">
+                            <p style="margin:0; color:var(--text-primary);">${l.item}</p>
+                            <p style="margin:4px 0 0 0; font-size:0.8em; color:var(--text-secondary);">by ${l.seller} • Rarity: ${l.rarity}</p>
+                        </div>
+                        <div style="text-align:right; margin:0 10px;">
+                            <p style="margin:0; color:#f39c12; font-weight:bold;">${l.price} pts</p>
+                            <p style="margin:4px 0 0 0; font-size:0.75em; color:var(--text-secondary);">${l.listed_days}d ago</p>
+                        </div>
+                        <button onclick="makeOffer(${l.id})" style="padding:6px 12px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer;">Offer</button>
+                    </div>
+                `).join('');
+                document.getElementById('market-listings').innerHTML = html;
+            } catch (e) {
+                showNotification('Failed to load market', 'error');
+            }
+        }
+
+        function showSellForm() {
+            showNotification('📋 List your item for sale', 'info');
+        }
+
+        function makeOffer(listingId) {
+            showNotification('💰 Make an offer on this item', 'info');
+        }
+
+        function closeMarket() {
+            const modal = document.getElementById('market-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Cosmetic Collections Functions
+        async function showCollections() {
+            const modal = document.getElementById('collections-modal');
+            modal.style.display = 'flex';
+            try {
+                const resp = await fetch('/api/collections');
+                const data = await resp.json();
+                
+                const totalAvg = Math.round(data.total_completion);
+                document.getElementById('collection-total').textContent = totalAvg + '%';
+                document.getElementById('collection-mastery').textContent = data.mastery_tier;
+                
+                const html = data.collections.map(c => `
+                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <p style="margin:0; color:var(--text-primary); text-transform:capitalize;">${c.type.slice(0,-1)}</p>
+                            <span style="color:#f39c12; font-weight:bold;">${c.completion}%</span>
+                        </div>
+                        <div style="background:rgba(0,0,0,0.3); height:8px; border-radius:4px;">
+                            <div style="background:#f39c12; height:100%; width:${c.completion}%; border-radius:4px;"></div>
+                        </div>
+                        <p style="margin:8px 0 0 0; font-size:0.8em; color:var(--text-secondary);">${c.owned}/${c.total} items • ${c.rarity_points} rarity points</p>
+                    </div>
+                `).join('');
+                document.getElementById('collections-detail').innerHTML = html;
+            } catch (e) {
+                showNotification('Failed to load collections', 'error');
+            }
+        }
+
+        function closeCollections() {
+            const modal = document.getElementById('collections-modal');
+            if (modal) modal.style.display = 'none';
+        }
     </script>
 
     <!-- Emoji Picker Modal -->
@@ -9415,5 +9809,357 @@
             </div>
         </div>
     </div>
+
+    <!-- PHASE 7 MODALS -->
+    
+    <!-- Battle Pass Modal -->
+    <div id="battlepass-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeBattlePass()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">🎖️ Battle Pass</h2>
+            <div id="battlepass-container" style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px;">
+                <div style="margin-bottom:20px;">
+                    <h3 id="bp-name" style="color:#667eea; margin:0 0 10px 0;"></h3>
+                    <div style="background:rgba(0,0,0,0.3); height:30px; border-radius:8px; overflow:hidden;">
+                        <div id="bp-progress" style="background:linear-gradient(90deg,#667eea,#764ba2); height:100%; width:47%; transition:width 0.3s; display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:0.8em;"></div>
+                    </div>
+                    <p id="bp-level" style="margin:8px 0 0 0; color:var(--text-secondary); font-size:0.9em;"></p>
+                </div>
+                <div id="bp-rewards" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:15px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tournaments Modal -->
+    <div id="tournaments-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeTournaments()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">🏆 Tournaments</h2>
+            <div style="margin-bottom:15px;">
+                <input id="tournament-filter" type="text" placeholder="Search tournaments..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+            </div>
+            <div id="tournaments-list" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:400px; overflow-y:auto;"></div>
+            <button onclick="showTournamentBracket()" style="width:100%; margin-top:15px; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">View My Bracket</button>
+        </div>
+    </div>
+
+    <!-- Creator Program Modal -->
+    <div id="creator-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeCreator()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">⭐ Creator Program</h2>
+            <div id="creator-container" style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
+                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
+                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">👥 Followers</p>
+                        <p id="creator-followers" style="color:#667eea; font-size:1.5em; font-weight:bold; margin:0;"></p>
+                    </div>
+                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
+                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">💰 This Month</p>
+                        <p id="creator-earnings" style="color:#27ae60; font-size:1.5em; font-weight:bold; margin:0;"></p>
+                    </div>
+                </div>
+                <div style="background:rgba(39,174,96,0.1); padding:15px; border-radius:8px; border-left:3px solid #27ae60; margin-bottom:15px;">
+                    <p id="creator-tier" style="color:var(--text-primary); margin:0 0 5px 0; font-weight:bold;"></p>
+                    <p id="creator-next-tier" style="color:var(--text-secondary); margin:0; font-size:0.9em;"></p>
+                </div>
+                <button onclick="applyCreatorProgram()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Apply for Program</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Referral System Modal -->
+    <div id="referral-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeReferral()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">🎁 Referral Rewards</h2>
+            <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px;">
+                <div style="background:rgba(102,126,234,0.1); padding:15px; border-radius:8px; margin-bottom:20px;">
+                    <p style="color:var(--text-secondary); font-size:0.9em; margin:0 0 8px 0;">Your Referral Code</p>
+                    <div style="display:flex; gap:10px;">
+                        <input id="referral-code" type="text" readonly style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                        <button onclick="copyReferralCode()" style="padding:10px 15px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Copy</button>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
+                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">📊 Total Uses</p>
+                        <p id="referral-uses" style="color:#667eea; font-size:1.5em; font-weight:bold; margin:0;"></p>
+                    </div>
+                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
+                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">💰 Earned</p>
+                        <p id="referral-earned" style="color:#27ae60; font-size:1.5em; font-weight:bold; margin:0;"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Seasonal Events Modal -->
+    <div id="events-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeEvents()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">🎪 Seasonal Events</h2>
+            <div id="events-list" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:400px; overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- Guild System Modal -->
+    <div id="guilds-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeGuilds()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">👥 Guilds</h2>
+            <div style="margin-bottom:15px;">
+                <input id="guild-name-input" type="text" placeholder="Guild name..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
+                <button onclick="createGuild()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Create Guild</button>
+            </div>
+            <div id="my-guild-container" style="background:rgba(102,126,234,0.1); padding:15px; border-radius:8px; margin-bottom:20px; display:none;">
+                <h3 id="my-guild-name" style="color:#667eea; margin:0 0 10px 0;"></h3>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:0.9em;">
+                    <p style="margin:0;"><strong>Level:</strong> <span id="my-guild-level" style="color:var(--text-secondary);"></span></p>
+                    <p style="margin:0;"><strong>Members:</strong> <span id="my-guild-members" style="color:var(--text-secondary);"></span></p>
+                </div>
+            </div>
+            <h4 style="color:var(--text-primary); margin-bottom:10px;">Recruiting Guilds</h4>
+            <div id="guilds-list" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:300px; overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- Progression Paths Modal -->
+    <div id="progression-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeProgression()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">📈 Progression Paths</h2>
+            <div id="progression-list" style="display:grid; grid-template-columns:1fr; gap:15px; max-height:400px; overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- Trading Market Modal -->
+    <div id="market-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeMarket()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">💳 Trading Market</h2>
+            <div style="margin-bottom:15px;">
+                <input id="market-search" type="text" placeholder="Search items..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+            </div>
+            <div id="market-listings" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:350px; overflow-y:auto; margin-bottom:15px;"></div>
+            <button onclick="showSellForm()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">List Item for Sale</button>
+        </div>
+    </div>
+
+    <!-- Cosmetic Collections Modal -->
+    <div id="collections-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeCollections()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">✨ Cosmetic Collections</h2>
+            <div id="collections-stats" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
+                <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
+                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">📊 Overall</p>
+                    <p id="collection-total" style="color:#667eea; font-size:1.5em; font-weight:bold; margin:0;"></p>
+                </div>
+                <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
+                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">⭐ Mastery</p>
+                    <p id="collection-mastery" style="color:#f39c12; font-size:1.5em; font-weight:bold; margin:0;"></p>
+                </div>
+            </div>
+            <div id="collections-detail" style="display:grid; grid-template-columns:1fr; gap:12px;"></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         PHASE 9: ADMIN EXCELLENCE & USER EXPERIENCE MODALS
+         ═══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Analytics Dashboard Modal -->
+    <div id="analytics-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-height:90vh; overflow-y:auto;">
+            <button class="modal-close" onclick="closeAnalyticsDashboard()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">📊 Analytics Dashboard</h2>
+            
+            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
+                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Total Users</p>
+                    <p id="analytics-total-users" style="color:#667eea; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                </div>
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
+                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Active (7d)</p>
+                    <p id="analytics-active-7d" style="color:#27ae60; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                </div>
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
+                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Total Picks</p>
+                    <p id="analytics-total-picks" style="color:#e74c3c; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                </div>
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
+                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Avg Picks/User</p>
+                    <p id="analytics-avg-picks" style="color:#f39c12; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                </div>
+            </div>
+
+            <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); margin-bottom:15px;">
+                <h3 style="color:var(--text-primary); margin-top:0;">📈 Pick Trends (7 days)</h3>
+                <div id="analytics-trends-chart" style="font-size:0.9em;"></div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
+                    <h3 style="color:var(--text-primary); margin-top:0;">🎮 Top Games</h3>
+                    <div id="analytics-top-games" style="max-height:300px; overflow-y:auto;"></div>
+                </div>
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
+                    <h3 style="color:var(--text-primary); margin-top:0;">🖥️ Platforms</h3>
+                    <div id="analytics-platforms" style="max-height:300px; overflow-y:auto;"></div>
+                </div>
+            </div>
+
+            <button onclick="exportAnalytics()" style="width:100%; padding:12px; background:#667eea; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">📥 Export Analytics</button>
+        </div>
+    </div>
+
+    <!-- Audit Log Modal -->
+    <div id="audit-log-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-height:90vh; overflow-y:auto;">
+            <button class="modal-close" onclick="closeAuditLog()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">🔍 Audit Log</h2>
+            
+            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:15px;">
+                <input id="audit-filter-user" type="text" placeholder="Filter by username..." 
+                    style="padding:10px; border:1px solid var(--input-border); border-radius:6px; 
+                    background:var(--input-bg); color:var(--text-primary);">
+                <select id="audit-filter-action" style="padding:10px; border:1px solid var(--input-border); 
+                    border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                    <option value="">All Actions</option>
+                    <option value="pick">Pick</option>
+                    <option value="login">Login</option>
+                    <option value="create_user">Create User</option>
+                </select>
+            </div>
+
+            <table style="width:100%; border-collapse:collapse; margin-bottom:15px; background:var(--card-bg);">
+                <thead>
+                    <tr style="background:rgba(0,0,0,0.05); border-bottom:2px solid var(--card-border);">
+                        <th style="padding:10px; text-align:left; color:var(--text-primary);">Timestamp</th>
+                        <th style="padding:10px; text-align:left; color:var(--text-primary);">User</th>
+                        <th style="padding:10px; text-align:left; color:var(--text-primary);">Action</th>
+                        <th style="padding:10px; text-align:left; color:var(--text-primary);">Resource</th>
+                        <th style="padding:10px; text-align:left; color:var(--text-primary);">Status</th>
+                    </tr>
+                </thead>
+                <tbody id="audit-logs-table">
+                    <tr><td colspan="5" style="padding:20px; text-align:center; color:var(--text-secondary);">Loading...</td></tr>
+                </tbody>
+            </table>
+
+            <div id="audit-pagination" style="display:flex; justify-content:center; gap:8px; margin-bottom:15px;"></div>
+
+            <button onclick="exportAuditLogs()" style="width:100%; padding:12px; background:#667eea; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">📥 Export as CSV</button>
+        </div>
+    </div>
+
+    <!-- Advanced Search Modal -->
+    <div id="advanced-search-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-height:90vh; overflow-y:auto;">
+            <button class="modal-close" onclick="closeAdvancedSearch()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">🔍 Advanced Search</h2>
+            
+            <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); margin-bottom:15px;">
+                <h3 style="color:var(--text-primary); margin-top:0; margin-bottom:12px;">Search Criteria</h3>
+                <input id="search-query" type="text" placeholder="Search games..." 
+                    style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; 
+                    background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
+                
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <input id="search-min-year" type="number" placeholder="Min year" 
+                        style="padding:10px; border:1px solid var(--input-border); border-radius:6px; 
+                        background:var(--input-bg); color:var(--text-primary);">
+                    <input id="search-max-year" type="number" placeholder="Max year" 
+                        style="padding:10px; border:1px solid var(--input-border); border-radius:6px; 
+                        background:var(--input-bg); color:var(--text-primary);">
+                </div>
+
+                <input id="search-genres" type="text" placeholder="Genres (comma-separated)" 
+                    style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; 
+                    background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
+
+                <div style="display:flex; gap:10px;">
+                    <button onclick="performAdvancedSearch()" style="flex:1; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔎 Search</button>
+                    <button onclick="saveCurrentSearch()" style="flex:1; padding:10px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💾 Save</button>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
+                    <h3 style="color:var(--text-primary); margin-top:0; margin-bottom:10px;">⭐ Saved Searches</h3>
+                    <div id="saved-searches-list" style="max-height:250px; overflow-y:auto; font-size:0.9em;"></div>
+                </div>
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
+                    <h3 style="color:var(--text-primary); margin-top:0; margin-bottom:10px;">🔥 Trending</h3>
+                    <div id="trending-searches" style="max-height:250px; overflow-y:auto; font-size:0.9em;"></div>
+                </div>
+            </div>
+
+            <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
+                <h3 style="color:var(--text-primary); margin-top:0;">🎮 Results</h3>
+                <div id="search-results" style="max-height:300px; overflow-y:auto; font-size:0.9em;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Moderation Modal -->
+    <div id="moderation-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-height:90vh; overflow-y:auto;">
+            <button class="modal-close" onclick="closeModerationPanel()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">🛡️ Moderation Panel</h2>
+            
+            <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); margin-bottom:15px;">
+                <h3 style="color:var(--text-primary); margin-top:0; margin-bottom:10px;">📋 Pending Reports</h3>
+                <div id="reports-list" style="max-height:500px; overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Operations Modal -->
+    <div id="batch-operations-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-height:90vh; overflow-y:auto;">
+            <button class="modal-close" onclick="closeBatchOperations()">✕</button>
+            <h2 style="color:var(--text-primary); margin-top:0;">⚡ Batch Operations</h2>
+            
+            <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); margin-bottom:15px;">
+                <h3 style="color:var(--text-primary); margin-top:0;">Game IDs</h3>
+                <textarea id="batch-game-ids" placeholder="Enter game IDs (comma-separated)" 
+                    style="width:100%; height:80px; padding:10px; border:1px solid var(--input-border); 
+                    border-radius:6px; background:var(--input-bg); color:var(--text-primary); font-family:monospace;"></textarea>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
+                    <h3 style="color:var(--text-primary); margin-top:0;">🏷️ Tag Games</h3>
+                    <input id="batch-tags" type="text" placeholder="Tags (comma-separated)" 
+                        style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; 
+                        background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
+                    <button onclick="batchTagGames()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Apply Tags</button>
+                </div>
+
+                <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
+                    <h3 style="color:var(--text-primary); margin-top:0;">📊 Change Status</h3>
+                    <select id="batch-status" style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
+                        <option value="">Select status...</option>
+                        <option value="playing">Playing</option>
+                        <option value="completed">Completed</option>
+                        <option value="abandoned">Abandoned</option>
+                        <option value="backlog">Backlog</option>
+                    </select>
+                    <button onclick="batchChangeStatus()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Change Status</button>
+                </div>
+            </div>
+
+            <div style="margin-top:15px;">
+                <button onclick="batchExportGames()" style="width:100%; padding:10px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; margin-bottom:10px;">📥 Export as CSV</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load Phase 9 scripts -->
+    <script src="{{ url_for('static', filename='phase9_admin_features.js') }}"></script>
+
 </body>
 </html>
