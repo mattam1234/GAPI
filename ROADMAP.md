@@ -62,7 +62,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Nintendo eShop** - Nintendo Switch library support (if API available)
 
 #### Smart Features
-- [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
+- [x] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
 - [x] **Smart Recommendations** - Genre-affinity based recommendations from user's own library
 - [x] **Duplicate Detection** - Identify same games across platforms
 - [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
@@ -96,9 +96,9 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### API & Integrations
 - [x] **Public API** - RESTful API for third-party integrations (Flask REST API fully implemented)
 - [x] **Webhook Support** - Trigger external services on game picks
-- [ ] **IFTTT Integration** - Connect with IFTTT for automation
-- [ ] **Slack/Teams Bots** - Enterprise communication platform integrations
-- [ ] **Home Assistant** - Smart home integration for game lighting/setup
+- [x] **IFTTT Integration** - Connect with IFTTT for automation
+- [x] **Slack/Teams Bots** - Enterprise communication platform integrations
+- [x] **Home Assistant** - Smart home integration for game lighting/setup
 
 #### Long-term Backlog Features
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")

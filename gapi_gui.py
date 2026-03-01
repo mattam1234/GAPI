@@ -1850,6 +1850,25 @@ def api_pick_game():
                         daemon=True,
                     ).start()
 
+                # Fire Slack / Teams / IFTTT / Home Assistant notifications
+                try:
+                    from webhook_notifier import WebhookNotifier
+                    _notifier = WebhookNotifier(picker.config or {})
+                    _has_extra = any(
+                        _notifier._get(k) for k in (
+                            'slack_webhook_url', 'teams_webhook_url',
+                            'ifttt_webhook_key', 'homeassistant_url',
+                        )
+                    )
+                    if _has_extra:
+                        threading.Thread(
+                            target=_notifier.notify_game_picked,
+                            args=(response,),
+                            daemon=True,
+                        ).start()
+                except Exception as _wh_exc:
+                    gui_logger.debug("WebhookNotifier error: %s", _wh_exc)
+
                 return jsonify(response)
             
             except Exception as e:
@@ -6242,6 +6261,260 @@ def api_twitch_library_overlap():
 
     overlap = client.find_library_overlap(trending, user_games)
     return jsonify({'overlap': overlap, 'trending_count': len(trending)})
+
+
+# ---------------------------------------------------------------------------
+# Smart Recommendations
+# ---------------------------------------------------------------------------
+
+@app.route('/api/recommendations/smart')
+@require_login
+def api_smart_recommendations():
+    """Return AI-enhanced game recommendations using multi-factor scoring.
+
+    Unlike the basic ``/api/recommendations`` endpoint this engine considers:
+
+    * Genre **and** Steam category/tag affinity from well-played titles
+    * Developer / publisher affinity
+    * Metacritic score influence (if cached)
+    * Diversity boosting (avoids clustering by developer)
+    * Recently-played history penalty
+
+    Query params:
+        count (int, 1-50, default 10): Number of recommendations to return.
+
+    Response JSON::
+
+        {
+          "recommendations": [
+            {
+              "appid": 620,
+              "name": "Portal 2",
+              "playtime_hours": 0.0,
+              "smart_score": 7.4,
+              "smart_reason": "Unplayed. Matches your Puzzle, Action preference. Metacritic 95",
+              ...
+            }
+          ],
+          "engine": "smart"
+        }
+
+    Returns 400 if the picker is not initialised.
+    """
+    from app.services.recommendation_service import SmartRecommendationEngine
+
+    if not picker:
+        return jsonify({
+            'error': 'Not initialized. Please log in and ensure your Steam ID is set.'
+        }), 400
+
+    try:
+        count = max(1, min(int(request.args.get('count', 10)), 50))
+    except (ValueError, TypeError):
+        count = 10
+
+    with picker_lock:
+        games   = list(picker.games) if picker.games else []
+        history = list(picker.history) if hasattr(picker, 'history') else []
+        # Collect details cache from the Steam client (if available)
+        cache: dict = {}
+        steam_client = picker.clients.get('steam') if hasattr(picker, 'clients') else None
+        if steam_client and hasattr(steam_client, 'details_cache'):
+            cache = dict(steam_client.details_cache)
+
+        well_mins   = getattr(picker, 'WELL_PLAYED_THRESHOLD_MINUTES', 600)
+        barely_mins = getattr(picker, 'BARELY_PLAYED_THRESHOLD_MINUTES', 120)
+
+    engine = SmartRecommendationEngine(
+        games=games,
+        details_cache=cache,
+        history=history,
+        well_played_mins=well_mins,
+        barely_played_mins=barely_mins,
+    )
+    recs = engine.recommend(count=count)
+    return jsonify({'recommendations': recs, 'engine': 'smart'})
+
+
+# ---------------------------------------------------------------------------
+# Webhook Notifications — Slack, Teams, IFTTT, Home Assistant
+# ---------------------------------------------------------------------------
+
+def _get_webhook_notifier() -> 'WebhookNotifier':  # type: ignore[name-defined]
+    """Return a WebhookNotifier initialised with the current picker config."""
+    from webhook_notifier import WebhookNotifier
+    cfg = (picker.config if picker else {}) or {}
+    return WebhookNotifier(cfg)
+
+
+@app.route('/api/notifications/slack/test', methods=['POST'])
+@require_login
+def api_test_slack_webhook():
+    """Send a test notification to the configured Slack Incoming Webhook.
+
+    Request JSON (optional)::
+
+        {
+          "webhook_url": "https://hooks.slack.com/services/..."  // overrides config
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "slack"}
+
+    Returns 503 if no webhook URL is configured and none was provided.
+    """
+    from webhook_notifier import WebhookNotifier
+    body      = request.get_json(silent=True) or {}
+    cfg       = dict((picker.config if picker else {}) or {})
+    override  = body.get('webhook_url', '')
+    if override:
+        cfg['slack_webhook_url'] = override
+    notifier  = WebhookNotifier(cfg)
+    slack_url = notifier._get('slack_webhook_url')
+    if not slack_url:
+        return jsonify({
+            'error': (
+                'Slack webhook URL not configured. '
+                'Add slack_webhook_url to config.json or supply it in the request body.'
+            )
+        }), 503
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = notifier.send_slack(slack_url, test_game)
+    return jsonify({'success': ok, 'service': 'slack'})
+
+
+@app.route('/api/notifications/teams/test', methods=['POST'])
+@require_login
+def api_test_teams_webhook():
+    """Send a test notification to the configured Microsoft Teams Incoming Webhook.
+
+    Request JSON (optional)::
+
+        {
+          "webhook_url": "https://...webhook.office.com/..."
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "teams"}
+    """
+    from webhook_notifier import WebhookNotifier
+    body     = request.get_json(silent=True) or {}
+    cfg      = dict((picker.config if picker else {}) or {})
+    override = body.get('webhook_url', '')
+    if override:
+        cfg['teams_webhook_url'] = override
+    notifier  = WebhookNotifier(cfg)
+    teams_url = notifier._get('teams_webhook_url')
+    if not teams_url:
+        return jsonify({
+            'error': (
+                'Teams webhook URL not configured. '
+                'Add teams_webhook_url to config.json or supply it in the request body.'
+            )
+        }), 503
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = notifier.send_teams(teams_url, test_game)
+    return jsonify({'success': ok, 'service': 'teams'})
+
+
+@app.route('/api/notifications/ifttt/test', methods=['POST'])
+@require_login
+def api_test_ifttt_webhook():
+    """Send a test event to the configured IFTTT Maker Webhooks channel.
+
+    Request JSON (optional)::
+
+        {
+          "ifttt_webhook_key":  "YOUR_IFTTT_KEY",
+          "ifttt_event_name":   "gapi_game_picked"
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "ifttt"}
+
+    Returns 503 if the IFTTT key is not configured.
+    """
+    from webhook_notifier import WebhookNotifier
+    body     = request.get_json(silent=True) or {}
+    cfg      = dict((picker.config if picker else {}) or {})
+    if body.get('ifttt_webhook_key'):
+        cfg['ifttt_webhook_key'] = body['ifttt_webhook_key']
+    if body.get('ifttt_event_name'):
+        cfg['ifttt_event_name']  = body['ifttt_event_name']
+    notifier = WebhookNotifier(cfg)
+    key      = notifier._get('ifttt_webhook_key')
+    if not key:
+        return jsonify({
+            'error': (
+                'IFTTT webhook key not configured. '
+                'Add ifttt_webhook_key to config.json or supply it in the request body.'
+            )
+        }), 503
+    event     = cfg.get('ifttt_event_name', 'gapi_game_picked')
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = WebhookNotifier.send_ifttt(key, event, test_game)
+    return jsonify({'success': ok, 'service': 'ifttt'})
+
+
+@app.route('/api/notifications/homeassistant/test', methods=['POST'])
+@require_login
+def api_test_homeassistant_webhook():
+    """Send a test event to the configured Home Assistant webhook.
+
+    Request JSON (optional)::
+
+        {
+          "homeassistant_url":        "http://homeassistant.local:8123",
+          "homeassistant_webhook_id": "gapi_game_picked",
+          "homeassistant_token":      "Bearer eyJ..."
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "homeassistant"}
+
+    Returns 503 if the Home Assistant URL / webhook ID are not configured.
+    """
+    from webhook_notifier import WebhookNotifier
+    body = request.get_json(silent=True) or {}
+    cfg  = dict((picker.config if picker else {}) or {})
+    for key in ('homeassistant_url', 'homeassistant_webhook_id', 'homeassistant_token'):
+        if body.get(key):
+            cfg[key] = body[key]
+    notifier = WebhookNotifier(cfg)
+    ha_url   = notifier._get('homeassistant_url')
+    ha_id    = notifier._get('homeassistant_webhook_id')
+    if not ha_url or not ha_id:
+        return jsonify({
+            'error': (
+                'Home Assistant URL and webhook ID must be configured. '
+                'Add homeassistant_url and homeassistant_webhook_id to config.json '
+                'or supply them in the request body.'
+            )
+        }), 503
+    ha_token  = notifier._get('homeassistant_token')
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = WebhookNotifier.send_homeassistant(ha_url, ha_id, test_game, token=ha_token)
+    return jsonify({'success': ok, 'service': 'homeassistant'})
 
 
 # ---------------------------------------------------------------------------

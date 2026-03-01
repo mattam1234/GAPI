@@ -171,6 +171,22 @@ If PostgreSQL is not available:
 - [x] Achievement statistics by platform
 
 ### Recently Completed
+- [x] **Smart Recommendations** — `GET /api/recommendations/smart` uses the new
+  `SmartRecommendationEngine` which scores games by genre **and** Steam category/tag
+  affinity, developer/publisher affinity, Metacritic score, diversity boosting, and
+  history penalty.  Richer results than the basic `/api/recommendations` endpoint.
+- [x] **Slack/Teams Bots** — `WebhookNotifier` dispatches Block Kit (Slack) and
+  Adaptive Card (Microsoft Teams) messages on game pick.  Test endpoints:
+  `POST /api/notifications/slack/test` and `POST /api/notifications/teams/test`.
+  Configure via `slack_webhook_url` / `teams_webhook_url` in `config.json`.
+- [x] **IFTTT Integration** — Maker Webhooks channel support. Fires `value1` (game
+  name), `value2` (playtime hours), `value3` (Steam URL) to any IFTTT applet.
+  Test via `POST /api/notifications/ifttt/test`.  Configure via `ifttt_webhook_key`
+  and `ifttt_event_name` in `config.json`.
+- [x] **Home Assistant** — REST API webhook trigger on game pick, including optional
+  long-lived access token for authentication.  Test via
+  `POST /api/notifications/homeassistant/test`.  Configure via
+  `homeassistant_url`, `homeassistant_webhook_id`, `homeassistant_token`.
 - [x] **Twitch Integration** — `GET /api/twitch/trending` and `GET /api/twitch/library-overlap`
   cross-reference the user's library against live Twitch trending games.
   Configure via `twitch_client_id` / `twitch_client_secret` in `config.json`
