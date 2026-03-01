@@ -97,7 +97,8 @@ try:
     _search_service = SearchService(database, None) if DB_AVAILABLE else None
     _moderation_service = ModerationService(database) if DB_AVAILABLE else None
 except Exception as _e:
-    gui_logger.warning('Phase 9 services failed to load: %s', _e)
+    # Note: gui_logger not yet defined here, so we print directly
+    print(f'Warning: Phase 9 services failed to load: {_e}')
     _audit_service = None
     _analytics_service = None
     _search_service = None

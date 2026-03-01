@@ -4,8 +4,8 @@ Analytics service for business intelligence and usage insights.
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_, or_
 from database import (
-    User, User_Library, Pick, Review, Chat_Message, AuditLog,
-    Achievement_Hunt, Leaderboard
+    User, GameLibraryCache, GameReview, ChatMessage, AuditLog,
+    AchievementHunt
 )
 
 
@@ -107,8 +107,8 @@ class AnalyticsService:
             platforms = ['steam', 'epic', 'gog', 'xbox', 'psn', 'nintendo']
 
             for platform in platforms:
-                count = db.query(User_Library).filter(
-                    User_Library.platform == platform
+                count = db.query(GameLibraryCache).filter(
+                    GameLibraryCache.platform == platform
                 ).count()
                 stats[platform] = count
 
@@ -122,14 +122,12 @@ class AnalyticsService:
             total_users = self._count_total_users(db)
             active_users = self._count_active_users(db, 7)
             users_with_reviews = db.query(
-                func.count(func.distinct(Review.username))
+                func.count(func.distinct(GameReview.user_id))
             ).scalar() or 0
             users_with_picks = db.query(
-                func.count(func.distinct(
-                    db.query(AuditLog.username).filter(
-                        AuditLog.action == 'pick'
-                    ).distinct()
-                ))
+                func.count(func.distinct(AuditLog.username))
+            ).filter(
+                AuditLog.action == 'pick'
             ).scalar() or 0
 
             return {
@@ -146,11 +144,11 @@ class AnalyticsService:
         """Get chat activity metrics."""
         try:
             cutoff = datetime.utcnow() - timedelta(days=days)
-            messages = db.query(Chat_Message).filter(
-                Chat_Message.created_at >= cutoff
+            messages = db.query(ChatMessage).filter(
+                ChatMessage.created_at >= cutoff
             ).count()
-            users = db.query(func.count(func.distinct(Chat_Message.username))).filter(
-                Chat_Message.created_at >= cutoff
+            users = db.query(func.count(func.distinct(ChatMessage.sender_id))).filter(
+                ChatMessage.created_at >= cutoff
             ).scalar() or 0
 
             return {
@@ -164,11 +162,11 @@ class AnalyticsService:
     def get_review_stats(self, db):
         """Get game review statistics."""
         try:
-            total_reviews = db.query(Review).count()
-            avg_rating = db.query(func.avg(Review.rating)).scalar()
+            total_reviews = db.query(GameReview).count()
+            avg_rating = db.query(func.avg(GameReview.rating)).scalar()
             reviews_by_rating = {}
             for r in [1, 2, 3, 4, 5]:
-                count = db.query(Review).filter(Review.rating == r).count()
+                count = db.query(GameReview).filter(GameReview.rating == r).count()
                 reviews_by_rating[f'star_{r}'] = count
 
             return {
@@ -230,12 +228,12 @@ class AnalyticsService:
 
     def _count_total_games(self, db):
         try:
-            return db.query(func.count(func.distinct(User_Library.app_id))).scalar() or 0
+            return db.query(func.count(func.distinct(GameLibraryCache.app_id))).scalar() or 0
         except Exception:
             return 0
 
     def _count_reviews(self, db):
         try:
-            return db.query(Review).count()
+            return db.query(GameReview).count()
         except Exception:
             return 0
