@@ -6513,14 +6513,16 @@ def api_platform_status():
 
         {
           "platforms": {
-            "steam":  {"configured": true,  "authenticated": true},
-            "epic":   {"configured": true,  "authenticated": false},
-            "gog":    {"configured": false, "authenticated": false},
-            "xbox":   {"configured": false, "authenticated": false}
+            "steam":     {"configured": true,  "authenticated": true},
+            "epic":      {"configured": true,  "authenticated": false},
+            "gog":       {"configured": false, "authenticated": false},
+            "xbox":      {"configured": false, "authenticated": false},
+            "psn":       {"configured": false, "authenticated": false},
+            "nintendo":  {"configured": false, "authenticated": false}
           }
         }
     """
-    from platform_clients import EpicOAuthClient, GOGOAuthClient, XboxAPIClient
+    from platform_clients import EpicOAuthClient, GOGOAuthClient, XboxAPIClient, PSNClient, NintendoEShopClient
     clients = picker.clients if picker else {}
     status: Dict[str, Any] = {}
 
@@ -6552,7 +6554,249 @@ def api_platform_status():
         'authenticated': isinstance(xbox, XboxAPIClient) and xbox._xsts_token is not None,
     }
 
+    # PSN
+    psn = clients.get('psn')
+    status['psn'] = {
+        'configured': psn is not None,
+        'authenticated': isinstance(psn, PSNClient) and psn.is_authenticated,
+    }
+
+    # Nintendo (catalog only — always "authenticated" when configured)
+    nintendo = clients.get('nintendo')
+    status['nintendo'] = {
+        'configured': nintendo is not None,
+        'authenticated': isinstance(nintendo, NintendoEShopClient),
+        'note': 'catalog only — no library API available',
+    }
+
     return jsonify({'platforms': status})
+
+
+# ---------------------------------------------------------------------------
+# PlayStation Network
+# ---------------------------------------------------------------------------
+
+@app.route('/api/psn/connect', methods=['POST'])
+@require_login
+def api_psn_connect():
+    """Authenticate with PlayStation Network using an NPSSO token.
+
+    The NPSSO token can be obtained from the ``npsso`` cookie at
+    ``https://my.playstation.com`` after signing in.
+
+    Request JSON::
+
+        {"npsso": "YOUR_NPSSO_TOKEN_HERE"}
+
+    Response JSON::
+
+        {"success": true, "platform": "psn"}
+
+    Returns 400 if the NPSSO token is missing or invalid, 503 if PSN is
+    not configured.
+    """
+    from platform_clients import PSNClient
+    if not picker:
+        return jsonify({'error': 'Not initialized.'}), 400
+    client = picker.clients.get('psn')
+    if not isinstance(client, PSNClient):
+        # Auto-create a PSN client if not already configured
+        from platform_clients import PSNClient as _PSN
+        client = _PSN(timeout=picker.API_TIMEOUT)
+        picker.clients['psn'] = client
+    body  = request.get_json(silent=True) or {}
+    npsso = body.get('npsso', '').strip()
+    if not npsso:
+        return jsonify({'error': 'Missing npsso token in request body.'}), 400
+    ok = client.connect(npsso)
+    if not ok:
+        return jsonify({
+            'error': 'PSN authentication failed. '
+                     'The NPSSO token may be expired or invalid. '
+                     'Please obtain a fresh token from https://my.playstation.com'
+        }), 400
+    return jsonify({'success': True, 'platform': 'psn'})
+
+
+@app.route('/api/psn/library')
+@require_login
+def api_psn_library():
+    """Return the authenticated user's PlayStation game library.
+
+    Response JSON::
+
+        {
+          "games": [...],
+          "count": 42,
+          "platform": "psn"
+        }
+
+    Returns 503 if PSN is not configured or authenticated.
+    """
+    from platform_clients import PSNClient
+    client = picker.clients.get('psn') if picker else None
+    if not isinstance(client, PSNClient):
+        return jsonify({'error': 'PSN client not configured. '
+                        'POST /api/psn/connect with your npsso token first.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'PSN account not authenticated. '
+                        'POST /api/psn/connect with your npsso token first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'psn'})
+
+
+@app.route('/api/psn/trophies')
+@require_login
+def api_psn_trophies():
+    """Return the authenticated user's PlayStation trophy titles.
+
+    Response JSON::
+
+        {
+          "trophyTitles": [...],
+          "count": 15,
+          "platform": "psn"
+        }
+
+    Returns 503 if PSN is not configured or authenticated.
+    """
+    from platform_clients import PSNClient
+    client = picker.clients.get('psn') if picker else None
+    if not isinstance(client, PSNClient):
+        return jsonify({'error': 'PSN client not configured.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'PSN account not authenticated.'}), 503
+    trophies = client.get_trophies()
+    return jsonify({'trophyTitles': trophies, 'count': len(trophies), 'platform': 'psn'})
+
+
+# ---------------------------------------------------------------------------
+# Nintendo eShop
+# ---------------------------------------------------------------------------
+
+@app.route('/api/nintendo/search')
+@require_login
+def api_nintendo_search():
+    """Search the Nintendo eShop catalog.
+
+    Query params:
+        q          (str):  Search query (empty = browse all).
+        page       (int):  Zero-based page number (default 0).
+        per_page   (int):  Results per page 1-100 (default 20).
+        filters    (str):  Algolia filter string.
+
+    Response JSON::
+
+        {
+          "hits": [...],
+          "nbHits": 1234,
+          "page": 0,
+          "nbPages": 25,
+          "platform": "nintendo"
+        }
+
+    Returns 503 if Nintendo client is not configured.
+    """
+    from platform_clients import NintendoEShopClient
+    client = picker.clients.get('nintendo') if picker else None
+    if not isinstance(client, NintendoEShopClient):
+        # Auto-create a Nintendo client if not configured
+        if picker:
+            from platform_clients import NintendoEShopClient as _N
+            client = _N(timeout=picker.API_TIMEOUT)
+            picker.clients['nintendo'] = client
+        else:
+            return jsonify({'error': 'Nintendo client not configured. '
+                            'Add nintendo_enabled: true to config.json.'}), 503
+
+    query    = request.args.get('q', '')
+    page     = max(0, int(request.args.get('page', 0)))
+    per_page = max(1, min(int(request.args.get('per_page', 20)), 100))
+    filters  = request.args.get('filters', '')
+
+    result = client.search_games(
+        query=query,
+        filters=filters,
+        page=page,
+        hits_per_page=per_page,
+    )
+    result['platform'] = 'nintendo'
+    return jsonify(result)
+
+
+@app.route('/api/nintendo/game/<nsuid>')
+@require_login
+def api_nintendo_game(nsuid: str):
+    """Return details for a single Nintendo Switch game by nsuid.
+
+    Also fetches current eShop pricing.
+
+    Path param:
+        nsuid (str): 14-digit Nintendo Switch unique game ID.
+
+    Response JSON::
+
+        {
+          "game": {...},
+          "platform": "nintendo"
+        }
+
+    Returns 404 if the game is not in cache, 503 if not configured.
+    """
+    from platform_clients import NintendoEShopClient
+    client = picker.clients.get('nintendo') if picker else None
+    if not isinstance(client, NintendoEShopClient):
+        if picker:
+            from platform_clients import NintendoEShopClient as _N
+            client = _N(timeout=picker.API_TIMEOUT)
+            picker.clients['nintendo'] = client
+        else:
+            return jsonify({'error': 'Nintendo client not configured.'}), 503
+
+    game = client.get_game_by_nsuid(nsuid)
+    if game is None:
+        # Try to search for it
+        result = client.search_games(query='', page=0, hits_per_page=1)
+        game   = client.get_game_by_nsuid(nsuid)
+    if game is None:
+        return jsonify({'error': f'Game {nsuid} not found in cache. '
+                        'Search for it first via /api/nintendo/search.'}), 404
+    return jsonify({'game': game, 'platform': 'nintendo'})
+
+
+@app.route('/api/nintendo/prices')
+@require_login
+def api_nintendo_prices():
+    """Fetch current eShop prices for one or more games.
+
+    Query params:
+        nsuids  (str): Comma-separated list of 14-digit nsuid strings.
+        country (str): ISO country code (default ``US``).
+
+    Response JSON::
+
+        {
+          "prices": {"70010000000025": {"regular_price": "59.99", ...}},
+          "platform": "nintendo"
+        }
+    """
+    from platform_clients import NintendoEShopClient
+    client = picker.clients.get('nintendo') if picker else None
+    if not isinstance(client, NintendoEShopClient):
+        if picker:
+            from platform_clients import NintendoEShopClient as _N
+            client = _N(timeout=picker.API_TIMEOUT)
+            picker.clients['nintendo'] = client
+        else:
+            return jsonify({'error': 'Nintendo client not configured.'}), 503
+
+    nsuids_param = request.args.get('nsuids', '')
+    nsuids = [n.strip() for n in nsuids_param.split(',') if n.strip()]
+    if not nsuids:
+        return jsonify({'error': 'Provide one or more nsuids as ?nsuids=id1,id2'}), 400
+    country = request.args.get('country', 'US')
+    prices  = client.get_prices(nsuids=nsuids, country=country)
+    return jsonify({'prices': prices, 'platform': 'nintendo'})
 
 
 # ---------------------------------------------------------------------------

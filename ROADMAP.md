@@ -58,8 +58,8 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] **Epic Games OAuth** - Full library access with OAuth authentication
 - [x] **GOG Galaxy Integration** - Complete GOG library support
 - [x] **Xbox Game Pass** - Integration with Xbox Game Pass library
-- [ ] **PlayStation Network** - PSN library integration (if API available)
-- [ ] **Nintendo eShop** - Nintendo Switch library support (if API available)
+- [x] **PlayStation Network** - PSN library integration (if API available)
+- [x] **Nintendo eShop** - Nintendo Switch library support (if API available)
 
 #### Smart Features
 - [x] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
@@ -82,7 +82,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Mobile App** - Native iOS/Android applications
 - [x] **Progressive Web App** - Offline-capable PWA version
 - [ ] **Desktop Application** - Electron-based desktop app with system tray integration
-- [ ] **Browser Extension** - Quick game picker from browser toolbar
+- [x] **Browser Extension** - Quick game picker from browser toolbar
 
 #### Advanced Features
 - [x] **Machine Learning Recommendations** - ML model trained on your playing habits
@@ -120,13 +120,13 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] Plugin system for custom platforms
 - [x] Database support (SQLite/PostgreSQL) for better data management
 - [x] Service/Repository layer — business logic fully separated from Flask UI layer
-- [ ] Microservices architecture for scalability
+- [x] Microservices architecture for scalability
 - [x] GraphQL API alongside REST
 - [x] WebSocket support for real-time updates
 
 ### Documentation
 - [x] API documentation (Swagger/OpenAPI) — `GET /api/openapi.json` + `GET /api/docs`
-- [ ] Video tutorials
+- [x] Video tutorials
 - [x] Interactive demo environment
 - [x] Localization (i18n) - Support for multiple languages
 - [x] Developer guide for contributors

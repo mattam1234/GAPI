@@ -171,6 +171,39 @@ If PostgreSQL is not available:
 - [x] Achievement statistics by platform
 
 ### Recently Completed
+- [x] **PlayStation Network** — `PSNClient` in `platform_clients.py` uses the two-step
+  NPSSO→auth-code→token exchange flow.  `POST /api/psn/connect` accepts the user's NPSSO
+  token (extracted from the `npsso` browser cookie at `my.playstation.com`), exchanges it
+  for an access + refresh token pair, and enables library access via
+  `GET /api/psn/library` (paginated `gamelist/v2` API) and
+  `GET /api/psn/trophies`.  Automatic token refresh on expiry.
+  Config: `psn_enabled`, `psn_npsso`.
+
+- [x] **Nintendo eShop** — `NintendoEShopClient` in `platform_clients.py` wraps Nintendo's
+  public Algolia-powered catalog search API (the same backend used by `nintendo.com`).
+  Supports multi-region (US/EU/JP), free-text search, filter strings, and paginated results.
+  Price data is fetched from the public `api.ec.nintendo.com/v1/price` endpoint.
+  Routes: `GET /api/nintendo/search`, `GET /api/nintendo/game/{nsuid}`,
+  `GET /api/nintendo/prices`.  Note: no user library API exists for Nintendo — the
+  integration is catalog-only.
+
+- [x] **Browser Extension** — Manifest V3 Chrome/Firefox extension in `browser-extension/`.
+  Features: toolbar popup with quick-pick UI, three pick modes (Random/Unplayed/Barely
+  played), store link opener, badge-based connection status, desktop notifications,
+  configurable GAPI server URL via options page, background service worker with periodic
+  health-check alarm.
+
+- [x] **Docker / Microservices** — `Dockerfile` (multi-stage, non-root user, HEALTHCHECK),
+  `docker-compose.yml` with four services (`gapi-web`, `gapi-db` PostgreSQL 15,
+  `gapi-redis` Redis 7, `gapi-nginx` reverse proxy with WebSocket + TLS support),
+  `docker-compose.override.yml` for hot-reload development, `nginx/nginx.conf`,
+  and updated `.env.example` with all credential placeholders.
+
+- [x] **Video Tutorials** — `TUTORIALS.md` with 12 step-by-step tutorial sections covering
+  Steam setup, Web GUI, all platform integrations (Epic/GOG/Xbox/PSN/Nintendo), Smart/ML
+  recommendations, Live sessions, playlists/tags/backlog, reviews, Discord bot,
+  notifications (Slack/Teams/IFTTT/Home Assistant), browser extension, Docker deployment,
+  and admin panel.
 - [x] **Epic Games OAuth** — `EpicOAuthClient` in `platform_clients.py` implements the full
   OAuth2 PKCE authorization code flow.  After completing `/api/epic/oauth/authorize` →
   `/api/epic/oauth/callback` the user's Epic library is available at `GET /api/epic/library`.

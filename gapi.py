@@ -753,6 +753,29 @@ class GamePicker:
             except Exception as e:
                 self._log.warning("Could not initialize Xbox client: %s", e)
 
+        # Initialize PSN client if enabled
+        if self.config.get('psn_enabled', False):
+            try:
+                from platform_clients import PSNClient
+                psn = PSNClient(timeout=self.API_TIMEOUT)
+                npsso = self.config.get('psn_npsso', '')
+                if npsso and not is_placeholder_value(npsso):
+                    psn.connect(npsso)
+                self.clients['psn'] = psn
+            except Exception as e:
+                self._log.warning("Could not initialize PSN client: %s", e)
+
+        # Initialize Nintendo eShop client if enabled
+        if self.config.get('nintendo_enabled', False):
+            try:
+                from platform_clients import NintendoEShopClient
+                self.clients['nintendo'] = NintendoEShopClient(
+                    region=self.config.get('nintendo_region', 'US'),
+                    timeout=self.API_TIMEOUT,
+                )
+            except Exception as e:
+                self._log.warning("Could not initialize Nintendo client: %s", e)
+
         # For backward compatibility, keep steam_client reference
         self.steam_client = self.clients.get('steam')
 

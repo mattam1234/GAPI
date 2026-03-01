@@ -828,3 +828,534 @@ class XboxAPIClient(_OAuth2Mixin):
         # Details are populated as a side effect of get_owned_games;
         # a single-title lookup would require a separate titlehub call.
         return None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _extract_title_image(title: Dict[str, Any]) -> str:
+    """Safely extract the image URL from a PSN title dict."""
+    image = title.get('image')
+    if isinstance(image, dict):
+        return image.get('url', '')
+    if isinstance(image, str):
+        return image
+    return ''
+
+
+# ---------------------------------------------------------------------------
+# PlayStation Network Client
+# ---------------------------------------------------------------------------
+
+class PSNClient(_OAuth2Mixin):
+    """PlayStation Network client using Sony's NPSSO token authentication.
+
+    Sony's PlayStation Network does not have an official public OAuth application
+    registration flow for third-party developers.  Instead, users provide their
+    **NPSSO token** — a long-lived session token that PlayStation stores in the
+    browser cookie ``npsso`` when logged in at ``my.playstation.com``.
+
+    Auth flow
+    ---------
+    1. User retrieves their NPSSO token from browser cookies (see README).
+    2. ``connect(npsso)`` exchanges the NPSSO for a short-lived OAuth access
+       token via the Sony SSO endpoint.
+    3. Subsequent calls to ``get_owned_games()`` / ``get_trophies()`` use the
+       access token, refreshing automatically when it expires.
+
+    Args:
+        timeout: HTTP request timeout in seconds.
+
+    Example config::
+
+        "psn_enabled": true,
+        "psn_npsso": "YOUR_PSN_NPSSO_TOKEN_HERE"
+    """
+
+    _SSO_URL      = "https://ca.account.sony.com/api/authz/v3/oauth/token"
+    _EXCHANGE_URL = "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/token"
+    _TITLES_URL   = "https://m.np.playstation.com/api/gamelist/v2/users/me/titles"
+    _TROPHIES_URL = "https://m.np.playstation.com/api/trophy/v1/users/me/trophyTitles"
+    # Known public client credentials used by the PlayStation Android app.
+    # These are widely published in the PlayStation community (PSDLE, psn-php,
+    # psnawp, etc.) and are not secret — Sony intentionally ships them in the
+    # public Android APK.  They do NOT grant elevated API access; they are
+    # required only to complete the standard OAuth2 code-exchange flow for
+    # any PSN OAuth application.
+    _CLIENT_ID    = "09515159-7237-4370-9b40-3806e67c0891"
+    _CLIENT_SECRET = "ucIBBpU6QUVYETxW"
+    _SCOPE         = "psn:mobile.v2.core psn:clientapp"
+
+    def __init__(self, timeout: int = 10) -> None:
+        _OAuth2Mixin.__init__(self)
+        self._timeout = timeout
+        self._session = requests.Session()
+        self._session.headers.update({
+            'User-Agent': (
+                'PlayStation/21090100 CFNetwork/1126 Darwin/19.5.0'
+            )
+        })
+        self.details_cache: Dict[str, Any] = {}
+
+    def get_platform_name(self) -> str:
+        return "psn"
+
+    # ------------------------------------------------------------------
+    # Authentication
+    # ------------------------------------------------------------------
+
+    def connect(self, npsso: str) -> bool:
+        """Exchange an NPSSO token for a PlayStation Network access token.
+
+        The NPSSO token can be obtained by logging in to
+        ``https://my.playstation.com`` and extracting the ``npsso`` cookie
+        value (available in browser DevTools → Application → Cookies).
+
+        Args:
+            npsso: The NPSSO session token string.
+
+        Returns:
+            ``True`` on success, ``False`` on any HTTP or JSON error.
+        """
+        # Step 1: obtain an authorization code from the SSO endpoint
+        auth_code_url = (
+            "https://ca.account.sony.com/api/authz/v3/oauth/authorize"
+            "?access_type=offline"
+            "&client_id=09515159-7237-4370-9b40-3806e67c0891"
+            "&redirect_uri=com.scee.psxandroid.sceabroker%3A%2F%2Fpsxbroker"
+            "&response_type=code"
+            "&scope=psn%3Amobile.v2.core%20psn%3Aclientapp"
+        )
+        try:
+            resp = self._session.get(
+                auth_code_url,
+                headers={'Cookie': f'npsso={npsso}'},
+                allow_redirects=False,
+                timeout=self._timeout,
+            )
+            location = resp.headers.get('Location', '')
+            if 'code=' not in location:
+                logger.warning("PSN: NPSSO exchange did not return auth code. "
+                               "Token may be expired or invalid.")
+                return False
+            # Extract code from redirect location
+            from urllib.parse import urlparse, parse_qs
+            parsed  = urlparse(location)
+            qs      = parse_qs(parsed.query)
+            codes   = qs.get('code', [])
+            if not codes:
+                return False
+            auth_code = codes[0]
+        except requests.RequestException as exc:
+            logger.warning("PSN: NPSSO → auth code failed: %s", exc)
+            return False
+
+        # Step 2: exchange auth code for access + refresh tokens
+        data = {
+            'code':          auth_code,
+            'grant_type':    'authorization_code',
+            'redirect_uri':  'com.scee.psxandroid.sceabroker://psxbroker',
+            'token_format':  'jwt',
+        }
+        try:
+            resp = self._session.post(
+                self._SSO_URL,
+                data=data,
+                auth=(self._CLIENT_ID, self._CLIENT_SECRET),
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            self._store_tokens(resp.json())
+            logger.info("PSN: authenticated successfully")
+            return True
+        except requests.RequestException as exc:
+            logger.warning("PSN: token exchange failed: %s", exc)
+            return False
+
+    def refresh_tokens(self) -> bool:
+        """Refresh the PSN access token using the stored refresh token.
+
+        Returns:
+            ``True`` on success.
+        """
+        if not self._refresh_token:
+            return False
+        data = {
+            'grant_type':    'refresh_token',
+            'refresh_token': self._refresh_token,
+            'token_format':  'jwt',
+            'scope':         self._SCOPE,
+        }
+        try:
+            resp = self._session.post(
+                self._SSO_URL,
+                data=data,
+                auth=(self._CLIENT_ID, self._CLIENT_SECRET),
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            self._store_tokens(resp.json())
+            return True
+        except requests.RequestException as exc:
+            logger.warning("PSN: token refresh failed: %s", exc)
+            return False
+
+    # ------------------------------------------------------------------
+    # Library
+    # ------------------------------------------------------------------
+
+    def get_owned_games(self, user_id: str = '') -> List[Dict[str, Any]]:
+        """Fetch the authenticated user's PlayStation game library.
+
+        Uses the PSN mobile game-list API to retrieve all titles associated
+        with the account, normalised to the GAPI game dict shape.
+
+        Args:
+            user_id: Ignored; identity is from the OAuth access token.
+
+        Returns:
+            List of game dicts with ``name``, ``game_id``, ``platform``,
+            ``appid``, ``playtime_forever`` (always 0 — PSN has no playtime
+            API), ``psn_title_id``, and ``concept_id``.
+        """
+        if not self.is_authenticated:
+            logger.info("PSN: not authenticated — call connect(npsso) first")
+            return []
+        if self._is_token_expired():
+            self.refresh_tokens()
+
+        games: List[Dict[str, Any]] = []
+        offset = 0
+        limit  = 100
+
+        while True:
+            try:
+                resp = self._session.get(
+                    self._TITLES_URL,
+                    params={
+                        'categories': 'ps4_game,ps5_native_game,pspc_game',
+                        'limit':      limit,
+                        'offset':     offset,
+                    },
+                    headers=self._auth_header(),
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+            except requests.RequestException as exc:
+                logger.warning("PSN get_owned_games failed: %s", exc)
+                break
+
+            titles = body.get('titles', [])
+            for title in titles:
+                title_id   = title.get('titleId', '')
+                concept_id = str(title.get('conceptId', ''))
+                name       = title.get('name', title_id)
+                game: Dict[str, Any] = {
+                    'name':             name,
+                    'appid':            title_id,
+                    'game_id':          f'psn:{title_id}',
+                    'platform':         'psn',
+                    'playtime_forever': 0,
+                    'psn_title_id':     title_id,
+                    'concept_id':       concept_id,
+                    'category':         title.get('category', ''),
+                }
+                # Store basic details
+                self.details_cache[title_id] = {
+                    'title':       name,
+                    'description': '',
+                    'genres':      [],
+                    'developers':  [],
+                    'publishers':  [],
+                    'image_url':   _extract_title_image(title),
+                }
+                games.append(game)
+
+            # Paginate
+            total  = body.get('totalItemCount', len(titles))
+            offset += len(titles)
+            if offset >= total or not titles:
+                break
+
+        return games
+
+    def get_game_details(self, game_id: str) -> Optional[Dict[str, Any]]:
+        """Return cached details for *game_id* (PSN title ID).
+
+        Returns:
+            Details dict or ``None``.
+        """
+        return self.details_cache.get(game_id)
+
+    def get_trophies(self, account_id: str = 'me') -> List[Dict[str, Any]]:
+        """Fetch trophy titles for the authenticated user.
+
+        Args:
+            account_id: PSN account ID (default ``'me'`` for authenticated user).
+
+        Returns:
+            List of trophy-title dicts with ``npServiceName``, ``trophySetVersion``,
+            ``trophyTitleName``, ``npCommunicationId``, and progress fields.
+        """
+        if not self.is_authenticated:
+            return []
+        if self._is_token_expired():
+            self.refresh_tokens()
+
+        trophies: List[Dict[str, Any]] = []
+        offset = 0
+        limit  = 100
+
+        while True:
+            url = self._TROPHIES_URL.replace('/me/', f'/{account_id}/')
+            try:
+                resp = self._session.get(
+                    url,
+                    params={'limit': limit, 'offset': offset},
+                    headers=self._auth_header(),
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+            except requests.RequestException as exc:
+                logger.warning("PSN get_trophies failed: %s", exc)
+                break
+
+            items  = body.get('trophyTitles', [])
+            trophies.extend(items)
+            total   = body.get('totalItemCount', len(items))
+            offset += len(items)
+            if offset >= total or not items:
+                break
+
+        return trophies
+
+
+# ---------------------------------------------------------------------------
+# Nintendo eShop Client (public catalog only — no library API available)
+# ---------------------------------------------------------------------------
+
+class NintendoEShopClient:
+    """Nintendo eShop client for public catalog browsing and price lookup.
+
+    Nintendo does not provide a public API for user game libraries.  This
+    client uses Nintendo's public *algolia*-powered eShop search API (same
+    backend used by the Nintendo website) to browse and search the game
+    catalog.
+
+    Region support
+    --------------
+    The Nintendo eShop has separate regional storefronts.  Supported
+    ``region`` values: ``US``, ``EU``, ``JP``.
+
+    Args:
+        region:  Store region (default ``"US"``).
+        timeout: HTTP request timeout in seconds.
+
+    Note:
+        Library access is **not available** without an official Nintendo
+        developer API agreement.  This client is catalog-only.
+    """
+
+    # Public Algolia credentials used by Nintendo's own website.
+    # App ID and API key are the same for all regions; only the index name
+    # varies by region/language.
+    _ALGOLIA_APP_ID  = 'U3B6GR4UA3'
+    _ALGOLIA_API_KEY = '9a20c93440cf63cf1a7008d75f7438bf'
+    _ALGOLIA_INDICES: Dict[str, str] = {
+        'US': 'noa_aem_game_en_us',
+        'EU': 'noa_aem_game_en_gb',
+        'JP': 'noa_aem_game_ja_jp',
+    }
+    _ALGOLIA_SEARCH_URL = (
+        "https://{app_id}-dsn.algolia.net/1/indexes/{index}/query"
+    )
+    _PRICE_URL = "https://api.ec.nintendo.com/v1/price"
+
+    def __init__(self, region: str = 'US', timeout: int = 10) -> None:
+        self._region  = region.upper()
+        self._timeout = timeout
+        self._session = requests.Session()
+        self.details_cache: Dict[str, Any] = {}
+
+    def get_platform_name(self) -> str:
+        return "nintendo"
+
+    def _algolia_headers(self) -> Dict[str, str]:
+        return {
+            'X-Algolia-Application-Id': self._ALGOLIA_APP_ID,
+            'X-Algolia-API-Key':        self._ALGOLIA_API_KEY,
+            'Content-Type':             'application/json',
+        }
+
+    def search_games(
+        self,
+        query: str = '',
+        filters: str = '',
+        page: int = 0,
+        hits_per_page: int = 50,
+    ) -> Dict[str, Any]:
+        """Search the Nintendo eShop catalog.
+
+        Args:
+            query:         Free-text search term.  Empty string returns all
+                           games sorted by relevance / popularity.
+            filters:       Algolia filter string (e.g.
+                           ``'playerFilters:1-4 players'``).
+            page:          Zero-based page number.
+            hits_per_page: Results per page (max 100).
+
+        Returns:
+            Dict with ``hits`` (list of game dicts), ``nbHits`` (total count),
+            ``page``, and ``nbPages``.  Each hit includes ``title``,
+            ``nsuid``, ``url``, ``players``, ``categories``, ``platform``,
+            ``releaseDate``, and ``msrp``.
+        """
+        app_id = self._ALGOLIA_APP_ID
+        index  = self._ALGOLIA_INDICES.get(self._region, self._ALGOLIA_INDICES['US'])
+        url    = self._ALGOLIA_SEARCH_URL.format(app_id=app_id, index=index)
+
+        payload: Dict[str, Any] = {
+            'params': f'query={urllib.parse.quote(query)}'
+                      f'&hitsPerPage={hits_per_page}'
+                      f'&page={page}'
+                      + (f'&filters={urllib.parse.quote(filters)}' if filters else ''),
+        }
+        try:
+            resp = self._session.post(
+                url,
+                json=payload,
+                headers=self._algolia_headers(),
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Normalise hits to GAPI-friendly dicts
+            hits = []
+            for hit in data.get('hits', []):
+                nsuid = hit.get('nsuid', '')
+                game: Dict[str, Any] = {
+                    'title':       hit.get('title', ''),
+                    'nsuid':       nsuid,
+                    'url':         'https://www.nintendo.com' + hit.get('url', ''),
+                    'description': hit.get('description', ''),
+                    'players':     hit.get('players', ''),
+                    'categories':  hit.get('categories', []),
+                    'platform':    hit.get('platform', 'Nintendo Switch'),
+                    'releaseDate': hit.get('releaseDate', ''),
+                    'msrp':        hit.get('msrp', 0),
+                    'publishers':  hit.get('publishers', []),
+                    'developers':  hit.get('developers', []),
+                    'esrb':        hit.get('esrb', ''),
+                    'boxart':      hit.get('boxart', ''),
+                    # GAPI-standard keys
+                    'name':             hit.get('title', ''),
+                    'game_id':          f'nintendo:{nsuid}',
+                    'appid':            nsuid,
+                    'playtime_forever': 0,
+                    'source':           'nintendo',
+                }
+                if nsuid:
+                    self.details_cache[nsuid] = game
+                hits.append(game)
+
+            return {
+                'hits':     hits,
+                'nbHits':   data.get('nbHits', 0),
+                'page':     data.get('page', 0),
+                'nbPages':  data.get('nbPages', 0),
+            }
+        except requests.RequestException as exc:
+            logger.warning("Nintendo search_games failed: %s", exc)
+            return {'hits': [], 'nbHits': 0, 'page': 0, 'nbPages': 0}
+
+    def get_game_by_nsuid(self, nsuid: str) -> Optional[Dict[str, Any]]:
+        """Return details for a game by its *nsuid* (Nintendo Switch unique ID).
+
+        Checks the in-process cache first.  Fetches price data from the
+        Nintendo price API to enrich the result.
+
+        Args:
+            nsuid: The 14-digit Nintendo Switch game ID.
+
+        Returns:
+            Game detail dict or ``None``.
+        """
+        if nsuid in self.details_cache:
+            # Enrich with current price if not yet fetched
+            entry = self.details_cache[nsuid]
+            if 'current_price' not in entry:
+                self._enrich_price(nsuid, entry)
+            return entry
+        return None
+
+    def get_prices(self, nsuids: List[str], country: str = 'US') -> Dict[str, Any]:
+        """Fetch current eShop prices for one or more games.
+
+        Uses Nintendo's public price API which requires no authentication.
+
+        Args:
+            nsuids:  List of 14-digit nsuid strings (up to 50 per request).
+            country: Two-letter ISO country code (default ``"US"``).
+
+        Returns:
+            Dict mapping nsuid → ``{'regular_price': ..., 'discount_price': ...}``.
+        """
+        result: Dict[str, Any] = {}
+        # API accepts up to 50 nsuids per call
+        for chunk_start in range(0, len(nsuids), 50):
+            chunk = nsuids[chunk_start: chunk_start + 50]
+            try:
+                resp = self._session.get(
+                    self._PRICE_URL,
+                    params={
+                        'country': country,
+                        'lang':    'en',
+                        'ids':     ','.join(chunk),
+                    },
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                for price_data in data.get('prices', []):
+                    nsuid_str = str(price_data.get('title_id', ''))
+                    regular   = price_data.get('regular_price', {})
+                    discount  = price_data.get('discount_price', {})
+                    result[nsuid_str] = {
+                        'regular_price':        regular.get('raw_value'),
+                        'regular_price_str':    regular.get('amount', ''),
+                        'discount_price':       discount.get('raw_value') if discount else None,
+                        'discount_price_str':   discount.get('amount', '') if discount else '',
+                        'sales_status':         price_data.get('sales_status', ''),
+                    }
+            except requests.RequestException as exc:
+                logger.warning("Nintendo get_prices failed: %s", exc)
+        return result
+
+    def _enrich_price(self, nsuid: str, entry: Dict[str, Any]) -> None:
+        """Add current price data to *entry* in-place."""
+        prices = self.get_prices([nsuid])
+        if nsuid in prices:
+            entry['current_price']     = prices[nsuid].get('regular_price')
+            entry['current_price_str'] = prices[nsuid].get('regular_price_str', '')
+            entry['discount_price']    = prices[nsuid].get('discount_price')
+            entry['sales_status']      = prices[nsuid].get('sales_status', '')
+
+    # ------------------------------------------------------------------
+    # Stub (no library API available)
+    # ------------------------------------------------------------------
+
+    def get_owned_games(self, user_id: str = '') -> List[Dict[str, Any]]:
+        """Not available — Nintendo has no public library API.
+
+        Returns an empty list.  Use :meth:`search_games` to browse the
+        catalog instead.
+        """
+        logger.info(
+            "Nintendo eShop library access is not available via a public API. "
+            "Use search_games() to browse the catalog."
+        )
+        return []
