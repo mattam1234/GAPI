@@ -181,7 +181,7 @@ chat_rooms: Dict[str, Dict] = {
         'is_private': False,
         'members': set(),
         'invites': set(),
-        'created_at': datetime.utcnow(),
+        'created_at': datetime.now(timezone.utc),
     }
 }
 chat_room_active_session: Dict[str, str] = {}
@@ -4973,9 +4973,9 @@ def api_user_profile(username: str):
 # Notifications API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/notifications', methods=['GET'])
+@app.route('/api/notifications/mock', methods=['GET'])
 @require_login
-def api_get_notifications():
+def api_get_notifications_mock():
     """Return user notifications"""
     username = get_current_username()
     notifications = [
@@ -5202,7 +5202,7 @@ def api_get_my_profile():
 
 @app.route('/api/profile/update', methods=['POST'])
 @require_login
-def api_update_profile():
+def api_update_profile_legacy():
     """Update user's profile"""
     username = get_current_username()
     data = request.get_json() or {}
@@ -5285,59 +5285,9 @@ def api_seasonal_leaderboards():
 
 
 # ---------------------------------------------------------------------------
-# Phase 5: Advanced Features API
+# Phase 6: Advanced Features APIs
 # ---------------------------------------------------------------------------
 
-# Achievements & Badges
-@app.route('/api/achievements', methods=['GET'])
-@require_login
-def api_get_achievements():
-    """Get all achievements with unlock status"""
-    username = get_current_username()
-    achievements = [
-        {'id': '1', 'name': 'First Pick', 'description': 'Make your first pick', 'tier': 'bronze', 'icon': '🥉', 'unlocked': True},
-        {'id': '2', 'name': 'Popular Vote', 'description': 'Get 5 votes', 'tier': 'bronze', 'icon': '⭐', 'unlocked': True},
-        {'id': '3', 'name': 'Host Master', 'description': 'Host 10 sessions', 'tier': 'silver', 'icon': '🎯', 'unlocked': False},
-        {'id': '4', 'name': 'Social Butterfly', 'description': 'Follow 20 users', 'tier': 'silver', 'icon': '🦋', 'unlocked': False},
-        {'id': '5', 'name': 'Perfect Accuracy', 'description': 'Get 100% accuracy in a session', 'tier': 'gold', 'icon': '🎖️', 'unlocked': False},
-        {'id': '6', 'name': 'Legendary', 'description': 'Reach 100 correct picks', 'tier': 'platinum', 'icon': '👑', 'unlocked': False},
-    ]
-    return jsonify({'achievements': achievements})
-
-
-# Guilds & Clans
-@app.route('/api/guilds', methods=['GET'])
-@require_login
-def api_get_guilds():
-    """Get available guilds to join"""
-    guilds = [
-        {'id': '1', 'name': 'The Pickmaster Guild', 'icon': '🎮', 'color': '#667eea', 'member_count': 42, 'created_at': '2024-01-15', 'is_member': True},
-        {'id': '2', 'name': 'Casual Gamers Alliance', 'icon': '🎯', 'color': '#764ba2', 'member_count': 28, 'created_at': '2024-02-01', 'is_member': False},
-        {'id': '3', 'name': 'Competitive Elite', 'icon': '⚔️', 'color': '#f39c12', 'member_count': 15, 'created_at': '2024-01-20', 'is_member': False},
-    ]
-    return jsonify({'guilds': guilds})
-
-
-@app.route('/api/guilds/create', methods=['POST'])
-@require_login
-def api_create_guild():
-    """Create a new guild"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    name = data.get('name', '')
-    
-    if not name:
-        return jsonify({'error': 'Guild name required'}), 400
-    
-    return jsonify({'success': True, 'message': f'Guild "{name}" created', 'guild_id': '4'})
-
-
-@app.route('/api/guilds/<guild_id>/join', methods=['POST'])
-@require_login
-def api_join_guild(guild_id):
-    """Join a guild"""
-    username = get_current_username()
-    return jsonify({'success': True, 'message': 'Joined guild'})
 
 
 # Tournaments & Brackets
@@ -5360,194 +5310,6 @@ def api_get_tournaments():
     return jsonify({'tournaments': tournaments})
 
 
-@app.route('/api/tournaments/create', methods=['POST'])
-@require_login
-def api_create_tournament():
-    """Create a new tournament"""
-    data = request.get_json() or {}
-    name = data.get('name', '')
-    
-    if not name:
-        return jsonify({'error': 'Tournament name required'}), 400
-    
-    return jsonify({'success': True, 'message': 'Tournament created', 'tournament_id': '5'})
-
-
-# Game Reviews & Ratings
-@app.route('/api/reviews', methods=['GET', 'POST'])
-@require_login
-def api_reviews():
-    """Get reviews or post a new review"""
-    if request.method == 'GET':
-        reviews = [
-            {'id': '1', 'game_name': 'Portal 2', 'rating': 5, 'author': 'gamer123', 'review': 'Mind-bending puzzles and hilarious dialogue!', 'helpful': 23, 'unhelpful': 2},
-            {'id': '2', 'game_name': 'Elden Ring', 'rating': 4, 'author': 'player_pro', 'review': 'Challenging but rewarding. Amazing world design.', 'helpful': 18, 'unhelpful': 5},
-            {'id': '3', 'game_name': 'Baldurs Gate 3', 'rating': 5, 'author': 'legendary_gamer', 'review': 'The best RPG I have ever played!', 'helpful': 45, 'unhelpful': 3},
-        ]
-        return jsonify({'reviews': reviews})
-    else:  # POST
-        data = request.get_json() or {}
-        game = data.get('game', '')
-        rating = data.get('rating', 0)
-        review = data.get('review', '')
-        
-        if not all([game, rating, review]):
-            return jsonify({'error': 'All fields required'}), 400
-        
-        return jsonify({'success': True, 'message': 'Review posted', 'review_id': '4'})
-
-
-# Gaming Events
-@app.route('/api/events', methods=['GET', 'POST'])
-@require_login
-def api_events():
-    """Get events or create a new event"""
-    if request.method == 'GET':
-        events = [
-            {'id': '1', 'name': 'Gaming Marathon', 'datetime': '2024-12-20T18:00:00', 'confirmed_attendees': 8, 'max_attendees': 20, 'host': 'gamer123'},
-            {'id': '2', 'name': 'Co-op Tournament', 'datetime': '2024-12-25T15:00:00', 'confirmed_attendees': 12, 'max_attendees': 12, 'host': 'player_pro'},
-            {'id': '3', 'name': 'Casual Game Night', 'datetime': '2024-12-22T20:00:00', 'confirmed_attendees': 5, 'max_attendees': None, 'host': 'legend_gamer'},
-        ]
-        return jsonify({'events': events})
-    else:  # POST
-        data = request.get_json() or {}
-        name = data.get('name', '')
-        datetime_val = data.get('datetime', '')
-        max_attendees = data.get('max_attendees')
-        
-        if not all([name, datetime_val]):
-            return jsonify({'error': 'Required fields missing'}), 400
-        
-        return jsonify({'success': True, 'message': 'Event created', 'event_id': '4'})
-
-
-@app.route('/api/events/<event_id>/rsvp', methods=['POST'])
-@require_login
-def api_event_rsvp(event_id):
-    """RSVP to an event"""
-    username = get_current_username()
-    return jsonify({'success': True, 'message': 'RSVP confirmed'})
-
-
-# User Analytics
-@app.route('/api/analytics', methods=['GET'])
-@require_login
-def api_get_analytics():
-    """Get user analytics and statistics"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        
-        # Get pick count
-        picks_query = "SELECT COUNT(*) FROM picks WHERE username = ?"
-        picks = db.execute(picks_query, (username,)).fetchone()[0]
-        
-        # Get vote count
-        votes_query = "SELECT COUNT(*) FROM votes WHERE username = ?"
-        votes = db.execute(votes_query, (username,)).fetchone()[0]
-        
-        # Get accuracy (percentage of picks that won)
-        accuracy_query = """
-            SELECT CAST(COUNT(CASE WHEN p.won THEN 1 END) as float) / 
-                   NULLIF(COUNT(*), 0) * 100 as accuracy
-            FROM picks p WHERE p.username = ?
-        """
-        accuracy_result = db.execute(accuracy_query, (username,)).fetchone()
-        accuracy = round(accuracy_result[0], 1) if accuracy_result[0] else 0
-        
-        # Get current streak (simplified)
-        streak = 5
-        
-        return jsonify({
-            'picks': picks,
-            'votes': votes,
-            'accuracy': accuracy,
-            'streak': streak
-        })
-    except Exception as e:
-        gui_logger.error(f"Error getting analytics: {e}")
-        return jsonify({
-            'picks': 0,
-            'votes': 0,
-            'accuracy': 0,
-            'streak': 0
-        })
-
-
-# Activity Feed
-@app.route('/api/activity-feed', methods=['GET'])
-@require_login
-def api_activity_feed():
-    """Get friend activity feed"""
-    username = get_current_username()
-    
-    activities = [
-        {'user': 'gamer123', 'action': 'made a pick in Game Night', 'icon': '📍', 'color': '#667eea', 'created_at': datetime.now().isoformat()},
-        {'user': 'player_pro', 'action': 'created a new tournament', 'icon': '🎮', 'color': '#764ba2', 'created_at': datetime.now().isoformat()},
-        {'user': 'legendary_gamer', 'action': 'joined The Pickmaster Guild', 'icon': '⚔️', 'color': '#f39c12', 'created_at': datetime.now().isoformat()},
-        {'user': 'gamer123', 'action': 'unlocked an achievement', 'icon': '🏆', 'color': '#27ae60', 'created_at': datetime.now().isoformat()},
-    ]
-    
-    return jsonify({'activities': activities})
-
-
-# Collections & Wishlists
-@app.route('/api/collections', methods=['GET', 'POST'])
-@require_login
-def api_collections():
-    """Get collections or create a new one"""
-    if request.method == 'GET':
-        username = get_current_username()
-        collections = [
-            {'id': '1', 'name': 'Must Play', 'type': 'collection', 'game_count': 12, 'owner': username},
-            {'id': '2', 'name': 'Wishlist', 'type': 'wishlist', 'game_count': 8, 'owner': username},
-            {'id': '3', 'name': 'Co-op Favorites', 'type': 'collection', 'game_count': 5, 'owner': username},
-        ]
-        return jsonify({'collections': collections})
-    else:  # POST
-        data = request.get_json() or {}
-        name = data.get('name', '')
-        ctype = data.get('type', 'collection')
-        
-        if not name:
-            return jsonify({'error': 'Collection name required'}), 400
-        
-        return jsonify({'success': True, 'message': 'Collection created', 'collection_id': '4'})
-
-
-# Game Series & Franchises
-@app.route('/api/game-series', methods=['GET'])
-@require_login
-def api_game_series():
-    """Get game series/franchises with completion tracking"""
-    username = get_current_username()
-    
-    series = [
-        {'id': '1', 'name': 'The Witcher', 'icon': '🐺', 'owned_games': 2, 'total_games': 3, 'completion_percentage': 67},
-        {'id': '2', 'name': 'Dark Souls', 'icon': '⚫', 'owned_games': 2, 'total_games': 4, 'completion_percentage': 50},
-        {'id': '3', 'name': 'Portal', 'icon': '🔷', 'owned_games': 2, 'total_games': 2, 'completion_percentage': 100},
-        {'id': '4', 'name': 'Legend of Zelda', 'icon': '🗡️', 'owned_games': 1, 'total_games': 20, 'completion_percentage': 5},
-    ]
-    
-    return jsonify({'series': series})
-
-
-# Cosmetics & Themes
-@app.route('/api/cosmetics', methods=['GET'])
-@require_login
-def api_get_cosmetics():
-    """Get available cosmetics (themes, titles, badges)"""
-    username = get_current_username()
-    
-    themes = [
-        {'id': '1', 'name': 'Dark', 'color': '#1a1a1a', 'owned': True, 'active': True},
-        {'id': '2', 'name': 'Neon', 'color': '#ff00ff', 'owned': True, 'active': False},
-        {'id': '3', 'name': 'Ocean Blue', 'color': '#0077be', 'owned': False, 'active': False},
-        {'id': '4', 'name': 'Forest Green', 'color': '#2d5016', 'owned': False, 'active': False},
-        {'id': '5', 'name': 'Cherry Red', 'color': '#991113', 'owned': True, 'active': False},
-    ]
-    
     titles = [
         {'id': '1', 'title': '👑 Legendary', 'owned': True, 'active': True},
         {'id': '2', 'title': '⭐ Star Player', 'owned': True, 'active': False},
