@@ -1189,6 +1189,80 @@ self.addEventListener('fetch', (event) => {
 
 
 
+def ensure_picker_initialized(username: str = None):
+    """Ensure picker is initialized and loaded with user's games from database.
+    
+    Args:
+        username: Username to load games for. If None, uses current_user.
+        
+    Returns:
+        True if picker was successfully initialized, False otherwise.
+    """
+    global picker, current_user
+    
+    if username is None:
+        with current_user_lock:
+            username = current_user
+    
+    if not username:
+        return False
+    
+    # Initialize picker if needed
+    if not picker:
+        with picker_lock:
+            if not picker:  # Double-check after acquiring lock
+                # Properly initialize GamePicker with config
+                try:
+                    picker = gapi.GamePicker(config_path='config.json')
+                    gui_logger.info("Initialized GamePicker")
+                except Exception as e:
+                    gui_logger.exception(f"Failed to initialize GamePicker: {e}")
+                    return False
+    
+    # Load games from database if not already loaded
+    if not picker.games or len(picker.games) == 0:
+        if DB_AVAILABLE and ensure_db_available():
+            try:
+                db = database.SessionLocal()
+                try:
+                    if _library_service:
+                        cached_games = _library_service.get_cached(db, username)
+                    else:
+                        cached_games = database.get_cached_library(db, username)
+                    
+                    if cached_games:
+                        with picker_lock:
+                            picker.games = [
+                                {
+                                    'appid': int(g['app_id']) if str(g['app_id']).isdigit() else g['app_id'],
+                                    'name': g['name'],
+                                    'playtime_forever': int(g.get('playtime_hours', 0) * 60),
+                                    'platform': g.get('platform', 'steam')
+                                }
+                                for g in cached_games
+                            ]
+                        gui_logger.info(f"Loaded {len(picker.games)} games for {username} from database cache")
+                        return True
+                    else:
+                        gui_logger.warning(f"No cached games for {username}")
+                        with picker_lock:
+                            picker.games = DEMO_GAMES
+                        return False
+                finally:
+                    db.close()
+            except Exception as e:
+                gui_logger.exception(f"Failed to load games from database: {e}")
+                with picker_lock:
+                    picker.games = DEMO_GAMES
+                return False
+        else:
+            with picker_lock:
+                picker.games = DEMO_GAMES
+            return False
+    
+    return True
+
+
 @app.route('/api/status')
 def api_status():
     """Get application status"""
@@ -1202,6 +1276,9 @@ def api_status():
                 'logged_in': False,
                 'message': 'Please log in'
             })
+    
+    # Ensure picker is initialized with user's games
+    ensure_picker_initialized()
     
     if picker is None:
         return jsonify({
@@ -1549,81 +1626,10 @@ def api_pick_game():
     try:
         gui_logger.info(f"Pick request from user {username}")
         
-        # Ensure picker is initialized for logged-in user
-        # Create a minimal picker without config validation (we're just picking from cached games)
-        if not picker:
-            with picker_lock:
-                # Create picker with minimal config to avoid requiring Steam API credentials
-                picker = gapi.GamePicker.__new__(gapi.GamePicker)
-                picker._log = logging.getLogger('gapi.picker')
-                picker.config = {}
-                picker.MAX_HISTORY = gapi.GamePicker.DEFAULT_MAX_HISTORY
-                picker.BARELY_PLAYED_THRESHOLD_MINUTES = gapi.GamePicker.DEFAULT_BARELY_PLAYED_HOURS * 60
-                picker.WELL_PLAYED_THRESHOLD_MINUTES = gapi.GamePicker.DEFAULT_WELL_PLAYED_HOURS * 60
-                picker.API_TIMEOUT = gapi.GamePicker.DEFAULT_API_TIMEOUT
-                picker.clients = {}
-                picker.steam_client = None
-                picker.games = []
-                picker.history = []
-                picker.favorites = []
-                picker.reviews = {}
-                picker.tags = {}
-                picker.schedule = {}
-                picker.playlists = {}
-                picker.backlog = {}
-                
-                # Initialize steam_client for fetching game details
-                try:
-                    base_config = load_base_config()
-                    api_key = base_config.get('steam_api_key', '').strip()
-                    if api_key and not gapi.is_placeholder_value(api_key):
-                        picker.steam_client = gapi.SteamAPIClient(api_key)
-                        gui_logger.debug("Initialized SteamAPIClient for game details")
-                    else:
-                        gui_logger.warning("No valid Steam API key configured, game details may be limited")
-                except Exception as e:
-                    gui_logger.warning(f"Failed to initialize SteamAPIClient: {e}")
-                
-                gui_logger.debug("Initialized minimal picker for game selection")
-        
-        # Load user's games from database cache if available
-        if not picker.games or len(picker.games) == 0:
-            if DB_AVAILABLE and ensure_db_available():
-                db = None
-                try:
-                    db = database.SessionLocal()
-                    if _library_service:
-                        cached_games = _library_service.get_cached(db, username)
-                    else:
-                        cached_games = database.get_cached_library(db, username)
-
-                    if cached_games:
-                        # Convert database format to picker format
-                        picker.games = [
-                            {
-                                'appid': int(g['app_id']) if str(g['app_id']).isdigit() else g['app_id'],
-                                'name': g['name'],
-                                'playtime_forever': int(g.get('playtime_hours', 0) * 60),  # Convert hours to minutes
-                                'platform': g.get('platform', 'steam')
-                            }
-                            for g in cached_games
-                        ]
-                        gui_logger.info(f"Loaded {len(picker.games)} games for {username} from database cache")
-                    else:
-                        picker.games = DEMO_GAMES
-                        gui_logger.warning(f"No cached games for {username}, using demo games")
-                except Exception as e:
-                    gui_logger.exception(f"Failed to load games from database for {username}: {e}")
-                    picker.games = DEMO_GAMES
-                finally:
-                    if db:
-                        try:
-                            db.close()
-                        except Exception:
-                            pass
-            else:
-                picker.games = DEMO_GAMES
-                gui_logger.warning(f"Database not available for {username}, using demo games")
+        # Ensure picker is initialized with user's games
+        if not ensure_picker_initialized(username):
+            gui_logger.warning(f"Failed to initialize picker for {username}")
+            return jsonify({'error': 'Failed to load games'}), 500
         
         if not picker.games or len(picker.games) == 0:
             gui_logger.error(f"No games available for {username} after loading attempt")
@@ -3380,10 +3386,10 @@ def api_get_reviews():
     """Return all personal game reviews."""
     global picker
 
+    ensure_picker_initialized()
     if not picker:
-        with picker_lock:
-            picker = gapi.GamePicker()
-            picker.games = DEMO_GAMES
+        return jsonify({}), 500
+    
     with picker_lock:
         return jsonify(picker.review_service.get_all())
 
@@ -3394,10 +3400,10 @@ def api_get_review(game_id: str):
     """Return the review for a specific game."""
     global picker
 
+    ensure_picker_initialized()
     if not picker:
-        with picker_lock:
-            picker = gapi.GamePicker()
-            picker.games = DEMO_GAMES
+        return jsonify({'error': 'Picker not initialized'}), 500
+    
     with picker_lock:
         review = picker.review_service.get(game_id)
     if review is None:
@@ -3414,10 +3420,9 @@ def api_save_review(game_id: str):
     """
     global picker
 
+    ensure_picker_initialized()
     if not picker:
-        with picker_lock:
-            picker = gapi.GamePicker()
-            picker.games = DEMO_GAMES
+        return jsonify({'error': 'Picker not initialized'}), 500
 
     data = request.json or {}
     rating = data.get('rating')
@@ -3446,10 +3451,9 @@ def api_delete_review(game_id: str):
     """Delete the review for a game."""
     global picker
 
+    ensure_picker_initialized()
     if not picker:
-        with picker_lock:
-            picker = gapi.GamePicker()
-            picker.games = DEMO_GAMES
+        return jsonify({'error': 'Picker not initialized'}), 500
 
     with picker_lock:
         removed = picker.review_service.remove(game_id)
@@ -3472,12 +3476,9 @@ def api_get_all_tags():
 
     try:
         # Ensure picker is initialized for logged-in user
+        ensure_picker_initialized()
         if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
-        if not picker.games:
-            picker.games = DEMO_GAMES
+            return jsonify({'tags': [], 'game_tags': {}}), 500
 
         with picker_lock:
             return jsonify({'tags': picker.tag_service.all_tag_names(),
@@ -3493,10 +3494,9 @@ def api_get_game_tags(game_id: str):
     global picker
 
     try:
+        ensure_picker_initialized()
         if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
+            return jsonify({'game_id': game_id, 'tags': []}), 500
         with picker_lock:
             return jsonify({'game_id': game_id, 'tags': picker.tag_service.get(game_id)})
     except Exception as e:
@@ -3513,10 +3513,9 @@ def api_add_tag(game_id: str):
     global picker
 
     try:
+        ensure_picker_initialized()
         if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
+            return jsonify({'error': 'Picker not initialized'}), 500
 
         data = request.json or {}
         tag = data.get('tag', '').strip()
@@ -3540,10 +3539,9 @@ def api_remove_tag(game_id: str, tag: str):
     global picker
 
     try:
+        ensure_picker_initialized()
         if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
+            return jsonify({'error': 'Picker not initialized'}), 500
 
         with picker_lock:
             removed = picker.tag_service.remove(game_id, tag)
@@ -3565,14 +3563,9 @@ def api_library_by_tag(tag: str):
     global picker
 
     # Ensure picker is initialized for logged-in user
-    if not picker or not picker.games:
-        # Initialize with demo games if not loaded
-        if not picker:
-            with picker_lock:
-                picker = gapi.GamePicker()
-                picker.games = DEMO_GAMES
-        if not picker.games:
-            picker.games = DEMO_GAMES
+    ensure_picker_initialized()
+    if not picker:
+        return jsonify({'tag': tag, 'games': [], 'count': 0}), 500
 
     with picker_lock:
         games = picker.tag_service.filter_by_tag(tag, picker.games)
