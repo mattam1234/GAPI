@@ -9,6 +9,7 @@ import argparse
 import uuid
 import secrets
 from flask import Flask, render_template, jsonify, request, session, Response, redirect as flask_redirect
+from flask import has_request_context
 import threading
 import json
 import os
@@ -20,6 +21,7 @@ import tempfile
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple
 from functools import wraps
+from werkzeug.local import LocalProxy
 import gapi
 import multiuser
 try:
@@ -263,7 +265,16 @@ def _invite_to_chat_room(inviter: str, target_username: str,
     return True, f'Added @{target_username} to room "{room_name}".', room_name
 
 # User authentication
-current_user: Optional[str] = None
+_demo_current_user: Optional[str] = None
+
+
+def _resolve_current_user() -> Optional[str]:
+    if has_request_context():
+        return session.get('username') or _demo_current_user
+    return _demo_current_user
+
+
+current_user = LocalProxy(_resolve_current_user)
 current_user_lock = threading.Lock()
 
 DEMO_GAMES = [
@@ -1500,7 +1511,7 @@ def api_setup_initial_admin():
 @app.route('/api/auth/login', methods=['POST'])
 def api_auth_login():
     """Log in a user"""
-    global current_user, picker, multi_picker
+    global picker, multi_picker
     
     data = request.json or {}
     username = data.get('username', '').strip()
@@ -1515,9 +1526,7 @@ def api_auth_login():
     if not success:
         return jsonify({'error': message}), 401
     
-    # Set current user
-    with current_user_lock:
-        current_user = username
+    session['username'] = username
     gui_logger.info('User logged in: %s', username)
     
     # Initialize picker for this user
@@ -1581,11 +1590,10 @@ def api_auth_login():
 @app.route('/api/auth/logout', methods=['POST'])
 def api_auth_logout():
     """Log out the current user"""
-    global current_user, picker, multi_picker
+    global picker, multi_picker
 
-    with current_user_lock:
-        gui_logger.info('User logged out: %s', current_user)
-        current_user = None
+    gui_logger.info('User logged out: %s', session.get('username'))
+    session.pop('username', None)
 
     with picker_lock:
         picker = None
@@ -9622,6 +9630,7 @@ def main():
     port = args.port
 
     if demo_mode:
+        global _demo_current_user
         demo_config_path = '.demo_config.json'
         config_path = demo_config_path
         demo_config = {
@@ -9652,9 +9661,7 @@ def main():
         gapi.GamePicker.load_config = demo_load_config
 
         initialize_picker(config_path=config_path)
-        with current_user_lock:
-            global current_user
-            current_user = 'demo'
+        _demo_current_user = 'demo'
 
     # Create templates
     create_templates()
