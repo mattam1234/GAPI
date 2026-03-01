@@ -84,6 +84,7 @@ def build_spec(server_url: str = "/") -> Dict[str, Any]:
             {"name": "export",        "description": "CSV export"},
             {"name": "achievements",  "description": "Steam achievement tracking"},
             {"name": "friends",       "description": "Steam friend activity"},
+            {"name": "graphql",       "description": "GraphQL API"},
             {"name": "admin",         "description": "Admin-only operations"},
             {"name": "docs",          "description": "API documentation"},
         ],
@@ -354,6 +355,15 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
                         "min_score":     {"type": "integer", "minimum": 0, "maximum": 100},
                         "min_year":      {"type": "integer"},
                         "max_year":      {"type": "integer"},
+                        "min_rarity":    {"type": "number", "minimum": 0, "maximum": 100,
+                                          "description": "Lower bound for achievement rarity % — "
+                                                         "only pick games with uncompleted "
+                                                         "achievements at or above this rarity"},
+                        "max_rarity":    {"type": "number", "minimum": 0, "maximum": 100,
+                                          "description": "Upper bound for achievement rarity % — "
+                                                         "only pick games with uncompleted "
+                                                         "achievements at or below this rarity "
+                                                         "(e.g. 5 = only rare achievements)"},
                     },
                 }}},
             },
@@ -728,6 +738,23 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
         },
     }
 
+    paths["/api/schedule/export.ics"] = {
+        "get": {
+            "tags": ["schedule"],
+            "summary": "Download game-night schedule as an iCalendar (.ics) file",
+            "description": (
+                "Produces a standards-compliant RFC 5545 VCALENDAR document.  "
+                "Each game-night event is a VEVENT with DTSTART, SUMMARY, and "
+                "DESCRIPTION (notes, game name, attendees)."
+            ),
+            "responses": {
+                "200": _resp("iCalendar file",
+                              {"text/calendar": {"schema": {"type": "string"}}}),
+                "400": _error(400),
+            },
+        }
+    }
+
     # ------------------------------------------------------------------
     # Multi-user
     # ------------------------------------------------------------------
@@ -1076,6 +1103,345 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
             "responses": {"201": _json_resp("Hunt started", {"type": "object"})},
         }
     }
+    paths["/api/achievements/sync"] = {
+        "post": {
+            "tags": ["achievements"],
+            "summary": "Sync achievements from the Steam API into the database",
+            "description": (
+                "Fetches ``GetPlayerAchievements`` + ``GetSchemaForGame`` for each "
+                "requested app ID and upserts the results.  If ``app_ids`` is omitted "
+                "the entire cached library is synced (capped at 50 games per call).  "
+                "Requires a Steam API key and Steam ID to be configured."
+            ),
+            "requestBody": {
+                "required": False,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "app_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Steam app IDs to sync (omit to sync full library)",
+                        },
+                        "force": {
+                            "type": "boolean",
+                            "default": False,
+                        },
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Sync results", {
+                    "type": "object",
+                    "properties": {
+                        "synced": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "app_id":    {"type": "string"},
+                                    "game_name": {"type": "string"},
+                                    "added":     {"type": "integer"},
+                                    "updated":   {"type": "integer"},
+                                    "total":     {"type": "integer"},
+                                },
+                            },
+                        },
+                        "skipped": {"type": "array", "items": {"type": "string"}},
+                        "errors":  {"type": "array", "items": {"type": "string"}},
+                    },
+                }),
+                "400": _error(400),
+                "503": _error(503),
+            },
+        }
+    }
+    paths["/api/achievements/stats"] = {
+        "get": {
+            "tags": ["achievements"],
+            "summary": "Achievement statistics dashboard for the current user",
+            "description": (
+                "Returns total tracked/unlocked counts, overall completion %, the "
+                "rarest achievement, a per-game breakdown, and a per-platform breakdown."
+            ),
+            "responses": {
+                "200": _json_resp("Achievement stats", {
+                    "type": "object",
+                    "properties": {
+                        "total_tracked":      {"type": "integer"},
+                        "total_unlocked":     {"type": "integer"},
+                        "completion_percent": {"type": "number"},
+                        "rarest_achievement": {
+                            "type": "object", "nullable": True,
+                            "properties": {
+                                "app_id":         {"type": "string"},
+                                "game_name":      {"type": "string"},
+                                "achievement_id": {"type": "string"},
+                                "name":           {"type": "string"},
+                                "rarity":         {"type": "number"},
+                                "unlocked":       {"type": "boolean"},
+                            },
+                        },
+                        "games": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "app_id":             {"type": "string"},
+                                    "game_name":          {"type": "string"},
+                                    "total":              {"type": "integer"},
+                                    "unlocked":           {"type": "integer"},
+                                    "completion_percent": {"type": "number"},
+                                    "rarest_rarity":      {"type": "number", "nullable": True},
+                                },
+                            },
+                        },
+                        "by_platform": {
+                            "type": "array",
+                            "description": "Per-platform achievement breakdown",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "platform":           {"type": "string"},
+                                    "total_tracked":      {"type": "integer"},
+                                    "total_unlocked":     {"type": "integer"},
+                                    "completion_percent": {"type": "number"},
+                                    "game_count":         {"type": "integer"},
+                                },
+                            },
+                        },
+                    },
+                }),
+                "503": _error(503),
+            },
+        }
+    }
+    paths["/api/ignored-games"] = {
+        "get": {
+            "tags": ["library"],
+            "summary": "Full ignored-games list for the current user",
+            "description": "Returns games the user has chosen to hide from the picker, with reason and date added.",
+            "responses": {
+                "200": _json_resp("Ignored games", {
+                    "type": "object",
+                    "properties": {
+                        "ignored_games": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "app_id":     {"type": "string"},
+                                    "game_name":  {"type": "string"},
+                                    "reason":     {"type": "string"},
+                                    "created_at": {"type": "string", "format": "date-time"},
+                                },
+                            },
+                        },
+                    },
+                }),
+                "503": _error(503),
+            },
+        },
+        "post": {
+            "tags": ["library"],
+            "summary": "Toggle ignore status for a game (add if not ignored, remove if already ignored)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["app_id"],
+                    "properties": {
+                        "app_id":    {"type": "integer"},
+                        "game_name": {"type": "string"},
+                        "reason":    {"type": "string"},
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Toggle result", {
+                    "type": "object",
+                    "properties": {
+                        "ignored":    {"type": "boolean",
+                                       "description": "true = game is now ignored, false = removed"},
+                        "app_id":     {"type": "string"},
+                        "game_name":  {"type": "string"},
+                    },
+                }),
+                "400": _error(400),
+                "503": _error(503),
+            },
+        },
+    }
+
+    # ------------------------------------------------------------------
+    # Multiplayer Achievement Challenges
+    # ------------------------------------------------------------------
+    _challenge_schema = {
+        "type": "object",
+        "properties": {
+            "id":          {"type": "string"},
+            "title":       {"type": "string"},
+            "app_id":      {"type": "string"},
+            "game_name":   {"type": "string"},
+            "status":      {"type": "string",
+                             "enum": ["open", "in_progress", "completed", "cancelled"]},
+            "created_by":  {"type": "string"},
+            "winner":      {"type": "string", "nullable": True},
+            "starts_at":   {"type": "string", "format": "date-time", "nullable": True},
+            "ends_at":     {"type": "string", "format": "date-time", "nullable": True},
+            "created_at":  {"type": "string", "format": "date-time"},
+            "target_achievement_ids": {"type": "array", "items": {"type": "string"}},
+            "participants": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "username":       {"type": "string"},
+                        "unlocked_count": {"type": "integer"},
+                        "completed":      {"type": "boolean"},
+                        "joined_at":      {"type": "string", "format": "date-time"},
+                        "completed_at":   {"type": "string", "format": "date-time", "nullable": True},
+                    },
+                },
+            },
+        },
+    }
+    paths["/api/achievement-challenges"] = {
+        "get": {
+            "tags": ["achievements"],
+            "summary": "List achievement challenges for the current user",
+            "responses": {
+                "200": _json_resp("Challenges", {
+                    "type": "object",
+                    "properties": {
+                        "challenges": {"type": "array", "items": _challenge_schema},
+                    },
+                }),
+            },
+        },
+        "post": {
+            "tags": ["achievements"],
+            "summary": "Create a new multiplayer achievement challenge",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["title", "app_id", "game_name"],
+                    "properties": {
+                        "title":                  {"type": "string"},
+                        "app_id":                 {"type": "string"},
+                        "game_name":              {"type": "string"},
+                        "target_achievement_ids": {"type": "array", "items": {"type": "string"}},
+                        "starts_at":              {"type": "string", "format": "date-time"},
+                        "ends_at":                {"type": "string", "format": "date-time"},
+                    },
+                }}},
+            },
+            "responses": {
+                "201": _json_resp("Challenge created", _challenge_schema),
+                "400": _error(400),
+            },
+        },
+    }
+    paths["/api/achievement-challenges/{challenge_id}"] = {
+        "get": {
+            "tags": ["achievements"],
+            "summary": "Get a single achievement challenge by ID",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Challenge", _challenge_schema),
+                "404": _error(404),
+            },
+        },
+        "delete": {
+            "tags": ["achievements"],
+            "summary": "Cancel an achievement challenge (creator only)",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Cancelled", _ref("Success")),
+                "404": _error(404),
+            },
+        },
+    }
+    paths["/api/achievement-challenges/{challenge_id}/join"] = {
+        "post": {
+            "tags": ["achievements"],
+            "summary": "Join an existing achievement challenge",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Updated challenge", _challenge_schema),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/achievement-challenges/{challenge_id}/progress"] = {
+        "put": {
+            "tags": ["achievements"],
+            "summary": "Update the current user's unlocked count for a challenge",
+            "parameters": [{"name": "challenge_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["unlocked_count"],
+                    "properties": {
+                        "unlocked_count": {"type": "integer", "minimum": 0},
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Updated challenge", _challenge_schema),
+                "400": _error(400),
+                "404": _error(404),
+            },
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # GraphQL API
+    # ------------------------------------------------------------------
+    paths["/api/graphql"] = {
+        "post": {
+            "tags": ["graphql"],
+            "summary": "Execute a GraphQL query against the GAPI schema",
+            "description": (
+                "Accepts a standard GraphQL request body and returns ``data`` and/or "
+                "``errors``.  Requires ``graphene>=3.0.0``.  "
+                "Exposed fields: ``games(platform, limit)``, ``stats``, "
+                "``achievements(app_id, unlocked_only)``."
+            ),
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["query"],
+                    "properties": {
+                        "query":         {"type": "string",
+                                          "example": "{ stats { total_games total_playtime } }"},
+                        "variables":     {"type": "object", "nullable": True},
+                        "operationName": {"type": "string", "nullable": True},
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("GraphQL response", {
+                    "type": "object",
+                    "properties": {
+                        "data":   {"type": "object", "nullable": True},
+                        "errors": {"type": "array",
+                                   "items": {"type": "object",
+                                             "properties": {"message": {"type": "string"}}}},
+                    },
+                }),
+                "400": _error(400),
+                "503": _json_resp("graphene not installed", _ref("Error")),
+            },
+        }
+    }
 
     # ------------------------------------------------------------------
     # Friends
@@ -1142,6 +1508,605 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
             "responses": {
                 "200": _resp("HTML page",
                               {"text/html": {"schema": {"type": "string"}}}),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Presence
+    # -----------------------------------------------------------------------
+    paths["/api/presence"] = {
+        "post": {
+            "tags": ["presence"],
+            "summary": "Heartbeat — update caller's last_seen timestamp",
+            "responses": {"200": _success(), "401": _error(401)},
+        }
+    }
+    paths["/api/users/online"] = {
+        "get": {
+            "tags": ["presence"],
+            "summary": "Return users active within the last 5 minutes",
+            "responses": {
+                "200": _json_resp("Online users", {
+                    "type": "object",
+                    "properties": {
+                        "online_users": {"type": "array", "items": {"type": "string"}},
+                    },
+                }),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # App-friends (in-app social graph)
+    # -----------------------------------------------------------------------
+    paths["/api/app-friends"] = {
+        "get": {
+            "tags": ["friends"],
+            "summary": "List accepted app-friends with platform IDs and online status",
+            "responses": {
+                "200": _json_resp("App friends", {
+                    "type": "object",
+                    "properties": {"friends": {"type": "array", "items": {"type": "object"}}},
+                }),
+            },
+        }
+    }
+    paths["/api/app-friends/request"] = {
+        "post": {
+            "tags": ["friends"],
+            "summary": "Send a friend request to another user",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"to_username": {"type": "string"}},
+                    "required": ["to_username"],
+                }}},
+            },
+            "responses": {"200": _success(), "400": _error(), "404": _error(404)},
+        }
+    }
+    paths["/api/app-friends/respond"] = {
+        "post": {
+            "tags": ["friends"],
+            "summary": "Accept or reject a pending friend request",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "from_username": {"type": "string"},
+                        "action": {"type": "string", "enum": ["accept", "reject"]},
+                    },
+                    "required": ["from_username", "action"],
+                }}},
+            },
+            "responses": {"200": _success(), "400": _error(), "404": _error(404)},
+        }
+    }
+    paths["/api/app-friends/remove"] = {
+        "post": {
+            "tags": ["friends"],
+            "summary": "Remove an existing friendship",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"friend_username": {"type": "string"}},
+                    "required": ["friend_username"],
+                }}},
+            },
+            "responses": {"200": _success(), "404": _error(404)},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Live pick sessions
+    # -----------------------------------------------------------------------
+    _session_schema = {
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "string"},
+            "name": {"type": "string"},
+            "host": {"type": "string"},
+            "participants": {"type": "array", "items": {"type": "string"}},
+            "status": {"type": "string", "enum": ["waiting", "picking", "completed", "closed"]},
+            "picked_game": {"type": "object", "nullable": True},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/live-session/create"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Create a new live pick session (host auto-joined)",
+            "requestBody": {
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                }}},
+            },
+            "responses": {"201": _json_resp("Created session", _session_schema), "400": _error()},
+        }
+    }
+    paths["/api/live-session/active"] = {
+        "get": {
+            "tags": ["live-sessions"],
+            "summary": "List all non-completed live sessions",
+            "responses": {
+                "200": _json_resp("Active sessions", {
+                    "type": "object",
+                    "properties": {"sessions": {"type": "array", "items": _session_schema}},
+                }),
+            },
+        }
+    }
+    paths["/api/live-session/{session_id}"] = {
+        "get": {
+            "tags": ["live-sessions"],
+            "summary": "Get state of a specific live session",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {"200": _json_resp("Session", _session_schema), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/events"] = {
+        "get": {
+            "tags": ["live-sessions"],
+            "summary": "Server-Sent Events stream — pushes session state on every change",
+            "description": (
+                "Connect with `EventSource`. Events: `session` (full session state), "
+                "`heartbeat` (keepalive, every 25 s). Stream ends when session reaches "
+                "`completed` or `closed` status."
+            ),
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _resp("SSE stream", {"text/event-stream": {"schema": {"type": "string"}}}),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/live-session/{session_id}/join"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Join a live session",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {"200": _json_resp("Session view", _session_schema),
+                          "400": _error(), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/leave"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Leave a live session (transfers host; removes session when empty)",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {"200": _success(), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/pick"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Host-only: pick a common game for all participants",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "requestBody": {
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"coop_only": {"type": "boolean"}},
+                }}},
+            },
+            "responses": {"200": _json_resp("Picked game"), "400": _error(),
+                          "403": _error(403), "404": _error(404)},
+        }
+    }
+    paths["/api/live-session/{session_id}/invite"] = {
+        "post": {
+            "tags": ["live-sessions"],
+            "summary": "Host-only: send session invitations to other users",
+            "parameters": [{"name": "session_id", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"usernames": {"type": "array", "items": {"type": "string"}}},
+                    "required": ["usernames"],
+                }}},
+            },
+            "responses": {"200": _json_resp("Invite result",
+                          {"type": "object",
+                           "properties": {
+                               "sent": {"type": "array", "items": {"type": "string"}},
+                               "failed": {"type": "array", "items": {"type": "string"}},
+                           }}),
+                          "403": _error(403), "404": _error(404)},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Chat
+    # -----------------------------------------------------------------------
+    _msg_schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer"},
+            "sender": {"type": "string"},
+            "message": {"type": "string"},
+            "room": {"type": "string"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/chat/messages"] = {
+        "get": {
+            "tags": ["chat"],
+            "summary": "Fetch messages from a chat room",
+            "parameters": [
+                {"name": "room", "in": "query", "schema": {"type": "string", "default": "general"},
+                 "description": "Room name. Use `session:<id>` for live-session chat."},
+                {"name": "since_id", "in": "query", "schema": {"type": "integer", "default": 0}},
+                {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 50}},
+            ],
+            "responses": {
+                "200": _json_resp("Messages", {
+                    "type": "object",
+                    "properties": {
+                        "room": {"type": "string"},
+                        "messages": {"type": "array", "items": _msg_schema},
+                    },
+                }),
+            },
+        }
+    }
+    paths["/api/chat/send"] = {
+        "post": {
+            "tags": ["chat"],
+            "summary": "Send a message to a chat room",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "room": {"type": "string"},
+                        "message": {"type": "string", "maxLength": 500},
+                    },
+                    "required": ["message"],
+                }}},
+            },
+            "responses": {"201": _json_resp("Sent message", _msg_schema), "400": _error()},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Notifications
+    # -----------------------------------------------------------------------
+    _notif_schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer"},
+            "title": {"type": "string"},
+            "message": {"type": "string"},
+            "type": {"type": "string"},
+            "read": {"type": "boolean"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/notifications"] = {
+        "get": {
+            "tags": ["notifications"],
+            "summary": "Return notifications for the current user",
+            "parameters": [
+                {"name": "unread_only", "in": "query",
+                 "schema": {"type": "boolean", "default": False}},
+            ],
+            "responses": {
+                "200": _json_resp("Notifications", {
+                    "type": "object",
+                    "properties": {"notifications": {"type": "array", "items": _notif_schema}},
+                }),
+            },
+        }
+    }
+    paths["/api/notifications/read"] = {
+        "post": {
+            "tags": ["notifications"],
+            "summary": "Mark one or all notifications as read",
+            "requestBody": {
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "notification_id": {"type": "integer",
+                                            "description": "Omit to mark all as read"},
+                    },
+                }}},
+            },
+            "responses": {"200": _success()},
+        }
+    }
+    paths["/api/notifications/send"] = {
+        "post": {
+            "tags": ["notifications"],
+            "summary": "Send a notification to a user (admin or self)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "to_username": {"type": "string"},
+                        "title": {"type": "string"},
+                        "message": {"type": "string"},
+                        "type": {"type": "string", "default": "info"},
+                    },
+                    "required": ["to_username", "title", "message"],
+                }}},
+            },
+            "responses": {"201": _success(), "400": _error(), "404": _error(404)},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Leaderboard
+    # -----------------------------------------------------------------------
+    paths["/api/leaderboard"] = {
+        "get": {
+            "tags": ["leaderboard"],
+            "summary": "Ranked leaderboard of users",
+            "parameters": [
+                {"name": "metric", "in": "query",
+                 "schema": {"type": "string", "enum": ["playtime", "games", "achievements"],
+                            "default": "playtime"}},
+                {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20}},
+            ],
+            "responses": {
+                "200": _json_resp("Leaderboard", {
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string"},
+                        "entries": {"type": "array", "items": {"type": "object"}},
+                    },
+                }),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Plugins / Addons
+    # -----------------------------------------------------------------------
+    _plugin_schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer"},
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "version": {"type": "string"},
+            "author": {"type": "string"},
+            "enabled": {"type": "boolean"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    }
+    paths["/api/plugins"] = {
+        "get": {
+            "tags": ["plugins"],
+            "summary": "List all registered plugins",
+            "responses": {
+                "200": _json_resp("Plugins", {
+                    "type": "object",
+                    "properties": {"plugins": {"type": "array", "items": _plugin_schema}},
+                }),
+            },
+        },
+        "post": {
+            "tags": ["plugins"],
+            "summary": "Register or update a plugin (admin only)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "version": {"type": "string"},
+                        "author": {"type": "string"},
+                        "config": {"type": "object"},
+                    },
+                    "required": ["name"],
+                }}},
+            },
+            "responses": {"201": _success(), "400": _error(), "403": _error(403)},
+        },
+    }
+    paths["/api/plugins/{plugin_id}"] = {
+        "put": {
+            "tags": ["plugins"],
+            "summary": "Enable or disable a plugin (admin only)",
+            "parameters": [{"name": "plugin_id", "in": "path", "required": True,
+                             "schema": {"type": "integer"}}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"enabled": {"type": "boolean"}},
+                    "required": ["enabled"],
+                }}},
+            },
+            "responses": {"200": _success(), "403": _error(403), "404": _error(404)},
+        },
+        "delete": {
+            "tags": ["plugins"],
+            "summary": "Permanently delete a plugin (admin only)",
+            "parameters": [{"name": "plugin_id", "in": "path", "required": True,
+                             "schema": {"type": "integer"}}],
+            "responses": {"200": _success(), "403": _error(403), "404": _error(404)},
+        },
+    }
+
+    # -----------------------------------------------------------------------
+    # Admin settings
+    # -----------------------------------------------------------------------
+    _setting_schema = {
+        "type": "object",
+        "properties": {
+            "key": {"type": "string"},
+            "value": {"type": "string"},
+            "description": {"type": "string"},
+        },
+    }
+    paths["/api/admin/settings"] = {
+        "get": {
+            "tags": ["admin"],
+            "summary": "Return all admin-controlled settings (admin only)",
+            "responses": {
+                "200": _json_resp("Settings", {
+                    "type": "object",
+                    "properties": {"settings": {"type": "array", "items": _setting_schema}},
+                }),
+                "403": _error(403),
+            },
+        },
+        "post": {
+            "tags": ["admin"],
+            "summary": "Create or update one or more admin settings (admin only)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "description": "Free-form key→value pairs to persist",
+                    "additionalProperties": {"type": "string"},
+                }}},
+            },
+            "responses": {"200": _success(), "403": _error(403)},
+        },
+    }
+    paths["/api/admin/settings/public"] = {
+        "get": {
+            "tags": ["admin"],
+            "summary": "Return publicly-visible settings (no auth required)",
+            "security": [],
+            "responses": {
+                "200": _json_resp("Public settings", {
+                    "type": "object",
+                    "properties": {"settings": {"type": "array", "items": _setting_schema}},
+                }),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # i18n
+    # -----------------------------------------------------------------------
+    paths["/api/i18n"] = {
+        "get": {
+            "tags": ["i18n"],
+            "summary": "Return available locale codes",
+            "security": [],
+            "responses": {
+                "200": _json_resp("Locales", {
+                    "type": "object",
+                    "properties": {"locales": {"type": "array", "items": {"type": "string"}}},
+                }),
+            },
+        }
+    }
+    paths["/api/i18n/{lang}"] = {
+        "get": {
+            "tags": ["i18n"],
+            "summary": "Return translation strings for a locale",
+            "security": [],
+            "parameters": [{"name": "lang", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Translations", {"type": "object",
+                                                   "additionalProperties": {"type": "string"}}),
+                "404": _error(404),
+            },
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # User profile card
+    # -----------------------------------------------------------------------
+    paths["/api/user/{username}/card"] = {
+        "get": {
+            "tags": ["users"],
+            "summary": "Return the public profile card for a user",
+            "parameters": [{"name": "username", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Profile card", {
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string"},
+                        "steam_id": {"type": "string"},
+                        "total_games": {"type": "integer"},
+                        "total_playtime_hours": {"type": "number"},
+                        "total_achievements": {"type": "integer"},
+                        "joined": {"type": "string", "format": "date-time"},
+                    },
+                }),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/user/profile"] = {
+        "post": {
+            "tags": ["users"],
+            "summary": "Update the current user's profile (steam_id, epic_id, gog_id, bio, etc.)",
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "steam_id": {"type": "string"},
+                        "epic_id": {"type": "string"},
+                        "gog_id": {"type": "string"},
+                        "bio": {"type": "string"},
+                    },
+                }}},
+            },
+            "responses": {"200": _success(), "400": _error()},
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # User data backup / restore
+    # -----------------------------------------------------------------------
+    paths["/api/export/user-data"] = {
+        "get": {
+            "tags": ["export"],
+            "summary": "Download all persisted user data as a JSON backup",
+            "responses": {
+                "200": _resp("JSON backup file",
+                              {"application/json": {"schema": {"type": "object"}}}),
+                "404": _error(404),
+            },
+        }
+    }
+    paths["/api/import/user-data"] = {
+        "post": {
+            "tags": ["export"],
+            "summary": "Restore user data from a JSON backup (merge — existing records kept)",
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {"schema": {"type": "object"}},
+                    "multipart/form-data": {"schema": {
+                        "type": "object",
+                        "properties": {"file": {"type": "string", "format": "binary"}},
+                    }},
+                },
+            },
+            "responses": {
+                "200": _json_resp("Import counts", {
+                    "type": "object",
+                    "properties": {
+                        "ignored_added": {"type": "integer"},
+                        "favorites_added": {"type": "integer"},
+                        "achievements_added": {"type": "integer"},
+                    },
+                }),
+                "400": _error(),
             },
         }
     }

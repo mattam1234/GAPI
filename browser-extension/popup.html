@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GAPI Game Picker</title>
+  <style>
+    /* ─── Reset & base ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 320px;
+      min-height: 200px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      background: #0d1117;
+      color: #e6edf3;
+    }
+
+    /* ─── Header ─────────────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px 10px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+    }
+    .header img { width: 22px; height: 22px; }
+    .header h1  { font-size: 14px; font-weight: 600; color: #58a6ff; }
+    .header .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #3fb950; margin-left: auto; flex-shrink: 0;
+    }
+    .header .status-dot.offline { background: #f85149; }
+
+    /* ─── Game card ──────────────────────────────────────────────────── */
+    #game-card {
+      padding: 14px;
+      min-height: 90px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    #game-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: #e6edf3;
+      line-height: 1.3;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    #game-meta {
+      font-size: 11px;
+      color: #8b949e;
+    }
+    #game-meta span { margin-right: 10px; }
+    .placeholder {
+      font-size: 13px;
+      color: #8b949e;
+      text-align: center;
+      padding: 20px 0;
+    }
+
+    /* ─── Actions ────────────────────────────────────────────────────── */
+    .actions {
+      padding: 0 14px 14px;
+      display: flex;
+      gap: 6px;
+    }
+    button {
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #21262d;
+      color: #e6edf3;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover  { background: #30363d; border-color: #8b949e; }
+    button:active { background: #161b22; }
+    #btn-pick {
+      background: #238636;
+      border-color: #2ea043;
+      font-weight: 700;
+    }
+    #btn-pick:hover { background: #2ea043; }
+    #btn-pick:disabled {
+      background: #21262d;
+      border-color: #30363d;
+      color: #484f58;
+      cursor: not-allowed;
+    }
+
+    /* ─── Filters bar ─────────────────────────────────────────────────── */
+    .filters {
+      padding: 0 14px 10px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .filters select {
+      flex: 1;
+      padding: 5px 8px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 12px;
+    }
+
+    /* ─── Footer ─────────────────────────────────────────────────────── */
+    .footer {
+      padding: 8px 14px;
+      border-top: 1px solid #30363d;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #161b22;
+    }
+    .footer a {
+      font-size: 11px;
+      color: #58a6ff;
+      text-decoration: none;
+    }
+    .footer a:hover { text-decoration: underline; }
+    #error-msg {
+      font-size: 11px;
+      color: #f85149;
+      padding: 0 14px 8px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <img src="icons/icon48.png" alt="GAPI" onerror="this.style.display='none'" />
+    <h1>GAPI Game Picker</h1>
+    <div id="status-dot" class="status-dot offline" title="Connecting…"></div>
+  </div>
+
+  <!-- Game display -->
+  <div id="game-card">
+    <div class="placeholder" id="placeholder-text">Click "Pick a Game" to get started!</div>
+    <div id="game-name" style="display:none"></div>
+    <div id="game-meta" style="display:none">
+      <span id="meta-playtime"></span>
+      <span id="meta-platform"></span>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="error-msg"></div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <select id="filter-mode" title="Pick mode">
+      <option value="random">🎲 Random</option>
+      <option value="unplayed">🆕 Unplayed only</option>
+      <option value="barely_played">⏱ Barely played</option>
+    </select>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button id="btn-pick">🎮 Pick a Game</button>
+    <button id="btn-open" style="display:none" title="Open in Steam / GAPI">Open</button>
+    <button id="btn-reroll" style="display:none" title="Pick another game">↺ Reroll</button>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <a id="link-open-gapi" href="#" target="_blank">Open GAPI ↗</a>
+    <a href="options.html">⚙ Settings</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

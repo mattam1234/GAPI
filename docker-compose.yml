@@ -1,0 +1,151 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GAPI — Docker Compose (production-style microservices)
+#
+# Services
+# ────────
+#  gapi-web    Flask application (main GAPI server)
+#  gapi-db     PostgreSQL 15 database
+#  gapi-redis  Redis 7 in-memory cache / session store
+#  gapi-nginx  Nginx reverse proxy (SSL termination, static file serving)
+#
+# Quick start
+# ───────────
+#   cp .env.example .env          # fill in STEAM_API_KEY, STEAM_ID, SECRET_KEY …
+#   docker compose up -d
+#   docker compose logs -f gapi-web
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+# ─── Common defaults ─────────────────────────────────────────────────────────
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# ─── Services ────────────────────────────────────────────────────────────────
+services:
+
+  # ── Main web application ───────────────────────────────────────────────────
+  gapi-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gapi/web:latest
+    container_name: gapi-web
+    restart: unless-stopped
+    depends_on:
+      gapi-db:
+        condition: service_healthy
+      gapi-redis:
+        condition: service_healthy
+    environment:
+      # Application
+      FLASK_ENV:         ${FLASK_ENV:-production}
+      SECRET_KEY:        ${SECRET_KEY:?Set SECRET_KEY in .env}
+      # Steam
+      STEAM_API_KEY:     ${STEAM_API_KEY:?Set STEAM_API_KEY in .env}
+      STEAM_ID:          ${STEAM_ID:?Set STEAM_ID in .env}
+      # Database
+      DATABASE_URL:      postgresql://${POSTGRES_USER:-gapi}:${POSTGRES_PASSWORD:-gapi}@gapi-db:5432/${POSTGRES_DB:-gapi}
+      # Redis
+      REDIS_URL:         redis://gapi-redis:6379/0
+      # Optional platform credentials
+      EPIC_CLIENT_ID:    ${EPIC_CLIENT_ID:-}
+      EPIC_CLIENT_SECRET: ${EPIC_CLIENT_SECRET:-}
+      GOG_CLIENT_ID:     ${GOG_CLIENT_ID:-}
+      GOG_CLIENT_SECRET: ${GOG_CLIENT_SECRET:-}
+      XBOX_CLIENT_ID:    ${XBOX_CLIENT_ID:-}
+      XBOX_CLIENT_SECRET: ${XBOX_CLIENT_SECRET:-}
+    volumes:
+      - gapi-data:/app/data
+    ports:
+      - "127.0.0.1:5000:5000"   # bound to loopback only; not reachable from outside the host
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - gapi-internal
+
+  # ── PostgreSQL database ────────────────────────────────────────────────────
+  gapi-db:
+    image: postgres:15-alpine
+    container_name: gapi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-gapi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gapi}
+      POSTGRES_DB:       ${POSTGRES_DB:-gapi}
+    volumes:
+      - gapi-postgres:/var/lib/postgresql/data
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gapi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gapi-internal
+    # Do NOT expose 5432 to the host in production
+
+  # ── Redis cache / session store ────────────────────────────────────────────
+  gapi-redis:
+    image: redis:7-alpine
+    container_name: gapi-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - gapi-redis:/data
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gapi-internal
+
+  # ── Nginx reverse proxy ────────────────────────────────────────────────────
+  gapi-nginx:
+    image: nginx:1.25-alpine
+    container_name: gapi-nginx
+    restart: unless-stopped
+    depends_on:
+      gapi-web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro          # mount your TLS certs here
+      - gapi-static:/app/static:ro             # served directly by nginx
+    logging: *default-logging
+    networks:
+      - gapi-internal
+      - gapi-external
+
+# ─── Volumes ─────────────────────────────────────────────────────────────────
+volumes:
+  gapi-postgres:
+    driver: local
+  gapi-redis:
+    driver: local
+  gapi-data:
+    driver: local
+  gapi-static:
+    driver: local
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  gapi-internal:
+    driver: bridge
+    internal: true          # no external access; all inter-service traffic stays here
+  gapi-external:
+    driver: bridge           # nginx is the only container on the external network

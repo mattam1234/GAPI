@@ -145,18 +145,135 @@ If PostgreSQL is not available:
 ### Immediate (Recommended)
 - [x] Add UI tabs for "Ignore List" and "Achievements"
 - [x] Create quick-ignore buttons in game library
-- [ ] Show ignored games in separate section
+- [x] Show ignored games in separate section
 
 ### Short-term
-- [ ] Sync with actual Steam achievementdata
-- [ ] Add Discord bot commands (`/hunt`, `/ignore`)
-- [ ] Statistics dashboard (completion %, rarity)
+- [x] Sync with actual Steam achievement data via `POST /api/achievements/sync`
+- [x] Add Discord bot commands (`/hunt`, `/ignore`)
+- [x] Statistics dashboard (completion %, rarity)
+
+## Next Steps
+
+### Immediate (Recommended)
+- [x] Add UI tabs for "Ignore List" and "Achievements"
+- [x] Create quick-ignore buttons in game library
+- [x] Show ignored games in separate section
+
+### Short-term
+- [x] Sync with actual Steam achievement data via `POST /api/achievements/sync`
+- [x] Add Discord bot commands (`/hunt`, `/ignore`)
+- [x] Statistics dashboard (completion %, rarity)
 
 ### Medium-term
-- [ ] Achievement rarity filters in game picker
-- [ ] Multiplayer achievement challenges
-- [ ] Backup/export user data
-- [ ] Achievement statistics by platform
+- [x] Achievement rarity filters in game picker
+- [x] Multiplayer achievement challenges
+- [x] Backup/export user data
+- [x] Achievement statistics by platform
+
+### Recently Completed
+- [x] **Mobile App** — React Native application (`mobile-app/`) for iOS and Android.
+  Four bottom-tab screens: **Pick** (three modes: Random/Unplayed/Barely Played, game
+  card with platform badge + genre chips), **Library** (real-time debounced search,
+  platform filter chips, pull-to-refresh FlatList), **History** (recent picks with
+  relative timestamps, pull-to-refresh), **Settings** (server URL persisted in
+  AsyncStorage, connectivity indicator, open-in-browser link).  Shared
+  `ServerConfigContext` provides the GAPI URL + health-check status to every screen.
+  `useGapiApi` hook wraps `POST /api/pick`, `GET /api/library`, `GET /api/history`.
+  Dark GitHub-dark theme throughout.  Includes Jest formatter tests.
+
+- [x] **Desktop Application** — Electron desktop app (`desktop-app/`) for macOS,
+  Windows, and Linux with a **system tray** icon.  Main process (`src/main.js`):
+  BrowserWindow, system tray with context menu (Pick a Game / Open Window / Open in
+  Browser / Settings / Quit), periodic 30-second health-check with tray badge update,
+  desktop notifications via `Notification` API, settings persisted via `electron-store`.
+  All IPC through a `contextBridge` preload (`src/preload.js`) that exposes `window.gapiAPI`
+  without leaking Node.js.  Renderer (`renderer/index.html` + `renderer.js`): sidebar
+  navigation, pick panel (three modes), library panel (search + platform filter), history
+  panel, settings panel.  macOS hidden-inset title bar; stays alive in tray when window
+  is closed.  Packaged for all platforms via `electron-builder`.  Includes Jest formatter
+  tests and full README.
+- [x] **PlayStation Network** — `PSNClient` in `platform_clients.py` uses the two-step
+  NPSSO→auth-code→token exchange flow.  `POST /api/psn/connect` accepts the user's NPSSO
+  token (extracted from the `npsso` browser cookie at `my.playstation.com`), exchanges it
+  for an access + refresh token pair, and enables library access via
+  `GET /api/psn/library` (paginated `gamelist/v2` API) and
+  `GET /api/psn/trophies`.  Automatic token refresh on expiry.
+  Config: `psn_enabled`, `psn_npsso`.
+
+- [x] **Nintendo eShop** — `NintendoEShopClient` in `platform_clients.py` wraps Nintendo's
+  public Algolia-powered catalog search API (the same backend used by `nintendo.com`).
+  Supports multi-region (US/EU/JP), free-text search, filter strings, and paginated results.
+  Price data is fetched from the public `api.ec.nintendo.com/v1/price` endpoint.
+  Routes: `GET /api/nintendo/search`, `GET /api/nintendo/game/{nsuid}`,
+  `GET /api/nintendo/prices`.  Note: no user library API exists for Nintendo — the
+  integration is catalog-only.
+
+- [x] **Browser Extension** — Manifest V3 Chrome/Firefox extension in `browser-extension/`.
+  Features: toolbar popup with quick-pick UI, three pick modes (Random/Unplayed/Barely
+  played), store link opener, badge-based connection status, desktop notifications,
+  configurable GAPI server URL via options page, background service worker with periodic
+  health-check alarm.
+
+- [x] **Docker / Microservices** — `Dockerfile` (multi-stage, non-root user, HEALTHCHECK),
+  `docker-compose.yml` with four services (`gapi-web`, `gapi-db` PostgreSQL 15,
+  `gapi-redis` Redis 7, `gapi-nginx` reverse proxy with WebSocket + TLS support),
+  `docker-compose.override.yml` for hot-reload development, `nginx/nginx.conf`,
+  and updated `.env.example` with all credential placeholders.
+
+- [x] **Video Tutorials** — `TUTORIALS.md` with 12 step-by-step tutorial sections covering
+  Steam setup, Web GUI, all platform integrations (Epic/GOG/Xbox/PSN/Nintendo), Smart/ML
+  recommendations, Live sessions, playlists/tags/backlog, reviews, Discord bot,
+  notifications (Slack/Teams/IFTTT/Home Assistant), browser extension, Docker deployment,
+  and admin panel.
+- [x] **Epic Games OAuth** — `EpicOAuthClient` in `platform_clients.py` implements the full
+  OAuth2 PKCE authorization code flow.  After completing `/api/epic/oauth/authorize` →
+  `/api/epic/oauth/callback` the user's Epic library is available at `GET /api/epic/library`.
+  Tokens are refreshed automatically.  Configure via `epic_enabled`, `epic_client_id`,
+  `epic_client_secret`, `epic_redirect_uri` in `config.json`.
+- [x] **GOG Galaxy Integration** — `GOGOAuthClient` implements standard OAuth2 (no PKCE) against
+  `auth.gog.com`.  Library fetched from `embed.gog.com/user/data/games`; game details from
+  GOG API v2.  Endpoints: `/api/gog/oauth/authorize`, `/api/gog/oauth/callback`,
+  `GET /api/gog/library`.  Config: `gog_enabled`, `gog_client_id`, `gog_client_secret`.
+- [x] **Xbox Game Pass** — `XboxAPIClient` performs Microsoft Identity MSA token exchange,
+  then Xbox Live (XBL) and XSTS authentication, and paginates the `titlehub` API to list
+  owned + Game Pass titles.  Endpoints: `/api/xbox/oauth/authorize`,
+  `/api/xbox/oauth/callback`, `GET /api/xbox/library`.  Config: `xbox_enabled`,
+  `xbox_client_id`, `xbox_client_secret`.  `GET /api/platform/status` reports auth state
+  for all four platforms simultaneously.
+- [x] **Machine Learning Recommendations** — `MLRecommendationEngine` in
+  `app/services/ml_recommendation_service.py` provides three scoring modes:
+  * **CF** — item-based collaborative filtering: cosine similarity in genre feature space
+  * **MF** — ALS implicit-feedback matrix factorization (pure numpy, no external ML library)
+  * **Hybrid** — weighted blend (60% CF + 40% MF)
+  Endpoint: `GET /api/recommendations/ml?count=10&method=cf|mf|hybrid`.
+  Graceful fallback to heuristic ranker when numpy is unavailable.
+- [x] **Smart Recommendations** — `GET /api/recommendations/smart` uses the new
+  `SmartRecommendationEngine` which scores games by genre **and** Steam category/tag
+  affinity, developer/publisher affinity, Metacritic score, diversity boosting, and
+  history penalty.  Richer results than the basic `/api/recommendations` endpoint.
+- [x] **Slack/Teams Bots** — `WebhookNotifier` dispatches Block Kit (Slack) and
+  Adaptive Card (Microsoft Teams) messages on game pick.  Test endpoints:
+  `POST /api/notifications/slack/test` and `POST /api/notifications/teams/test`.
+  Configure via `slack_webhook_url` / `teams_webhook_url` in `config.json`.
+- [x] **IFTTT Integration** — Maker Webhooks channel support. Fires `value1` (game
+  name), `value2` (playtime hours), `value3` (Steam URL) to any IFTTT applet.
+  Test via `POST /api/notifications/ifttt/test`.  Configure via `ifttt_webhook_key`
+  and `ifttt_event_name` in `config.json`.
+- [x] **Home Assistant** — REST API webhook trigger on game pick, including optional
+  long-lived access token for authentication.  Test via
+  `POST /api/notifications/homeassistant/test`.  Configure via
+  `homeassistant_url`, `homeassistant_webhook_id`, `homeassistant_token`.
+- [x] **Twitch Integration** — `GET /api/twitch/trending` and `GET /api/twitch/library-overlap`
+  cross-reference the user's library against live Twitch trending games.
+  Configure via `twitch_client_id` / `twitch_client_secret` in `config.json`
+  or the `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` environment variables.
+- [x] **Progressive Web App (PWA)** — `manifest.json` + service worker at `/sw.js`
+  enable "Add to Home Screen" on mobile/desktop and offline shell caching.
+  PWA meta tags added to `index.html`.
+- [x] **Interactive Demo** — `python3 demo.py [--quiet]` showcases all major
+  features without requiring credentials or a database.
+- [x] **CodeQL Security Scanning** — automated weekly security analysis via
+  `.github/workflows/codeql.yml` using the `security-extended` query suite.
 
 ## Database Operations
 

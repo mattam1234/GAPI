@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GAPI — Docker Compose override for LOCAL DEVELOPMENT
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up
+#
+# Differences from production compose:
+#   • Flask runs in debug / hot-reload mode
+#   • Source code is volume-mounted for instant changes
+#   • Database port exposed on host (5432) for direct psql / DBeaver access
+#   • Redis port exposed on host (6379)
+#   • No nginx — Flask listens directly on 0.0.0.0:5000
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+
+  gapi-web:
+    build:
+      target: builder          # use builder stage for faster dev rebuilds
+    environment:
+      FLASK_ENV: development
+      FLASK_DEBUG: "1"
+    volumes:
+      - .:/app                 # live-reload source edits
+    ports:
+      - "127.0.0.1:5000:5000"  # loopback only for dev — change to 0.0.0.0 only if needed for LAN testing
+    command: python gapi_gui.py --host 127.0.0.1 --port 5000 --debug
+
+  gapi-db:
+    ports:
+      - "127.0.0.1:5432:5432"  # expose Postgres for local DB tools
+
+  gapi-redis:
+    ports:
+      - "127.0.0.1:6379:6379"  # expose Redis for local inspection
+
+  # Disable nginx in dev — connect directly to Flask
+  gapi-nginx:
+    profiles:
+      - nginx                  # only started with: docker compose --profile nginx up

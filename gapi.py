@@ -387,6 +387,78 @@ class SteamAPIClient(GamePlatformClient):
             self._log.debug("Achievement fetch failed for app %s: %s", app_id, e)
         return None
 
+    def get_player_achievements(self, steam_id: str, app_id) -> List[Dict]:
+        """Return the full per-achievement list for *steam_id* + *app_id*.
+
+        Each entry is a dict with at least:
+        ``apiname``, ``achieved`` (0/1), ``unlocktime`` (epoch int).
+
+        Returns an empty list on error or if the game has no achievements.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return []
+
+        url = f"{self.BASE_URL}/ISteamUserStats/GetPlayerAchievements/v0001/"
+        params = {
+            'key': self.api_key,
+            'steamid': steam_id,
+            'appid': app_id_int,
+            'l': 'en',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            return data.get('playerstats', {}).get('achievements', [])
+        except requests.RequestException as e:
+            self._log.debug("get_player_achievements failed for app %s: %s", app_id, e)
+        return []
+
+    def get_schema_for_game(self, app_id) -> Dict:
+        """Return the game schema (achievement definitions) for *app_id*.
+
+        The returned dict maps ``apiname -> {name, description, icon, icongray}``
+        for every achievement defined for the game.  Returns an empty dict on
+        error or if the game has no achievements.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return {}
+
+        url = f"{self.BASE_URL}/ISteamUserStats/GetSchemaForGame/v2/"
+        params = {
+            'key': self.api_key,
+            'appid': app_id_int,
+            'l': 'en',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+            raw = (
+                data.get('game', {})
+                    .get('availableGameStats', {})
+                    .get('achievements', [])
+            )
+            return {
+                a['name']: {
+                    'name': a.get('displayName', a['name']),
+                    'description': a.get('description', ''),
+                    'icon': a.get('icon', ''),
+                    'icongray': a.get('icongray', ''),
+                }
+                for a in raw
+                if 'name' in a
+            }
+        except requests.RequestException as e:
+            self._log.debug("get_schema_for_game failed for app %s: %s", app_id, e)
+        return {}
+
     def get_friend_list(self, steam_id: str) -> List[Dict]:
         """Return the friend list for *steam_id*.
 
@@ -638,16 +710,71 @@ class GamePicker:
         # Initialize Epic Games client if enabled
         if self.config.get('epic_enabled', False):
             try:
-                self.clients['epic'] = EpicAPIClient()
+                epic_client_id = self.config.get('epic_client_id', '')
+                if epic_client_id and not is_placeholder_value(epic_client_id):
+                    from platform_clients import EpicOAuthClient
+                    self.clients['epic'] = EpicOAuthClient(
+                        client_id=epic_client_id,
+                        client_secret=self.config.get('epic_client_secret', ''),
+                        timeout=self.API_TIMEOUT,
+                    )
+                else:
+                    self.clients['epic'] = EpicAPIClient()
             except Exception as e:
                 self._log.warning("Could not initialize Epic Games client: %s", e)
 
         # Initialize GOG client if enabled
         if self.config.get('gog_enabled', False):
             try:
-                self.clients['gog'] = GOGAPIClient()
+                gog_client_id = self.config.get('gog_client_id', '')
+                if gog_client_id and not is_placeholder_value(gog_client_id):
+                    from platform_clients import GOGOAuthClient
+                    self.clients['gog'] = GOGOAuthClient(
+                        client_id=gog_client_id,
+                        client_secret=self.config.get('gog_client_secret', ''),
+                        timeout=self.API_TIMEOUT,
+                    )
+                else:
+                    self.clients['gog'] = GOGAPIClient()
             except Exception as e:
                 self._log.warning("Could not initialize GOG client: %s", e)
+
+        # Initialize Xbox client if enabled
+        if self.config.get('xbox_enabled', False):
+            try:
+                xbox_client_id = self.config.get('xbox_client_id', '')
+                if xbox_client_id and not is_placeholder_value(xbox_client_id):
+                    from platform_clients import XboxAPIClient
+                    self.clients['xbox'] = XboxAPIClient(
+                        client_id=xbox_client_id,
+                        client_secret=self.config.get('xbox_client_secret', ''),
+                        timeout=self.API_TIMEOUT,
+                    )
+            except Exception as e:
+                self._log.warning("Could not initialize Xbox client: %s", e)
+
+        # Initialize PSN client if enabled
+        if self.config.get('psn_enabled', False):
+            try:
+                from platform_clients import PSNClient
+                psn = PSNClient(timeout=self.API_TIMEOUT)
+                npsso = self.config.get('psn_npsso', '')
+                if npsso and not is_placeholder_value(npsso):
+                    psn.connect(npsso)
+                self.clients['psn'] = psn
+            except Exception as e:
+                self._log.warning("Could not initialize PSN client: %s", e)
+
+        # Initialize Nintendo eShop client if enabled
+        if self.config.get('nintendo_enabled', False):
+            try:
+                from platform_clients import NintendoEShopClient
+                self.clients['nintendo'] = NintendoEShopClient(
+                    region=self.config.get('nintendo_region', 'US'),
+                    timeout=self.API_TIMEOUT,
+                )
+            except Exception as e:
+                self._log.warning("Could not initialize Nintendo client: %s", e)
 
         # For backward compatibility, keep steam_client reference
         self.steam_client = self.clients.get('steam')
@@ -1389,7 +1516,8 @@ class GamePicker:
                      max_release_year: Optional[int] = None,
                      exclude_game_ids: Optional[List[str]] = None,
                      platforms: Optional[List[str]] = None,
-                     device_types: Optional[List[str]] = None) -> List[Dict]:
+                     device_types: Optional[List[str]] = None,
+                     vr_filter: Optional[str] = None) -> List[Dict]:
         """Filter games based on various criteria
 
         Args:
@@ -1404,6 +1532,10 @@ class GamePicker:
             exclude_game_ids: List of appids/game IDs to exclude from results
             platforms: List of platform names to include (e.g., steam, epic)
             device_types: List of device types to include (pc, console)
+            vr_filter: VR filtering mode — ``"vr_supported"`` (VR Supported or VR Only),
+                ``"vr_only"`` (requires a VR headset), ``"no_vr"`` (exclude VR games).
+                Uses Steam category descriptions; games without details are excluded when
+                a positive VR filter is active.  ``None`` disables VR filtering.
 
         Returns:
             List of filtered games
@@ -1477,7 +1609,8 @@ class GamePicker:
 
         # Filters that require fetching game details
         needs_details = bool(genres or exclude_genres or min_metacritic is not None
-                             or min_release_year is not None or max_release_year is not None)
+                             or min_release_year is not None or max_release_year is not None
+                             or vr_filter is not None)
 
         if needs_details:
             genres_lower = [g.lower() for g in genres] if genres else []
@@ -1546,18 +1679,35 @@ class GamePicker:
                         if max_release_year is not None and year > max_release_year:
                             continue
 
+                    # --- VR filter ---
+                    if vr_filter is not None:
+                        cat_descs = [
+                            c.get('description', '').lower()
+                            for c in details.get('categories', [])
+                        ]
+                        _is_vr_only      = any('vr only' in d for d in cat_descs)
+                        _is_vr_supported = _is_vr_only or any('vr supported' in d for d in cat_descs)
+                        if vr_filter == 'vr_only' and not _is_vr_only:
+                            continue
+                        elif vr_filter == 'vr_supported' and not _is_vr_supported:
+                            continue
+                        elif vr_filter == 'no_vr' and _is_vr_supported:
+                            continue
+
                     detail_filtered.append(game)
                 else:
                     # Details unavailable – include only when no positive filter set
                     if not genres_lower and min_metacritic is None \
-                            and min_release_year is None and max_release_year is None:
+                            and min_release_year is None and max_release_year is None \
+                            and vr_filter not in ('vr_supported', 'vr_only'):
                         if not exclude_lower:
                             detail_filtered.append(game)
 
             # Games without a client are included only when no positive filter is active
             if not genres_lower and min_metacritic is None \
                     and min_release_year is None and max_release_year is None \
-                    and not exclude_lower:
+                    and not exclude_lower \
+                    and vr_filter not in ('vr_supported', 'vr_only'):
                 detail_filtered.extend(no_details)
 
             filtered = detail_filtered
@@ -1996,9 +2146,22 @@ Examples:
         metavar='ID',
         help='Comma-separated app IDs or game IDs to exclude (e.g., "730,570")'
     )
-    
+    parser.add_argument(
+        '--vr-filter',
+        type=str,
+        choices=['vr_supported', 'vr_only', 'no_vr'],
+        metavar='MODE',
+        help=(
+            'VR filtering mode: '
+            '"vr_supported" — only VR-capable games (VR Supported or VR Only); '
+            '"vr_only" — only games that require a VR headset; '
+            '"no_vr" — exclude all VR games. '
+            'Uses Steam category data; requires fetching game details.'
+        )
+    )
+
     args = parser.parse_args()
-    
+
     print(f"{Fore.CYAN}{Style.BRIGHT}")
     print("  ____    _    ____ ___ ")
     print(" / ___|  / \\  |  _ \\_ _|")
@@ -2059,7 +2222,8 @@ Examples:
 
         # Show detail-fetch warning early
         needs_details = bool(genres or exclude_genres or args.min_score is not None
-                             or args.min_year is not None or args.max_year is not None)
+                             or args.min_year is not None or args.max_year is not None
+                             or args.vr_filter is not None)
         if needs_details:
             print(f"{Fore.YELLOW}Note: Advanced filtering may take a moment as we fetch game details...")
 
@@ -2071,6 +2235,7 @@ Examples:
             'min_release_year': args.min_year,
             'max_release_year': args.max_year,
             'exclude_game_ids': exclude_game_ids,
+            'vr_filter': args.vr_filter,
         }
 
         # Non-interactive modes

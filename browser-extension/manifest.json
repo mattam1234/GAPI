@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "GAPI Game Picker",
+  "version": "1.0.0",
+  "description": "Quick game picker from your browser toolbar — powered by GAPI.",
+  "permissions": [
+    "storage",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "https://*/*"
+  ],
+  "_comment_host_permissions": "https://*/* is required to allow users to configure any GAPI server URL. Restrict to your specific domain if you deploy GAPI at a known URL.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "GAPI Game Picker",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "32":  "icons/icon32.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16":  "icons/icon16.png",
+    "32":  "icons/icon32.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_page": "options.html",
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; connect-src 'self' http://localhost:* https://*; style-src 'self' 'unsafe-inline'"
+  }
+}

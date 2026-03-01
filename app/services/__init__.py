@@ -19,6 +19,8 @@ from .library_service import LibraryService
 from .db_favorites_service import DBFavoritesService
 from .user_service import UserService
 from .achievement_service import AchievementService
+from .recommendation_service import SmartRecommendationEngine
+from .ml_recommendation_service import MLRecommendationEngine
 
 __all__ = [
     'ReviewService',
@@ -41,4 +43,6 @@ __all__ = [
     'DBFavoritesService',
     'UserService',
     'AchievementService',
+    'SmartRecommendationEngine',
+    'MLRecommendationEngine',
 ]

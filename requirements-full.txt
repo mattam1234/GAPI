@@ -1,0 +1,15 @@
+# =============================================================================
+# GAPI — Full dependency set (all optional integrations included)
+# =============================================================================
+#
+# Install with:
+#   pip install -r requirements-full.txt
+#
+# =============================================================================
+
+# Include everything from the core/default requirements file
+-r requirements.txt
+
+# GOG Galaxy integration (requires building the plugin separately)
+# See: https://github.com/nickvdyck/galaxy-integration-gog
+galaxy.plugin.api>=0.69,<0.70
