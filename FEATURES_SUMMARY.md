@@ -148,8 +148,8 @@ If PostgreSQL is not available:
 - [x] Show ignored games in separate section
 
 ### Short-term
-- [ ] Sync with actual Steam achievementdata
-- [ ] Add Discord bot commands (`/hunt`, `/ignore`)
+- [x] Sync with actual Steam achievement data via `POST /api/achievements/sync`
+- [x] Add Discord bot commands (`/hunt`, `/ignore`)
 - [x] Statistics dashboard (completion %, rarity)
 
 ### Medium-term

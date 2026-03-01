@@ -129,7 +129,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] Video tutorials
 - [ ] Interactive demo environment
 - [x] Localization (i18n) - Support for multiple languages
-- [ ] Developer guide for contributors
+- [x] Developer guide for contributors
 
 ## 💡 Community Requested Features
 

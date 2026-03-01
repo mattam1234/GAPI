@@ -387,6 +387,78 @@ class SteamAPIClient(GamePlatformClient):
             self._log.debug("Achievement fetch failed for app %s: %s", app_id, e)
         return None
 
+    def get_player_achievements(self, steam_id: str, app_id) -> List[Dict]:
+        """Return the full per-achievement list for *steam_id* + *app_id*.
+
+        Each entry is a dict with at least:
+        ``apiname``, ``achieved`` (0/1), ``unlocktime`` (epoch int).
+
+        Returns an empty list on error or if the game has no achievements.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return []
+
+        url = f"{self.BASE_URL}/ISteamUserStats/GetPlayerAchievements/v0001/"
+        params = {
+            'key': self.api_key,
+            'steamid': steam_id,
+            'appid': app_id_int,
+            'l': 'en',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            return data.get('playerstats', {}).get('achievements', [])
+        except requests.RequestException as e:
+            self._log.debug("get_player_achievements failed for app %s: %s", app_id, e)
+        return []
+
+    def get_schema_for_game(self, app_id) -> Dict:
+        """Return the game schema (achievement definitions) for *app_id*.
+
+        The returned dict maps ``apiname -> {name, description, icon, icongray}``
+        for every achievement defined for the game.  Returns an empty dict on
+        error or if the game has no achievements.
+        """
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            return {}
+
+        url = f"{self.BASE_URL}/ISteamUserStats/GetSchemaForGame/v2/"
+        params = {
+            'key': self.api_key,
+            'appid': app_id_int,
+            'l': 'en',
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+            raw = (
+                data.get('game', {})
+                    .get('availableGameStats', {})
+                    .get('achievements', [])
+            )
+            return {
+                a['name']: {
+                    'name': a.get('displayName', a['name']),
+                    'description': a.get('description', ''),
+                    'icon': a.get('icon', ''),
+                    'icongray': a.get('icongray', ''),
+                }
+                for a in raw
+                if 'name' in a
+            }
+        except requests.RequestException as e:
+            self._log.debug("get_schema_for_game failed for app %s: %s", app_id, e)
+        return {}
+
     def get_friend_list(self, steam_id: str) -> List[Dict]:
         """Return the friend list for *steam_id*.
 

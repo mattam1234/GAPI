@@ -1103,6 +1103,59 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
             "responses": {"201": _json_resp("Hunt started", {"type": "object"})},
         }
     }
+    paths["/api/achievements/sync"] = {
+        "post": {
+            "tags": ["achievements"],
+            "summary": "Sync achievements from the Steam API into the database",
+            "description": (
+                "Fetches ``GetPlayerAchievements`` + ``GetSchemaForGame`` for each "
+                "requested app ID and upserts the results.  If ``app_ids`` is omitted "
+                "the entire cached library is synced (capped at 50 games per call).  "
+                "Requires a Steam API key and Steam ID to be configured."
+            ),
+            "requestBody": {
+                "required": False,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "app_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Steam app IDs to sync (omit to sync full library)",
+                        },
+                        "force": {
+                            "type": "boolean",
+                            "default": False,
+                        },
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Sync results", {
+                    "type": "object",
+                    "properties": {
+                        "synced": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "app_id":    {"type": "string"},
+                                    "game_name": {"type": "string"},
+                                    "added":     {"type": "integer"},
+                                    "updated":   {"type": "integer"},
+                                    "total":     {"type": "integer"},
+                                },
+                            },
+                        },
+                        "skipped": {"type": "array", "items": {"type": "string"}},
+                        "errors":  {"type": "array", "items": {"type": "string"}},
+                    },
+                }),
+                "400": _error(400),
+                "503": _error(503),
+            },
+        }
+    }
     paths["/api/achievements/stats"] = {
         "get": {
             "tags": ["achievements"],

@@ -1714,6 +1714,116 @@ def get_ignored_games_full(db, username: str) -> list:
 # Achievement hunt helpers
 # ---------------------------------------------------------------------------
 
+def sync_steam_achievements(
+    db,
+    username: str,
+    steam_id: str,
+    app_id: str,
+    game_name: str,
+    player_achievements: list,
+    schema: dict,
+) -> dict:
+    """Upsert Steam achievement data for *username* from raw Steam API payloads.
+
+    Args:
+        db:                  SQLAlchemy session.
+        username:            GAPI username.
+        steam_id:            Steam 64-bit ID (informational only).
+        app_id:              Steam app ID.
+        game_name:           Human-readable game name.
+        player_achievements: List of dicts from
+                             ``ISteamUserStats/GetPlayerAchievements`` —
+                             each must have at minimum ``apiname`` and
+                             ``achieved`` (0/1) keys; may also include
+                             ``unlocktime`` (epoch int).
+        schema:              Dict mapping ``apiname`` → ``{name, description}``
+                             from ``ISteamUserStats/GetSchemaForGame``.
+
+    Returns:
+        ``{'added': int, 'updated': int, 'total': int}`` counts.
+    """
+    if not db:
+        return {'added': 0, 'updated': 0, 'total': 0}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {'added': 0, 'updated': 0, 'total': 0}
+
+        app_id_str = str(app_id).strip()
+        added = updated = 0
+        import datetime as _dt
+
+        for ach in player_achievements:
+            api_name = ach.get('apiname', '').strip()
+            if not api_name:
+                continue
+            achieved = bool(ach.get('achieved', 0))
+            unlock_ts = ach.get('unlocktime', 0)
+            unlock_time = None  # type: Optional[_dt.datetime]
+            if unlock_ts:
+                try:
+                    unlock_time = _dt.datetime.utcfromtimestamp(int(unlock_ts))
+                except (ValueError, OverflowError, OSError):
+                    unlock_time = None
+
+            meta = schema.get(api_name, {})
+            disp_name = meta.get('name', api_name)
+            description = meta.get('description', '')
+
+            existing = (
+                db.query(Achievement)
+                .filter(
+                    Achievement.user_id == user.id,
+                    Achievement.app_id == app_id_str,
+                    Achievement.achievement_id == api_name,
+                )
+                .first()
+            )
+
+            if existing:
+                changed = False
+                if existing.unlocked != achieved:
+                    existing.unlocked = achieved
+                    changed = True
+                if unlock_time and existing.unlock_time != unlock_time:
+                    existing.unlock_time = unlock_time
+                    changed = True
+                if disp_name and existing.achievement_name != disp_name:
+                    existing.achievement_name = disp_name
+                    changed = True
+                if description and existing.achievement_description != description:
+                    existing.achievement_description = description
+                    changed = True
+                if changed:
+                    existing.updated_at = _dt.datetime.utcnow()
+                    updated += 1
+            else:
+                db.add(Achievement(
+                    user_id=user.id,
+                    app_id=app_id_str,
+                    game_name=game_name,
+                    achievement_id=api_name,
+                    achievement_name=disp_name,
+                    achievement_description=description or None,
+                    unlocked=achieved,
+                    unlock_time=unlock_time,
+                ))
+                added += 1
+
+        db.commit()
+        # Total = existing rows after commit (includes newly added ones)
+        total = (
+            db.query(Achievement)
+            .filter(Achievement.user_id == user.id, Achievement.app_id == app_id_str)
+            .count()
+        )
+        return {'added': added, 'updated': updated, 'total': total}
+    except Exception as e:
+        logger.error("Error syncing Steam achievements for %s/%s: %s", username, app_id, e)
+        db.rollback()
+        return {'added': 0, 'updated': 0, 'total': 0}
+
+
 def get_user_achievements_grouped(db, username: str) -> list:
     """Return achievements for *username* grouped by game.
 

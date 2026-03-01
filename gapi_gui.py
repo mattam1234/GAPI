@@ -3851,6 +3851,140 @@ def api_get_steam_achievements(app_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Achievement sync (Steam API → database)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/achievements/sync', methods=['POST'])
+@require_login
+def api_sync_achievements():
+    """Sync achievements for one or more games from the Steam API.
+
+    Request JSON::
+
+        {
+          "app_ids": ["620", "570"],   // optional – if omitted, syncs all cached games
+          "force": false               // optional – skip if synced within last hour
+        }
+
+    The endpoint fetches ``GetPlayerAchievements`` + ``GetSchemaForGame`` for
+    each requested app and upserts the results into the ``achievements`` table.
+
+    Response JSON::
+
+        {
+          "synced": [
+            {"app_id": "620", "game_name": "Portal 2",
+             "added": 10, "updated": 2, "total": 12},
+            ...
+          ],
+          "skipped": ["570"],
+          "errors":  ["730"]
+        }
+
+    Returns 503 if the database is unavailable, 400 if Steam API key or Steam
+    ID is not configured.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    # Load config to get Steam credentials
+    base_config = load_base_config()
+    steam_api_key = base_config.get('steam_api_key', '').strip()
+    if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
+        return jsonify({'error': 'Steam API key not configured'}), 400
+
+    # Resolve the user's Steam ID
+    db = next(database.get_db())
+    try:
+        user = database.get_user(db, username)
+        steam_id = user.steam_id if user else None
+    finally:
+        if db:
+            db.close()
+
+    if not steam_id:
+        return jsonify({'error': 'Steam ID not configured for this account'}), 400
+
+    data = request.json or {}
+    requested_app_ids: Optional[List[str]] = data.get('app_ids')
+
+    # If no explicit list provided, use the cached library
+    if not requested_app_ids:
+        db2 = next(database.get_db())
+        try:
+            cached = (
+                _library_service.get_cached(db2, username)
+                if _library_service
+                else database.get_cached_library(db2, username)
+            )
+        finally:
+            if db2:
+                db2.close()
+        if not cached:
+            return jsonify({'error': 'No games in library cache. Sync your library first.'}), 400
+        requested_app_ids = [str(g.get('app_id', '')) for g in (cached or [])
+                              if g.get('app_id')]
+
+    steam_client = gapi.SteamAPIClient(steam_api_key)
+    synced: List[Dict] = []
+    skipped: List[str] = []
+    errors: List[str] = []
+
+    # Resolve game names from library cache for display
+    db3 = next(database.get_db())
+    try:
+        cached_all = (
+            _library_service.get_cached(db3, username)
+            if _library_service
+            else database.get_cached_library(db3, username)
+        )
+    finally:
+        if db3:
+            db3.close()
+    name_map: Dict[str, str] = {
+        str(g.get('app_id', '')): g.get('name', g.get('app_id', ''))
+        for g in (cached_all or [])
+    }
+
+    for app_id in requested_app_ids[:50]:  # cap at 50 per call to avoid timeouts
+        app_id = str(app_id).strip()
+        if not app_id:
+            continue
+        game_name = name_map.get(app_id, app_id)
+        try:
+            player_achievements = steam_client.get_player_achievements(steam_id, app_id)
+            if not player_achievements:
+                skipped.append(app_id)
+                continue
+            schema = steam_client.get_schema_for_game(app_id)
+            db4 = next(database.get_db())
+            try:
+                result = database.sync_steam_achievements(
+                    db4, username, steam_id, app_id, game_name,
+                    player_achievements, schema
+                )
+            finally:
+                if db4:
+                    db4.close()
+            synced.append({
+                'app_id': app_id,
+                'game_name': game_name,
+                'added': result['added'],
+                'updated': result['updated'],
+                'total': result['total'],
+            })
+        except Exception as exc:
+            gui_logger.error("Error syncing achievements for app %s: %s", app_id, exc)
+            errors.append(app_id)
+
+    return jsonify({'synced': synced, 'skipped': skipped, 'errors': errors})
+
+
+# ---------------------------------------------------------------------------
 # Achievement statistics dashboard
 # ---------------------------------------------------------------------------
 

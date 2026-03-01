@@ -1,26 +1,42 @@
-# Core dependencies (Python 3.7+)
+# =============================================================================
+# GAPI — Python dependencies
+# =============================================================================
+#
+# Quick install (core + web GUI only):
+#   pip install -r requirements.txt
+#
+# Full install (everything including optional integrations):
+#   pip install -r requirements-full.txt
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core — required for the web GUI (gapi_gui.py) and CLI (gapi.py)
+# Python 3.8+ required (discord.py and asyncio features need 3.8+)
+# -----------------------------------------------------------------------------
 requests>=2.28.0
 colorama>=0.4.6
 flask>=2.0.0
 python-dotenv>=1.0.0
 
-# Database support
+# Database (PostgreSQL — required for multi-user web GUI)
 sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0
+psycopg2-binary>=2.9.0      # swap for psycopg2 if you build from source
 
-# Discord bot (requires Python 3.8+)
+# -----------------------------------------------------------------------------
+# Optional — Discord bot (discord_bot.py)
+# -----------------------------------------------------------------------------
 discord.py>=2.3.0
 
-# Optional platform integrations
-epicstore-api>=0.1.7
-galaxy.plugin.api>=0.69,<0.70
+# -----------------------------------------------------------------------------
+# Optional — Platform integrations
+# -----------------------------------------------------------------------------
+epicstore-api>=0.1.7          # Epic Games Store library sync
+# galaxy.plugin.api>=0.69,<0.70  # GOG Galaxy (uncomment if GOG integration needed)
 
-# Optional: HowLongToBeat completion-time data
-howlongtobeatpy>=1.0.0
-
-# Optional: Discord Rich Presence (shows currently picked game in Discord status)
-# Install with: pip install pypresence
-pypresence>=4.3.0
-
-# Optional: GraphQL API (POST /api/graphql)
-graphene>=3.0.0
+# -----------------------------------------------------------------------------
+# Optional — Extra features
+# -----------------------------------------------------------------------------
+howlongtobeatpy>=1.0.0        # How Long to Beat completion-time estimates
+pypresence>=4.3.0             # Discord Rich Presence (shows picked game in Discord)
+graphene>=3.0.0               # GraphQL API (POST /api/graphql)
