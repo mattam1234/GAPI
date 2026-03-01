@@ -3,6 +3,8 @@
   "steam_id": "YOUR_STEAM_64_ID_HERE",
   "database_url": "postgresql://gapi:gapi_password@localhost:5432/gapi_db",
   "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+  "twitch_client_id": "",
+  "twitch_client_secret": "",
   "barely_played_hours": 2,
   "well_played_hours": 10,
   "max_history_size": 20,

@@ -1079,6 +1079,115 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/manifest.json')
+def pwa_manifest():
+    """Serve the Web App Manifest for Progressive Web App support."""
+    manifest = {
+        "name": "GAPI - Game Picker",
+        "short_name": "GAPI",
+        "description": "Randomly pick your next game from your Steam library.",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#667eea",
+        "theme_color": "#667eea",
+        "orientation": "any",
+        "icons": [
+            {
+                "src": "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6/svgs/solid/gamepad.svg",
+                "sizes": "any",
+                "type": "image/svg+xml",
+                "purpose": "any maskable",
+            }
+        ],
+        "categories": ["games", "entertainment", "utilities"],
+        "lang": "en",
+        "dir": "ltr",
+    }
+    return jsonify(manifest), 200, {
+        'Content-Type': 'application/manifest+json',
+        'Cache-Control': 'public, max-age=86400',
+    }
+
+
+@app.route('/sw.js')
+def pwa_service_worker():
+    """Serve the PWA service worker that enables offline-capable caching."""
+    sw_js = r"""// GAPI Service Worker — offline-first caching for the web shell
+'use strict';
+
+const CACHE_NAME = 'gapi-v1';
+// Core assets that make up the app shell — cached on install.
+const SHELL_ASSETS = [
+  '/',
+  '/manifest.json',
+];
+// API path prefixes that should never be served from cache.
+const NO_CACHE_PREFIXES = [
+  '/api/',
+];
+
+// ── Install: pre-cache the app shell ──────────────────────────────────────
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS))
+  );
+  self.skipWaiting();
+});
+
+// ── Activate: remove stale caches ─────────────────────────────────────────
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((k) => k !== CACHE_NAME)
+          .map((k) => caches.delete(k))
+      )
+    )
+  );
+  self.clients.claim();
+});
+
+// ── Fetch: network-first for API calls, cache-first for the app shell ─────
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
+  // Always go to the network for API requests (no stale data).
+  const isApi = NO_CACHE_PREFIXES.some((p) => url.pathname.startsWith(p));
+  if (isApi || event.request.method !== 'GET') {
+    return; // let the browser handle it normally
+  }
+
+  // Cache-first for the app shell; fall back to network.
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request).then((response) => {
+        if (!response || response.status !== 200 || response.type !== 'basic') {
+          return response;
+        }
+        const toCache = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, toCache));
+        return response;
+      }).catch(() => {
+        // Offline fallback: return the cached root page for navigation requests.
+        if (event.request.mode === 'navigate') {
+          return caches.match('/');
+        }
+      });
+    })
+  );
+});
+"""
+    return sw_js, 200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        # Service workers must be served without long-lived caching.
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Service-Worker-Allowed': '/',
+    }
+
+
+
 @app.route('/api/status')
 def api_status():
     """Get application status"""
@@ -5971,6 +6080,168 @@ def api_graphql():
     except Exception as exc:
         gui_logger.error("GraphQL execution error: %s", exc)
         return jsonify({'errors': [{'message': str(exc)}]}), 500
+
+
+# ---------------------------------------------------------------------------
+# Twitch Integration — Trending games + library overlap
+# ---------------------------------------------------------------------------
+
+def _get_twitch_client():
+    """Return a TwitchClient using credentials from the app config.
+
+    Reads ``twitch_client_id`` and ``twitch_client_secret`` from the active
+    picker config.  Returns ``None`` when either credential is missing.
+    """
+    try:
+        from twitch_client import TwitchClient
+    except ImportError:
+        return None
+
+    if not picker:
+        return None
+
+    cfg = getattr(picker, 'config', {}) or {}
+    client_id     = cfg.get('twitch_client_id', '') or os.environ.get('TWITCH_CLIENT_ID', '')
+    client_secret = cfg.get('twitch_client_secret', '') or os.environ.get('TWITCH_CLIENT_SECRET', '')
+    if not client_id or not client_secret:
+        return None
+
+    try:
+        return TwitchClient(client_id=client_id, client_secret=client_secret)
+    except Exception as exc:
+        gui_logger.warning("Could not create TwitchClient: %s", exc)
+        return None
+
+
+@app.route('/api/twitch/trending')
+@require_login
+def api_twitch_trending():
+    """Return the top games currently live on Twitch.
+
+    Query params:
+        count (int, 1-100, default 20): Number of trending games to return.
+
+    Response JSON::
+
+        {
+          "trending": [
+            {
+              "id": "32982",
+              "name": "Grand Theft Auto V",
+              "viewer_count": 87452,
+              "box_art_url": "https://...",
+              "twitch_url": "https://www.twitch.tv/directory/game/..."
+            },
+            ...
+          ]
+        }
+
+    Returns 503 when Twitch credentials are not configured.
+    """
+    from twitch_client import TwitchAuthError, TwitchAPIError
+
+    client = _get_twitch_client()
+    if client is None:
+        return jsonify({
+            'error': (
+                'Twitch credentials not configured. '
+                'Add twitch_client_id and twitch_client_secret to config.json '
+                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
+            )
+        }), 503
+
+    try:
+        count = max(1, min(int(request.args.get('count', 20)), 100))
+    except (ValueError, TypeError):
+        count = 20
+
+    try:
+        trending = client.get_top_games(count=count)
+    except TwitchAuthError as exc:
+        gui_logger.error("Twitch auth error: %s", exc)
+        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
+    except TwitchAPIError as exc:
+        gui_logger.error("Twitch API error: %s", exc)
+        return jsonify({'error': f'Twitch API error: {exc}'}), 502
+    except Exception as exc:
+        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
+        return jsonify({'error': 'Unexpected error'}), 500
+
+    return jsonify({'trending': trending})
+
+
+@app.route('/api/twitch/library-overlap')
+@require_login
+def api_twitch_library_overlap():
+    """Return user library games that are currently trending on Twitch.
+
+    Fetches the top trending games and cross-references them against the
+    user's loaded game library by normalised name.  Useful for prompting
+    the user to pick a game they own that has an active Twitch community.
+
+    Query params:
+        count (int, 1-100, default 20): Number of trending Twitch games to
+            compare against.
+
+    Response JSON::
+
+        {
+          "overlap": [
+            {
+              "appid": 730,
+              "name": "Counter-Strike 2",
+              "playtime_forever": 4560,
+              "twitch_id": "32399",
+              "viewer_count": 75000,
+              "box_art_url": "https://...",
+              "twitch_url": "https://www.twitch.tv/directory/game/...",
+              "trending_rank": 3
+            },
+            ...
+          ],
+          "trending_count": 20
+        }
+
+    Returns 503 when Twitch credentials are not configured.
+    Returns 400 when the picker is not initialised.
+    """
+    from twitch_client import TwitchAuthError, TwitchAPIError
+
+    if not picker:
+        return jsonify({'error': 'Not initialized. Please log in.'}), 400
+
+    client = _get_twitch_client()
+    if client is None:
+        return jsonify({
+            'error': (
+                'Twitch credentials not configured. '
+                'Add twitch_client_id and twitch_client_secret to config.json '
+                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
+            )
+        }), 503
+
+    try:
+        count = max(1, min(int(request.args.get('count', 20)), 100))
+    except (ValueError, TypeError):
+        count = 20
+
+    try:
+        trending = client.get_top_games(count=count)
+    except TwitchAuthError as exc:
+        gui_logger.error("Twitch auth error: %s", exc)
+        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
+    except TwitchAPIError as exc:
+        gui_logger.error("Twitch API error: %s", exc)
+        return jsonify({'error': f'Twitch API error: {exc}'}), 502
+    except Exception as exc:
+        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
+        return jsonify({'error': 'Unexpected error'}), 500
+
+    with picker_lock:
+        user_games = list(picker.games) if picker.games else []
+
+    overlap = client.find_library_overlap(trending, user_games)
+    return jsonify({'overlap': overlap, 'trending_count': len(trending)})
 
 
 # ---------------------------------------------------------------------------

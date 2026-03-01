@@ -152,11 +152,36 @@ If PostgreSQL is not available:
 - [x] Add Discord bot commands (`/hunt`, `/ignore`)
 - [x] Statistics dashboard (completion %, rarity)
 
+## Next Steps
+
+### Immediate (Recommended)
+- [x] Add UI tabs for "Ignore List" and "Achievements"
+- [x] Create quick-ignore buttons in game library
+- [x] Show ignored games in separate section
+
+### Short-term
+- [x] Sync with actual Steam achievement data via `POST /api/achievements/sync`
+- [x] Add Discord bot commands (`/hunt`, `/ignore`)
+- [x] Statistics dashboard (completion %, rarity)
+
 ### Medium-term
 - [x] Achievement rarity filters in game picker
 - [x] Multiplayer achievement challenges
 - [x] Backup/export user data
 - [x] Achievement statistics by platform
+
+### Recently Completed
+- [x] **Twitch Integration** — `GET /api/twitch/trending` and `GET /api/twitch/library-overlap`
+  cross-reference the user's library against live Twitch trending games.
+  Configure via `twitch_client_id` / `twitch_client_secret` in `config.json`
+  or the `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` environment variables.
+- [x] **Progressive Web App (PWA)** — `manifest.json` + service worker at `/sw.js`
+  enable "Add to Home Screen" on mobile/desktop and offline shell caching.
+  PWA meta tags added to `index.html`.
+- [x] **Interactive Demo** — `python3 demo.py [--quiet]` showcases all major
+  features without requiring credentials or a database.
+- [x] **CodeQL Security Scanning** — automated weekly security analysis via
+  `.github/workflows/codeql.yml` using the `security-extended` query suite.
 
 ## Database Operations
 

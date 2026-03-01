@@ -80,14 +80,14 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 
 #### Mobile & Cross-Platform
 - [ ] **Mobile App** - Native iOS/Android applications
-- [ ] **Progressive Web App** - Offline-capable PWA version
+- [x] **Progressive Web App** - Offline-capable PWA version
 - [ ] **Desktop Application** - Electron-based desktop app with system tray integration
 - [ ] **Browser Extension** - Quick game picker from browser toolbar
 
 #### Advanced Features
 - [ ] **Machine Learning Recommendations** - ML model trained on your playing habits
 - [x] **Calendar Integration** - Sync game sessions with calendar apps
-- [ ] **Twitch Integration** - Pick games based on what's trending on Twitch
+- [x] **Twitch Integration** - Pick games based on what's trending on Twitch
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
 - [x] **Game Backlog Manager** - Prioritize and track game completion
 - [x] **Budget Tracking** - Track game purchases and library value
