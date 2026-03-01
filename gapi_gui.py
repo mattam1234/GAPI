@@ -931,10 +931,8 @@ def require_login(f):
     """Decorator to require user to be logged in"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        global current_user
-        with current_user_lock:
-            if not current_user:
-                return jsonify({'error': 'Not logged in'}), 401
+        if not current_user:
+            return jsonify({'error': 'Not logged in'}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -943,12 +941,10 @@ def require_admin(f):
     """Decorator to require admin privileges"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        global current_user
-        with current_user_lock:
-            if not current_user:
-                return jsonify({'error': 'Not logged in'}), 401
-            if not user_manager.is_admin(current_user):
-                return jsonify({'error': 'Admin privileges required'}), 403
+        if not current_user:
+            return jsonify({'error': 'Not logged in'}), 401
+        if not user_manager.is_admin(current_user):
+            return jsonify({'error': 'Admin privileges required'}), 403
         return f(*args, **kwargs)
     return decorated_function
 
@@ -1415,12 +1411,11 @@ def api_status():
 @app.route('/api/auth/current', methods=['GET'])
 def api_auth_current():
     """Get current logged-in user"""
-    with current_user_lock:
-        if current_user:
-            return jsonify({
-                'username': current_user,
-                'role': user_manager.get_user_role(current_user)
-            })
+    if current_user:
+        return jsonify({
+            'username': current_user,
+            'role': user_manager.get_user_role(current_user)
+        })
     return jsonify({'username': None}), 401
 
 
