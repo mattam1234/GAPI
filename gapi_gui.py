@@ -274,6 +274,12 @@ def _resolve_current_user() -> Optional[str]:
     return _demo_current_user
 
 
+def get_current_username() -> Optional[str]:
+    """Get the resolved current username as a string (not a LocalProxy)"""
+    resolved = _resolve_current_user()
+    return str(resolved) if resolved else None
+
+
 current_user = LocalProxy(_resolve_current_user)
 current_user_lock = threading.Lock()
 
@@ -931,7 +937,8 @@ def require_login(f):
     """Decorator to require user to be logged in"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user:
+        username = get_current_username()
+        if not username:
             return jsonify({'error': 'Not logged in'}), 401
         return f(*args, **kwargs)
     return decorated_function
@@ -941,9 +948,10 @@ def require_admin(f):
     """Decorator to require admin privileges"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user:
+        username = get_current_username()
+        if not username:
             return jsonify({'error': 'Not logged in'}), 401
-        if not user_manager.is_admin(current_user):
+        if not user_manager.is_admin(username):
             return jsonify({'error': 'Admin privileges required'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -1308,8 +1316,7 @@ def ensure_picker_initialized(username: str = None):
     global picker, current_user
     
     if username is None:
-        with current_user_lock:
-            username = current_user
+        username = get_current_username()
     
     if not username:
         return False
@@ -1376,13 +1383,12 @@ def api_status():
     global picker, current_user
     
     # Check if user is logged in
-    with current_user_lock:
-        if not current_user:
-            return jsonify({
-                'ready': False,
-                'logged_in': False,
-                'message': 'Please log in'
-            })
+    if not current_user:
+        return jsonify({
+            'ready': False,
+            'logged_in': False,
+            'message': 'Please log in'
+        })
     
     # Ensure picker is initialized with user's games
     ensure_picker_initialized()
@@ -1397,8 +1403,8 @@ def api_status():
     return jsonify({
         'ready': True,
         'logged_in': True,
-        'current_user': current_user,
-        'is_admin': user_manager.is_admin(current_user),
+        'current_user': get_current_username(),
+        'is_admin': user_manager.is_admin(get_current_username()),
         'total_games': len(picker.games) if picker.games else 0,
         'favorites': len(picker.favorites) if picker.favorites else 0
     })
@@ -1411,10 +1417,11 @@ def api_status():
 @app.route('/api/auth/current', methods=['GET'])
 def api_auth_current():
     """Get current logged-in user"""
-    if current_user:
+    username = get_current_username()
+    if username:
         return jsonify({
-            'username': current_user,
-            'role': user_manager.get_user_role(current_user)
+            'username': username,
+            'role': user_manager.get_user_role(username)
         })
     return jsonify({'username': None}), 401
 
@@ -1608,10 +1615,9 @@ def api_auth_update_ids():
     """Update user's platform IDs"""
     global current_user
     
-    with current_user_lock:
-        if not current_user:
-            return jsonify({'error': 'Not logged in'}), 401
-        username = current_user
+    if not current_user:
+        return jsonify({'error': 'Not logged in'}), 401
+    username = get_current_username()
     
     data = request.json or {}
     steam_id = data.get('steam_id', '').strip()
@@ -1649,10 +1655,9 @@ def api_auth_get_ids():
     """Get current user's platform IDs"""
     global current_user
     
-    with current_user_lock:
-        if not current_user:
-            return jsonify({'error': 'Not logged in'}), 401
-        username = current_user
+    if not current_user:
+        return jsonify({'error': 'Not logged in'}), 401
+    username = get_current_username()
     
     user_ids = user_manager.get_user_ids(username)
     if DB_AVAILABLE:
@@ -1682,8 +1687,7 @@ def api_auth_get_ids():
 @require_login
 def api_filter_platform_options():
     """Return platform/device filter options limited to user-configured platforms."""
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     users_param = request.args.get('users', '').strip()
     requested_users = [u.strip() for u in users_param.split(',') if u.strip()] if users_param else []
@@ -1723,8 +1727,7 @@ def api_pick_game():
     global picker, current_game, current_user
 
     # Get current user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     
     try:
         gui_logger.info(f"Pick request from user {username}")
@@ -2012,8 +2015,7 @@ def api_game_details(app_id):
         db = database.SessionLocal()
         global current_user
 
-        with current_user_lock:
-            username = current_user
+        username = get_current_username()
 
         # Determine platform: check user's library for this game
         platform = 'steam'  # Default to steam
@@ -2146,8 +2148,7 @@ def api_toggle_favorite(app_id):
         return jsonify({'error': 'Database not available'}), 503
 
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not username:
         return jsonify({'error': 'Not authenticated'}), 401
@@ -2185,8 +2186,7 @@ def api_toggle_favorite(app_id):
 def api_library():
     """Get all games in library from database cache"""
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         # Fallback to demo games if DB not available
@@ -2281,8 +2281,7 @@ def api_library():
 def api_sync_library():
     """Manually trigger library sync from Steam API to database"""
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     
     try:
         success, message = sync_scheduler.trigger_sync(username)
@@ -2339,8 +2338,7 @@ def api_update_sync_settings():
 def api_sync_status():
     """Get sync status for current user"""
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -2440,8 +2438,7 @@ def api_favorites():
         return jsonify({'error': 'Database not available'}), 503
 
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not username:
         return jsonify({'error': 'Not authenticated'}), 401
@@ -2492,8 +2489,7 @@ def api_stats():
         return jsonify({'error': 'Database not available'}), 503
 
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     try:
         db = database.SessionLocal()
@@ -2711,8 +2707,7 @@ def api_get_ignored_games():
     """Get current user's ignored games list"""
     global current_user
 
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not DB_AVAILABLE:
         return jsonify({'ignored_games': []}), 200
@@ -2749,8 +2744,7 @@ def api_toggle_ignored_game():
     """Toggle game ignore status for current user"""
     global current_user
 
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
@@ -2809,8 +2803,7 @@ def api_get_achievements():
     """Get achievements for current user"""
     global current_user
 
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not DB_AVAILABLE:
         return jsonify({'achievements': []}), 200
@@ -2855,8 +2848,7 @@ def api_start_achievement_hunt():
     """Start tracking an achievement hunting session"""
     global current_user
 
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
@@ -2925,8 +2917,7 @@ def api_update_achievement_hunt(hunt_id: str):
     """Update achievement hunt progress"""
     global current_user
 
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
@@ -2993,8 +2984,7 @@ def api_users_all():
 @require_admin
 def api_users_delete(username):
     """Delete a user (admin only)"""
-    with current_user_lock:
-        requesting_user = current_user
+    requesting_user = get_current_username()
     
     if not requesting_user:
         return jsonify({'error': 'Not logged in'}), 401
@@ -3011,8 +3001,7 @@ def api_users_delete(username):
 @require_admin
 def api_users_update_role():
     """Update user role (admin only)"""
-    with current_user_lock:
-        requesting_user = current_user
+    requesting_user = get_current_username()
     
     if not requesting_user:
         return jsonify({'error': 'Not logged in'}), 401
@@ -3036,8 +3025,7 @@ def api_users_update_role():
 @require_admin
 def api_users_update_roles():
     """Update user roles (admin only)"""
-    with current_user_lock:
-        requesting_user = current_user
+    requesting_user = get_current_username()
 
     if not requesting_user:
         return jsonify({'error': 'Not logged in'}), 401
@@ -4113,8 +4101,7 @@ def api_sync_achievements():
     ID is not configured.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -4241,8 +4228,7 @@ def api_achievement_stats():
         }
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -4366,8 +4352,7 @@ def api_create_achievement_challenge():
     Response JSON: the created challenge object (status 201).
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -4412,8 +4397,7 @@ def api_list_achievement_challenges():
         {"challenges": [ {...}, ... ]}
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -4458,8 +4442,7 @@ def api_join_achievement_challenge(challenge_id: str):
     Response JSON: updated challenge object.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -4488,8 +4471,7 @@ def api_update_challenge_progress(challenge_id: str):
     Response JSON: updated challenge object.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -4523,8 +4505,7 @@ def api_cancel_achievement_challenge(challenge_id: str):
         {"success": true, "id": "<challenge_id>"}
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     if not ensure_db_available():
         return jsonify({'error': 'Database not available'}), 503
@@ -4572,8 +4553,7 @@ def api_get_friends():
     Returns 503 if Steam is not configured or the profile is private.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     user_ids = user_manager.get_user_ids(username)
     steam_id = user_ids.get('steam_id', '')
 
@@ -4905,8 +4885,7 @@ def api_export_user_data():
     Response: ``application/json`` attachment named ``gapi_<username>_backup.json``.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     db = next(database.get_db())
     try:
         export = database.get_user_data_export(db, username)
@@ -4940,8 +4919,7 @@ def api_import_user_data():
       - ``achievements_added``– achievement records inserted
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     data = None
     if request.content_type and 'multipart' in request.content_type:
@@ -5009,8 +4987,7 @@ def api_update_profile():
       - ``avatar_url``:   URL to a profile picture
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     data = request.get_json() or {}
     db = next(database.get_db())
     try:
@@ -5050,8 +5027,7 @@ def api_app_friends():
     friends directly in the multi-user game picker.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     db = next(database.get_db())
     try:
         result = database.get_app_friends_with_platforms(db, username)
@@ -5070,8 +5046,7 @@ def api_send_friend_request():
       - ``username``: target username (required)
     """
     global current_user
-    with current_user_lock:
-        sender = current_user
+    sender = get_current_username()
     data = request.get_json() or {}
     target = data.get('username', '').strip()
     if not target:
@@ -5100,8 +5075,7 @@ def api_respond_friend_request():
       - ``accept``:   boolean (required)
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     data = request.get_json() or {}
     requester = data.get('username', '').strip()
     if 'accept' not in data:
@@ -5132,8 +5106,7 @@ def api_remove_app_friend():
       - ``username``: the friend's username (required)
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     data = request.get_json() or {}
     other = data.get('username', '').strip()
     if not other:
@@ -5165,8 +5138,7 @@ def api_update_presence():
     has the app open so that other users can see them as online.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     if not DB_AVAILABLE:
         return jsonify({'success': True})
     db = next(database.get_db())
@@ -5223,8 +5195,7 @@ def api_live_session_create():
     Returns the newly created session.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     data = request.get_json() or {}
     session_id = str(uuid.uuid4())
     session = {
@@ -5259,8 +5230,7 @@ def api_live_session_active():
 def api_live_session_join(session_id: str):
     """Join an existing live pick session."""
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -5284,8 +5254,7 @@ def api_live_session_leave(session_id: str):
     is removed entirely.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -5315,8 +5284,7 @@ def api_live_session_pick(session_id: str):
       - ``coop_only``: boolean, default false
     """
     global current_user, multi_picker
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -5400,8 +5368,7 @@ def api_live_session_invite(session_id: str):
       - ``usernames``: list of usernames to invite (required)
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -5806,8 +5773,7 @@ def api_chat_messages():
       - ``limit``:    max messages to return (default 50)
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     room = _normalize_chat_room_name(request.args.get('room', 'general'))
     if not _can_access_chat_room(username, room):
         return jsonify({'error': f'Access denied for private room "{room}"'}), 403
@@ -5840,8 +5806,7 @@ def api_chat_send():
       - ``message``: message text (required)
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     data = request.get_json() or {}
     message = data.get('message', '').strip()
     room = _normalize_chat_room_name(data.get('room', 'general'))
@@ -5936,8 +5901,7 @@ def api_chat_online_users():
     Returns dict mapping room_name -> list of usernames in that room.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     
     online_users = {}
     current_time = datetime.utcnow().timestamp()
@@ -5964,8 +5928,7 @@ def api_chat_update_room():
       - ``room``: room name
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     
     data = request.get_json() or {}
     room = _normalize_chat_room_name(data.get('room', 'general'))
@@ -5991,8 +5954,7 @@ def api_chat_room_users():
       - ``owner``: owner username (or null)
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     
     room = _normalize_chat_room_name(request.args.get('room', 'general'))
     if not _can_access_chat_room(username, room):
@@ -6021,8 +5983,7 @@ def api_chat_invite():
     Only the room owner can invite users to private rooms.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     
     data = request.get_json() or {}
     target_username = data.get('target_username', '').strip()
@@ -6078,8 +6039,7 @@ def api_get_notifications():
       - ``unread_only``: 'true' to return only unread (default false)
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     unread_only = request.args.get('unread_only', 'false').lower() == 'true'
     db = next(database.get_db())
     try:
@@ -6102,8 +6062,7 @@ def api_mark_notifications_read():
       - ``ids``: list of notification IDs. If omitted, marks all as read.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     data = request.get_json() or {}
     ids = data.get('ids')
     db = next(database.get_db())
@@ -6132,8 +6091,7 @@ def api_send_notification():
       - ``type``:     'info' | 'warning' | 'success' | 'error' (default 'info')
     """
     global current_user
-    with current_user_lock:
-        sender = current_user
+    sender = get_current_username()
     # Only admins can send notifications to others
     db_check = next(database.get_db())
     try:
@@ -6202,8 +6160,7 @@ def api_register_plugin():
       - ``config``:      optional config object
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     db_check = next(database.get_db())
     try:
         if _plugin_service:
@@ -6254,8 +6211,7 @@ def api_toggle_plugin(plugin_id):
       - ``enabled``: boolean
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     db_check = next(database.get_db())
     try:
         if _plugin_service:
@@ -6288,8 +6244,7 @@ def api_toggle_plugin(plugin_id):
 def api_delete_plugin(plugin_id):
     """Permanently delete a registered plugin (admin only)."""
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     db_check = next(database.get_db())
     try:
         if _plugin_service:
@@ -6325,8 +6280,7 @@ def api_get_app_settings():
       - ``settings``: list of ``{key, value, default, description}`` objects
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     db_check = next(database.get_db())
     try:
         if _app_settings_service:
@@ -6359,8 +6313,7 @@ def api_save_app_settings():
       - ``settings``: dict of ``{key: value}`` pairs to update
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
     db_check = next(database.get_db())
     try:
         if _app_settings_service:
@@ -6668,8 +6621,7 @@ def api_graphql():
     library is not available.
     """
     global current_user
-    with current_user_lock:
-        username = current_user
+    username = get_current_username()
 
     schema = _get_graphql_schema()
     if schema is None:
