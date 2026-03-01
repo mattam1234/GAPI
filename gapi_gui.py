@@ -1228,8 +1228,9 @@ def index():
 
 
 @app.route('/game-sessions')
+@require_login
 def game_sessions():
-    """Dedicated game sessions page"""
+    """Dedicated game sessions page - requires login"""
     return render_template('game_sessions.html')
 
 

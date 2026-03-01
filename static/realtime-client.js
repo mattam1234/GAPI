@@ -4,7 +4,7 @@
  */
 
 class RealtimeClient {
-    constructor(username) {
+    constructor(username, autoStart = true) {
         this.username = username;
         this.eventSource = null;
         this.listeners = {};
@@ -12,14 +12,23 @@ class RealtimeClient {
         this.lastEventTime = null;
         this.useSSE = true;  // Try SSE first
         this.usePolling = false;  // Fallback to polling
+        this.isAuthenticated = false;
         
-        this.init();
+        if (autoStart) {
+            this.init();
+        }
     }
     
     /**
      * Initialize real-time connection
      */
     init() {
+        // Don't initialize without a valid username
+        if (!this.username || this.username.trim() === '') {
+            console.warn('⚠️ Realtime: Cannot init without username');
+            return;
+        }
+        
         // Try SSE first
         if (typeof EventSource !== 'undefined') {
             this.initSSE();
@@ -105,13 +114,29 @@ class RealtimeClient {
      * Poll for new events
      */
     async poll() {
+        // Don't poll without a valid username
+        if (!this.username || this.username.trim() === '') {
+            console.warn('⚠️ Realtime: Cannot poll without username, disconnecting');
+            this.disconnect();
+            return;
+        }
+        
         try {
             const resp = await fetch(`/api/events/poll?since=${encodeURIComponent(this.lastEventTime)}`, {
                 headers: { 'X-Username': this.username }
             });
             
+            // Stop polling if unauthenticated
+            if (resp.status === 401) {
+                console.warn('⚠️ Realtime: Authentication lost, stopping polling');
+                this.disconnect();
+                this.isAuthenticated = false;
+                return;
+            }
+            
             if (!resp.ok) return;
             
+            this.isAuthenticated = true;
             const data = await resp.json();
             if (data.events && data.events.length > 0) {
                 data.events.forEach(event => {
@@ -173,7 +198,21 @@ class RealtimeClient {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
         }
+        this.isAuthenticated = false;
         console.log('🔌 Real-time disconnected');
+    }
+    
+    /**
+     * Reconnect/restart polling (for when user logs in)
+     */
+    reconnect(username) {
+        this.disconnect();
+        if (username) {
+            this.username = username;
+            this.isAuthenticated = true;
+            this.init();
+            console.log('🔌 Real-time reconnected for:', username);
+        }
     }
     
     /**
@@ -195,6 +234,17 @@ class RealtimeClient {
  * Initialize real-time for page
  */
 function initRealtime(username) {
+    // Disconnect any existing client first
+    if (window.realtimeClient) {
+        window.realtimeClient.disconnect();
+    }
+    
+    // Don't initialize if no username
+    if (!username || username.trim() === '') {
+        console.warn('⚠️ Cannot initialize realtime: no username provided');
+        return;
+    }
+    
     window.realtimeClient = new RealtimeClient(username);
     
     // Leaderboard updates

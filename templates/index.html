@@ -7,70 +7,39 @@
     <!-- PWA: Web App Manifest + theme colour -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#667eea">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="GAPI">
-    <meta name="mobile-web-app-capable" content="yes">
-    <!-- Chart.js for statistics visualizations -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <!-- PWA: register service worker -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js', { scope: '/' })
-                    .catch((err) => console.warn('SW registration failed:', err));
-            });
-        }
-    </script>
-    <!-- Toastr removed (use built-in showMessage fallback instead) -->
     <style>
-        /* ── CSS Custom Properties (light + dark theme) ───────────────── */
         :root {
-            --bg-gradient-start: #667eea;
-            --bg-gradient-end:   #764ba2;
-            --card-bg:           #ffffff;
-            --card-border:       #e0e0e0;
-            --text-primary:      #333333;
-            --text-secondary:    #666666;
-            --input-bg:          #ffffff;
-            --input-border:      #ddd;
-            --list-hover:        #f5f5f5;
-            --tab-inactive-bg:   rgba(255,255,255,0.15);
-            --tab-active-bg:     #ffffff;
-            --tab-active-color:  #667eea;
-            --status-bar-bg:     rgba(255,255,255,0.15);
-            --status-bar-color:  #ffffff;
+            /* Color scheme variables - light theme defaults */
+            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-bg: white;
+            --card-border: #e0e0e0;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --list-hover: rgba(102, 126, 234, 0.08);
+            --input-bg: white;
+            --input-border: #ddd;
+            --tab-inactive-bg: rgba(255,255,255,0.2);
+            --tab-inactive-color: white;
+            --tab-hover-bg: rgba(255,255,255,0.3);
+            --tab-active-bg: white;
+            --tab-active-color: #667eea;
+            --header-color: white;
+            --status-bar-bg: rgba(255,255,255,0.2);
+            --status-bar-color: white;
+            --accent: #667eea;
         }
-
-        [data-theme="dark"] {
-            --bg-gradient-start: #1a1a2e;
-            --bg-gradient-end:   #16213e;
-            --card-bg:           #1e2a3a;
-            --card-border:       #2d3f55;
-            --text-primary:      #e8e8e8;
-            --text-secondary:    #a0b0c0;
-            --input-bg:          #253347;
-            --input-border:      #3a5068;
-            --list-hover:        #253347;
-            --tab-inactive-bg:   rgba(255,255,255,0.08);
-            --tab-active-bg:     #253347;
-            --tab-active-color:  #8fa8f8;
-            --status-bar-bg:     rgba(255,255,255,0.08);
-            --status-bar-color:  #d0d8f0;
-        }
-
+        
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
+            background: var(--bg-gradient, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
             min-height: 100vh;
             padding: 20px;
-            transition: background 0.3s;
         }
 
         .container {
@@ -80,26 +49,9 @@
 
         header {
             text-align: center;
-            color: white;
+            color: var(--header-color, white);
             margin-bottom: 30px;
-            position: relative;
         }
-
-        /* Dark mode toggle button */
-        #dark-mode-btn {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            background: rgba(255,255,255,0.18);
-            border: none;
-            border-radius: 20px;
-            padding: 7px 16px;
-            color: white;
-            font-size: 0.95em;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        #dark-mode-btn:hover { background: rgba(255,255,255,0.32); }
 
         h1 {
             font-size: 3em;
@@ -113,11 +65,11 @@
         }
 
         .status-bar {
-            background: var(--status-bar-bg);
+            background: var(--status-bar-bg, rgba(255,255,255,0.2));
             padding: 10px 20px;
             border-radius: 10px;
             margin-bottom: 20px;
-            color: var(--status-bar-color);
+            color: var(--status-bar-color, white);
             text-align: center;
             font-weight: 500;
         }
@@ -130,8 +82,8 @@
         }
 
         .tab {
-            background: var(--tab-inactive-bg);
-            color: white;
+            background: var(--tab-inactive-bg, rgba(255,255,255,0.2));
+            color: var(--tab-inactive-color, white);
             border: none;
             padding: 15px 30px;
             border-radius: 10px;
@@ -142,22 +94,28 @@
         }
 
         .tab:hover {
-            background: rgba(255,255,255,0.3);
+            background: var(--tab-hover-bg, rgba(255,255,255,0.3));
             transform: translateY(-2px);
         }
 
         .tab.active {
-            background: var(--tab-active-bg);
-            color: var(--tab-active-color);
+            background: var(--tab-active-bg, white);
+            color: var(--tab-active-color, #667eea);
+        }
+        
+        /* Hide auth-required tabs by default until user logs in */
+        .tab.auth-required,
+        a.auth-required {
+            display: none !important;
         }
 
         .tab-content {
             display: none;
-            background: var(--card-bg);
+            background: var(--card-bg, white);
             border-radius: 15px;
             padding: 30px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            color: var(--text-primary);
+            color: var(--text-primary, #333);
         }
 
         .tab-content.active {
@@ -847,13 +805,13 @@
             <button class="tab" onclick="switchTab('playlists', event)">📋 Playlists</button>
             <button class="tab" onclick="switchTab('backlog', event)">📚 Backlog</button>
             <button class="tab" onclick="switchTab('ignored', event)">No-Play List</button>
-            <button class="tab" onclick="switchTab('achievements', event)" data-tooltip="Track your gaming achievements">Achievements</button>
-            <button class="tab" onclick="switchTab('friends', event)" data-tooltip="Manage your friends list">👥 Friends</button>
-            <button class="tab" onclick="switchTab('recommendations', event)" data-tooltip="Get personalized game recommendations">💡 For You</button>
-            <button class="tab" onclick="switchTab('leaderboard', event)" data-tooltip="View top players and rankings">🏆 Leaderboard</button>
-            <button class="tab" onclick="switchTab('chat', event)" data-tooltip="Chat with other users">💬 Chat</button>
-            <button class="tab" onclick="switchTab('sessions', event)" data-tooltip="Join multiplayer sessions">🎯 Sessions</button>
-            <a href="/game-sessions" class="tab" style="text-decoration: none; display: inline-flex; align-items: center;">🎬 Full Sessions Page</a>
+            <button id="achievements-tab-btn" class="tab auth-required" onclick="switchTab('achievements', event)" data-tooltip="Track your gaming achievements">Achievements</button>
+            <button id="friends-tab-btn" class="tab auth-required" onclick="switchTab('friends', event)" data-tooltip="Manage your friends list">👥 Friends</button>
+            <button id="recommendations-tab-btn" class="tab auth-required" onclick="switchTab('recommendations', event)" data-tooltip="Get personalized game recommendations">💡 For You</button>
+            <button id="leaderboard-tab-btn" class="tab auth-required" onclick="switchTab('leaderboard', event)" data-tooltip="View top players and rankings">🏆 Leaderboard</button>
+            <button id="chat-tab-btn" class="tab auth-required" onclick="switchTab('chat', event)" data-tooltip="Chat with other users">💬 Chat</button>
+            <button id="sessions-tab-btn" class="tab auth-required" onclick="switchTab('sessions', event)" data-tooltip="Join multiplayer sessions">🎯 Sessions</button>
+            <a id="full-sessions-link" href="/game-sessions" class="tab auth-required" style="text-decoration: none; display: inline-flex; align-items: center;">🎬 Full Sessions Page</a>
             <button id="notifications-tab-btn" class="tab" onclick="switchTab('notifications', event)">🔔 Alerts <span id="notif-badge" style="display:none;background:#e74c3c;color:white;border-radius:50%;padding:1px 6px;font-size:0.75em;margin-left:4px;"></span></button>
             <button class="tab" onclick="switchTab('plugins', event)">🧩 Plugins</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
@@ -1501,15 +1459,6 @@
                 <button onclick="showRanked()" style="padding:6px 12px; background:#d4af37; color:black; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🏆 Ranked</button>
                 <button onclick="showAntiCheat()" style="padding:6px 12px; background:#95a5a6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔒 Fairness</button>
                 <button onclick="showAdvancedNotif()" style="padding:6px 12px; background:#16a085; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Settings</button>
-                <button onclick="showBattlePass()" style="padding:6px 12px; background:#9b59b6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎖️ Battle Pass</button>
-                <button onclick="showTournaments()" style="padding:6px 12px; background:#e67e22; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🏆 Tournaments</button>
-                <button onclick="showCreator()" style="padding:6px 12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">⭐ Creator</button>
-                <button onclick="showReferral()" style="padding:6px 12px; background:#2980b9; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎁 Referral</button>
-                <button onclick="showEvents()" style="padding:6px 12px; background:#f1c40f; color:black; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎪 Events</button>
-                <button onclick="showGuilds()" style="padding:6px 12px; background:#c0392b; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👥 Guilds</button>
-                <button onclick="showProgression()" style="padding:6px 12px; background:#16a085; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📈 Paths</button>
-                <button onclick="showMarket()" style="padding:6px 12px; background:#34495e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💳 Market</button>
-                <button onclick="showCollections()" style="padding:6px 12px; background:#e91e63; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✨ Collections</button>
             </div>
             <div style="display:flex; gap:12px; flex:1;">
                 <!-- Chat column -->
@@ -2031,15 +1980,7 @@
                 await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter(), refreshPlatformFilters()]);
                 checkInitialSetup();
                 
-                // Initialize real-time updates
-                const username = document.getElementById('current-username').textContent;
-                if (username && typeof initRealtime !== 'undefined') {
-                    try {
-                        initRealtime(username);
-                    } catch (err) {
-                        console.error('Real-time initialization failed:', err);
-                    }
-                }
+                // Real-time updates are now managed by setAuthenticatedUI()
             } finally {
                 hideSpinner();
             }
@@ -2131,15 +2072,21 @@
         }
         
         function switchTab(tabName, event) {
-            // Ensure we're working with the button element
-            const button = event.target.closest('.tab') || event.target;
+            // Ensure we're working with a tab button even when called programmatically
+            let button = null;
+            if (event && event.target) {
+                button = event.target.closest('.tab') || event.target;
+            }
+            if (!button) {
+                button = document.querySelector(`.tab[onclick*=\"switchTab('${tabName}'\"]`);
+            }
 
             if (tabName !== 'chat' && typeof stopChatPolling === 'function') stopChatPolling();
             if (tabName !== 'sessions' && typeof stopSessionsPolling === 'function') stopSessionsPolling();
             
             // Update tab buttons
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-            button.classList.add('active');
+            if (button && button.classList) button.classList.add('active');
             
             // Update tab content
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -3122,12 +3069,18 @@
         
         async function loadStats() {
             const statsDiv = document.getElementById('stats-content');
+            if (!statsDiv) return;
             statsDiv.innerHTML = '<div class="loading">Loading...</div>';
-            
+
             try {
                 const response = await fetch('/api/stats');
                 const data = await response.json();
-                
+
+                if (!response.ok) {
+                    statsDiv.innerHTML = `<div class="error">Error: ${data.error || 'Failed to load statistics'}</div>`;
+                    return;
+                }
+
                 let html = `
                     <div class="stats-grid">
                         <div class="stat-card">
@@ -3150,91 +3103,22 @@
                             <div class="stat-label">hours/game</div>
                         </div>
                     </div>
-
                     <div class="top-games">
                         <h3>🏆 Top 10 Most Played Games</h3>
                         <div class="list-container">
                 `;
 
-                data.top_games.forEach((game, index) => {
+                (data.top_games || []).forEach((game, index) => {
                     html += `
                         <div class="list-item">
-                            <div>
-                                <strong>#${index + 1} ${game.name}</strong>
-                            </div>
+                            <div><strong>#${index + 1} ${game.name}</strong></div>
                             <div>${game.playtime_hours} hours</div>
                         </div>
                     `;
                 });
 
-                html += `</div></div>
-                    <div class="charts-row">
-                        <div class="chart-card">
-                            <h3>📊 Played vs Unplayed</h3>
-                            <canvas id="pie-chart" height="220"></canvas>
-                        </div>
-                        <div class="chart-card">
-                            <h3>⏱️ Top 10 by Playtime</h3>
-                            <canvas id="bar-chart" height="220"></canvas>
-                        </div>
-                    </div>
-                `;
+                html += '</div></div>';
                 statsDiv.innerHTML = html;
-
-                // Defer chart rendering to next frame to avoid blocking UI
-                requestAnimationFrame(() => {
-                    // Build Played vs Unplayed pie chart
-                    if (document.getElementById('pie-chart')) {
-                        new Chart(document.getElementById('pie-chart'), {
-                            type: 'doughnut',
-                            data: {
-                                labels: ['Played', 'Unplayed'],
-                                datasets: [{
-                                    data: [data.played_games, data.unplayed_games],
-                                    backgroundColor: ['#667eea', '#e0e0e0'],
-                                    borderWidth: 0,
-                                }],
-                            },
-                            options: {
-                                plugins: { legend: { position: 'bottom' } },
-                                cutout: '60%',
-                                animation: { duration: 300 },
-                            },
-                        });
-                    }
-
-                    // Build Top 10 bar chart (deferred further to avoid simultaneous rendering)
-                    requestAnimationFrame(() => {
-                        if (document.getElementById('bar-chart')) {
-                            const MAX_CHART_LABEL_LENGTH = 18;
-                            const barLabels = data.top_games.map(g =>
-                                g.name.length > MAX_CHART_LABEL_LENGTH
-                                    ? g.name.slice(0, MAX_CHART_LABEL_LENGTH - 1) + '…'
-                                    : g.name
-                            );
-                            const barData = data.top_games.map(g => g.playtime_hours);
-                            new Chart(document.getElementById('bar-chart'), {
-                                type: 'bar',
-                                data: {
-                                    labels: barLabels,
-                                    datasets: [{
-                                        label: 'Hours played',
-                                        data: barData,
-                                        backgroundColor: '#764ba2',
-                                        borderRadius: 5,
-                                    }],
-                                },
-                                options: {
-                                    indexAxis: 'y',
-                                    plugins: { legend: { display: false } },
-                                    scales: { x: { beginAtZero: true } },
-                                    animation: { duration: 300 },
-                                },
-                            });
-                        }
-                    });
-                });
-
             } catch (error) {
                 statsDiv.innerHTML = '<div class="error">Error loading statistics</div>';
             }
@@ -4370,6 +4254,85 @@
         // Authentication Functions
         // ==============================================================================================
         
+        function setAuthenticatedUI(isAuthenticated, userRole, username = null) {
+            // Show/hide auth modal and user info
+            const authModal = document.getElementById('auth-modal');
+            const userInfo = document.getElementById('user-info');
+            
+            if (isAuthenticated) {
+                if (authModal) authModal.style.display = 'none';
+                if (userInfo) userInfo.style.display = 'block';
+                
+                // Show all auth-required tabs by removing !important with inline style
+                const authTabs = [
+                    document.getElementById('sessions-tab-btn'),
+                    document.getElementById('full-sessions-link'),
+                    document.getElementById('chat-tab-btn'),
+                    document.getElementById('friends-tab-btn'),
+                    document.getElementById('recommendations-tab-btn'),
+                    document.getElementById('leaderboard-tab-btn'),
+                    document.getElementById('achievements-tab-btn')
+                ];
+                
+                authTabs.forEach(tab => {
+                    if (tab) {
+                        // Use inline-block for buttons, inline-flex for links
+                        const displayValue = tab.tagName === 'A' ? 'inline-flex' : 'inline-block';
+                        tab.style.setProperty('display', displayValue, 'important');
+                    }
+                });
+                
+                // Handle admin tab
+                const adminTab = document.getElementById('admin-tab-btn');
+                if (adminTab) {
+                    adminTab.style.display = userRole === 'admin' ? 'inline-block' : 'none';
+                }
+                
+                // Start/restart realtime client
+                if (username && typeof initRealtime !== 'undefined') {
+                    try {
+                        if (window.realtimeClient) {
+                            window.realtimeClient.reconnect(username);
+                        } else {
+                            initRealtime(username);
+                        }
+                    } catch (err) {
+                        console.error('Real-time initialization failed:', err);
+                    }
+                }
+            } else {
+                if (authModal) authModal.style.display = 'flex';
+                if (userInfo) userInfo.style.display = 'none';
+                
+                // Hide all auth-protected tabs
+                const authTabs = [
+                    document.getElementById('sessions-tab-btn'),
+                    document.getElementById('full-sessions-link'),
+                    document.getElementById('chat-tab-btn'),
+                    document.getElementById('friends-tab-btn'),
+                    document.getElementById('recommendations-tab-btn'),
+                    document.getElementById('leaderboard-tab-btn'),
+                    document.getElementById('achievements-tab-btn'),
+                    document.getElementById('admin-tab-btn')
+                ];
+                
+                authTabs.forEach(tab => {
+                    if (tab) {
+                        tab.style.setProperty('display', 'none', 'important');
+                    }
+                });
+                
+                // Stop realtime client
+                if (window.realtimeClient) {
+                    try {
+                        window.realtimeClient.disconnect();
+                    } catch (err) {
+                        console.error('Real-time disconnect failed:', err);
+                    }
+                }
+            }
+        }
+        
         async function checkAuthStatus() {
             try {
                 const response = await fetch('/api/auth/current');
@@ -4377,28 +4340,23 @@
                 
                 if (data.username) {
                     // User is logged in
-                    document.getElementById('auth-modal').style.display = 'none';
-                    document.getElementById('user-info').style.display = 'block';
                     document.getElementById('current-username').textContent = data.username;
                     
                     // Store user role for UI controls
                     window.currentUserRole = data.role || 'user';
                     
-                    // Show/hide admin-only tabs
-                    const usersTab = document.querySelector('[data-tab=\"users-tab\"]');
-                    if (usersTab) {
-                        usersTab.style.display = data.role === 'admin' ? 'inline-block' : 'none';
-                    }
+                    // Update UI based on auth state
+                    setAuthenticatedUI(true, data.role || 'user', data.username);
                     
                     loadSettings();
                     init();
                 } else {
                     // User is not logged in
-                    document.getElementById('auth-modal').style.display = 'flex';
-                    document.getElementById('user-info').style.display = 'none';
+                    setAuthenticatedUI(false, null, null);
                 }
             } catch (error) {
                 console.error('Error checking auth status:', error);
+                setAuthenticatedUI(false, null, null);
             }
         }
         
@@ -6126,9 +6084,9 @@
             const formattedMessage = formatMessageText(msg.message, false, myUsername);
             const fullDateTime = msg.created_at ? new Date(msg.created_at).toLocaleString() : '';
             
-            const escapedMessage = msg.message.replace(/\\\\/g, '\\\\\\\\').replace(/`/g, '\\\\`').replace(/\\$/g, '\\\\$').replace(/'/g, \"\\\\'\");
-            const escapedSender = msg.sender.replace(/'/g, \"\\\\'\" );
-            const escapedPreview = msg.message.substring(0, 50).replace(/'/g, \"\\\\'\" );
+            const escapedMessage = msg.message.replace(/\\\\/g, '\\\\\\\\').replace(/`/g, '\\\\`').replace(/\\$/g, '\\\\$').replace(/'/g, "\\'");
+            const escapedSender = msg.sender.replace(/'/g, "\\'");
+            const escapedPreview = msg.message.substring(0, 50).replace(/'/g, "\\'");
             
             const bubble = document.createElement('div');
             bubble.id = `msg-${msg.id}`;
@@ -6556,11 +6514,20 @@
             }
         }
 
-        async function loadLiveSessions() {
+        async function loadLiveSessions(_retriedAuth = false) {
             const listDiv = document.getElementById('sessions-list');
             if (!listDiv) return;
             try {
                 const resp = await fetch('/api/live-session/active');
+                if (resp.status === 401) {
+                    await checkAuthStatus();
+                    if (!_retriedAuth && getCurrentUsername()) {
+                        await loadLiveSessions(true);
+                        return;
+                    }
+                    listDiv.innerHTML = '<div class="error">Please sign in to load sessions</div>';
+                    return;
+                }
                 if (!resp.ok) {
                     listDiv.innerHTML = '<div class="error">Failed to load sessions</div>';
                     return;
@@ -6616,9 +6583,18 @@
             }
         }
 
-        async function joinLiveSession(sessionId) {
+        async function joinLiveSession(sessionId, _retriedAuth = false) {
             try {
                 const resp = await fetch(`/api/live-session/${encodeURIComponent(sessionId)}/join`, { method: 'POST' });
+                if (resp.status === 401) {
+                    await checkAuthStatus();
+                    if (!_retriedAuth && getCurrentUsername()) {
+                        await joinLiveSession(sessionId, true);
+                        return;
+                    }
+                    showMessage('Please sign in to join a session', 'error');
+                    return;
+                }
                 const data = await resp.json();
                 if (!resp.ok) {
                     showMessage(data.error || 'Failed to join session', 'error');
@@ -8028,113 +8004,6 @@
             }
         }
 
-        // Guilds
-        async function showGuildsModal() {
-            const modal = document.getElementById('guilds-modal');
-            modal.style.display = 'flex';
-            await loadGuilds();
-        }
-
-        function closeGuildsModal() {
-            const modal = document.getElementById('guilds-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        async function loadGuilds() {
-            try {
-                const resp = await fetch('/api/guilds');
-                const data = await resp.json();
-                const guilds = data.guilds || [];
-                
-                const list = document.getElementById('guilds-list');
-                let html = '';
-                guilds.forEach(g => {
-                    html += `
-                        <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:8px; border-left:3px solid ${g.color};">
-                            <h4 style="margin:0 0 8px 0; color:var(--text-primary);">${g.icon} ${g.name}</h4>
-                            <p style="margin:0 0 8px 0; font-size:0.9em; color:var(--text-secondary);">Members: ${g.member_count} | Founded: ${g.created_at}</p>
-                            <button onclick="joinGuild('${g.id}')" style="padding:6px 12px; background:${g.is_member ? '#999' : '#667eea'}; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">${g.is_member ? '✓ Member' : 'Join Guild'}</button>
-                        </div>
-                    `;
-                });
-                list.innerHTML = html || '<p style="color:var(--text-secondary);">No guilds found</p>';
-            } catch (err) {
-                console.error('Error loading guilds:', err);
-            }
-        }
-
-        async function createGuild() {
-            const name = document.getElementById('guild-name-input').value.trim();
-            if (!name) return;
-            try {
-                await fetch('/api/guilds/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})});
-                document.getElementById('guild-name-input').value = '';
-                await loadGuilds();
-            } catch (err) {
-                console.error('Error creating guild:', err);
-            }
-        }
-
-        async function joinGuild(guildId) {
-            try {
-                await fetch(`/api/guilds/${guildId}/join`, {method: 'POST'});
-                await loadGuilds();
-            } catch (err) {
-                console.error('Error joining guild:', err);
-            }
-        }
-
-        // Tournaments
-        let tournamentFilter = 'active';
-
-        async function showTournaments() {
-            const modal = document.getElementById('tournaments-modal');
-            modal.style.display = 'flex';
-            await loadTournaments();
-        }
-
-        function closeTournaments() {
-            const modal = document.getElementById('tournaments-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        function filterTournaments(filter) {
-            tournamentFilter = filter;
-            loadTournaments();
-        }
-
-        async function loadTournaments() {
-            try {
-                const resp = await fetch(`/api/tournaments?status=${tournamentFilter}`);
-                const data = await resp.json();
-                const tournaments = data.tournaments || [];
-                
-                const list = document.getElementById('tournaments-list');
-                let html = '';
-                tournaments.forEach(t => {
-                    html += `
-                        <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
-                            <h4 style="margin:0 0 8px 0; color:var(--text-primary);">🎮 ${t.name}</h4>
-                            <p style="margin:0 0 6px 0; font-size:0.9em; color:var(--text-secondary);">Type: ${t.type} | Participants: ${t.participants}/${t.max_participants}</p>
-                            <div style="display:flex; gap:8px;">
-                                <button onclick="viewTournamentBracket('${t.id}')" style="padding:6px 10px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">📊 Bracket</button>
-                                <button onclick="registerTournament('${t.id}')" style="padding:6px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">Join</button>
-                            </div>
-                        </div>
-                    `;
-                });
-                list.innerHTML = html || '<p style="color:var(--text-secondary);">No tournaments</p>';
-            } catch (err) {
-                console.error('Error loading tournaments:', err);
-            }
-        }
-
-        function createTournament() {
-            const name = prompt('Tournament name:');
-            if (!name) return;
-            // Implementation for creating tournament
-        }
-
         // Reviews & Ratings
         let currentReviewRating = 0;
 
@@ -8208,74 +8077,6 @@
         }
 
         // Events
-        async function showEventsModal() {
-            const modal = document.getElementById('events-modal');
-            modal.style.display = 'flex';
-            await loadEvents();
-        }
-
-        function closeEventsModal() {
-            const modal = document.getElementById('events-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        async function createEvent() {
-            const name = document.getElementById('event-name').value.trim();
-            const datetime = document.getElementById('event-datetime').value;
-            const maxAttendees = document.getElementById('event-max-attendees').value;
-            
-            if (!name || !datetime) {
-                showMessage('Please fill in required fields', 'error');
-                return;
-            }
-            
-            try {
-                await fetch('/api/events', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, datetime, max_attendees: maxAttendees})});
-                showMessage('Event created!', 'success');
-                document.getElementById('event-name').value = '';
-                document.getElementById('event-datetime').value = '';
-                document.getElementById('event-max-attendees').value = '';
-                await loadEvents();
-            } catch (err) {
-                showMessage('Error creating event', 'error');
-            }
-        }
-
-        async function loadEvents() {
-            try {
-                const resp = await fetch('/api/events');
-                const data = await resp.json();
-                const events = data.events || [];
-                
-                const list = document.getElementById('events-list');
-                let html = '';
-                events.forEach(e => {
-                    const eventDate = new Date(e.datetime).toLocaleString();
-                    html += `
-                        <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:8px;">
-                            <h5 style="margin:0 0 8px 0; color:var(--text-primary);">📅 ${e.name}</h5>
-                            <p style="margin:0 0 6px 0; font-size:0.9em; color:var(--text-secondary);">📍 ${eventDate}</p>
-                            <p style="margin:0 0 8px 0; font-size:0.9em;">👥 ${e.confirmed_attendees}/${e.max_attendees || '∞'} confirmed</p>
-                            <button onclick="rsvpEvent('${e.id}')" style="padding:6px 12px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">✓ RSVP</button>
-                        </div>
-                    `;
-                });
-                list.innerHTML = html || '<p style="color:var(--text-secondary);">No upcoming events</p>';
-            } catch (err) {
-                console.error('Error loading events:', err);
-            }
-        }
-
-        async function rsvpEvent(eventId) {
-            try {
-                await fetch(`/api/events/${eventId}/rsvp`, {method: 'POST'});
-                showMessage('RSVP confirmed!', 'success');
-                await loadEvents();
-            } catch (err) {
-                showMessage('Error confirming RSVP', 'error');
-            }
-        }
-
         // Analytics
         async function showAnalytics() {
             const modal = document.getElementById('analytics-modal');
@@ -8351,55 +8152,6 @@
                 list.innerHTML = html || '<p style="color:var(--text-secondary);">No recent activity</p>';
             } catch (err) {
                 console.error('Error loading activity:', err);
-            }
-        }
-
-        // Collections & Wishlists
-        async function showCollections() {
-            const modal = document.getElementById('collections-modal');
-            modal.style.display = 'flex';
-            await loadCollections();
-        }
-
-        function closeCollections() {
-            const modal = document.getElementById('collections-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        async function createCollection() {
-            const name = document.getElementById('collection-name').value.trim();
-            const type = document.getElementById('collection-type').value;
-            if (!name) return;
-            
-            try {
-                await fetch('/api/collections', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, type})});
-                document.getElementById('collection-name').value = '';
-                await loadCollections();
-            } catch (err) {
-                console.error('Error creating collection:', err);
-            }
-        }
-
-        async function loadCollections() {
-            try {
-                const resp = await fetch('/api/collections');
-                const data = await resp.json();
-                const collections = data.collections || [];
-                
-                const list = document.getElementById('collections-list');
-                let html = '';
-                collections.forEach(c => {
-                    html += `
-                        <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; text-align:center; cursor:pointer;" onclick="viewCollection('${c.id}')">
-                            <div style="font-size:1.8em; margin-bottom:6px;">${c.type === 'wishlist' ? '🎁' : '📂'}</div>
-                            <h5 style="margin:0 0 4px 0; color:var(--text-primary);">${c.name}</h5>
-                            <p style="margin:0; font-size:0.85em; color:var(--text-secondary);">${c.game_count} games</p>
-                        </div>
-                    `;
-                });
-                list.innerHTML = html || '<p style="color:var(--text-secondary); grid-column:1/-1;">No collections yet</p>';
-            } catch (err) {
-                console.error('Error loading collections:', err);
             }
         }
 
@@ -8840,388 +8592,6 @@
             if (modal) modal.style.display = 'none';
         }
 
-        // ==================== PHASE 7 FUNCTIONS ====================
-
-        // Battle Pass Functions
-        async function showBattlePass() {
-            const modal = document.getElementById('battlepass-modal');
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/battlepass/current');
-                const data = await resp.json();
-                const bp = data.battle_pass;
-                
-                document.getElementById('bp-name').textContent = bp.name + ` (${bp.current_level}/${bp.max_level})`;
-                const progressPercent = (bp.current_level / bp.max_level) * 100;
-                document.getElementById('bp-progress').style.width = progressPercent + '%';
-                document.getElementById('bp-level').textContent = `${bp.experience} XP (${bp.exp_to_next} to next level)`;
-                
-                const rewardsHtml = data.rewards.map(r => `
-                    <div style="background:rgba(102,126,234,0.1); padding:10px; border-radius:6px; text-align:center;">
-                        <p style="color:var(--text-secondary); font-size:0.8em; margin:0;">Level ${r.level}</p>
-                        <p style="color:var(--text-primary); margin:5px 0 0 0; font-size:0.9em;">${r.reward}</p>
-                    </div>
-                `).join('');
-                document.getElementById('bp-rewards').innerHTML = rewardsHtml;
-            } catch (e) {
-                showNotification('Failed to load battle pass', 'error');
-            }
-        }
-
-        function closeBattlePass() {
-            const modal = document.getElementById('battlepass-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Tournament Functions (Phase 7)
-        async function showTournamentsPhase7() {
-            const modal = document.getElementById('tournaments-modal-phase7');
-            if (!modal) {
-                console.warn('Phase 7 tournaments modal not found, using main tournaments');
-                if (typeof showTournaments === 'function') showTournaments();
-                return;
-            }
-            modal.style.display = 'flex';
-            await loadTournamentsPhase7();
-        }
-
-        async function loadTournamentsPhase7() {
-            try {
-                const resp = await fetch('/api/tournaments');
-                const data = await resp.json();
-                const html = data.tournaments.map(t => `
-                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border-left:3px solid #e67e22;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div>
-                                <p style="margin:0; color:var(--text-primary); font-weight:bold;">${t.name}</p>
-                                <p style="margin:4px 0 0 0; font-size:0.85em; color:var(--text-secondary);">${t.game} • ${t.participants} players</p>
-                            </div>
-                            <button onclick="registerTournament(${t.id})" style="padding:6px 12px; background:#e67e22; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">${t.user_registered ? '✓ Registered' : 'Register'}</button>
-                        </div>
-                    </div>
-                `).join('');
-                document.getElementById('tournaments-list').innerHTML = html;
-            } catch (e) {
-                showNotification('Failed to load tournaments', 'error');
-            }
-        }
-
-        async function registerTournament(id) {
-            try {
-                const resp = await fetch(`/api/tournaments/${id}/register`, { method: 'POST' });
-                const data = await resp.json();
-                if (data.success) {
-                    showNotification('Tournament registered!', 'success');
-                    await loadTournamentsPhase7();
-                }
-            } catch (e) {
-                showNotification('Failed to register', 'error');
-            }
-        }
-
-        function showTournamentBracket() {
-            showNotification('🏆 View your tournament bracket', 'info');
-        }
-
-        function closeTournamentsPhase7() {
-            const modal = document.getElementById('tournaments-modal-phase7');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Creator Program Functions
-        async function showCreator() {
-            const modal = document.getElementById('creator-modal');
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/creator/dashboard');
-                const data = await resp.json();
-                
-                document.getElementById('creator-followers').textContent = data.followers.toLocaleString();
-                document.getElementById('creator-earnings').textContent = `$${data.this_month_earnings}`;
-                document.getElementById('creator-tier').textContent = `⭐ ${data.tier.toUpperCase()} Creator (${data.status})`;
-                document.getElementById('creator-next-tier').textContent = `${data.next_tier_followers.toLocaleString()} followers to next tier`;
-            } catch (e) {
-                showNotification('Failed to load creator data', 'error');
-            }
-        }
-
-        async function applyCreatorProgram() {
-            try {
-                const resp = await fetch('/api/creator/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-                const data = await resp.json();
-                if (data.success) showNotification('Application submitted! Review status in 24 hours.', 'success');
-            } catch (e) {
-                showNotification('Failed to apply', 'error');
-            }
-        }
-
-        function closeCreator() {
-            const modal = document.getElementById('creator-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Referral Functions
-        async function showReferral() {
-            const modal = document.getElementById('referral-modal');
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/referral/code');
-                const data = await resp.json();
-                
-                document.getElementById('referral-code').value = data.code;
-                document.getElementById('referral-uses').textContent = data.total_uses;
-                document.getElementById('referral-earned').textContent = `${data.total_earned} pts`;
-            } catch (e) {
-                showNotification('Failed to load referral data', 'error');
-            }
-        }
-
-        function copyReferralCode() {
-            const code = document.getElementById('referral-code').value;
-            navigator.clipboard.writeText(code);
-            showNotification('✓ Referral code copied!', 'success');
-        }
-
-        function closeReferral() {
-            const modal = document.getElementById('referral-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Seasonal Events Functions (Phase 7)
-        async function showSeasonalEvents() {
-            const modal = document.getElementById('seasonal-events-modal');
-            if (!modal) {
-                console.warn('Seasonal events modal not found, using main events');
-                if (typeof showEventsModal === 'function') showEventsModal();
-                return;
-            }
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/events/seasonal');
-                const data = await resp.json();
-                
-                const html = data.active_events.map(e => `
-                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                            <p style="margin:0; color:var(--text-primary); font-weight:bold;">${e.name}</p>
-                            <span style="font-size:0.8em; color:var(--text-secondary);">${e.days_left} days</span>
-                        </div>
-                        <div style="background:rgba(0,0,0,0.3); height:8px; border-radius:4px; margin-bottom:8px;">
-                            <div style="background:#667eea; height:100%; width:${e.progress}%; border-radius:4px;"></div>
-                        </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <p style="margin:0; font-size:0.85em; color:var(--text-secondary);">Reward: ${e.reward}</p>
-                            <button onclick="claimEventReward(${e.id})" style="padding:4px 10px; background:${e.completed ? '#27ae60' : '#95a5a6'}; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.8em;">${e.reward_claimed ? '✓ Claimed' : e.completed ? 'Claim' : 'In Progress'}</button>
-                        </div>
-                    </div>
-                `).join('');
-                document.getElementById('events-list').innerHTML = html;
-            } catch (e) {
-                showNotification('Failed to load events', 'error');
-            }
-        }
-
-        async function claimEventReward(eventId) {
-            try {
-                const resp = await fetch(`/api/events/${eventId}/claim`, { method: 'POST' });
-                const data = await resp.json();
-                if (data.success) {
-                    showNotification(`Claimed: ${data.reward}`, 'success');
-                    await showEvents();
-                }
-            } catch (e) {
-                showNotification('Failed to claim', 'error');
-            }
-        }
-
-        function closeEvents() {
-            const modal = document.getElementById('events-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Guild Functions (Phase 7)
-        async function showGuildsPhase7() {
-            const modal = document.getElementById('guilds-modal-phase7');
-            if (!modal) {
-                console.warn('Phase 7 guilds modal not found, using main guilds');
-                if (typeof showGuildsModal === 'function') showGuildsModal();
-                return;
-            }
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/guilds');
-                const data = await resp.json();
-                
-                if (data.my_guild) {
-                    const container = document.getElementById('my-guild-container');
-                    container.style.display = 'block';
-                    document.getElementById('my-guild-name').textContent = `📍 ${data.my_guild.name}`;
-                    document.getElementById('my-guild-level').textContent = data.my_guild.level;
-                    document.getElementById('my-guild-members').textContent = `${data.my_guild.members}/50`;
-                }
-                
-                const html = data.recommended_guilds.map(g => `
-                    <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
-                        <div>
-                            <p style="margin:0; color:var(--text-primary);">${g.name}</p>
-                            <p style="margin:4px 0 0 0; font-size:0.8em; color:var(--text-secondary);">Lv ${g.level} • ${g.members} members</p>
-                        </div>
-                        <button onclick="joinGuildPhase7()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer;">Join</button>
-                    </div>
-                `).join('');
-                document.getElementById('guilds-list').innerHTML = html;
-            } catch (e) {
-                showNotification('Failed to load guilds', 'error');
-            }
-        }
-
-        async function createGuildPhase7() {
-            const name = document.getElementById('guild-name-input').value.trim();
-            if (!name) {
-                showNotification('Enter a guild name', 'warning');
-                return;
-            }
-            try {
-                const resp = await fetch('/api/guilds/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name })
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    showNotification('Guild created!', 'success');
-                    document.getElementById('guild-name-input').value = '';
-                    await showGuildsPhase7();
-                }
-            } catch (e) {
-                showNotification('Failed to create guild', 'error');
-            }
-        }
-
-        async function joinGuildPhase7() {
-            try {
-                const resp = await fetch('/api/guilds/1/join', { method: 'POST' });
-                const data = await resp.json();
-                if (data.success) {
-                    showNotification('Guild joined!', 'success');
-                    await showGuildsPhase7();
-                }
-            } catch (e) {
-                showNotification('Failed to join', 'error');
-            }
-        }
-
-        function closeGuilds() {
-            const modal = document.getElementById('guilds-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Progression Path Functions
-        async function showProgression() {
-            const modal = document.getElementById('progression-modal');
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/progression');
-                const data = await resp.json();
-                
-                const html = data.paths.map(p => `
-                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
-                        <p style="margin:0 0 8px 0; color:var(--text-primary); font-weight:bold;">${p.name}</p>
-                        <p style="margin:0 0 10px 0; font-size:0.85em; color:var(--text-secondary);">${p.description}</p>
-                        <div style="background:rgba(0,0,0,0.3); height:10px; border-radius:5px; margin-bottom:8px;">
-                            <div style="background:#667eea; height:100%; width:${p.progress}%; border-radius:5px;"></div>
-                        </div>
-                        <p style="margin:0; font-size:0.8em; color:var(--text-secondary);">Step ${p.current_step}/${p.total_steps} • Next: ${p.next_reward}</p>
-                    </div>
-                `).join('');
-                document.getElementById('progression-list').innerHTML = html;
-            } catch (e) {
-                showNotification('Failed to load progression', 'error');
-            }
-        }
-
-        function closeProgression() {
-            const modal = document.getElementById('progression-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Trading Market Functions
-        async function showMarket() {
-            const modal = document.getElementById('market-modal');
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/market');
-                const data = await resp.json();
-                
-                const html = data.listings.map(l => `
-                    <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
-                        <div style="flex:1;">
-                            <p style="margin:0; color:var(--text-primary);">${l.item}</p>
-                            <p style="margin:4px 0 0 0; font-size:0.8em; color:var(--text-secondary);">by ${l.seller} • Rarity: ${l.rarity}</p>
-                        </div>
-                        <div style="text-align:right; margin:0 10px;">
-                            <p style="margin:0; color:#f39c12; font-weight:bold;">${l.price} pts</p>
-                            <p style="margin:4px 0 0 0; font-size:0.75em; color:var(--text-secondary);">${l.listed_days}d ago</p>
-                        </div>
-                        <button onclick="makeOffer(${l.id})" style="padding:6px 12px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer;">Offer</button>
-                    </div>
-                `).join('');
-                document.getElementById('market-listings').innerHTML = html;
-            } catch (e) {
-                showNotification('Failed to load market', 'error');
-            }
-        }
-
-        function showSellForm() {
-            showNotification('📋 List your item for sale', 'info');
-        }
-
-        function makeOffer(listingId) {
-            showNotification('💰 Make an offer on this item', 'info');
-        }
-
-        function closeMarket() {
-            const modal = document.getElementById('market-modal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        // Cosmetic Collections Functions (Phase 7)
-        async function showCosmeticCollections() {
-            const modal = document.getElementById('cosmetic-collections-modal');
-            if (!modal) {
-                console.warn('Cosmetic collections modal not found');
-                return;
-            }
-            modal.style.display = 'flex';
-            try {
-                const resp = await fetch('/api/collections/cosmetic');
-                const data = await resp.json();
-                
-                const totalAvg = Math.round(data.total_completion || 0);
-                const collectionTotal = document.getElementById('collection-total');
-                const collectionMastery = document.getElementById('collection-mastery');
-                if (collectionTotal) collectionTotal.textContent = totalAvg + '%';
-                if (collectionMastery) collectionMastery.textContent = data.mastery_tier || 'Novice';
-                
-                const html = (data.collections || []).map(c => `
-                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                            <p style="margin:0; color:var(--text-primary); text-transform:capitalize;">${c.type ? c.type.slice(0,-1) : 'Collection'}</p>
-                            <span style="color:#f39c12; font-weight:bold;">${c.completion || 0}%</span>
-                        </div>
-                        <div style="background:rgba(0,0,0,0.3); height:8px; border-radius:4px;">
-                            <div style="background:#f39c12; height:100%; width:${c.completion || 0}%; border-radius:4px;"></div>
-                        </div>
-                        <p style="margin:8px 0 0 0; font-size:0.8em; color:var(--text-secondary);">${c.owned || 0}/${c.total || 0} items • ${c.rarity_points || 0} rarity points</p>
-                    </div>
-                `).join('');
-                const detailEl = document.getElementById('collections-detail');
-                if (detailEl) detailEl.innerHTML = html;
-            } catch (e) {
-                console.error('Failed to load cosmetic collections:', e);
-                showNotification('Failed to load collections', 'error');
-            }
-        }
     </script>
 
     <!-- Emoji Picker Modal -->
@@ -9484,38 +8854,6 @@
         </div>
     </div>
 
-    <!-- Guilds Modal -->
-    <div id="guilds-modal" onclick="if(event.target.id==='guilds-modal')closeGuildsModal()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000; overflow-y:auto;">
-        <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:700px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h3 style="margin:0; color:var(--text-primary);">⚔️ Guilds & Clans</h3>
-                <button onclick="closeGuildsModal()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
-            </div>
-            <div style="margin-bottom:15px; display:flex; gap:8px;">
-                <input id="guild-name-input" type="text" placeholder="Create new guild..." style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                <button onclick="createGuild()" style="padding:10px 20px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create</button>
-            </div>
-            <div id="guilds-list" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;"></div>
-        </div>
-    </div>
-
-    <!-- Tournaments Modal -->
-    <div id="tournaments-modal" onclick="if(event.target.id==='tournaments-modal')closeTournaments()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000; overflow-y:auto;">
-        <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:800px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h3 style="margin:0; color:var(--text-primary);">🎮 Tournaments & Brackets</h3>
-                <button onclick="closeTournaments()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
-            </div>
-            <div style="margin-bottom:15px; display:flex; gap:8px;">
-                <button onclick="filterTournaments('active')" style="padding:8px 12px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); cursor:pointer;">🔴 Active</button>
-                <button onclick="filterTournaments('upcoming')" style="padding:8px 12px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); cursor:pointer;">📅 Upcoming</button>
-                <button onclick="filterTournaments('completed')" style="padding:8px 12px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); cursor:pointer;">✓ Completed</button>
-                <button onclick="createTournament()" style="padding:8px 12px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; margin-left:auto;">+ Create Tournament</button>
-            </div>
-            <div id="tournaments-list" style="display:flex; flex-direction:column; gap:12px;"></div>
-        </div>
-    </div>
-
     <!-- Reviews Modal -->
     <div id="reviews-modal" onclick="if(event.target.id==='reviews-modal')closeReviews()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000; overflow-y:auto;">
         <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:600px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
@@ -9545,32 +8883,6 @@
             </div>
             <button onclick="submitReview()" style="width:100%; padding:12px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Post Review</button>
             <div id="reviews-list" style="margin-top:20px; display:flex; flex-direction:column; gap:12px;"></div>
-        </div>
-    </div>
-
-    <!-- Events Modal -->
-    <div id="events-modal" onclick="if(event.target.id==='events-modal')closeEventsModal()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000; overflow-y:auto;">
-        <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:700px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h3 style="margin:0; color:var(--text-primary);">📅 Gaming Events</h3>
-                <button onclick="closeEventsModal()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
-            </div>
-            <div style="display:grid; gap:12px; margin-bottom:15px;">
-                <div>
-                    <label style="display:block; margin-bottom:6px; color:var(--text-primary); font-weight:600;">Event Name</label>
-                    <input id="event-name" type="text" placeholder="Gaming party, tournament, etc..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                </div>
-                <div>
-                    <label style="display:block; margin-bottom:6px; color:var(--text-primary); font-weight:600;">Date & Time</label>
-                    <input id="event-datetime" type="datetime-local" style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                </div>
-                <div>
-                    <label style="display:block; margin-bottom:6px; color:var(--text-primary); font-weight:600;">Max Attendees</label>
-                    <input id="event-max-attendees" type="number" placeholder="Leave empty for unlimited" style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                </div>
-            </div>
-            <button onclick="createEvent()" style="width:100%; padding:12px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600; margin-bottom:15px;">Create Event</button>
-            <div id="events-list" style="display:flex; flex-direction:column; gap:12px;"></div>
         </div>
     </div>
 
@@ -9611,25 +8923,6 @@
                 <button onclick="closeActivityFeed()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
             </div>
             <div id="activity-list" style="display:flex; flex-direction:column; gap:10px;"></div>
-        </div>
-    </div>
-
-    <!-- Collections & Wishlists Modal -->
-    <div id="collections-modal" onclick="if(event.target.id==='collections-modal')closeCollections()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000; overflow-y:auto;">
-        <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:700px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3); margin:20px 0;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h3 style="margin:0; color:var(--text-primary);">📚 Collections & Wishlists</h3>
-                <button onclick="closeCollections()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
-            </div>
-            <div style="margin-bottom:15px; display:flex; gap:8px;">
-                <input id="collection-name" type="text" placeholder="New collection name..." style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                <select id="collection-type" style="padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
-                    <option value="collection">📂 Collection</option>
-                    <option value="wishlist">🎁 Wishlist</option>
-                </select>
-                <button onclick="createCollection()" style="padding:10px 20px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create</button>
-            </div>
-            <div id="collections-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px;"></div>
         </div>
     </div>
 
@@ -9825,162 +9118,6 @@
                 <input id="webhook-url" type="text" placeholder="https://discord.com/api/webhooks/..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box; font-size:0.85em;">
                 <p style="margin:8px 0 0 0; color:var(--text-secondary); font-size:0.8em;">Integrate with Discord, Slack, or custom webhooks</p>
             </div>
-        </div>
-    </div>
-
-    <!-- PHASE 7 MODALS -->
-    
-    <!-- Battle Pass Modal -->
-    <div id="battlepass-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeBattlePass()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">🎖️ Battle Pass</h2>
-            <div id="battlepass-container" style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px;">
-                <div style="margin-bottom:20px;">
-                    <h3 id="bp-name" style="color:#667eea; margin:0 0 10px 0;"></h3>
-                    <div style="background:rgba(0,0,0,0.3); height:30px; border-radius:8px; overflow:hidden;">
-                        <div id="bp-progress" style="background:linear-gradient(90deg,#667eea,#764ba2); height:100%; width:47%; transition:width 0.3s; display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:0.8em;"></div>
-                    </div>
-                    <p id="bp-level" style="margin:8px 0 0 0; color:var(--text-secondary); font-size:0.9em;"></p>
-                </div>
-                <div id="bp-rewards" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:15px;"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Tournaments Modal -->
-    <div id="tournaments-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeTournaments()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">🏆 Tournaments</h2>
-            <div style="margin-bottom:15px;">
-                <input id="tournament-filter" type="text" placeholder="Search tournaments..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
-            </div>
-            <div id="tournaments-list" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:400px; overflow-y:auto;"></div>
-            <button onclick="showTournamentBracket()" style="width:100%; margin-top:15px; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">View My Bracket</button>
-        </div>
-    </div>
-
-    <!-- Creator Program Modal -->
-    <div id="creator-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeCreator()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">⭐ Creator Program</h2>
-            <div id="creator-container" style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px;">
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
-                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
-                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">👥 Followers</p>
-                        <p id="creator-followers" style="color:#667eea; font-size:1.5em; font-weight:bold; margin:0;"></p>
-                    </div>
-                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
-                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">💰 This Month</p>
-                        <p id="creator-earnings" style="color:#27ae60; font-size:1.5em; font-weight:bold; margin:0;"></p>
-                    </div>
-                </div>
-                <div style="background:rgba(39,174,96,0.1); padding:15px; border-radius:8px; border-left:3px solid #27ae60; margin-bottom:15px;">
-                    <p id="creator-tier" style="color:var(--text-primary); margin:0 0 5px 0; font-weight:bold;"></p>
-                    <p id="creator-next-tier" style="color:var(--text-secondary); margin:0; font-size:0.9em;"></p>
-                </div>
-                <button onclick="applyCreatorProgram()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Apply for Program</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Referral System Modal -->
-    <div id="referral-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeReferral()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">🎁 Referral Rewards</h2>
-            <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px;">
-                <div style="background:rgba(102,126,234,0.1); padding:15px; border-radius:8px; margin-bottom:20px;">
-                    <p style="color:var(--text-secondary); font-size:0.9em; margin:0 0 8px 0;">Your Referral Code</p>
-                    <div style="display:flex; gap:10px;">
-                        <input id="referral-code" type="text" readonly style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
-                        <button onclick="copyReferralCode()" style="padding:10px 15px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Copy</button>
-                    </div>
-                </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
-                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
-                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">📊 Total Uses</p>
-                        <p id="referral-uses" style="color:#667eea; font-size:1.5em; font-weight:bold; margin:0;"></p>
-                    </div>
-                    <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
-                        <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">💰 Earned</p>
-                        <p id="referral-earned" style="color:#27ae60; font-size:1.5em; font-weight:bold; margin:0;"></p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Seasonal Events Modal -->
-    <div id="events-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeEvents()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">🎪 Seasonal Events</h2>
-            <div id="events-list" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:400px; overflow-y:auto;"></div>
-        </div>
-    </div>
-
-    <!-- Guild System Modal -->
-    <div id="guilds-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeGuilds()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">👥 Guilds</h2>
-            <div style="margin-bottom:15px;">
-                <input id="guild-name-input" type="text" placeholder="Guild name..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
-                <button onclick="createGuild()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Create Guild</button>
-            </div>
-            <div id="my-guild-container" style="background:rgba(102,126,234,0.1); padding:15px; border-radius:8px; margin-bottom:20px; display:none;">
-                <h3 id="my-guild-name" style="color:#667eea; margin:0 0 10px 0;"></h3>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:0.9em;">
-                    <p style="margin:0;"><strong>Level:</strong> <span id="my-guild-level" style="color:var(--text-secondary);"></span></p>
-                    <p style="margin:0;"><strong>Members:</strong> <span id="my-guild-members" style="color:var(--text-secondary);"></span></p>
-                </div>
-            </div>
-            <h4 style="color:var(--text-primary); margin-bottom:10px;">Recruiting Guilds</h4>
-            <div id="guilds-list" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:300px; overflow-y:auto;"></div>
-        </div>
-    </div>
-
-    <!-- Progression Paths Modal -->
-    <div id="progression-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeProgression()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">📈 Progression Paths</h2>
-            <div id="progression-list" style="display:grid; grid-template-columns:1fr; gap:15px; max-height:400px; overflow-y:auto;"></div>
-        </div>
-    </div>
-
-    <!-- Trading Market Modal -->
-    <div id="market-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeMarket()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">💳 Trading Market</h2>
-            <div style="margin-bottom:15px;">
-                <input id="market-search" type="text" placeholder="Search items..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
-            </div>
-            <div id="market-listings" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:350px; overflow-y:auto; margin-bottom:15px;"></div>
-            <button onclick="showSellForm()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">List Item for Sale</button>
-        </div>
-    </div>
-
-    <!-- Cosmetic Collections Modal -->
-    <div id="collections-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeCollections()">✕</button>
-            <h2 style="color:var(--text-primary); margin-top:0;">✨ Cosmetic Collections</h2>
-            <div id="collections-stats" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
-                <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
-                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">📊 Overall</p>
-                    <p id="collection-total" style="color:#667eea; font-size:1.5em; font-weight:bold; margin:0;"></p>
-                </div>
-                <div style="text-align:center; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
-                    <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">⭐ Mastery</p>
-                    <p id="collection-mastery" style="color:#f39c12; font-size:1.5em; font-weight:bold; margin:0;"></p>
-                </div>
-            </div>
-            <div id="collections-detail" style="display:grid; grid-template-columns:1fr; gap:12px;"></div>
         </div>
     </div>
 

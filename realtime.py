@@ -6,6 +6,7 @@ Handles live updates for leaderboards, activity feeds, notifications, and trades
 
 import json
 import asyncio
+import time
 from datetime import datetime
 from typing import Dict, Set, Callable
 from collections import defaultdict
@@ -325,7 +326,11 @@ def setup_realtime_routes(app):
                 console.log('Leaderboard:', data);
             });
         """
+        # Capture request data while request context is active.
+        last_event_id = request.headers.get('Last-Event-ID', '')
+
         def generate_events():
+            since = last_event_id
             # Send connection confirmation
             yield f"data: {json.dumps({'type': 'connected', 'username': username})}\n\n"
             
@@ -334,20 +339,20 @@ def setup_realtime_routes(app):
             while True:
                 try:
                     # Send user-specific events
-                    user_events = polling_cache.get_events_since(f'user:{username}', 
-                                                                  request.headers.get('Last-Event-ID', ''))
+                    user_events = polling_cache.get_events_since(f'user:{username}', since)
                     for event in user_events:
-                        event_type = event.pop('type', 'update')
+                        event_type = event.get('type', 'update')
                         yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
+                        since = event.get('cached_at', since)
                     
                     # Send global events
-                    global_events = polling_cache.get_events_since('global', 
-                                                                    request.headers.get('Last-Event-ID', ''))
+                    global_events = polling_cache.get_events_since('global', since)
                     for event in global_events:
-                        event_type = event.pop('type', 'update')
+                        event_type = event.get('type', 'update')
                         yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
+                        since = event.get('cached_at', since)
                     
-                    asyncio.sleep(1)  # Poll every second
+                    time.sleep(1)  # Poll every second
                 except GeneratorExit:
                     break
                 except Exception as e:

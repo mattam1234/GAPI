@@ -12,27 +12,33 @@
         }
 
         :root {
-            --bg-primary: #1a1a2e;
-            --bg-secondary: #16213e;
-            --bg-tertiary: #0f3460;
-            --text-primary: #eaeaea;
-            --text-secondary: #a8a8a8;
-            --text-tertiary: #666;
-            --accent-primary: #667eea;
-            --accent-secondary: #e94560;
+            /* Color scheme variables - light theme defaults */
+            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-bg: white;
+            --card-border: #e0e0e0;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --text-tertiary: #999;
+            --list-hover: rgba(102, 126, 234, 0.08);
+            --input-bg: white;
+            --input-border: #ddd;
+            --tab-inactive-bg: rgba(255,255,255,0.2);
+            --tab-inactive-color: white;
+            --tab-hover-bg: rgba(255,255,255,0.3);
+            --tab-active-bg: white;
+            --tab-active-color: #667eea;
+            --header-color: white;
+            --status-bar-bg: rgba(255,255,255,0.2);
+            --status-bar-color: white;
+            --accent: #667eea;
+            --hover-bg: rgba(102, 126, 234, 0.15);
             --accent-success: #28a745;
             --accent-warning: #ffc107;
             --accent-danger: #dc3545;
-            --border-color: #444;
-            --border-color-light: #555;
-            --card-bg: #0f3460;
-            --input-bg: #16213e;
-            --input-border: #444;
-            --hover-bg: #1e3a5f;
         }
 
         body {
-            background: linear-gradient(135deg, var(--bg-primary), var(--bg-secondary));
+            background: var(--bg-gradient, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
             color: var(--text-primary);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             min-height: 100vh;
@@ -58,7 +64,7 @@
         .header {
             grid-column: 1 / -1;
             padding: 20px;
-            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            background: linear-gradient(135deg, #667eea, #764ba2);
             border-radius: 12px;
             margin-bottom: 20px;
         }
@@ -66,11 +72,13 @@
         .header h1 {
             font-size: 2.5em;
             margin-bottom: 10px;
+            color: white;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
 
         .header p {
             font-size: 1.05em;
+            color: white;
             opacity: 0.95;
         }
 
@@ -85,7 +93,7 @@
             padding: 16px;
             background: var(--card-bg);
             border-radius: 10px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--card-border);
         }
 
         .panel-header h2 {
@@ -141,7 +149,7 @@
         }
 
         .btn-primary {
-            background: var(--accent-primary);
+            background: var(--accent);
             color: white;
         }
 
@@ -183,7 +191,7 @@
         .session-item {
             padding: 12px;
             background: var(--card-bg);
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--card-border);
             border-radius: 8px;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -191,12 +199,12 @@
 
         .session-item:hover {
             background: var(--hover-bg);
-            border-color: var(--accent-primary);
+            border-color: var(--accent);
         }
 
         .session-item.active {
-            background: var(--accent-primary);
-            border-color: var(--accent-primary);
+            background: var(--accent);
+            border-color: var(--accent);
         }
 
         .session-item-header {
@@ -273,8 +281,8 @@
 
         .game-card-large {
             padding: 24px;
-            background: linear-gradient(135deg, var(--card-bg), var(--bg-tertiary));
-            border: 2px solid var(--accent-primary);
+            background: linear-gradient(135deg, var(--card-bg), var(--card-bg));
+            border: 2px solid var(--accent);
             border-radius: 12px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
@@ -327,7 +335,7 @@
             font-weight: 600;
             font-size: 1.2em;
             margin-top: 4px;
-            color: var(--accent-primary);
+            color: var(--accent);
         }
 
         .voting-section {
@@ -412,7 +420,7 @@
         .session-details {
             padding: 16px;
             background: var(--card-bg);
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--card-border);
             border-radius: 8px;
         }
 
@@ -459,7 +467,7 @@
             width: 40px;
             height: 40px;
             border: 4px solid rgba(102, 126, 234, 0.3);
-            border-top-color: var(--accent-primary);
+            border-top-color: var(--accent);
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-right: 10px;
@@ -518,7 +526,7 @@
         .back-link {
             grid-column: 1 / -1;
             padding: 10px 20px;
-            color: var(--accent-primary);
+            color: var(--accent);
             text-decoration: none;
             display: inline-flex;
             align-items: center;
@@ -550,7 +558,7 @@
 
         .modal-content {
             background: var(--bg-secondary);
-            border: 2px solid var(--accent-primary);
+            border: 2px solid var(--accent);
             border-radius: 12px;
             padding: 30px;
             max-width: 600px;
@@ -575,7 +583,7 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
-            border-bottom: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--card-border);
             padding-bottom: 15px;
         }
 
@@ -607,7 +615,7 @@
 
         .stat-box {
             background: rgba(102, 126, 234, 0.1);
-            border: 1px solid var(--accent-primary);
+            border: 1px solid var(--accent);
             border-radius: 8px;
             padding: 15px;
             text-align: center;
@@ -616,7 +624,7 @@
         .stat-value {
             font-size: 2em;
             font-weight: 700;
-            color: var(--accent-primary);
+            color: var(--accent);
             margin-bottom: 5px;
         }
 
@@ -662,7 +670,7 @@
 
         .tag {
             padding: 4px 10px;
-            background: var(--accent-primary);
+            background: var(--accent);
             color: white;
             border-radius: 20px;
             font-size: 0.85em;
@@ -695,7 +703,7 @@
             border-radius: 8px;
             overflow: hidden;
             background: var(--card-bg);
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--card-border);
             transition: transform 0.2s, box-shadow 0.2s;
             cursor: pointer;
         }
@@ -738,7 +746,7 @@
             gap: 12px;
             padding: 12px;
             background: var(--card-bg);
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--card-border);
             border-radius: 6px;
             transition: all 0.2s;
         }
@@ -748,6 +756,8 @@
             border-color: var(--accent);
         }
     </style>
+    <!-- Enhanced UI Styles & Animations -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='enhanced_styles.css') }}">
 </head>
 <body>
     <a href="/" class="back-link">← Back to Main</a>
@@ -888,7 +898,7 @@
             <div style="margin-top: 15px;">
                 <p style="color: var(--text-secondary); font-size: 0.9em;">Share this code:</p>
                 <div style="display: flex; gap: 10px;">
-                    <input id="session-code" style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-primary); font-family: monospace; font-weight: bold;" readonly />
+                    <input id="session-code" style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text-primary); font-family: monospace; font-weight: bold;" readonly />
                     <button class="btn btn-success btn-small" onclick="copySessionCode()">📋 Copy</button>
                 </div>
             </div>
@@ -914,7 +924,7 @@
                 <button class="modal-close" onclick="closeLeaderboardModal()">✕</button>
             </div>
             <div style="margin-bottom: 15px;">
-                <select id="leaderboard-category" onchange="refreshLeaderboard()" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-primary);">
+                <select id="leaderboard-category" onchange="refreshLeaderboard()" style="padding: 8px; border-radius: 6px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text-primary);">
                     <option value="picks">Most Picks</option>
                     <option value="acceptance">Highest Acceptance Rate</option>
                     <option value="votes">Most Votes Cast</option>
@@ -940,6 +950,9 @@
                 if (resp.ok) {
                     const data = await resp.json();
                     currentUser = data.username;
+                } else {
+                    currentUser = null;
+                    showToast('Please sign in to use live sessions', 'warning');
                 }
             } catch (err) {
                 console.error('Auth error:', err);
@@ -949,9 +962,30 @@
             setInterval(refreshSessions, 10000);
         }
 
-        async function refreshSessions() {
+        async function refreshSessions(_retriedAuth = false) {
             try {
                 const resp = await fetch('/api/live-session/active');
+                if (resp.status === 401) {
+                    try {
+                        const authResp = await fetch('/api/auth/current');
+                        if (authResp.ok) {
+                            const authData = await authResp.json();
+                            currentUser = authData.username || null;
+                            if (!_retriedAuth && currentUser) {
+                                await refreshSessions(true);
+                                return;
+                            }
+                        } else {
+                            currentUser = null;
+                        }
+                    } catch (_) {
+                        currentUser = null;
+                    }
+                    activeSessions = [];
+                    renderSessionsList();
+                    showToast('Session expired. Please sign in again.', 'warning');
+                    return;
+                }
                 const data = await resp.json();
                 activeSessions = data.sessions || [];
                 renderSessionsList();
@@ -1198,13 +1232,33 @@
             }
         }
 
-        async function joinCurrentSession() {
+        async function joinCurrentSession(_retriedAuth = false) {
             if (!currentSessionId) return;
             try {
                 const resp = await fetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
+
+                if (resp.status === 401) {
+                    try {
+                        const authResp = await fetch('/api/auth/current');
+                        if (authResp.ok) {
+                            const authData = await authResp.json();
+                            currentUser = authData.username || null;
+                            if (!_retriedAuth && currentUser) {
+                                await joinCurrentSession(true);
+                                return;
+                            }
+                        } else {
+                            currentUser = null;
+                        }
+                    } catch (_) {
+                        currentUser = null;
+                    }
+                    showToast('Please sign in to join sessions', 'warning');
+                    return;
+                }
 
                 const data = await resp.json();
                 if (!resp.ok) {
@@ -1505,7 +1559,7 @@
                 });
                 
                 if (userRank && userRank > entries.length) {
-                    html += `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color); text-align: center; color: var(--text-secondary);">You're ranked #${userRank}</div>`;
+                    html += `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--card-border); text-align: center; color: var(--text-secondary);">You're ranked #${userRank}</div>`;
                 }
                 
                 list.innerHTML = html;
@@ -1536,3 +1590,4 @@
     </script>
 </body>
 </html>
+

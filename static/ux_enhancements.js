@@ -29,7 +29,15 @@ const toastContainer = (() => {
             gap: 10px;
             max-width: 400px;
         `;
-        document.body.appendChild(container);
+        if (document.body) {
+            document.body.appendChild(container);
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                if (!document.getElementById('toast-container')) {
+                    document.body.appendChild(container);
+                }
+            }, { once: true });
+        }
     }
     return container;
 })();
@@ -223,7 +231,15 @@ const tooltipInstance = (() => {
             transition: opacity 0.2s;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         `;
-        document.body.appendChild(tooltip);
+        if (document.body) {
+            document.body.appendChild(tooltip);
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                if (!document.getElementById('app-tooltip')) {
+                    document.body.appendChild(tooltip);
+                }
+            }, { once: true });
+        }
     }
     return tooltip;
 })();
