@@ -171,6 +171,27 @@ If PostgreSQL is not available:
 - [x] Achievement statistics by platform
 
 ### Recently Completed
+- [x] **Mobile App** — React Native application (`mobile-app/`) for iOS and Android.
+  Four bottom-tab screens: **Pick** (three modes: Random/Unplayed/Barely Played, game
+  card with platform badge + genre chips), **Library** (real-time debounced search,
+  platform filter chips, pull-to-refresh FlatList), **History** (recent picks with
+  relative timestamps, pull-to-refresh), **Settings** (server URL persisted in
+  AsyncStorage, connectivity indicator, open-in-browser link).  Shared
+  `ServerConfigContext` provides the GAPI URL + health-check status to every screen.
+  `useGapiApi` hook wraps `POST /api/pick`, `GET /api/library`, `GET /api/history`.
+  Dark GitHub-dark theme throughout.  Includes Jest formatter tests.
+
+- [x] **Desktop Application** — Electron desktop app (`desktop-app/`) for macOS,
+  Windows, and Linux with a **system tray** icon.  Main process (`src/main.js`):
+  BrowserWindow, system tray with context menu (Pick a Game / Open Window / Open in
+  Browser / Settings / Quit), periodic 30-second health-check with tray badge update,
+  desktop notifications via `Notification` API, settings persisted via `electron-store`.
+  All IPC through a `contextBridge` preload (`src/preload.js`) that exposes `window.gapiAPI`
+  without leaking Node.js.  Renderer (`renderer/index.html` + `renderer.js`): sidebar
+  navigation, pick panel (three modes), library panel (search + platform filter), history
+  panel, settings panel.  macOS hidden-inset title bar; stays alive in tray when window
+  is closed.  Packaged for all platforms via `electron-builder`.  Includes Jest formatter
+  tests and full README.
 - [x] **PlayStation Network** — `PSNClient` in `platform_clients.py` uses the two-step
   NPSSO→auth-code→token exchange flow.  `POST /api/psn/connect` accepts the user's NPSSO
   token (extracted from the `npsso` browser cookie at `my.playstation.com`), exchanges it

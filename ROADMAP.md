@@ -79,9 +79,9 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### 📅 Long-term Vision (v3.0.0+)
 
 #### Mobile & Cross-Platform
-- [ ] **Mobile App** - Native iOS/Android applications
+- [x] **Mobile App** - Native iOS/Android applications
 - [x] **Progressive Web App** - Offline-capable PWA version
-- [ ] **Desktop Application** - Electron-based desktop app with system tray integration
+- [x] **Desktop Application** - Electron-based desktop app with system tray integration
 - [x] **Browser Extension** - Quick game picker from browser toolbar
 
 #### Advanced Features
