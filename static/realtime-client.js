@@ -34,9 +34,9 @@ class RealtimeClient {
      */
     initSSE() {
         try {
-            this.eventSource = new EventSource('/api/events/stream', {
-                headers: { 'X-Username': this.username }
-            });
+            // EventSource uses cookies for authentication (session-based)
+            // Headers are not supported in EventSource standard API
+            this.eventSource = new EventSource('/api/events/stream');
             
             // Handle connection
             this.eventSource.addEventListener('connected', (e) => {

@@ -2134,8 +2134,8 @@
             // Ensure we're working with the button element
             const button = event.target.closest('.tab') || event.target;
 
-            if (tabName !== 'chat') stopChatPolling();
-            if (tabName !== 'sessions') stopSessionsPolling();
+            if (tabName !== 'chat' && typeof stopChatPolling === 'function') stopChatPolling();
+            if (tabName !== 'sessions' && typeof stopSessionsPolling === 'function') stopSessionsPolling();
             
             // Update tab buttons
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
@@ -3009,7 +3009,7 @@
             document.getElementById('game-details-modal').style.display = 'none';
         }
 
-        async function toggleFavorite(appId) {
+        async function toggleFavoriteLibraryLibrary(appId) {
             try {
                 const response = await fetch('/api/favorites/toggle', {
                     method: 'POST',
@@ -4944,7 +4944,7 @@
         // Achievements Functions
         // ==============================================================================================
         
-        async function loadAchievements() {
+        async function loadUserAchievements() {
             const listDiv = document.getElementById('achievements-list');
             listDiv.innerHTML = '<div class="loading">Loading...</div>';
             
@@ -6039,10 +6039,6 @@
         }
 
         // Text formatting helpers
-        function escapeHtml(text) {
-            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        }
-
         function linkifyText(text) {
             // Detect URLs and make them clickable
             const urlPattern = /(https?:\/\/[^\s<]+[^<.,:;"'\]\s])/gi;
@@ -6950,6 +6946,10 @@
 
         async function pollNotifications() {
             try {
+                // Only poll if user is logged in
+                const username = getCurrentUsername();
+                if (!username) return;
+                
                 const resp = await fetch('/api/notifications?unread_only=true');
                 if (resp.ok) {
                     const data = await resp.json();
@@ -7086,7 +7086,7 @@
             if (_origSwitchTab) _origSwitchTab(tabName, event);
             if (tabName === 'leaderboard') loadLeaderboard();
             if (tabName === 'chat') { chatLastId = 0; loadChatMessages(false); startChatPolling(); }
-            else stopChatPolling();
+            else if (typeof stopChatPolling === 'function') stopChatPolling();
             if (tabName === 'notifications') loadNotifications();
             if (tabName === 'plugins') { loadPlugins(); checkIfAdmin(isAdmin => {
                 const adminBox = document.getElementById('admin-register-plugin');
@@ -7460,7 +7460,7 @@
                     ` : ''}
                     
                     <button onclick="openUserChat('${user.username}')" style="width:100%; padding:10px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:8px;">💬 Send Message</button>
-                    <button onclick="closeUserPreview()" style="width:100%; padding:10px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
+                    <button onclick="closeUserPreviewPhase5()" style="width:100%; padding:10px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
                 `;
                 contentDiv.innerHTML = profileHtml;
             } catch (err) {
@@ -7468,7 +7468,7 @@
             }
         }
 
-        function closeUserPreview() {
+        function closeUserPreviewPhase5() {
             const modal = document.getElementById('user-preview-modal');
             if (modal) modal.style.display = 'none';
         }
@@ -7486,7 +7486,7 @@
         async function showNotifications() {
             const modal = document.getElementById('notifications-modal');
             modal.style.display = 'flex';
-            await loadNotifications();
+            await loadNotificationsPhase5();
         }
 
         function closeNotifications() {
@@ -7494,7 +7494,7 @@
             if (modal) modal.style.display = 'none';
         }
 
-        async function loadNotifications() {
+        async function loadNotificationsPhase5() {
             try {
                 const resp = await fetch('/api/notifications');
                 const data = await resp.json();
@@ -7617,7 +7617,7 @@
         async function showFriendsModal() {
             const modal = document.getElementById('friends-modal');
             modal.style.display = 'flex';
-            await loadFriends();
+            await loadFriendsPhase5();
         }
 
         function closeFriendsModal() {
@@ -7625,7 +7625,7 @@
             if (modal) modal.style.display = 'none';
         }
 
-        async function loadFriends() {
+        async function loadFriendsPhase5() {
             try {
                 const resp = await fetch('/api/friends');
                 const data = await resp.json();
@@ -7988,7 +7988,7 @@
         async function showAchievements() {
             const modal = document.getElementById('achievements-modal');
             modal.style.display = 'flex';
-            await loadAchievements();
+            await loadAchievementsPhase5();
         }
 
         function closeAchievements() {
@@ -7998,10 +7998,10 @@
 
         function filterAchievements(filter) {
             achievementsFilter = filter;
-            loadAchievements();
+            loadAchievementsPhase5();
         }
 
-        async function loadAchievements() {
+        async function loadAchievementsPhase5() {
             try {
                 const resp = await fetch('/api/achievements');
                 const data = await resp.json();
@@ -8873,14 +8873,19 @@
             if (modal) modal.style.display = 'none';
         }
 
-        // Tournament Functions
-        async function showTournaments() {
-            const modal = document.getElementById('tournaments-modal');
+        // Tournament Functions (Phase 7)
+        async function showTournamentsPhase7() {
+            const modal = document.getElementById('tournaments-modal-phase7');
+            if (!modal) {
+                console.warn('Phase 7 tournaments modal not found, using main tournaments');
+                if (typeof showTournaments === 'function') showTournaments();
+                return;
+            }
             modal.style.display = 'flex';
-            await loadTournaments();
+            await loadTournamentsPhase7();
         }
 
-        async function loadTournaments() {
+        async function loadTournamentsPhase7() {
             try {
                 const resp = await fetch('/api/tournaments');
                 const data = await resp.json();
@@ -8907,7 +8912,7 @@
                 const data = await resp.json();
                 if (data.success) {
                     showNotification('Tournament registered!', 'success');
-                    await loadTournaments();
+                    await loadTournamentsPhase7();
                 }
             } catch (e) {
                 showNotification('Failed to register', 'error');
@@ -8918,8 +8923,8 @@
             showNotification('🏆 View your tournament bracket', 'info');
         }
 
-        function closeTournaments() {
-            const modal = document.getElementById('tournaments-modal');
+        function closeTournamentsPhase7() {
+            const modal = document.getElementById('tournaments-modal-phase7');
             if (modal) modal.style.display = 'none';
         }
 
@@ -8982,9 +8987,14 @@
             if (modal) modal.style.display = 'none';
         }
 
-        // Seasonal Events Functions
-        async function showEvents() {
-            const modal = document.getElementById('events-modal');
+        // Seasonal Events Functions (Phase 7)
+        async function showSeasonalEvents() {
+            const modal = document.getElementById('seasonal-events-modal');
+            if (!modal) {
+                console.warn('Seasonal events modal not found, using main events');
+                if (typeof showEventsModal === 'function') showEventsModal();
+                return;
+            }
             modal.style.display = 'flex';
             try {
                 const resp = await fetch('/api/events/seasonal');
@@ -9029,9 +9039,14 @@
             if (modal) modal.style.display = 'none';
         }
 
-        // Guild Functions
-        async function showGuilds() {
-            const modal = document.getElementById('guilds-modal');
+        // Guild Functions (Phase 7)
+        async function showGuildsPhase7() {
+            const modal = document.getElementById('guilds-modal-phase7');
+            if (!modal) {
+                console.warn('Phase 7 guilds modal not found, using main guilds');
+                if (typeof showGuildsModal === 'function') showGuildsModal();
+                return;
+            }
             modal.style.display = 'flex';
             try {
                 const resp = await fetch('/api/guilds');
@@ -9051,7 +9066,7 @@
                             <p style="margin:0; color:var(--text-primary);">${g.name}</p>
                             <p style="margin:4px 0 0 0; font-size:0.8em; color:var(--text-secondary);">Lv ${g.level} • ${g.members} members</p>
                         </div>
-                        <button onclick="joinGuild()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer;">Join</button>
+                        <button onclick="joinGuildPhase7()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer;">Join</button>
                     </div>
                 `).join('');
                 document.getElementById('guilds-list').innerHTML = html;
@@ -9060,7 +9075,7 @@
             }
         }
 
-        async function createGuild() {
+        async function createGuildPhase7() {
             const name = document.getElementById('guild-name-input').value.trim();
             if (!name) {
                 showNotification('Enter a guild name', 'warning');
@@ -9076,20 +9091,20 @@
                 if (data.success) {
                     showNotification('Guild created!', 'success');
                     document.getElementById('guild-name-input').value = '';
-                    await showGuilds();
+                    await showGuildsPhase7();
                 }
             } catch (e) {
                 showNotification('Failed to create guild', 'error');
             }
         }
 
-        async function joinGuild() {
+        async function joinGuildPhase7() {
             try {
                 const resp = await fetch('/api/guilds/1/join', { method: 'POST' });
                 const data = await resp.json();
                 if (data.success) {
                     showNotification('Guild joined!', 'success');
-                    await showGuilds();
+                    await showGuildsPhase7();
                 }
             } catch (e) {
                 showNotification('Failed to join', 'error');
@@ -9170,39 +9185,42 @@
             if (modal) modal.style.display = 'none';
         }
 
-        // Cosmetic Collections Functions
-        async function showCollections() {
-            const modal = document.getElementById('collections-modal');
+        // Cosmetic Collections Functions (Phase 7)
+        async function showCosmeticCollections() {
+            const modal = document.getElementById('cosmetic-collections-modal');
+            if (!modal) {
+                console.warn('Cosmetic collections modal not found');
+                return;
+            }
             modal.style.display = 'flex';
             try {
-                const resp = await fetch('/api/collections');
+                const resp = await fetch('/api/collections/cosmetic');
                 const data = await resp.json();
                 
-                const totalAvg = Math.round(data.total_completion);
-                document.getElementById('collection-total').textContent = totalAvg + '%';
-                document.getElementById('collection-mastery').textContent = data.mastery_tier;
+                const totalAvg = Math.round(data.total_completion || 0);
+                const collectionTotal = document.getElementById('collection-total');
+                const collectionMastery = document.getElementById('collection-mastery');
+                if (collectionTotal) collectionTotal.textContent = totalAvg + '%';
+                if (collectionMastery) collectionMastery.textContent = data.mastery_tier || 'Novice';
                 
-                const html = data.collections.map(c => `
+                const html = (data.collections || []).map(c => `
                     <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                            <p style="margin:0; color:var(--text-primary); text-transform:capitalize;">${c.type.slice(0,-1)}</p>
-                            <span style="color:#f39c12; font-weight:bold;">${c.completion}%</span>
+                            <p style="margin:0; color:var(--text-primary); text-transform:capitalize;">${c.type ? c.type.slice(0,-1) : 'Collection'}</p>
+                            <span style="color:#f39c12; font-weight:bold;">${c.completion || 0}%</span>
                         </div>
                         <div style="background:rgba(0,0,0,0.3); height:8px; border-radius:4px;">
-                            <div style="background:#f39c12; height:100%; width:${c.completion}%; border-radius:4px;"></div>
+                            <div style="background:#f39c12; height:100%; width:${c.completion || 0}%; border-radius:4px;"></div>
                         </div>
-                        <p style="margin:8px 0 0 0; font-size:0.8em; color:var(--text-secondary);">${c.owned}/${c.total} items • ${c.rarity_points} rarity points</p>
+                        <p style="margin:8px 0 0 0; font-size:0.8em; color:var(--text-secondary);">${c.owned || 0}/${c.total || 0} items • ${c.rarity_points || 0} rarity points</p>
                     </div>
                 `).join('');
-                document.getElementById('collections-detail').innerHTML = html;
+                const detailEl = document.getElementById('collections-detail');
+                if (detailEl) detailEl.innerHTML = html;
             } catch (e) {
+                console.error('Failed to load cosmetic collections:', e);
                 showNotification('Failed to load collections', 'error');
             }
-        }
-
-        function closeCollections() {
-            const modal = document.getElementById('collections-modal');
-            if (modal) modal.style.display = 'none';
         }
     </script>
 
@@ -9269,11 +9287,11 @@
     </div>
 
     <!-- User Profiles Modal -->
-    <div id="user-preview-modal" onclick="if(event.target.id==='user-preview-modal')closeUserPreview()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1001;">
+    <div id="user-preview-modal" onclick="if(event.target.id==='user-preview-modal')closeUserPreviewPhase5()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1001;">
         <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:500px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <h3 style="margin:0; color:var(--text-primary);">User Profile</h3>
-                <button onclick="closeUserPreview()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
+                <button onclick="closeUserPreviewPhase5()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
             </div>
             <div id="user-preview-content" style="padding:12px 0;">
                 <div class="loading">Loading…</div>

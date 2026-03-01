@@ -298,15 +298,16 @@ def setup_realtime_routes(app):
         from realtime import setup_realtime_routes
         setup_realtime_routes(app)
     """
-    from flask import Response, request
+    from flask import Response, request, session
     from functools import wraps
     
     def require_login(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            # Get username from session or auth header
-            username = request.headers.get('X-Username')
+            # Get username from session (supports cookies, which EventSource uses)
+            username = session.get('username')
             if not username:
+                logger.warning('Realtime auth failed: no username in session')
                 return {'error': 'Unauthorized'}, 401
             return f(username, *args, **kwargs)
         return decorated_function
