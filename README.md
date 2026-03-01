@@ -249,6 +249,14 @@ python3 gapi_gui.py
 
 Then open **http://127.0.0.1:5000** in your browser.
 
+For remote access from another machine (for example, Linux server):
+
+```bash
+python3 gapi_gui.py --host 0.0.0.0 --port 5000
+```
+
+Then open **http://YOUR_SERVER_IP:5000** from your client machine.
+
 1. Click **Register** and create an account.
 2. Go to the **Settings** tab and add your Steam ID (and optionally Epic / GOG IDs).
 3. Click **Sync Library** — your games will load!

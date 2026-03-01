@@ -9603,10 +9603,23 @@ def main():
     parser = argparse.ArgumentParser(description='GAPI Web GUI')
     parser.add_argument('--config', default='config.json', help='Path to config file')
     parser.add_argument('--demo', action='store_true', help='Run with demo data')
+    parser.add_argument(
+        '--host',
+        default=os.getenv('GAPI_HOST', '127.0.0.1'),
+        help='Host interface to bind (use 0.0.0.0 for remote access)'
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=int(os.getenv('GAPI_PORT', '5000')),
+        help='Port to bind the web server on'
+    )
     args = parser.parse_args()
 
     demo_mode = args.demo
     config_path = args.config
+    host = args.host
+    port = args.port
 
     if demo_mode:
         demo_config_path = '.demo_config.json'
@@ -9654,12 +9667,14 @@ def main():
     print("🎮 GAPI Web GUI is starting...")
     print("="*60)
     print("\nOpen your browser and go to:")
-    print("  http://127.0.0.1:5000")
+    print(f"  http://{host}:{port}")
+    if host == '0.0.0.0':
+        print(f"  (or http://<server-ip>:{port} from another machine)")
     print("\nPress Ctrl+C to stop the server")
     print("="*60 + "\n")
     
     try:
-        app.run(host='127.0.0.1', port=5000, debug=False)
+        app.run(host=host, port=port, debug=False)
     except KeyboardInterrupt:
         print("\n\n" + "="*60)
         print("🛑 GAPI Web GUI stopped")
