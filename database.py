@@ -306,10 +306,33 @@ class ChatMessage(Base):
     room = Column(String(100), default='general')  # channel / room name
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    edited_at = Column(DateTime, nullable=True)  # When message was last edited
+    deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
+    reply_to_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=True)  # For threading
     command_only = Column(Boolean, default=False)  # Only visible to sender and admins
 
     sender = relationship("User", foreign_keys=[sender_id])
     recipient = relationship("User", foreign_keys=[recipient_id])
+    reply_to = relationship("ChatMessage", remote_side=[id], foreign_keys=[reply_to_id])
+
+
+class ChatMessageReaction(Base):
+    """Reactions (emojis) on chat messages."""
+    __tablename__ = "chat_message_reactions"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    emoji = Column(String(20), nullable=False)  # Emoji unicode or shortcode
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    message = relationship("ChatMessage")
+    user = relationship("User")
+
+    __table_args__ = (
+        # One user can only react once with each emoji per message
+        Index('idx_message_user_emoji', 'message_id', 'user_id', 'emoji', unique=True),
+    )
 
 
 class Plugin(Base):
@@ -1002,7 +1025,7 @@ def mark_notifications_read(db, username: str, notification_ids: list = None) ->
 # Chat helpers
 # ---------------------------------------------------------------------------
 
-def send_chat_message(db, sender_username: str, message: str, room: str = 'general', recipient_username: str = None, command_only: bool = False) -> dict:
+def send_chat_message(db, sender_username: str, message: str, room: str = 'general', recipient_username: str = None, command_only: bool = False, reply_to_id: int = None) -> dict:
     """Save a chat message and return it as a dict."""
     if not db:
         return {}
@@ -1016,7 +1039,7 @@ def send_chat_message(db, sender_username: str, message: str, room: str = 'gener
             if recipient:
                 recipient_id = recipient.id
         
-        # Try to create message with command_only field
+        # Try to create message with all new fields
         try:
             msg = ChatMessage(
                 sender_id=sender.id,
@@ -1024,9 +1047,10 @@ def send_chat_message(db, sender_username: str, message: str, room: str = 'gener
                 room=room,
                 message=message,
                 command_only=command_only,
+                reply_to_id=reply_to_id,
             )
         except TypeError:
-            # Fallback for older database schema without command_only
+            # Fallback for older database schema
             msg = ChatMessage(
                 sender_id=sender.id,
                 recipient_id=recipient_id,
@@ -1046,11 +1070,13 @@ def send_chat_message(db, sender_username: str, message: str, room: str = 'gener
             'created_at': msg.created_at.isoformat() if msg.created_at else None,
         }
         
-        # Handle command_only - may not exist in older databases
+        # Handle new fields - may not exist in older databases
         try:
             result['command_only'] = msg.command_only
+            result['reply_to_id'] = msg.reply_to_id
         except AttributeError:
             result['command_only'] = False
+            result['reply_to_id'] = None
         
         return result
     except Exception as e:
@@ -1059,15 +1085,27 @@ def send_chat_message(db, sender_username: str, message: str, room: str = 'gener
         return {}
 
 
-def get_chat_messages(db, room: str = 'general', limit: int = 50, since_id: int = 0) -> list:
-    """Return recent messages from a room."""
+def get_chat_messages(db, room: str = 'general', limit: int = 50, since_id: int = 0, before_id: int = 0) -> list:
+    """Return recent messages from a room.
+    
+    Args:
+        room: Chat room name
+        limit: Maximum number of messages to return
+        since_id: Return only messages with id > this value (for new messages)
+        before_id: Return only messages with id < this value (for loading older messages)
+    """
     if not db:
         return []
     try:
-        q = db.query(ChatMessage).filter(ChatMessage.room == room)
+        q = db.query(ChatMessage).filter(ChatMessage.room == room, ChatMessage.deleted_at.is_(None))
         if since_id:
             q = q.filter(ChatMessage.id > since_id)
-        msgs = q.order_by(ChatMessage.created_at.asc()).limit(limit).all()
+        if before_id:
+            q = q.filter(ChatMessage.id < before_id)
+        msgs = q.order_by(ChatMessage.created_at.desc() if before_id else ChatMessage.created_at.asc()).limit(limit).all()
+        # Reverse if we fetched older messages (they come in desc order)
+        if before_id:
+            msgs = list(reversed(msgs))
         result = []
         for m in msgs:
             item = {
@@ -1077,16 +1115,176 @@ def get_chat_messages(db, room: str = 'general', limit: int = 50, since_id: int 
                 'message': m.message,
                 'created_at': m.created_at.isoformat() if m.created_at else None,
             }
-            # Handle command_only - may not exist in older databases
+            # Handle new fields - may not exist in older databases
             try:
                 item['command_only'] = m.command_only
+                item['edited_at'] = m.edited_at.isoformat() if m.edited_at else None
+                item['reply_to_id'] = m.reply_to_id
+                
+                # If replying to another message, include preview of that message
+                if m.reply_to_id and m.reply_to:
+                    item['reply_to'] = {
+                        'id': m.reply_to.id,
+                        'sender': m.reply_to.sender.username if m.reply_to.sender else 'unknown',
+                        'message': m.reply_to.message[:100] + ('...' if len(m.reply_to.message) > 100 else ''),
+                    }
             except AttributeError:
                 item['command_only'] = False
+                item['edited_at'] = None
+                item['reply_to_id'] = None
+            
+            # Get reactions for this message
+            item['reactions'] = get_message_reactions(db, m.id)
+            
             result.append(item)
         return result
     except Exception as e:
         logger.error(f"Error getting chat messages: {e}")
         return []
+
+
+def get_message_reactions(db, message_id: int) -> dict:
+    """Get reactions for a message grouped by emoji.
+    Returns: {"👍": [{"username": "alice", "created_at": "..."}, ...], ...}
+    """
+    if not db:
+        return {}
+    try:
+        reactions = db.query(ChatMessageReaction).filter(
+            ChatMessageReaction.message_id == message_id
+        ).order_by(ChatMessageReaction.created_at.asc()).all()
+        
+        grouped = {}
+        for r in reactions:
+            emoji = r.emoji
+            if emoji not in grouped:
+                grouped[emoji] = []
+            grouped[emoji].append({
+                'username': r.user.username if r.user else 'unknown',
+                'created_at': r.created_at.isoformat() if r.created_at else None,
+            })
+        return grouped
+    except Exception as e:
+        logger.error(f"Error getting message reactions: {e}")
+        return {}
+
+
+def add_message_reaction(db, message_id: int, username: str, emoji: str) -> bool:
+    """Add a reaction to a message. Returns True if successful."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        
+        message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+        if not message:
+            return False
+        
+        # Check if reaction already exists
+        existing = db.query(ChatMessageReaction).filter(
+            ChatMessageReaction.message_id == message_id,
+            ChatMessageReaction.user_id == user.id,
+            ChatMessageReaction.emoji == emoji
+        ).first()
+        
+        if existing:
+            # Already reacted with this emoji, do nothing
+            return True
+        
+        reaction = ChatMessageReaction(
+            message_id=message_id,
+            user_id=user.id,
+            emoji=emoji
+        )
+        db.add(reaction)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error adding message reaction: {e}")
+        db.rollback()
+        return False
+
+
+def remove_message_reaction(db, message_id: int, username: str, emoji: str) -> bool:
+    """Remove a reaction from a message. Returns True if successful."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        
+        reaction = db.query(ChatMessageReaction).filter(
+            ChatMessageReaction.message_id == message_id,
+            ChatMessageReaction.user_id == user.id,
+            ChatMessageReaction.emoji == emoji
+        ).first()
+        
+        if reaction:
+            db.delete(reaction)
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error removing message reaction: {e}")
+        db.rollback()
+        return False
+
+
+def edit_chat_message(db, message_id: int, username: str, new_text: str) -> bool:
+    """Edit a chat message. Only the sender can edit. Returns True if successful."""
+    if not db or not new_text.strip():
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        
+        message = db.query(ChatMessage).filter(
+            ChatMessage.id == message_id,
+            ChatMessage.sender_id == user.id,
+            ChatMessage.deleted_at.is_(None)
+        ).first()
+        
+        if not message:
+            return False
+        
+        message.message = new_text.strip()
+        message.edited_at = datetime.utcnow()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error editing chat message: {e}")
+        db.rollback()
+        return False
+
+
+def delete_chat_message(db, message_id: int, username: str) -> bool:
+    """Soft delete a chat message. Only the sender can delete. Returns True if successful."""
+    if not db:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        
+        message = db.query(ChatMessage).filter(
+            ChatMessage.id == message_id,
+            ChatMessage.sender_id == user.id,
+            ChatMessage.deleted_at.is_(None)
+        ).first()
+        
+        if not message:
+            return False
+        
+        message.deleted_at = datetime.utcnow()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting chat message: {e}")
+        db.rollback()
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -2657,3 +2855,173 @@ def get_app_friends_with_platforms(db, username: str) -> dict:
     except Exception as e:
         logger.error("Error enriching friends with platform info: %s", e)
     return result
+
+
+# ============================================================================
+# Phase 6: Advanced Features DB Models
+# ============================================================================
+
+class ShopItem(Base):
+    """Shop items available for purchase"""
+    __tablename__ = "shop_items"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, index=True)
+    icon = Column(String(10))  # emoji
+    description = Column(String(500))
+    price = Column(Integer)  # in XP or coins
+    currency = Column(String(20))  # 'xp' or 'coins'
+    premium = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserInventory(Base):
+    """User's purchased items (cosmetics, themes, etc)"""
+    __tablename__ = "user_inventory"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    item_id = Column(Integer, ForeignKey("shop_items.id"), index=True)
+    purchased_at = Column(DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (UniqueConstraint('user_id', 'item_id', name='unique_user_item'),)
+    
+    user = relationship("User")
+    item = relationship("ShopItem")
+
+
+class StreamVOD(Base):
+    """Video On Demand (VOD) from streams"""
+    __tablename__ = "stream_vods"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    title = Column(String(255))
+    duration = Column(String(20))  # "HH:MM:SS"
+    views = Column(Integer, default=0)
+    vod_url = Column(String(500))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class TradeOffer(Base):
+    """Player-to-player trading system"""
+    __tablename__ = "trade_offers"
+    
+    id = Column(Integer, primary_key=True)
+    from_user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    to_user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    offer_description = Column(Text)  # What's being offered
+    status = Column(String(20), default='pending')  # pending, accepted, declined
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Team(Base):
+    """Player teams/clans for group matches"""
+    __tablename__ = "teams"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, index=True)
+    leader_id = Column(Integer, ForeignKey("users.id"), index=True)
+    description = Column(String(500))
+    max_members = Column(Integer, default=5)
+    win_rate = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    leader = relationship("User")
+
+
+class TeamMembership(Base):
+    """User membership in teams"""
+    __tablename__ = "team_memberships"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), index=True)
+    role = Column(String(20), default='member')  # leader, officer, member
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (UniqueConstraint('user_id', 'team_id', name='unique_user_team'),)
+    
+    user = relationship("User")
+    team = relationship("Team")
+
+
+class RankedRating(Base):
+    """User's ranked tier and rating points"""
+    __tablename__ = "ranked_ratings"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True)
+    tier = Column(String(20))  # bronze, silver, gold, diamond, master
+    tier_level = Column(Integer, default=1)  # I, II, III, IV
+    rating_points = Column(Integer, default=0)
+    wins = Column(Integer, default=0)
+    losses = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class AntiCheatLog(Base):
+    """Anti-cheat integrity logs for each pick"""
+    __tablename__ = "anticheat_logs"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    session_id = Column(String(255), index=True)  # reference to game session
+    game_picked = Column(String(255))
+    accuracy_variance = Column(Float)  # percentage deviation from average
+    response_time_ms = Column(Integer)  # milliseconds
+    is_flagged = Column(Boolean, default=False)
+    flag_reason = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class UserCosmetics(Base):
+    """User's active cosmetic theme and title"""
+    __tablename__ = "user_cosmetics"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True)
+    active_theme = Column(String(50))  # theme name
+    active_title = Column(String(100))  # title/badge name
+    profile_color = Column(String(7))  # hex color
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class GameReview(Base):
+    """User-generated game reviews"""
+    __tablename__ = "game_reviews"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    game_name = Column(String(255), index=True)
+    rating = Column(Integer)  # 1-5 stars
+    review_text = Column(Text)
+    helpful_votes = Column(Integer, default=0)
+    unhelpful_votes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User")
+
+
+class AIRecommendationCache(Base):
+    """Cached AI recommendations for users"""
+    __tablename__ = "ai_recommendations"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True)
+    game_name = Column(String(255), index=True)
+    match_score = Column(Integer)  # 0-100
+    reason = Column(String(255))
+    recommended_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User")

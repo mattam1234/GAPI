@@ -47,19 +47,21 @@ class ChatService:
         )
 
     def get_messages(self, db, room: str = 'general',
-                     limit: int = 50, since_id: int = 0) -> List[dict]:
+                     limit: int = 50, since_id: int = 0, before_id: int = 0) -> List[dict]:
         """Fetch messages from a chat room.
 
         Args:
-            db:       SQLAlchemy session.
-            room:     Room to fetch from (default ``'general'``).
-            limit:    Maximum messages to return (default 50).
-            since_id: Return only messages with ``id > since_id``
-                      (default 0 = no filter).
+            db:        SQLAlchemy session.
+            room:      Room to fetch from (default ``'general'``).
+            limit:     Maximum messages to return (default 50).
+            since_id:  Return only messages with ``id > since_id``
+                       (default 0 = no filter).
+            before_id: Return only messages with ``id < before_id``
+                       (default 0 = no filter).
 
         Returns:
             List of message dicts sorted by ``created_at`` ascending.
         """
         return self._db.get_chat_messages(
-            db, room=room, limit=limit, since_id=since_id,
+            db, room=room, limit=limit, since_id=since_id, before_id=before_id,
         )
