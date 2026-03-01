@@ -6,7 +6,7 @@ Handles PostgreSQL connections for user data, ignored games, and achievements.
 
 import os
 import json
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint, Index
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from datetime import datetime, timezone
 import logging
