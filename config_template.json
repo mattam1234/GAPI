@@ -1,5 +1,6 @@
 {
   "steam_api_key": "YOUR_STEAM_API_KEY_HERE",
+  "steam_id": "YOUR_STEAM_64_ID_HERE",
   "database_url": "postgresql://gapi:gapi_password@localhost:5432/gapi_db",
   "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
   "barely_played_hours": 2,

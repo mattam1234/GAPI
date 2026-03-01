@@ -7,23 +7,28 @@ GAPI is a multi-platform game picker tool that helps you decide what to play fro
 
 ## 📋 Table of Contents
 
-- 🌐 **Multi-Platform Support**: Steam, Epic Games Store, and GOG Galaxy integration
-- 🌐 **Modern Web GUI**: Beautiful browser-based interface with tabs for game picking, library browsing, favorites, statistics, and multi-user management
-- 👥 **Multi-User Support**: Link multiple accounts across platforms and find common games among friends
-- 🎮 **Co-op Game Finder**: Automatically filter and pick co-op/multiplayer games for your group
-- 🤖 **Discord Bot Integration**: Pick games with friends directly from Discord with voting and auto-selection
-- 🎲 **Random Game Selection**: Pick a random game from all your game libraries
-- 🎯 **Smart Filters**: Filter by playtime (unplayed, barely played, well-played games)
-- 🎨 **Genre Filtering**: Filter games by genre/tags (Action, RPG, Strategy, etc.)
-- ⭐ **Favorites System**: Mark games as favorites and pick from your favorite games
-- 📊 **Library Statistics**: View stats about your game collection including top played games
-- 🔍 **Detailed Game Info**: Fetch descriptions, genres, release dates, and Metacritic scores
-- 🔗 **Direct Links**: Quick access to game store pages
-- 🎨 **Colorful Interface**: Easy-to-read colored terminal output (CLI mode)
-- 💾 **Smart History**: Avoids suggesting recently picked games
-- 📤 **Export/Import**: Export and import your game picking history
-- ⚡ **CLI Mode**: Command-line arguments for scripting and quick picks
-- 🔧 **Configurable**: Custom playtime filters and settings
+- [🎯 About](#-about)
+- [✨ Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [📦 Installation](#-installation)
+  - [Prerequisites](#prerequisites)
+  - [1 — Clone the repository](#1--clone-the-repository)
+  - [2 — Create a virtual environment](#2--create-a-virtual-environment-recommended)
+  - [3 — Install dependencies](#3--install-dependencies)
+  - [4 — Configure](#4--configure)
+  - [5 — Set up the database](#5--set-up-the-database)
+  - [6 — Run GAPI](#6--run-gapi)
+  - [7 — Run as a service](#7--optional-run-as-a-service)
+- [🔐 Authentication System](#-authentication-system)
+- [🎮 Usage](#-usage)
+- [⚙️ Configuration](#️-configuration)
+- [🔑 Getting Your Credentials](#-getting-your-credentials)
+- [❓ FAQ](#-faq)
+- [🔧 Troubleshooting](#-troubleshooting)
+- [🤝 Contributing](#-contributing)
+- [📚 Additional Resources](#-additional-resources)
+- [📜 License](#-license)
+- [🙏 Credits & Acknowledgments](#-credits--acknowledgments)
 
 ## 🎯 About
 
@@ -816,6 +821,7 @@ For detailed guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md)
 - **[Roadmap](ROADMAP.md)** - Planned features and improvements
 - **[Changelog](CHANGELOG.md)** - Version history and changes
 - **[License](LICENSE)** - MIT License details
+- **[Demo script](demo.py)** - `python3 demo.py` — try all features without credentials
 
 ## 📜 License
 

@@ -114,7 +114,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] Code coverage reports (target: 80%+)
 - [x] Type checking with mypy
 - [x] Automated dependency updates (Dependabot)
-- [ ] Security scanning (CodeQL, Snyk)
+- [x] Security scanning (CodeQL, Snyk)
 
 ### Architecture
 - [x] Plugin system for custom platforms
@@ -127,7 +127,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### Documentation
 - [x] API documentation (Swagger/OpenAPI) — `GET /api/openapi.json` + `GET /api/docs`
 - [ ] Video tutorials
-- [ ] Interactive demo environment
+- [x] Interactive demo environment
 - [x] Localization (i18n) - Support for multiple languages
 - [x] Developer guide for contributors
 
