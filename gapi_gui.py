@@ -140,6 +140,24 @@ multi_picker_lock = threading.Lock()
 live_sessions: Dict[str, Dict] = {}
 live_sessions_lock = threading.Lock()
 
+chat_rooms_lock = threading.Lock()
+chat_rooms: Dict[str, Dict] = {
+    'general': {
+        'room': 'general',
+        'owner': None,
+        'is_private': False,
+        'members': set(),
+        'invites': set(),
+        'created_at': datetime.utcnow(),
+    }
+}
+chat_room_active_session: Dict[str, str] = {}
+
+# Track users' current rooms and last activity
+user_current_room: Dict[str, str] = {}  # username -> room_name
+user_last_activity: Dict[str, float] = {}  # username -> timestamp
+user_room_lock = threading.Lock()
+
 # SSE subscriber queues: session_id -> list of queue.Queue
 import queue as _queue
 _sse_subscribers: Dict[str, list] = {}
@@ -161,6 +179,88 @@ def _sse_publish(session_id: str, event_type: str, data: Dict) -> None:
             _sse_subscribers[session_id] = [
                 q for q in _sse_subscribers.get(session_id, []) if q not in dead
             ]
+
+
+def _normalize_chat_room_name(raw_room: str) -> str:
+    room = (raw_room or 'general').strip().lower().replace(' ', '-')
+    cleaned = ''.join(ch for ch in room if ch.isalnum() or ch in ('-', '_', ':'))
+    return (cleaned[:100] or 'general')
+
+
+def _ensure_chat_room(room: str, owner: Optional[str] = None,
+                      is_private: bool = False) -> Dict:
+    room_name = _normalize_chat_room_name(room)
+    with chat_rooms_lock:
+        state = chat_rooms.get(room_name)
+        if state is None:
+            state = {
+                'room': room_name,
+                'owner': owner,
+                'is_private': bool(is_private),
+                'members': set(),
+                'invites': set(),
+                'created_at': datetime.utcnow(),
+            }
+            if owner:
+                state['members'].add(owner)
+            chat_rooms[room_name] = state
+        return state
+
+
+def _can_access_chat_room(username: str, room: str) -> bool:
+    state = _ensure_chat_room(room)
+    if not state['is_private']:
+        return True
+    if username == state.get('owner'):
+        return True
+    return username in state['members']
+
+
+def _join_chat_room(username: str, room: str) -> Tuple[bool, str, str]:
+    room_name = _normalize_chat_room_name(room)
+    state = _ensure_chat_room(room_name)
+    with chat_rooms_lock:
+        if state['is_private']:
+            if username != state.get('owner') and username not in state['members'] and username not in state['invites']:
+                return False, f'Room "{room_name}" is private. Ask for an invite.', room_name
+            state['invites'].discard(username)
+        state['members'].add(username)
+    return True, f'Joined room "{room_name}".', room_name
+
+
+def _create_chat_room(owner: str, room: str, is_private: bool) -> Tuple[bool, str, str]:
+    room_name = _normalize_chat_room_name(room)
+    if room_name == 'general':
+        return False, 'The room name "general" is reserved.', room_name
+    with chat_rooms_lock:
+        if room_name in chat_rooms:
+            return False, f'Room "{room_name}" already exists.', room_name
+        chat_rooms[room_name] = {
+            'room': room_name,
+            'owner': owner,
+            'is_private': bool(is_private),
+            'members': {owner},
+            'invites': set(),
+            'created_at': datetime.utcnow(),
+        }
+    privacy = 'private' if is_private else 'public'
+    return True, f'Created {privacy} room "{room_name}".', room_name
+
+
+def _invite_to_chat_room(inviter: str, target_username: str,
+                         room: str) -> Tuple[bool, str, str]:
+    room_name = _normalize_chat_room_name(room)
+    state = _ensure_chat_room(room_name)
+    with chat_rooms_lock:
+        if state['is_private']:
+            if inviter != state.get('owner') and inviter not in state['members']:
+                return False, f'You are not allowed to invite users to "{room_name}".', room_name
+            state['invites'].add(target_username)
+        else:
+            state['members'].add(target_username)
+    if state['is_private']:
+        return True, f'Invited @{target_username} to private room "{room_name}".', room_name
+    return True, f'Added @{target_username} to room "{room_name}".', room_name
 
 # User authentication
 current_user: Optional[str] = None
@@ -3714,7 +3814,7 @@ def api_add_to_playlist(name: str):
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
-    game_id = (data.get('game_id') or '').strip()
+    game_id = str(data.get('game_id', '')).strip()
     if not game_id:
         return jsonify({'error': 'game_id is required'}), 400
     with picker_lock:
@@ -4550,6 +4650,9 @@ def api_get_recommendations():
 
     Query params:
         count (int, default 10): Maximum number of recommendations to return.
+        platforms (str): Comma-separated list of platforms to filter by (e.g., "steam,epic").
+        max_budget (float): Maximum price to consider for recommendations.
+        include_new (bool): If true, boost recently released games.
 
     Response JSON::
 
@@ -4574,8 +4677,41 @@ def api_get_recommendations():
     except (ValueError, TypeError):
         count = 10
 
-    with picker_lock:
-        recs = picker.get_recommendations(count=count)
+    # Parse platform filter
+    platforms_param = request.args.get('platforms', '').strip()
+    platforms = [p.strip() for p in platforms_param.split(',') if p.strip()] if platforms_param else None
+
+    # Parse budget filter
+    max_budget = None
+    max_budget_param = request.args.get('max_budget', '').strip()
+    if max_budget_param:
+        try:
+            max_budget = float(max_budget_param)
+        except (ValueError, TypeError):
+            max_budget = None
+
+    # Parse new releases flag
+    include_new = request.args.get('include_new', '').lower() in ('true', '1', 'yes')
+
+    try:
+        with picker_lock:
+            recs = picker.get_recommendations(
+                count=count,
+                platforms=platforms,
+                max_budget=max_budget,
+                include_new_releases=include_new
+            )
+    except TypeError as e:
+        # Fallback: try calling without new parameters for backward compatibility
+        try:
+            with picker_lock:
+                recs = picker.get_recommendations(count=count)
+        except Exception as e2:
+            gui_logger.error(f"Error calling get_recommendations: {e2}")
+            return jsonify({'error': f'Failed to generate recommendations: {str(e2)}'}), 500
+    except Exception as e:
+        gui_logger.error(f"Error generating recommendations: {e}")
+        return jsonify({'error': f'Failed to generate recommendations: {str(e)}'}), 500
 
     return jsonify({'recommendations': recs})
 
@@ -5363,6 +5499,266 @@ def api_live_session_events(session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Chat command helpers
+# ---------------------------------------------------------------------------
+
+def _get_active_room_session(room: str) -> Optional[Dict]:
+    room_name = _normalize_chat_room_name(room)
+    with live_sessions_lock:
+        session_id = chat_room_active_session.get(room_name)
+        if not session_id:
+            return None
+        session = live_sessions.get(session_id)
+        if not session or session.get('status') == 'completed':
+            chat_room_active_session.pop(room_name, None)
+            return None
+        return session
+
+
+def _handle_chat_command(db, username: str, room: str, message: str) -> Dict:
+    room_name = _normalize_chat_room_name(room)
+    parts = message.strip().split()
+    if not parts:
+        return {'ok': False, 'text': 'Empty command.', 'announce': False, 'status': 400}
+
+    cmd = parts[0].lower()
+
+    if cmd in ('/help', '/commands'):
+        return {
+            'ok': True,
+            'announce': False,
+            'status': 200,
+            'text': (
+                'Chat commands:\n'
+                '/help\n'
+                '/room create <name> [private]\n'
+                '/room create-private <name>\n'
+                '/room join <name>\n'
+                '/room invite <username> [room]\n'
+                '/room status [room]\n'
+                '/picker start\n'
+                '/picker join\n'
+                '/picker status\n'
+                '/picker pick\n\n'
+                'Examples:\n'
+                '/room create squad private\n'
+                '/room invite @alex squad\n'
+                '/picker start'
+            ),
+        }
+
+    if cmd == '/room':
+        if len(parts) < 2:
+            return {'ok': False, 'announce': False, 'status': 400, 'text': 'Usage: /room <create|create-private|join|invite|status> ...'}
+        action = parts[1].lower()
+
+        if action in ('create', 'create-private'):
+            if len(parts) < 3:
+                return {'ok': False, 'announce': False, 'status': 400, 'text': 'Usage: /room create <name> [private]'}
+            target_room = parts[2]
+            is_private = action == 'create-private' or (len(parts) >= 4 and parts[3].lower() == 'private')
+            ok, text_out, created_room = _create_chat_room(username, target_room, is_private)
+            result = {'ok': ok, 'announce': ok, 'status': 201 if ok else 400, 'text': f'{text_out} Switch your chat room to "{created_room}" to use it.'}
+            if ok:
+                result['room_name'] = created_room
+            return result
+
+        if action == 'join':
+            if len(parts) < 3:
+                return {'ok': False, 'announce': False, 'status': 400, 'text': 'Usage: /room join <name>'}
+            ok, text_out, _ = _join_chat_room(username, parts[2])
+            return {'ok': ok, 'announce': ok, 'status': 200 if ok else 403, 'text': text_out}
+
+        if action == 'invite':
+            if len(parts) < 3:
+                return {'ok': False, 'announce': False, 'status': 400, 'text': 'Usage: /room invite <username> [room]'}
+            target_username = parts[2].strip().lstrip('@')
+            target_room = parts[3] if len(parts) >= 4 else room_name
+
+            if DB_AVAILABLE and db and not database.user_exists(db, target_username):
+                return {'ok': False, 'announce': False, 'status': 404, 'text': f'User "{target_username}" not found.'}
+
+            ok, text_out, normalized_room = _invite_to_chat_room(username, target_username, target_room)
+            if not ok:
+                return {'ok': False, 'announce': False, 'status': 403, 'text': text_out}
+
+            if DB_AVAILABLE and db:
+                try:
+                    database.create_notification(
+                        db,
+                        target_username,
+                        title=f'Private room invite from {username}',
+                        message=f'{username} invited you to room "{normalized_room}". Join from chat with /room join {normalized_room}',
+                        type='info',
+                    )
+                except Exception as exc:
+                    gui_logger.warning('Failed to create room invite notification for %s: %s', target_username, exc)
+
+            return {'ok': True, 'announce': True, 'status': 200, 'text': text_out}
+
+        if action == 'status':
+            target_room = parts[2] if len(parts) >= 3 else room_name
+            normalized_room = _normalize_chat_room_name(target_room)
+            state = _ensure_chat_room(normalized_room)
+            if not _can_access_chat_room(username, normalized_room):
+                return {'ok': False, 'announce': False, 'status': 403, 'text': f'You do not have access to room "{normalized_room}".'}
+            privacy = 'private' if state['is_private'] else 'public'
+            return {
+                'ok': True,
+                'announce': False,
+                'status': 200,
+                'text': f'Room "{normalized_room}" is {privacy}. Members: {len(state["members"])}.',
+            }
+
+        return {'ok': False, 'announce': False, 'status': 400, 'text': f'Unknown room action "{action}".'}
+
+    if cmd == '/picker':
+        action = parts[1].lower() if len(parts) >= 2 else 'status'
+
+        if action == 'start':
+            existing = _get_active_room_session(room_name)
+            if existing:
+                return {
+                    'ok': False,
+                    'announce': False,
+                    'status': 409,
+                    'text': f'A picker session is already active in "{room_name}" (id: {existing["session_id"]}).',
+                }
+
+            session_id = str(uuid.uuid4())
+            session_obj = {
+                'session_id': session_id,
+                'host': username,
+                'name': f'{room_name} picker',
+                'participants': [username],
+                'status': 'waiting',
+                'created_at': datetime.utcnow(),
+                'picked_game': None,
+                'chat_room': room_name,
+            }
+            with live_sessions_lock:
+                live_sessions[session_id] = session_obj
+                chat_room_active_session[room_name] = session_id
+            _sse_publish(session_id, 'session', _live_session_view(session_obj))
+            return {
+                'ok': True,
+                'announce': True,
+                'status': 201,
+                'text': f'{username} started a game picker session for room "{room_name}". Others can join with /picker join.',
+            }
+
+        if action == 'join':
+            session_obj = _get_active_room_session(room_name)
+            if not session_obj:
+                return {'ok': False, 'announce': False, 'status': 404, 'text': f'No active picker session in room "{room_name}".'}
+            with live_sessions_lock:
+                session_obj = live_sessions.get(session_obj['session_id'])
+                if not session_obj:
+                    return {'ok': False, 'announce': False, 'status': 404, 'text': 'Picker session not found.'}
+                if session_obj.get('status') == 'completed':
+                    return {'ok': False, 'announce': False, 'status': 400, 'text': 'Picker session already completed.'}
+                if username not in session_obj['participants']:
+                    session_obj['participants'].append(username)
+                view = _live_session_view(session_obj)
+            _sse_publish(session_obj['session_id'], 'session', view)
+            return {
+                'ok': True,
+                'announce': True,
+                'status': 200,
+                'text': f'{username} joined picker session in room "{room_name}" ({len(view["participants"])} participants).',
+            }
+
+        if action == 'status':
+            session_obj = _get_active_room_session(room_name)
+            if not session_obj:
+                return {'ok': True, 'announce': False, 'status': 200, 'text': f'No active picker session in room "{room_name}".'}
+            participants = ', '.join(session_obj.get('participants', []))
+            return {
+                'ok': True,
+                'announce': False,
+                'status': 200,
+                'text': (
+                    f'Picker session {session_obj["session_id"]} in room "{room_name}": '
+                    f'host={session_obj["host"]}, participants=[{participants}], status={session_obj["status"]}'
+                ),
+            }
+
+        if action == 'pick':
+            session_obj = _get_active_room_session(room_name)
+            if not session_obj:
+                return {'ok': False, 'announce': False, 'status': 404, 'text': f'No active picker session in room "{room_name}".'}
+            if session_obj['host'] != username:
+                return {'ok': False, 'announce': False, 'status': 403, 'text': 'Only the session host can run /picker pick.'}
+
+            participants = list(session_obj.get('participants', []))
+            with live_sessions_lock:
+                current_session = live_sessions.get(session_obj['session_id'])
+                if current_session:
+                    current_session['status'] = 'picking'
+
+            _ensure_multi_picker()
+            if not multi_picker:
+                return {'ok': False, 'announce': False, 'status': 400, 'text': 'Multi-user picker is not initialized.'}
+
+            with multi_picker_lock:
+                game = multi_picker.pick_common_game(
+                    user_names=participants,
+                    coop_only=False,
+                    max_players=max(2, len(participants)),
+                )
+
+            if not game:
+                with live_sessions_lock:
+                    current_session = live_sessions.get(session_obj['session_id'])
+                    if current_session:
+                        current_session['status'] = 'waiting'
+                return {
+                    'ok': False,
+                    'announce': False,
+                    'status': 404,
+                    'text': 'No common game found for joined users. Have more users join or sync libraries, then try /picker pick again.',
+                }
+
+            game_name = game.get('name', 'Unknown game')
+            with live_sessions_lock:
+                current_session = live_sessions.get(session_obj['session_id'])
+                if current_session:
+                    current_session['picked_game'] = game
+                    current_session['status'] = 'completed'
+                    view = _live_session_view(current_session)
+                else:
+                    view = None
+                chat_room_active_session.pop(room_name, None)
+
+            if view:
+                _sse_publish(session_obj['session_id'], 'session', view)
+
+            if DB_AVAILABLE and db:
+                for participant in participants:
+                    try:
+                        database.create_notification(
+                            db,
+                            participant,
+                            title='Game picked in chat room',
+                            message=f'{username} picked "{game_name}" in room "{room_name}".',
+                            type='success',
+                        )
+                    except Exception as exc:
+                        gui_logger.warning('Failed to notify %s for room pick: %s', participant, exc)
+
+            return {
+                'ok': True,
+                'announce': True,
+                'status': 200,
+                'text': f'🎮 Room "{room_name}" picked: {game_name} (participants: {len(participants)}).',
+            }
+
+        return {'ok': False, 'announce': False, 'status': 400, 'text': f'Unknown picker action "{action}".'}
+
+    return {'ok': False, 'announce': False, 'status': 400, 'text': f'Unknown command "{cmd}".'}
+
+
+# ---------------------------------------------------------------------------
 # Leaderboard API
 # ---------------------------------------------------------------------------
 
@@ -5406,7 +5802,12 @@ def api_chat_messages():
       - ``since_id``: return only messages with id > this value (default 0)
       - ``limit``:    max messages to return (default 50)
     """
-    room = request.args.get('room', 'general')
+    global current_user
+    with current_user_lock:
+        username = current_user
+    room = _normalize_chat_room_name(request.args.get('room', 'general'))
+    if not _can_access_chat_room(username, room):
+        return jsonify({'error': f'Access denied for private room "{room}"'}), 403
     try:
         since_id = int(request.args.get('since_id', 0))
         limit = int(request.args.get('limit', 50))
@@ -5440,13 +5841,76 @@ def api_chat_send():
         username = current_user
     data = request.get_json() or {}
     message = data.get('message', '').strip()
-    room = data.get('room', 'general').strip() or 'general'
+    room = _normalize_chat_room_name(data.get('room', 'general'))
     if not message:
         return jsonify({'error': 'message is required'}), 400
     if len(message) > 500:
         return jsonify({'error': 'message must be 500 characters or fewer'}), 400
     db = next(database.get_db())
     try:
+        if not _can_access_chat_room(username, room):
+            return jsonify({'error': f'Access denied for private room "{room}"'}), 403
+
+        # Update user's current room and activity
+        with user_room_lock:
+            user_current_room[username] = room
+            user_last_activity[username] = datetime.utcnow().timestamp()
+
+        with chat_rooms_lock:
+            state = chat_rooms.get(room)
+            if state:
+                state['members'].add(username)
+
+        if message.startswith('/'):
+            # First, save the command text itself (visible only to sender and admins)
+            if _chat_service:
+                _chat_service.send(db, sender_username=username,
+                                  message=message, room=room, command_only=True)
+            else:
+                database.send_chat_message(db, sender_username=username,
+                                          message=message, room=room, command_only=True)
+            
+            # Now handle the command and get the result
+            cmd_result = _handle_chat_command(db, username=username, room=room, message=message)
+            if not cmd_result.get('ok'):
+                return jsonify({'error': cmd_result.get('text', 'Command failed')}), int(cmd_result.get('status', 400))
+
+            if not cmd_result.get('announce', False):
+                # Save command-only result as a private message
+                cmd_text = cmd_result.get('text', '').strip()
+                if _chat_service:
+                    msg = _chat_service.send(db, sender_username=username,
+                                             message=cmd_text, room=room, command_only=True)
+                else:
+                    msg = database.send_chat_message(db, sender_username=username,
+                                                     message=cmd_text, room=room, command_only=True)
+                if msg:
+                    msg['command'] = True
+                    if 'room_name' in cmd_result:
+                        msg['room_name'] = cmd_result['room_name']
+                    return jsonify(msg), int(cmd_result.get('status', 200))
+                resp = {
+                    'command': True,
+                    'room': room,
+                    'message': cmd_text,
+                }
+                if 'room_name' in cmd_result:
+                    resp['room_name'] = cmd_result['room_name']
+                return jsonify(resp), int(cmd_result.get('status', 200))
+
+            # Announcement message - visible to everyone
+            announcement = cmd_result.get('text', '').strip()
+            if _chat_service:
+                msg = _chat_service.send(db, sender_username=username,
+                                         message=announcement, room=room)
+            else:
+                msg = database.send_chat_message(db, sender_username=username,
+                                                 message=announcement, room=room)
+            if not msg:
+                return jsonify({'error': 'Command succeeded but announcement message could not be sent'}), 500
+            msg['command'] = True
+            return jsonify(msg), int(cmd_result.get('status', 200))
+
         if _chat_service:
             msg = _chat_service.send(db, sender_username=username,
                                      message=message, room=room)
@@ -5459,6 +5923,143 @@ def api_chat_send():
     if not msg:
         return jsonify({'error': 'Failed to send message'}), 500
     return jsonify(msg), 201
+
+
+@app.route('/api/chat/online-users')
+@require_login
+def api_chat_online_users():
+    """Get list of online users and their current rooms.
+    
+    Returns dict mapping room_name -> list of usernames in that room.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    
+    online_users = {}
+    current_time = datetime.utcnow().timestamp()
+    
+    with user_room_lock:
+        # Get all users and their current rooms, filter out inactive users (not active in last 5 minutes)
+        for user, room in user_current_room.items():
+            last_activity = user_last_activity.get(user, current_time)
+            # If user hasn't been active in 5 minutes, consider them offline
+            if current_time - last_activity < 300:
+                if room not in online_users:
+                    online_users[room] = []
+                online_users[room].append(user)
+    
+    return jsonify({'online_users': online_users})
+
+
+@app.route('/api/chat/update-room', methods=['POST'])
+@require_login
+def api_chat_update_room():
+    """Update the current user's active room.
+    
+    Request JSON:
+      - ``room``: room name
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    
+    data = request.get_json() or {}
+    room = _normalize_chat_room_name(data.get('room', 'general'))
+    
+    with user_room_lock:
+        user_current_room[username] = room
+        user_last_activity[username] = datetime.utcnow().timestamp()
+    
+    return jsonify({'ok': True, 'room': room})
+
+
+@app.route('/api/chat/room-users', methods=['GET'])
+@require_login
+def api_chat_room_users():
+    """Get members and invite status for a room.
+    
+    Query params:
+      - ``room``: room name (default 'general')
+    
+    Returns:
+      - ``members``: list of usernames who are members
+      - ``invites``: list of usernames who have been invited
+      - ``owner``: owner username (or null)
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    
+    room = _normalize_chat_room_name(request.args.get('room', 'general'))
+    if not _can_access_chat_room(username, room):
+        return jsonify({'error': f'Access denied for private room "{room}"'}), 403
+    
+    state = _ensure_chat_room(room)
+    with chat_rooms_lock:
+        return jsonify({
+            'room': room,
+            'owner': state.get('owner'),
+            'is_private': state.get('is_private', False),
+            'members': list(state.get('members', [])),
+            'invites': list(state.get('invites', [])) if state.get('is_private') else []
+        })
+
+
+@app.route('/api/chat/invite', methods=['POST'])
+@require_login
+def api_chat_invite():
+    """Send an invite to a user for a private room.
+    
+    Request JSON:
+      - ``room``: room name
+      - ``target_username``: username to invite
+    
+    Only the room owner can invite users to private rooms.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    
+    data = request.get_json() or {}
+    target_username = data.get('target_username', '').strip()
+    room = _normalize_chat_room_name(data.get('room', 'general'))
+    
+    if not target_username:
+        return jsonify({'error': 'target_username is required'}), 400
+    
+    ok, msg, _ = _invite_to_chat_room(username, target_username, room)
+    status = 200 if ok else 403
+    return jsonify({'ok': ok, 'message': msg}), status
+
+
+@app.route('/api/user-profile/<username>')
+@require_login
+def api_get_user_profile(username):
+    """Get user profile card (display name, bio, avatar, stats, roles, etc).
+    
+    URL params:
+      - ``username``: target username (required)
+    
+    Returns user profile card with:
+      - username, display_name, bio, avatar_url
+      - roles (list)
+      - stats (total_games, total_playtime_hours, total_achievements)
+      - joined date
+      - platform IDs
+    """
+    if not username:
+        return jsonify({'error': 'username is required'}), 400
+    
+    db = next(database.get_db())
+    try:
+        user_card = database.get_user_card(db, username)
+        if not user_card:
+            return jsonify({'error': f'User "{username}" not found'}), 404
+        return jsonify(user_card)
+    finally:
+        if db:
+            db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -6813,7 +7414,10 @@ def api_smart_recommendations():
     * Recently-played history penalty
 
     Query params:
-        count (int, 1-50, default 10): Number of recommendations to return.
+           count (int, 1-50, default 10): Number of recommendations to return.
+           platforms (str): Comma-separated list of platforms to filter by.
+           max_budget (float): Maximum price to consider for recommendations.
+           include_new (bool): If true, boost recently released games.
 
     Response JSON::
 
@@ -6845,6 +7449,19 @@ def api_smart_recommendations():
     except (ValueError, TypeError):
         count = 10
 
+    platforms_param = request.args.get('platforms', '').strip()
+    platforms = [p.strip() for p in platforms_param.split(',') if p.strip()] if platforms_param else None
+
+    max_budget = None
+    max_budget_param = request.args.get('max_budget', '').strip()
+    if max_budget_param:
+        try:
+            max_budget = float(max_budget_param)
+        except (ValueError, TypeError):
+            max_budget = None
+
+    include_new = request.args.get('include_new', '').lower() in ('true', '1', 'yes')
+
     with picker_lock:
         games   = list(picker.games) if picker.games else []
         history = list(picker.history) if hasattr(picker, 'history') else []
@@ -6856,6 +7473,7 @@ def api_smart_recommendations():
 
         well_mins   = getattr(picker, 'WELL_PLAYED_THRESHOLD_MINUTES', 600)
         barely_mins = getattr(picker, 'BARELY_PLAYED_THRESHOLD_MINUTES', 120)
+        budget_svc  = getattr(picker, 'budget_service', None)
 
     engine = SmartRecommendationEngine(
         games=games,
@@ -6863,8 +7481,14 @@ def api_smart_recommendations():
         history=history,
         well_played_mins=well_mins,
         barely_played_mins=barely_mins,
+        budget_service=budget_svc,
     )
-    recs = engine.recommend(count=count)
+    recs = engine.recommend(
+        count=count,
+        platforms=platforms,
+        max_budget=max_budget,
+        include_new_releases=include_new
+    )
     return jsonify({'recommendations': recs, 'engine': 'smart'})
 
 

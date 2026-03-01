@@ -827,19 +827,21 @@ class MultiUserPicker:
 
     def create_voting_session(self, candidates: List[Dict],
                               voters: Optional[List[str]] = None,
-                              duration: Optional[int] = None) -> VotingSession:
+                              duration: Optional[int] = None,
+                              voting_method: str = 'plurality') -> VotingSession:
         """Create a new voting session.
 
         Args:
             candidates: List of game dicts that users can vote for.
             voters: Optional list of eligible voter names. If None, any name is accepted.
             duration: Optional voting window in seconds.
+            voting_method: 'plurality' (default) or 'ranked_choice' voting method.
 
         Returns:
             The newly created VotingSession.
         """
         session_id = str(uuid.uuid4())
-        session = VotingSession(session_id, candidates, voters=voters, duration=duration)
+        session = VotingSession(session_id, candidates, voters=voters, duration=duration, voting_method=voting_method)
         self.voting_sessions[session_id] = session
         return session
 

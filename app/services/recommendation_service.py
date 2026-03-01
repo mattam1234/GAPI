@@ -62,12 +62,14 @@ class SmartRecommendationEngine:
         history: Optional[List[str]] = None,
         well_played_mins: int = int(_WELL_PLAYED_HOURS * 60),
         barely_played_mins: int = 120,
+        budget_service: Optional[Any] = None,
     ) -> None:
         self._games            = games or []
         self._cache            = details_cache or {}
         self._history          = history or []
         self._well_played_mins = well_played_mins
         self._barely_mins      = barely_played_mins
+        self._budget_service   = budget_service
 
         # Pre-built affinity profiles (populated lazily)
         self._genre_weights:   Optional[Dict[str, float]] = None
@@ -79,7 +81,14 @@ class SmartRecommendationEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    def recommend(self, count: int = 10) -> List[Dict[str, Any]]:
+    def recommend(
+        self,
+        count: int = 10,
+        platforms: Optional[List[str]] = None,
+        max_budget: Optional[float] = None,
+        include_new_releases: bool = False,
+        new_release_days: int = 180,
+    ) -> List[Dict[str, Any]]:
         """Return the top *count* recommended games.
 
         Each returned dict is a copy of the original game dict enriched with:
@@ -90,6 +99,11 @@ class SmartRecommendationEngine:
 
         Args:
             count: Maximum number of recommendations to return.
+            platforms: List of platforms to filter by (e.g., ['steam', 'epic', 'gog']).
+                      If None or empty, includes all platforms.
+            max_budget: Maximum game price to consider. If None, no budget filtering.
+            include_new_releases: If True, boost scores for recently released games.
+            new_release_days: Number of days to consider a game as "new" (default 180).
 
         Returns:
             List sorted by ``smart_score`` descending.
@@ -109,7 +123,33 @@ class SmartRecommendationEngine:
         if not candidates:
             candidates = list(self._games)
 
-        scored = [self._score_game(g, recent_ids) for g in candidates]
+        # Apply platform filtering
+        if platforms:
+            platforms_lower = [p.lower() for p in platforms]
+            candidates = [
+                g for g in candidates
+                if g.get('platform', 'steam').lower() in platforms_lower
+            ]
+
+        # Apply budget filtering
+        if max_budget is not None and self._budget_service:
+            filtered = []
+            for game in candidates:
+                game_id = game.get('game_id', '')
+                price_data = self._budget_service.get_entry(game_id)
+                if price_data:
+                    price = price_data.get('price', 0)
+                    if price <= max_budget:
+                        filtered.append(game)
+                else:
+                    # Include games without price data
+                    filtered.append(game)
+            candidates = filtered
+
+        scored = [
+            self._score_game(g, recent_ids, include_new_releases, new_release_days)
+            for g in candidates
+        ]
         scored.sort(key=lambda x: x['score'], reverse=True)
 
         # Diversity pass: limit same developer to 2 consecutive spots in top-N
@@ -187,6 +227,8 @@ class SmartRecommendationEngine:
         self,
         game: Dict[str, Any],
         recent_ids: set,
+        include_new_releases: bool = False,
+        new_release_days: int = 180,
     ) -> Dict[str, Any]:
         score    = 0.0
         reasons: List[str] = []
@@ -208,6 +250,29 @@ class SmartRecommendationEngine:
 
         details = self._get_details(game)
         if details:
+            # New release boost
+            if include_new_releases:
+                release_date = details.get('release_date', {})
+                if isinstance(release_date, dict):
+                    date_str = release_date.get('date', '')
+                    if date_str:
+                        try:
+                            from datetime import datetime, timezone
+                            # Parse various date formats
+                            for fmt in ['%d %b, %Y', '%b %d, %Y', '%Y-%m-%d']:
+                                try:
+                                    release_dt = datetime.strptime(date_str, fmt)
+                                    days_old = (datetime.now() - release_dt).days
+                                    if days_old >= 0 and days_old <= new_release_days:
+                                        boost = 2.0 * (1 - (days_old / new_release_days))
+                                        score += boost
+                                        reasons.append(f'New release ({days_old}d ago)')
+                                    break
+                                except ValueError:
+                                    continue
+                        except Exception:
+                            pass
+
             # Genre affinity
             genre_boost, genre_reasons = self._affinity_boost(
                 [e.get('description', '') for e in details.get('genres', [])],

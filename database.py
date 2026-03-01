@@ -306,6 +306,7 @@ class ChatMessage(Base):
     room = Column(String(100), default='general')  # channel / room name
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    command_only = Column(Boolean, default=False)  # Only visible to sender and admins
 
     sender = relationship("User", foreign_keys=[sender_id])
     recipient = relationship("User", foreign_keys=[recipient_id])
@@ -356,11 +357,46 @@ def init_db():
         try:
             Base.metadata.create_all(bind=engine)
             logger.info("Database tables initialized successfully")
+            
+            # Run migrations
+            _run_migrations()
             return True
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             return False
     return False
+
+
+def _run_migrations():
+    """Run database migrations."""
+    if not engine:
+        return
+    
+    # Migrate: Add command_only column to chat_messages if it doesn't exist
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+        
+        if 'chat_messages' in inspector.get_table_names():
+            columns = {col['name'] for col in inspector.get_columns('chat_messages')}
+            
+            if 'command_only' not in columns:
+                with engine.connect() as conn:
+                    # Determine database type and use appropriate SQL
+                    dialect_name = engine.dialect.name
+                    
+                    if dialect_name == 'sqlite':
+                        conn.execute(text('ALTER TABLE chat_messages ADD COLUMN command_only BOOLEAN DEFAULT 0'))
+                    elif dialect_name == 'postgresql':
+                        conn.execute(text('ALTER TABLE chat_messages ADD COLUMN command_only BOOLEAN DEFAULT false'))
+                    else:
+                        # SQL Server and others
+                        conn.execute(text('ALTER TABLE chat_messages ADD command_only BIT DEFAULT 0'))
+                    
+                    conn.commit()
+                    logger.info("Migrated: Added command_only column to chat_messages")
+    except Exception as e:
+        logger.warning(f"Migration check failed (may already be applied): {e}")
 
 
 def get_user_by_username(db, username: str):
@@ -966,7 +1002,7 @@ def mark_notifications_read(db, username: str, notification_ids: list = None) ->
 # Chat helpers
 # ---------------------------------------------------------------------------
 
-def send_chat_message(db, sender_username: str, message: str, room: str = 'general', recipient_username: str = None) -> dict:
+def send_chat_message(db, sender_username: str, message: str, room: str = 'general', recipient_username: str = None, command_only: bool = False) -> dict:
     """Save a chat message and return it as a dict."""
     if not db:
         return {}
@@ -979,22 +1015,44 @@ def send_chat_message(db, sender_username: str, message: str, room: str = 'gener
             recipient = db.query(User).filter(User.username == recipient_username).first()
             if recipient:
                 recipient_id = recipient.id
-        msg = ChatMessage(
-            sender_id=sender.id,
-            recipient_id=recipient_id,
-            room=room,
-            message=message,
-        )
+        
+        # Try to create message with command_only field
+        try:
+            msg = ChatMessage(
+                sender_id=sender.id,
+                recipient_id=recipient_id,
+                room=room,
+                message=message,
+                command_only=command_only,
+            )
+        except TypeError:
+            # Fallback for older database schema without command_only
+            msg = ChatMessage(
+                sender_id=sender.id,
+                recipient_id=recipient_id,
+                room=room,
+                message=message,
+            )
+        
         db.add(msg)
         db.commit()
         db.refresh(msg)
-        return {
+        
+        result = {
             'id': msg.id,
             'sender': sender_username,
             'room': msg.room,
             'message': msg.message,
             'created_at': msg.created_at.isoformat() if msg.created_at else None,
         }
+        
+        # Handle command_only - may not exist in older databases
+        try:
+            result['command_only'] = msg.command_only
+        except AttributeError:
+            result['command_only'] = False
+        
+        return result
     except Exception as e:
         logger.error(f"Error sending chat message: {e}")
         db.rollback()
@@ -1012,13 +1070,19 @@ def get_chat_messages(db, room: str = 'general', limit: int = 50, since_id: int 
         msgs = q.order_by(ChatMessage.created_at.asc()).limit(limit).all()
         result = []
         for m in msgs:
-            result.append({
+            item = {
                 'id': m.id,
                 'sender': m.sender.username if m.sender else 'unknown',
                 'room': m.room,
                 'message': m.message,
                 'created_at': m.created_at.isoformat() if m.created_at else None,
-            })
+            }
+            # Handle command_only - may not exist in older databases
+            try:
+                item['command_only'] = m.command_only
+            except AttributeError:
+                item['command_only'] = False
+            result.append(item)
         return result
     except Exception as e:
         logger.error(f"Error getting chat messages: {e}")

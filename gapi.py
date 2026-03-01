@@ -1200,7 +1200,13 @@ class GamePicker:
         """Check Steam prices for all wishlist games and return sale items."""
         return self.wishlist_service.check_sales(self.steam_client)
 
-    def get_recommendations(self, count: int = 10) -> List[Dict]:
+    def get_recommendations(
+        self,
+        count: int = 10,
+        platforms: Optional[List[str]] = None,
+        max_budget: Optional[float] = None,
+        include_new_releases: bool = False
+    ) -> List[Dict]:
         """Recommend games from the user's library based on playtime and genre patterns.
 
         The algorithm:
@@ -1218,6 +1224,9 @@ class GamePicker:
 
         Args:
             count: Maximum number of recommendations to return.
+            platforms: List of platforms to filter by. If None, includes all platforms.
+            max_budget: Maximum game price to consider. If None, no budget filtering.
+            include_new_releases: If True, boost scores for recently released games.
 
         Returns:
             List of game dicts enriched with ``recommendation_score`` (float) and
@@ -1262,6 +1271,33 @@ class GamePicker:
         if not candidates:
             candidates = list(self.games)
 
+        # Apply platform filter
+        if platforms:
+            platforms_lower = [p.lower() for p in platforms]
+            candidates = [
+                g for g in candidates
+                if g.get('platform', 'steam').lower() in platforms_lower
+            ]
+
+        # Apply budget filter
+        if max_budget is not None:
+            filtered = []
+            for game in candidates:
+                game_id = game.get('game_id', '')
+                if hasattr(self, 'budget_service'):
+                    price_data = self.budget_service.get_entry(game_id)
+                    if price_data:
+                        price = price_data.get('price', 0)
+                        if price <= max_budget:
+                            filtered.append(game)
+                    else:
+                        # Include games without price data
+                        filtered.append(game)
+                else:
+                    # No budget service available, include all games
+                    filtered.append(game)
+            candidates = filtered
+
         recent_ids: set = set(self.history[-min(len(self.history), 10):])
 
         # ------------------------------------------------------------------
@@ -1286,6 +1322,38 @@ class GamePicker:
             # History penalty
             if game_id_str in recent_ids:
                 score -= 2.0
+
+            # New release boost
+            if include_new_releases:
+                app_id = extract_game_id(game)
+                platform = game.get('platform', 'steam')
+                client = self.clients.get(platform)
+                if app_id is not None and client is not None:
+                    try:
+                        cache_key = int(app_id)
+                    except (ValueError, TypeError):
+                        cache_key = app_id  # type: ignore[assignment]
+                    details = client.details_cache.get(cache_key)
+                    if details:
+                        release_date = details.get('release_date', {})
+                        if isinstance(release_date, dict):
+                            date_str = release_date.get('date', '')
+                            if date_str:
+                                try:
+                                    # Parse various date formats
+                                    for fmt in ['%d %b, %Y', '%b %d, %Y', '%Y-%m-%d']:
+                                        try:
+                                            release_dt = datetime.datetime.strptime(date_str, fmt)
+                                            days_old = (datetime.datetime.now() - release_dt).days
+                                            if days_old >= 0 and days_old <= 180:  # Within 6 months
+                                                boost = 2.0 * (1 - (days_old / 180.0))
+                                                score += boost
+                                                reasons.append(f'New release ({days_old}d ago)')
+                                            break
+                                        except ValueError:
+                                            continue
+                                except Exception:
+                                    pass
 
             # Genre affinity boost
             if genre_weights:

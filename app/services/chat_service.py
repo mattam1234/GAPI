@@ -24,7 +24,8 @@ class ChatService:
 
     def send(self, db, sender_username: str, message: str,
              room: str = 'general',
-             recipient_username: str = None) -> dict:
+             recipient_username: str = None,
+             command_only: bool = False) -> dict:
         """Save a chat message and return the persisted message dict.
 
         Args:
@@ -33,6 +34,7 @@ class ChatService:
             message:            Message text.
             room:               Chat room name (default ``'general'``).
             recipient_username: Optional direct-message recipient.
+            command_only:       Whether message is command-only (visible to sender/admin only).
 
         Returns:
             Dict with ``id``, ``sender``, ``room``, ``message``,
@@ -41,6 +43,7 @@ class ChatService:
         return self._db.send_chat_message(
             db, sender_username, message,
             room=room, recipient_username=recipient_username,
+            command_only=command_only,
         )
 
     def get_messages(self, db, room: str = 'general',

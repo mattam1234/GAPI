@@ -1405,6 +1405,22 @@
                     <option value="10" selected>10</option>
                     <option value="20">20</option>
                 </select>
+                    <label style="font-weight:600; color:var(--text-primary);">Platform:</label>
+                    <select id="rec-platform" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                        <option value="">All Platforms</option>
+                        <option value="steam">Steam</option>
+                        <option value="epic">Epic Games</option>
+                        <option value="gog">GOG</option>
+                        <option value="xbox">Xbox</option>
+                        <option value="playstation">PlayStation</option>
+                        <option value="nintendo">Nintendo</option>
+                    </select>
+                    <label style="font-weight:600; color:var(--text-primary);">Max Budget:</label>
+                    <input id="rec-budget" type="number" min="0" step="1" placeholder="Any price" style="width:100px; padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" id="rec-new-releases">
+                        <span style="font-weight:600; color:var(--text-primary);">New Releases</span>
+                    </label>
                 <button onclick="loadRecommendations()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
             </div>
             <div id="recommendations-list">
@@ -1439,15 +1455,32 @@
                     <option value="gaming">🎮 gaming</option>
                     <option value="off-topic">🎲 off-topic</option>
                 </select>
+                <button onclick="openCreateRoomModal()" style="padding:8px 16px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">+ Create Room</button>
             </div>
-            <div id="chat-messages" style="height:350px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px; margin-bottom:12px; display:flex; flex-direction:column; gap:8px;">
-                <div class="loading">Loading messages…</div>
-            </div>
-            <div style="display:flex; gap:8px;">
-                <input id="chat-input" type="text" placeholder="Type a message…" maxlength="500"
-                       onkeydown="if(event.key==='Enter')sendChatMessage()"
-                       style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
-                <button onclick="sendChatMessage()" style="padding:10px 24px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Send</button>
+            <div style="display:flex; gap:12px; flex:1;">
+                <!-- Chat column -->
+                <div style="flex:1; display:flex; flex-direction:column;">
+                    <div id="chat-messages" style="height:350px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px; margin-bottom:12px; display:flex; flex-direction:column; gap:8px;">
+                        <div class="loading">Loading messages…</div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <input id="chat-input" type="text" placeholder="Type a message…" maxlength="500"
+                               onkeydown="if(event.key==='Enter')sendChatMessage()"
+                               style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                        <button onclick="sendChatMessage()" style="padding:10px 24px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Send</button>
+                    </div>
+                </div>
+                
+                <!-- Online users sidebar -->
+                <div id="chat-sidebar" style="width:250px; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px; display:flex; flex-direction:column;">
+                    <h4 style="margin:0 0 12px 0; color:var(--text-primary); font-size:0.95em; display:flex; align-items:center; gap:6px;">
+                        👥 Online Users
+                        <button onclick="loadOnlineUsers()" style="margin-left:auto; padding:4px 8px; background:var(--input-border); border:none; border-radius:4px; cursor:pointer; font-size:0.8em; color:var(--text-primary);">🔄</button>
+                    </h4>
+                    <div id="online-users-list" style="flex:1; overflow-y:auto; font-size:0.9em;">
+                        <div class="loading" style="font-size:0.85em;">Loading…</div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1814,6 +1847,51 @@
         </div>
     </div>
 
+    <!-- Add to Playlist Modal -->
+    <div id="playlist-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+        <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:500px; width:90%; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+            <h3 style="margin-top:0;" id="playlist-modal-title">📋 Add to Playlist</h3>
+            <div id="playlist-list" style="margin:20px 0;">
+                <div class="loading">Loading playlists…</div>
+            </div>
+            <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--card-border);">
+                <label style="display:block; margin-bottom:8px; font-weight:600; font-size:0.95em;">Or create new playlist:</label>
+                <div style="display:flex; gap:10px;">
+                    <input type="text" id="new-playlist-input" class="search-input" placeholder="New playlist name…" style="margin-bottom:0; flex:1;">
+                    <button onclick="createNewPlaylistFromModal()" style="padding:8px 16px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Create</button>
+                </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px; justify-content:flex-end;">
+                <button onclick="closePlaylistModal()" style="padding:8px 16px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer;">✕ Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add to Backlog Modal -->
+    <div id="backlog-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+        <div style="background:var(--card-bg); border-radius:16px; padding:28px; max-width:400px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+            <h3 style="margin-top:0;" id="backlog-modal-title">📚 Add to Backlog</h3>
+            <p style="color:var(--text-secondary); margin:10px 0 20px 0; font-size:0.95em;">Select the status for this game:</p>
+            <div id="backlog-options" style="display:flex; flex-direction:column; gap:10px; margin:20px 0;">
+                <button onclick="selectBacklogStatus('want_to_play')" style="padding:12px; background:var(--card-border); color:var(--text-primary); border:1px solid var(--input-border); border-radius:8px; cursor:pointer; text-align:left; transition:all 0.2s; font-weight:500;">
+                    ⏳ Want to Play
+                </button>
+                <button onclick="selectBacklogStatus('playing')" style="padding:12px; background:var(--card-border); color:var(--text-primary); border:1px solid var(--input-border); border-radius:8px; cursor:pointer; text-align:left; transition:all 0.2s; font-weight:500;">
+                    🎮 Currently Playing
+                </button>
+                <button onclick="selectBacklogStatus('completed')" style="padding:12px; background:var(--card-border); color:var(--text-primary); border:1px solid var(--input-border); border-radius:8px; cursor:pointer; text-align:left; transition:all 0.2s; font-weight:500;">
+                    ✅ Completed
+                </button>
+                <button onclick="selectBacklogStatus('dropped')" style="padding:12px; background:var(--card-border); color:var(--text-primary); border:1px solid var(--input-border); border-radius:8px; cursor:pointer; text-align:left; transition:all 0.2s; font-weight:500;">
+                    ⛔ Dropped
+                </button>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px; justify-content:flex-end;">
+                <button onclick="closeBacklogModal()" style="padding:8px 16px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer;">✕ Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Debug: surface runtime errors to alert/console for easier diagnosis
         window.addEventListener('error', function (ev) {
@@ -1998,6 +2076,12 @@
             if (tabName === 'achievements') loadAchievements();
             if (tabName === 'friends') loadFriends();
             if (tabName === 'recommendations') loadRecommendations();
+            if (tabName === 'chat') {
+                loadChatMessages(false);
+                loadOnlineUsers();
+                loadRoomInfo();
+                startChatPolling();
+            }
             if (tabName === 'settings') {
                 loadSettings();
             }
@@ -2296,6 +2380,63 @@
             } catch (e) { /* silent */ }
         }
 
+        async function displayMultiUserGame(game, selectedUsers) {
+            const resultDiv = document.getElementById('multiuser-result');
+            const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
+            
+            // Multi-user specific info
+            const playersInfo = game.owners ? game.owners.join(', ') : selectedUsers.join(', ');
+            const multiplayerBadges = `
+                ${game.is_coop ? '<span style="display:inline-block; background:#27ae60; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em; margin-right:5px;">✅ Co-op</span>' : ''}
+                ${game.is_multiplayer ? '<span style="display:inline-block; background:#3498db; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em;">✅ Multiplayer</span>' : ''}
+            `;
+            
+            const safeGameName = escapeHtml(game.name || 'Unknown Game');
+            const heroFallback = `https://cdn.akamai.steamstatic.com/steam/apps/${game.app_id}/header.jpg`;
+
+            let html = `
+                <div class="game-hero" id="game-hero-card">
+                    <img id="game-hero-image" src="${heroFallback}" alt="${safeGameName} hero" loading="lazy">
+                    <div class="game-hero-overlay">
+                        <div class="game-hero-title">${favoriteIcon}${safeGameName}</div>
+                        <div class="game-hero-subtitle">Multi-User Pick • App ID: ${game.app_id}</div>
+                    </div>
+                </div>
+                <div style="background: #e8f4f8; padding: 12px; border-radius: 8px; margin: 12px 0;">
+                    <strong>👥 Players:</strong> ${playersInfo}
+                    <div style="margin-top: 8px;">${multiplayerBadges}</div>
+                </div>
+                <div id="game-details">Loading details...</div>
+                <div class="action-buttons" style="margin-top:12px;">
+                    <button class="btn btn-link" onclick="window.open('${game.steam_url}', '_blank')">
+                        🔗 Open in Steam
+                    </button>
+                    <button class="btn btn-link" onclick="window.open('${game.steamdb_url}', '_blank')">
+                        📊 Open in SteamDB
+                    </button>
+                    <button class="btn" onclick="shareMultiUserGame()" style="background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none;">
+                        📤 Share
+                    </button>
+                </div>
+            `;
+
+            resultDiv.innerHTML = html;
+            resultDiv.style.display = 'block';
+
+            // Load game details
+            loadGameDetails(game.app_id);
+        }
+
+        function shareMultiUserGame() {
+            const resultDiv = document.getElementById('multiuser-result');
+            const gameName = resultDiv.querySelector('.game-hero-title')?.textContent?.replace('⭐', '').trim() || 'Game';
+            const steamUrl = resultDiv.querySelector('[onclick*="steam_url"]')?.getAttribute('onclick')?.match(/https:\/\/[^']+/)?.[0] || '';
+            const text = `🎮 Multi-User Pick: **${gameName}**\n${steamUrl}`;
+            const modal = document.getElementById('share-modal');
+            document.getElementById('share-text').value = text;
+            modal.style.display = 'flex';
+        }
+
         async function setBacklogStatus(gameId, status) {
             try {
                 if (!status) {
@@ -2496,6 +2637,7 @@
                     }
                     await updateStatus();
                     loadFavorites();
+                    loadLibrary();  // Refresh library list to update star color
                 }
             } catch (error) {
                 alert('Error updating favorite: ' + error.message);
@@ -2514,18 +2656,21 @@
                     let html = '';
                     data.games.forEach(game => {
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
+                        const safeName = game.name.replace(/'/g, "\\'");
                         html += `
-                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${game.name.replace(/'/g, "\\'")}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
+                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                                 <div class="list-item-media">
                                     ${renderGameListThumb(game.app_id, game.name)}
                                     <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
                                 </div>
-                                <div style="display:flex; gap:10px; align-items:center;">
+                                <div style="display:flex; gap:8px; align-items:center;">
                                     <span>${game.playtime_hours}h</span>
-                                    <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
+                                    <span title="Favorite" style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
-                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
+                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
+                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
+                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeName}')">🚫</span>
                                 </div>
                             </div>
                         `;
@@ -2608,18 +2753,21 @@
                     data.games.forEach(game => {
                         appIds.push(game.app_id);
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
+                        const safeName = game.name.replace(/'/g, "\\'");
                         html += `
-                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${game.name.replace(/'/g, "\\'")}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
+                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                                 <div class="list-item-media">
                                     ${renderGameListThumb(game.app_id, game.name)}
                                     <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
                                 </div>
-                                <div style="display:flex; gap:10px; align-items:center;">
+                                <div style="display:flex; gap:8px; align-items:center;">
                                     <span>${game.playtime_hours}h</span>
-                                    <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
+                                    <span title="Favorite" style="cursor:pointer; font-size:1.2em; color: ${game.is_favorite ? '#ffc107' : 'inherit'};" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
-                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
+                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeName}')">📋</span>
+                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeName}')">📚</span>
+                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeName}')">🚫</span>
                                 </div>
                             </div>
                         `;
@@ -2795,9 +2943,11 @@
                                     ${renderGameListThumb(game.app_id, game.name)}
                                     <div><span class="favorite-icon">⭐</span><strong class="list-item-title">${game.name}</strong></div>
                                 </div>
-                                <div>
-                                    ${game.playtime_hours}h
-                                    <button class="btn btn-favorite" style="margin-left: 10px; padding: 5px 10px;"
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <span>${game.playtime_hours}h</span>
+                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeName}')">📋</span>
+                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeName}')">📚</span>
+                                    <button class="btn btn-favorite" style="padding: 5px 10px; font-size:0.85em;"
                                             onclick="event.stopPropagation(); removeFavorite(${game.app_id})">Remove</button>
                                 </div>
                             </div>
@@ -3547,25 +3697,9 @@
 
                 const game = await response.json();
 
-                let html = `
-                    <h3 style="color: #667eea; margin-bottom: 15px;">🎮 ${game.name}</h3>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
-                        <div>
-                            <strong>App ID:</strong> ${game.app_id}
-                        </div>
-                        <div>
-                            <strong>Players:</strong> ${game.owners ? game.owners.join(', ') : selectedUsers.join(', ')}
-                        </div>
-                        ${game.is_coop ? '<div><strong>✅ Co-op Game</strong></div>' : ''}
-                        ${game.is_multiplayer ? '<div><strong>✅ Multiplayer</strong></div>' : ''}
-                    </div>
-                    <div style="display: flex; gap: 10px;">
-                        <a href="${game.steam_url}" target="_blank" class="btn btn-link">🔗 Steam Store</a>
-                        <a href="${game.steamdb_url}" target="_blank" class="btn btn-link">📊 SteamDB</a>
-                    </div>
-                `;
+                // Display multi-user game with same rich preview as single-player picker
+                await displayMultiUserGame(game, selectedUsers);
                 
-                resultDiv.innerHTML = html;
             } catch (error) {
                 resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
             } finally {
@@ -4944,6 +5078,137 @@
             }
         }
 
+        let currentPlaylistGameId = null;
+        let currentPlaylistGameName = null;
+        let currentBacklogGameId = null;
+        let currentBacklogGameName = null;
+
+        async function quickAddToPlaylist(gameId, gameName) {
+            currentPlaylistGameId = gameId;
+            currentPlaylistGameName = gameName;
+            
+            const playlistList = document.getElementById('playlist-list');
+            playlistList.innerHTML = '<div class="loading">Loading playlists…</div>';
+            
+            try {
+                const response = await fetch('/api/playlists');
+                if (!response.ok) {
+                    const data = await response.json();
+                    playlistList.innerHTML = `<p style="color:var(--error-red);">⚠️ ${data.error || 'Failed to load playlists'}</p>`;
+                    document.getElementById('playlist-modal').style.display = 'flex';
+                    return;
+                }
+                const data = await response.json();
+                
+                if (data.playlists && data.playlists.length > 0) {
+                    playlistList.innerHTML = data.playlists.map(p => `
+                        <button onclick="addToPlaylistAndClose('${p.name}')" style="padding:12px; background:var(--card-border); color:var(--text-primary); border:1px solid var(--input-border); border-radius:8px; cursor:pointer; text-align:left; transition:all 0.2s; font-weight:500;">
+                            📋 ${p.name} (${p.count} games)
+                        </button>
+                    `).join('');
+                } else {
+                    playlistList.innerHTML = '<p style="color:var(--text-secondary);">No playlists yet. Create one below.</p>';
+                }
+            } catch (error) {
+                console.error('Playlist load error:', error);
+                playlistList.innerHTML = `<p style="color:var(--error-red);">⚠️ Failed to load playlists: ${error.message}</p>`;
+            }
+            
+            document.getElementById('new-playlist-input').value = '';
+            document.getElementById('playlist-modal').style.display = 'flex';
+        }
+
+        async function addToPlaylistAndClose(playlistName) {
+            if (!currentPlaylistGameId) return;
+            
+            try {
+                const response = await fetch(`/api/playlists/${encodeURIComponent(playlistName)}/games`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({game_id: currentPlaylistGameId})
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showMessage(`✅ Added "${currentPlaylistGameName}" to "${playlistName}"!`, 'success');
+                    closePlaylistModal();
+                } else {
+                    showMessage(data.error || 'Failed to add to playlist', 'error');
+                }
+            } catch (error) {
+                console.error('Add to playlist error:', error);
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function createNewPlaylistFromModal() {
+            const playlistName = document.getElementById('new-playlist-input').value.trim();
+            if (!playlistName) {
+                showMessage('Please enter a playlist name', 'error');
+                return;
+            }
+            if (!currentPlaylistGameId) return;
+            
+            try {
+                const response = await fetch(`/api/playlists/${encodeURIComponent(playlistName)}/games`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({game_id: currentPlaylistGameId})
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showMessage(`✅ Created playlist "${playlistName}" and added "${currentPlaylistGameName}"!`, 'success');
+                    closePlaylistModal();
+                } else {
+                    showMessage(data.error || 'Failed to create playlist', 'error');
+                }
+            } catch (error) {
+                console.error('Create playlist error:', error);
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        function closePlaylistModal() {
+            document.getElementById('playlist-modal').style.display = 'none';
+            currentPlaylistGameId = null;
+            currentPlaylistGameName = null;
+        }
+
+        async function quickAddToBacklog(gameId, gameName) {
+            currentBacklogGameId = gameId;
+            currentBacklogGameName = gameName;
+            document.getElementById('backlog-modal-title').textContent = `📚 Add "${gameName}" to Backlog`;
+            document.getElementById('backlog-modal').style.display = 'flex';
+        }
+
+        async function selectBacklogStatus(status) {
+            if (!currentBacklogGameId) return;
+            
+            try {
+                const response = await fetch(`/api/backlog/${currentBacklogGameId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({status: status})
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    const statusLabel = status.replace(/_/g, ' ').charAt(0).toUpperCase() + status.replace(/_/g, ' ').slice(1);
+                    showMessage(`✅ Added "${currentBacklogGameName}" to backlog as "${statusLabel}"!`, 'success');
+                    closeBacklogModal();
+                } else {
+                    showMessage(data.error || 'Failed to add to backlog', 'error');
+                }
+            } catch (error) {
+                console.error('Add to backlog error:', error);
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        function closeBacklogModal() {
+            document.getElementById('backlog-modal').style.display = 'none';
+            currentBacklogGameId = null;
+            currentBacklogGameName = null;
+        }
+
         // ==============================================================================================
         // Recommendations Functions
         // ==============================================================================================
@@ -4951,9 +5216,24 @@
         async function loadRecommendations() {
             const listDiv = document.getElementById('recommendations-list');
             const count = document.getElementById('rec-count').value;
+                const platform = document.getElementById('rec-platform').value;
+                const budget = document.getElementById('rec-budget').value;
+                const includeNew = document.getElementById('rec-new-releases').checked;
+            
             listDiv.innerHTML = '<div class="loading">Generating recommendations…</div>';
             try {
-                const response = await fetch(`/api/recommendations?count=${count}`);
+                    let url = `/api/recommendations?count=${count}`;
+                    if (platform) {
+                        url += `&platforms=${encodeURIComponent(platform)}`;
+                    }
+                    if (budget) {
+                        url += `&max_budget=${encodeURIComponent(budget)}`;
+                    }
+                    if (includeNew) {
+                        url += `&include_new=true`;
+                    }
+                
+                    const response = await fetch(url);
                 const data = await response.json();
                 if (response.status === 400) {
                     listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Not initialized. Add your Steam ID in ⚙️ Settings.'}</div>`;
@@ -4987,6 +5267,8 @@
                                 <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
                                 <a href="https://store.steampowered.com/app/${game.appid}/" target="_blank" onclick="event.stopPropagation()" style="font-size:0.8em; color:var(--tab-active-color); text-decoration:none;">Steam →</a>
                                 <span onclick="event.stopPropagation(); toggleFavorite(${game.appid})" style="cursor:pointer; font-size:1.1em;" title="Add to favorites">☆</span>
+                                <span onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id || game.appid}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Playlist">📋</span>
+                                <span onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || game.appid}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Backlog">📚</span>
                                 <span onclick="event.stopPropagation(); quickIgnoreGame(${game.appid}, '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Ignore">🚫</span>
                                 </div>
                                 </div>
@@ -5095,10 +5377,15 @@
             }
         }
 
-        async function sendFriendRequest() {
-            const input = document.getElementById('friend-request-input');
-            const username = (input.value || '').trim();
-            if (!username) return;
+        async function sendFriendRequest(targetUsername) {
+            // If no username provided, get from input field (friends tab)
+            let username = targetUsername;
+            if (!username) {
+                const input = document.getElementById('friend-request-input');
+                username = (input.value || '').trim();
+                if (!username) return;
+            }
+            
             try {
                 const resp = await fetch('/api/app-friends/request', {
                     method: 'POST',
@@ -5107,11 +5394,15 @@
                 });
                 const data = await resp.json();
                 if (resp.ok) {
-                    input.value = '';
-                    showMessage(data.message || 'Friend request sent!', 'success');
+                    if (!targetUsername) {
+                        // Clear input field if called from friends form
+                        const input = document.getElementById('friend-request-input');
+                        input.value = '';
+                    }
+                    showMessage(data.message || `Friend request sent to ${username}!`, 'success');
                     loadAppFriends();
                 } else {
-                    showMessage(data.error || 'Failed to send request', 'error');
+                    showMessage(data.error || 'Failed to send friend request', 'error');
                 }
             } catch (err) {
                 showMessage('Error: ' + err.message, 'error');
@@ -5285,6 +5576,7 @@
         // ==============================================================================================
 
         let chatPollInterval = null;
+        let onlineUsersPollInterval = null;
         let chatLastId = 0;
 
         async function loadChatMessages(append) {
@@ -5327,7 +5619,18 @@
 
         function switchChatRoom() {
             chatLastId = 0;
+            const room = document.getElementById('chat-room').value;
+            
+            // Update backend with current room
+            fetch('/api/chat/update-room', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ room }),
+            }).catch(err => console.error('Failed to update room:', err));
+            
             loadChatMessages(false);
+            loadOnlineUsers();
+            loadRoomInfo();
         }
 
         async function sendChatMessage() {
@@ -5344,6 +5647,7 @@
                 });
                 if (resp.ok) {
                     loadChatMessages(true);
+                    loadOnlineUsers();
                 } else {
                     const d = await resp.json();
                     showMessage(d.error || 'Failed to send', 'error');
@@ -5353,12 +5657,177 @@
             }
         }
 
+        async function loadOnlineUsers() {
+            const listDiv = document.getElementById('online-users-list');
+            const currentRoom = document.getElementById('chat-room').value;
+            
+            try {
+                const resp = await fetch('/api/chat/online-users');
+                if (!resp.ok) {
+                    listDiv.innerHTML = '<div class="error" style="font-size:0.85em;">Failed to load users</div>';
+                    return;
+                }
+                const data = await resp.json();
+                const onlineUsers = data.online_users || {};
+                
+                // Build HTML showing users in each room
+                let html = '';
+                const sortedRooms = Object.keys(onlineUsers).sort((a, b) => b === currentRoom ? -1 : a.localeCompare(b));
+                
+                if (sortedRooms.length === 0) {
+                    listDiv.innerHTML = '<div style="color:var(--text-secondary); font-size:0.85em;">No users online</div>';
+                    return;
+                }
+                
+                for (const room of sortedRooms) {
+                    const users = onlineUsers[room];
+                    const icon = room === currentRoom ? '📍' : '💬';
+                    html += `<div style="margin-bottom:12px;">
+                        <div style="font-weight:600; color:var(--text-primary); margin-bottom:6px; font-size:0.85em;">${icon} ${room}</div>
+                        <div style="padding-left:12px;">`;
+                    
+                    for (const user of users) {
+                        html += `<div style="display:flex; align-items:center; gap:6px; padding:4px 0; color:var(--text-secondary); flex-wrap:wrap;">
+                            <span style="cursor:pointer; color:#667eea; text-decoration:underline;" onclick="showUserPreview('${user}')">👤 ${user}</span>
+                            <div style="margin-left:auto; display:flex; gap:4px;">`;
+                        
+                        // Show room invite button if in a private room
+                        if (room === currentRoom) {
+                            html += `<button onclick="inviteUserToRoom('${user}')" title="Invite to room" style="padding:2px 6px; background:#667eea; color:white; border:none; border-radius:3px; cursor:pointer; font-size:0.7em;">🎫 Room</button>`;
+                        }
+                        
+                        // Always show friend invite button
+                        html += `<button onclick="sendFriendRequest('${user}')" title="Send friend request" style="padding:2px 6px; background:#e67e22; color:white; border:none; border-radius:3px; cursor:pointer; font-size:0.7em;">👥 Friend</button>`;
+                        
+                        html += `</div></div>`;
+                    }
+                    html += `</div></div>`;
+                }
+                listDiv.innerHTML = html;
+            } catch (err) {
+                listDiv.innerHTML = `<div class="error" style="font-size:0.85em;">Error: ${err.message}</div>`;
+            }
+        }
+
+        let roomInfo = {};
+        async function loadRoomInfo() {
+            const room = document.getElementById('chat-room').value;
+            try {
+                const resp = await fetch(`/api/chat/room-users?room=${encodeURIComponent(room)}`);
+                if (resp.ok) {
+                    roomInfo = await resp.json();
+                }
+            } catch (err) {
+                console.error('Failed to load room info:', err);
+            }
+        }
+
+        async function inviteUserToRoom(username) {
+            const room = document.getElementById('chat-room').value;
+            
+            // Check if current user is the room owner
+            if (!roomInfo.owner) {
+                await loadRoomInfo();
+            }
+            
+            // Only allow room owner to invite
+            if (!roomInfo.is_private) {
+                showMessage('Can only invite users to private rooms', 'error');
+                return;
+            }
+            
+            try {
+                const resp = await fetch('/api/chat/invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ room, target_username: username }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    showMessage(data.message || 'Invite sent!', 'success');
+                    loadOnlineUsers();
+                } else {
+                    showMessage(data.message || 'Failed to invite user', 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function showUserPreview(username) {
+            const modal = document.getElementById('userPreviewModal');
+            const previewDiv = document.getElementById('user-preview-content');
+            
+            previewDiv.innerHTML = '<div class="loading" style="padding:20px; text-align:center;">Loading profile…</div>';
+            modal.style.display = 'flex';
+            
+            try {
+                const resp = await fetch(`/api/user-profile/${encodeURIComponent(username)}`);
+                if (!resp.ok) {
+                    previewDiv.innerHTML = `<div class="error" style="padding:20px;">Failed to load profile</div>`;
+                    return;
+                }
+                
+                const profile = await resp.json();
+                const avatar = profile.avatar_url 
+                    ? `<img src="${profile.avatar_url}" style="width:60px; height:60px; border-radius:8px; object-fit:cover; margin:0 auto 12px;">`
+                    : `<div style="width:60px; height:60px; border-radius:8px; background:var(--card-border); margin:0 auto 12px;"></div>`;
+                
+                const rolesBadges = (profile.roles || []).map(role => 
+                    `<span style="display:inline-block; padding:3px 8px; margin:0 4px 4px 0; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border-radius:12px; font-size:0.75em; font-weight:600;">${role}</span>`
+                ).join('');
+                
+                const joinDate = profile.joined ? new Date(profile.joined).toLocaleDateString() : 'Unknown';
+                const stats = profile.stats || {};
+                
+                let html = `
+                    <div style="text-align:center;">
+                        ${avatar}
+                        <h3 style="margin:0 0 4px; color:var(--text-primary);">${profile.display_name}</h3>
+                        <div style="font-size:0.85em; color:var(--text-secondary); margin-bottom:12px;">@${profile.username}</div>
+                        ${profile.bio ? `<div style="color:var(--text-secondary); font-size:0.9em; margin-bottom:12px; font-style:italic;">"${profile.bio}"</div>` : ''}
+                        ${rolesBadges ? `<div style="margin-bottom:12px;">${rolesBadges}</div>` : ''}
+                    </div>
+                    <div style="border-top:1px solid var(--input-border); padding:12px 0; margin:12px 0;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;">
+                            <div>
+                                <div style="font-size:1.2em; font-weight:700; color:var(--text-primary);">${stats.total_games || 0}</div>
+                                <div style="font-size:0.75em; color:var(--text-secondary);">Games</div>
+                            </div>
+                            <div>
+                                <div style="font-size:1.2em; font-weight:700; color:var(--text-primary);">${stats.total_playtime_hours || 0}h</div>
+                                <div style="font-size:0.75em; color:var(--text-secondary);">Playtime</div>
+                            </div>
+                            <div>
+                                <div style="font-size:1.2em; font-weight:700; color:var(--text-primary);">${stats.total_achievements || 0}</div>
+                                <div style="font-size:0.75em; color:var(--text-secondary);">Achievements</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="font-size:0.8em; color:var(--text-secondary); text-align:center;">
+                        Joined ${joinDate}
+                    </div>
+                `;
+                
+                previewDiv.innerHTML = html;
+            } catch (err) {
+                previewDiv.innerHTML = `<div class="error" style="padding:20px;">Error: ${err.message}</div>`;
+            }
+        }
+
+        function closeUserPreview() {
+            document.getElementById('userPreviewModal').style.display = 'none';
+        }
+
         function startChatPolling() {
             if (chatPollInterval) return;
             chatPollInterval = setInterval(() => loadChatMessages(true), 5000);
+            if (onlineUsersPollInterval) return;
+            onlineUsersPollInterval = setInterval(() => loadOnlineUsers(), 6000);
         }
         function stopChatPolling() {
             if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
+            if (onlineUsersPollInterval) { clearInterval(onlineUsersPollInterval); onlineUsersPollInterval = null; }
         }
 
         // ==============================================================================================
@@ -5736,12 +6205,14 @@
                                 ${renderGameListThumb(game.app_id, game.name)}
                                 <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
                             </div>
-                            <div style="display:flex; gap:10px; align-items:center;">
+                            <div style="display:flex; gap:8px; align-items:center;">
                                 <span>${game.playtime_hours}h</span>
-                                <span style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
+                                <span title="Favorite" style="cursor:pointer; font-size:1.2em; color: ${game.is_favorite ? '#ffc107' : 'inherit'};" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                     ${game.is_favorite ? '⭐' : '☆'}
                                 </span>
-                                <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${game.name.replace(/'/g, "\\'")}')">🚫</span>
+                                <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeNameJs}')">📋</span>
+                                <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeNameJs}')">📚</span>
+                                <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeNameJs}')">🚫</span>
                             </div>
                         </div>`;
                 });
@@ -5784,6 +6255,90 @@
             if (adminDiv) adminDiv.classList.toggle('active', tabName === 'admin');
             if (tabName === 'admin') loadAdminSettings();
         };
+
+        // Create Room Modal Functions
+        function openCreateRoomModal() {
+            document.getElementById('createRoomModal').style.display = 'flex';
+            document.getElementById('roomNameInput').focus();
+        }
+        function closeCreateRoomModal() {
+            document.getElementById('createRoomModal').style.display = 'none';
+            document.getElementById('roomNameInput').value = '';
+            document.getElementById('roomPrivateCheckbox').checked = false;
+        }
+        function createRoomFromModal() {
+            const roomName = document.getElementById('roomNameInput').value.trim();
+            const isPrivate = document.getElementById('roomPrivateCheckbox').checked;
+            
+            if (!roomName) {
+                alert('Please enter a room name');
+                return;
+            }
+            if (roomName.length > 30) {
+                alert('Room name must be 30 characters or less');
+                return;
+            }
+            
+            const command = isPrivate ? `/room create-private ${roomName}` : `/room create ${roomName}`;
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = command;
+            sendChatMessage();
+            
+            // Auto-add room to dropdown
+            const roomDropdown = document.getElementById('chat-room');
+            const icon = isPrivate ? '🔒' : '💬';
+            const optionText = `${icon} ${roomName}`;
+            
+            // Check if room already exists
+            let existingOption = Array.from(roomDropdown.options).find(opt => opt.value === roomName);
+            if (!existingOption) {
+                const newOption = document.createElement('option');
+                newOption.value = roomName;
+                newOption.textContent = optionText;
+                roomDropdown.appendChild(newOption);
+            }
+            
+            // Switch to new room
+            roomDropdown.value = roomName;
+            switchChatRoom();
+            
+            // Close modal
+            closeCreateRoomModal();
+        }
     </script>
+
+    <!-- Create Room Modal -->
+    <div id="createRoomModal" onclick="if(event.target.id==='createRoomModal')closeCreateRoomModal()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000;">
+        <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:400px; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+            <h3 style="margin-top:0; color:var(--text-primary);">Create New Room</h3>
+            <div style="display:grid; gap:12px;">
+                <div>
+                    <label style="display:block; color:var(--text-primary); font-weight:600; margin-bottom:6px;">Room Name</label>
+                    <input id="roomNameInput" type="text" placeholder="Enter room name (max 30 chars)" maxlength="30" style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
+                </div>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary);">
+                    <input id="roomPrivateCheckbox" type="checkbox">
+                    <span style="font-weight:600;">Make this room private</span>
+                </label>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="closeCreateRoomModal()" style="flex:1; padding:10px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-weight:600;">Cancel</button>
+                <button onclick="createRoomFromModal()" style="flex:1; padding:10px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Preview Modal -->
+    <div id="userPreviewModal" onclick="if(event.target.id==='userPreviewModal')closeUserPreview()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000;">
+        <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:12px; padding:24px; width:90%; max-width:400px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h3 style="margin:0; color:var(--text-primary);">User Profile</h3>
+                <button onclick="closeUserPreview()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
+            </div>
+            <div id="user-preview-content" style="padding:12px 0;">
+                <div class="loading">Loading…</div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
