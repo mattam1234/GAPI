@@ -142,9 +142,9 @@ Features requested by the community will be tracked here. Please open an issue w
 - Import game lists from other services
 - ~~Export game recommendations~~ ✅ (see v2.3.0)
 - ~~Integration with HowLongToBeat API~~ ✅ (see v2.3.0)
-- VR game filtering
-- Controller support for desktop app
-- Voice commands for game picking
+- ~~VR game filtering~~ ✅ (`--vr-filter` CLI flag + `vr_filter` API param + Web GUI dropdown)
+- ~~Controller support for desktop app~~ ✅ (Gamepad API in Electron desktop renderer)
+- ~~Voice commands for game picking~~ ✅ (Web Speech API in web GUI — say "pick", "reroll", "stop")
 
 ## 🤝 How to Contribute
 

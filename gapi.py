@@ -1516,7 +1516,8 @@ class GamePicker:
                      max_release_year: Optional[int] = None,
                      exclude_game_ids: Optional[List[str]] = None,
                      platforms: Optional[List[str]] = None,
-                     device_types: Optional[List[str]] = None) -> List[Dict]:
+                     device_types: Optional[List[str]] = None,
+                     vr_filter: Optional[str] = None) -> List[Dict]:
         """Filter games based on various criteria
 
         Args:
@@ -1531,6 +1532,10 @@ class GamePicker:
             exclude_game_ids: List of appids/game IDs to exclude from results
             platforms: List of platform names to include (e.g., steam, epic)
             device_types: List of device types to include (pc, console)
+            vr_filter: VR filtering mode — ``"vr_supported"`` (VR Supported or VR Only),
+                ``"vr_only"`` (requires a VR headset), ``"no_vr"`` (exclude VR games).
+                Uses Steam category descriptions; games without details are excluded when
+                a positive VR filter is active.  ``None`` disables VR filtering.
 
         Returns:
             List of filtered games
@@ -1604,7 +1609,8 @@ class GamePicker:
 
         # Filters that require fetching game details
         needs_details = bool(genres or exclude_genres or min_metacritic is not None
-                             or min_release_year is not None or max_release_year is not None)
+                             or min_release_year is not None or max_release_year is not None
+                             or vr_filter is not None)
 
         if needs_details:
             genres_lower = [g.lower() for g in genres] if genres else []
@@ -1673,18 +1679,35 @@ class GamePicker:
                         if max_release_year is not None and year > max_release_year:
                             continue
 
+                    # --- VR filter ---
+                    if vr_filter is not None:
+                        cat_descs = [
+                            c.get('description', '').lower()
+                            for c in details.get('categories', [])
+                        ]
+                        _is_vr_only      = any('vr only' in d for d in cat_descs)
+                        _is_vr_supported = _is_vr_only or any('vr supported' in d for d in cat_descs)
+                        if vr_filter == 'vr_only' and not _is_vr_only:
+                            continue
+                        elif vr_filter == 'vr_supported' and not _is_vr_supported:
+                            continue
+                        elif vr_filter == 'no_vr' and _is_vr_supported:
+                            continue
+
                     detail_filtered.append(game)
                 else:
                     # Details unavailable – include only when no positive filter set
                     if not genres_lower and min_metacritic is None \
-                            and min_release_year is None and max_release_year is None:
+                            and min_release_year is None and max_release_year is None \
+                            and vr_filter not in ('vr_supported', 'vr_only'):
                         if not exclude_lower:
                             detail_filtered.append(game)
 
             # Games without a client are included only when no positive filter is active
             if not genres_lower and min_metacritic is None \
                     and min_release_year is None and max_release_year is None \
-                    and not exclude_lower:
+                    and not exclude_lower \
+                    and vr_filter not in ('vr_supported', 'vr_only'):
                 detail_filtered.extend(no_details)
 
             filtered = detail_filtered
@@ -2123,9 +2146,22 @@ Examples:
         metavar='ID',
         help='Comma-separated app IDs or game IDs to exclude (e.g., "730,570")'
     )
-    
+    parser.add_argument(
+        '--vr-filter',
+        type=str,
+        choices=['vr_supported', 'vr_only', 'no_vr'],
+        metavar='MODE',
+        help=(
+            'VR filtering mode: '
+            '"vr_supported" — only VR-capable games (VR Supported or VR Only); '
+            '"vr_only" — only games that require a VR headset; '
+            '"no_vr" — exclude all VR games. '
+            'Uses Steam category data; requires fetching game details.'
+        )
+    )
+
     args = parser.parse_args()
-    
+
     print(f"{Fore.CYAN}{Style.BRIGHT}")
     print("  ____    _    ____ ___ ")
     print(" / ___|  / \\  |  _ \\_ _|")
@@ -2186,7 +2222,8 @@ Examples:
 
         # Show detail-fetch warning early
         needs_details = bool(genres or exclude_genres or args.min_score is not None
-                             or args.min_year is not None or args.max_year is not None)
+                             or args.min_year is not None or args.max_year is not None
+                             or args.vr_filter is not None)
         if needs_details:
             print(f"{Fore.YELLOW}Note: Advanced filtering may take a moment as we fetch game details...")
 
@@ -2198,6 +2235,7 @@ Examples:
             'min_release_year': args.min_year,
             'max_release_year': args.max_year,
             'exclude_game_ids': exclude_game_ids,
+            'vr_filter': args.vr_filter,
         }
 
         # Non-interactive modes

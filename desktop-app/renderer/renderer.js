@@ -303,3 +303,190 @@ window.gapiAPI.onOpenSettings(() => {
   document.querySelector('[data-panel="settings"]').classList.add('active');
   document.getElementById('panel-settings').classList.add('active');
 });
+
+/* ─── Controller / Gamepad support ──────────────────────────────────────────
+ *
+ * Uses the standard Gamepad API to let a connected gamepad control the app:
+ *
+ *   A / Cross         → Pick a Game (same as clicking the Pick button)
+ *   B / Circle        → Reroll
+ *   X / Square        → Navigate to Library panel
+ *   Y / Triangle      → Navigate to History panel
+ *   Start / Options   → Navigate to Settings panel
+ *   D-Pad Left/Right  → Cycle between panels (Pick → Library → History → Settings)
+ *   D-Pad Up/Down     → Scroll the active panel
+ *   LB / L1           → Previous pick mode
+ *   RB / R1           → Next pick mode
+ *   LT / L2 (> 0.5)  → Toggle VR filter (cycles No-filter → vr_supported → vr_only → no_vr)
+ *
+ * A small controller HUD overlay shows the last detected input.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+(function initControllerSupport() {
+  'use strict';
+
+  // Panel navigation order
+  const PANELS = ['pick', 'library', 'history', 'settings'];
+  // Pick modes (in order)
+  const PICK_MODES   = ['random', 'unplayed', 'barely_played'];
+  let   _panelIdx    = 0;   // current panel index
+  let   _pickModeIdx = 0;   // current pick mode index
+  let   _vrFilterIdx = 0;   // 0=any, 1=vr_supported, 2=vr_only, 3=no_vr
+
+  // Debounce: track which buttons were pressed last frame
+  const _prevPressed = {};
+  let   _prevAxes    = {};
+  let   _rafId       = null;
+
+  // HUD element
+  const _hud = document.createElement('div');
+  _hud.id = 'gamepad-hud';
+  Object.assign(_hud.style, {
+    position:   'fixed',
+    bottom:     '16px',
+    right:      '16px',
+    padding:    '6px 12px',
+    background: 'rgba(0,0,0,0.7)',
+    color:      '#58a6ff',
+    borderRadius: '6px',
+    fontSize:   '12px',
+    fontWeight: '700',
+    display:    'none',
+    zIndex:     '9999',
+    pointerEvents: 'none',
+  });
+  document.body.appendChild(_hud);
+
+  let _hudTimer = null;
+  function _showHud(msg) {
+    _hud.textContent = `🎮 ${msg}`;
+    _hud.style.display = 'block';
+    clearTimeout(_hudTimer);
+    _hudTimer = setTimeout(() => { _hud.style.display = 'none'; }, 2000);
+  }
+
+  /** Switch to a panel by name */
+  function _gotoPanel(name) {
+    const idx = PANELS.indexOf(name);
+    if (idx < 0) { return; }
+    _panelIdx = idx;
+    document.querySelectorAll('.nav-btn').forEach(b => {
+      const active = b.dataset.panel === name;
+      b.classList.toggle('active', active);
+      if (active) { b.setAttribute('aria-current', 'page'); }
+      else { b.removeAttribute('aria-current'); }
+    });
+    document.querySelectorAll('.panel').forEach(p => {
+      p.classList.toggle('active', p.id === `panel-${name}`);
+    });
+    // loadLibrary / loadHistory are module-level functions in the outer renderer script
+    if (name === 'library' && typeof loadLibrary === 'function') { loadLibrary(); } // eslint-disable-line no-undef
+    if (name === 'history' && typeof loadHistory === 'function') { loadHistory(); } // eslint-disable-line no-undef
+  }
+
+  /** Cycle pick mode buttons */
+  function _setPickMode(idx) {
+    _pickModeIdx = ((idx % PICK_MODES.length) + PICK_MODES.length) % PICK_MODES.length;
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === PICK_MODES[_pickModeIdx]);
+    });
+    // pickMode is the module-level variable declared in the outer renderer script
+    if (typeof pickMode !== 'undefined') { // eslint-disable-line no-undef
+      pickMode = PICK_MODES[_pickModeIdx]; // eslint-disable-line no-undef
+    }
+    _showHud(`Mode: ${PICK_MODES[_pickModeIdx].replace('_', ' ')}`);
+  }
+
+  /** Cycle VR filter (only applicable when on pick panel) */
+  const VR_LABELS = ['All', 'VR Supported', 'VR Only', 'No VR'];
+  function _cycleVrFilter() {
+    _vrFilterIdx = (_vrFilterIdx + 1) % 4;
+    _showHud(`VR: ${VR_LABELS[_vrFilterIdx]}`);
+  }
+
+  /** Scroll active panel content */
+  function _scroll(delta) {
+    const active = document.querySelector('.panel.active');
+    if (active) { active.scrollBy({top: delta, behavior: 'smooth'}); }
+  }
+
+  /** Main gamepad poll loop */
+  function _pollGamepads() {
+    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const gp of gamepads) {
+      if (!gp || !gp.connected) { continue; }
+
+      const b = gp.buttons;
+      const a = gp.axes;
+
+      // Helper: button just pressed this frame
+      const pressed = (idx) => b[idx] && b[idx].pressed;
+      const justPressed = (idx) => pressed(idx) && !_prevPressed[`${gp.index}_${idx}`];
+
+      // A / Cross (button 0) — Pick
+      // doPick is the module-level async function in the outer renderer script
+      if (justPressed(0)) { if (typeof doPick === 'function') { doPick(); } _showHud('Pick!'); } // eslint-disable-line no-undef
+
+      // B / Circle (button 1) — Reroll
+      if (justPressed(1)) { if (typeof doPick === 'function') { doPick(); } _showHud('Reroll!'); } // eslint-disable-line no-undef
+
+      // X / Square (button 2) — Library panel
+      if (justPressed(2)) { _gotoPanel('library'); _showHud('Library'); }
+
+      // Y / Triangle (button 3) — History panel
+      if (justPressed(3)) { _gotoPanel('history'); _showHud('History'); }
+
+      // LB / L1 (button 4) — Previous pick mode
+      if (justPressed(4)) { _setPickMode(_pickModeIdx - 1); }
+
+      // RB / R1 (button 5) — Next pick mode
+      if (justPressed(5)) { _setPickMode(_pickModeIdx + 1); }
+
+      // LT / L2 (button 6) — Cycle VR filter
+      if (b[6] && b[6].value > 0.5 && !((_prevAxes[`${gp.index}_lt`] ?? 0) > 0.5)) {
+        _cycleVrFilter();
+      }
+      _prevAxes[`${gp.index}_lt`] = b[6] ? b[6].value : 0;
+
+      // Start / Options (button 9) — Settings panel
+      if (justPressed(9)) { _gotoPanel('settings'); _showHud('Settings'); }
+
+      // D-Pad left (button 14) / right (button 15) — cycle panels
+      if (justPressed(14)) {
+        _gotoPanel(PANELS[Math.max(0, _panelIdx - 1)]);
+        _showHud(PANELS[Math.max(0, _panelIdx - 1)]);
+      }
+      if (justPressed(15)) {
+        _gotoPanel(PANELS[Math.min(PANELS.length - 1, _panelIdx + 1)]);
+        _showHud(PANELS[Math.min(PANELS.length - 1, _panelIdx + 1)]);
+      }
+
+      // D-Pad up (button 12) / down (button 13) — scroll
+      if (pressed(12)) { _scroll(-60); }
+      if (pressed(13)) { _scroll(60);  }
+
+      // Left stick vertical (axis 1) — scroll
+      const axisY = a[1] ?? 0;
+      if (Math.abs(axisY) > 0.3) { _scroll(axisY * 80); }
+
+      // Update previous-state map
+      b.forEach((btn, idx) => {
+        _prevPressed[`${gp.index}_${idx}`] = btn && btn.pressed;
+      });
+    }
+    _rafId = requestAnimationFrame(_pollGamepads);
+  }
+
+  // Start polling when a gamepad is connected
+  window.addEventListener('gamepadconnected', (ev) => {
+    _showHud(`Controller connected: ${ev.gamepad.id.slice(0, 40)}`);
+    if (!_rafId) { _rafId = requestAnimationFrame(_pollGamepads); }
+  });
+
+  window.addEventListener('gamepaddisconnected', (ev) => {
+    _showHud('Controller disconnected');
+    // Stop polling if no more gamepads
+    const any = [...(navigator.getGamepads ? navigator.getGamepads() : [])].some(g => g && g.connected);
+    if (!any && _rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+  });
+}());

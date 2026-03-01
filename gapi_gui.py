@@ -1643,6 +1643,8 @@ def api_pick_game():
         device_filter = data.get('device_filter', '').strip().lower() or None
         min_rarity = data.get('min_rarity')
         max_rarity = data.get('max_rarity')
+        vr_filter_raw = data.get('vr_filter', '').strip().lower() or None
+        vr_filter = vr_filter_raw if vr_filter_raw in ('vr_supported', 'vr_only', 'no_vr') else None
 
         if DB_AVAILABLE:
             db = None
@@ -1707,6 +1709,7 @@ def api_pick_game():
             'exclude_game_ids': exclude_game_ids,
             'platforms': [platform_filter] if platform_filter else None,
             'device_types': [device_filter] if device_filter else None,
+            'vr_filter': vr_filter,
         }
 
         with picker_lock:
@@ -7661,9 +7664,31 @@ def create_templates():
                     <label class="filter-label" for="genre-filter">Genre (e.g., Action, RPG)</label>
                     <input type="text" id="genre-filter" class="genre-input" placeholder="Leave empty for any genre">
                 </div>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="vr-filter">VR Filter</label>
+                    <select id="vr-filter" class="genre-input" style="cursor:pointer">
+                        <option value="">All games (no VR filter)</option>
+                        <option value="vr_supported">🥽 VR Supported (includes VR Only)</option>
+                        <option value="vr_only">🥽 VR Only (requires headset)</option>
+                        <option value="no_vr">🖥️ No VR (exclude VR games)</option>
+                    </select>
+                </div>
             </div>
-            
+
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="pick-button" onclick="pickGame()">🎲 Pick Random Game</button>
+            <button id="voice-pick-btn" class="pick-button" onclick="toggleVoicePick()"
+                    title="Use voice commands to pick a game"
+                    style="background:var(--button-bg,#4a90d9);flex:0 0 auto;padding:10px 14px;font-size:14px">
+                🎤 Voice
+            </button>
+            </div>
+            <div id="voice-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;
+                background:rgba(74,144,217,0.15);border:1px solid rgba(74,144,217,0.4);
+                color:var(--text-secondary,#aaa);font-size:13px">
+                🎤 Listening… say "<strong>pick</strong>", "<strong>reroll</strong>", or "<strong>stop</strong>"
+            </div>
             
             <div id="game-result" class="game-display" style="display: none;">
                 <!-- Game info will be displayed here -->
@@ -7917,6 +7942,7 @@ def create_templates():
         async function pickGame() {
             const filterValue = document.querySelector('input[name="filter"]:checked').value;
             const genreValue = document.getElementById('genre-filter').value.trim();
+            const vrFilter = document.getElementById('vr-filter').value || null;
             
             try {
                 const response = await fetch('/api/pick', {
@@ -7924,7 +7950,8 @@ def create_templates():
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         filter: filterValue,
-                        genre: genreValue
+                        genre: genreValue,
+                        vr_filter: vrFilter
                     })
                 });
                 
@@ -7941,6 +7968,80 @@ def create_templates():
             } catch (error) {
                 alert('Error: ' + error.message);
             }
+        }
+
+        // ── Voice commands (Web Speech API) ───────────────────────────────────
+        let _voiceRecognition = null;
+        let _voiceActive = false;
+
+        function toggleVoicePick() {
+            if (!('SpeechRecognition' in window) && !('webkitSpeechRecognition' in window)) {
+                alert('Voice commands are not supported in this browser.\nTry Chrome or Edge.');
+                return;
+            }
+            if (_voiceActive) {
+                _stopVoice();
+            } else {
+                _startVoice();
+            }
+        }
+
+        function _startVoice() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            _voiceRecognition = new SR();
+            _voiceRecognition.lang = 'en-US';
+            _voiceRecognition.continuous = true;
+            _voiceRecognition.interimResults = false;
+            _voiceRecognition.maxAlternatives = 1;
+
+            _voiceRecognition.onstart = () => {
+                _voiceActive = true;
+                document.getElementById('voice-status').style.display = 'block';
+                document.getElementById('voice-pick-btn').textContent = '🎤 Stop';
+                document.getElementById('voice-pick-btn').style.background = '#d94a4a';
+            };
+
+            _voiceRecognition.onend = () => {
+                if (_voiceActive) {
+                    // Auto-restart so it stays active until the user explicitly stops
+                    try { _voiceRecognition.start(); } catch(e) {}
+                }
+            };
+
+            _voiceRecognition.onerror = (ev) => {
+                if (ev.error !== 'no-speech') {
+                    _stopVoice();
+                    console.warn('Voice recognition error:', ev.error);
+                }
+            };
+
+            _voiceRecognition.onresult = (ev) => {
+                const transcript = ev.results[ev.results.length - 1][0].transcript
+                    .trim().toLowerCase();
+                if (transcript.includes('pick') || transcript.includes('choose') ||
+                        transcript.includes('random')) {
+                    pickGame();
+                } else if (transcript.includes('reroll') || transcript.includes('re-roll') ||
+                        transcript.includes('again') || transcript.includes('another')) {
+                    pickGame();
+                } else if (transcript.includes('stop') || transcript.includes('quit') ||
+                        transcript.includes('cancel')) {
+                    _stopVoice();
+                }
+            };
+
+            try { _voiceRecognition.start(); } catch(e) { console.error(e); }
+        }
+
+        function _stopVoice() {
+            _voiceActive = false;
+            if (_voiceRecognition) {
+                try { _voiceRecognition.stop(); } catch(e) {}
+                _voiceRecognition = null;
+            }
+            document.getElementById('voice-status').style.display = 'none';
+            document.getElementById('voice-pick-btn').textContent = '🎤 Voice';
+            document.getElementById('voice-pick-btn').style.background = '';
         }
         
         async function displayGame(game) {

@@ -15,6 +15,7 @@ a desktop notification — all without opening a browser tab.
   - Context menu: Pick a Game / Open Window / Open in Browser / Settings / Quit
   - Desktop `Notification` when a game is picked (from tray or in-app)
 - **Periodic health check** — tray badge turns red when server is unreachable
+- **🎮 Gamepad / Controller support** — full Gamepad API integration (see below)
 - **macOS** — native hidden inset title bar, stays in tray when window is closed
 - **Windows / Linux** — standard windowed app, minimise to tray on close
 
@@ -112,3 +113,24 @@ The renderer communicates with the main process through `window.gapiAPI`:
 | `onConnectionStatus(cb)` | Listen for status changes |
 | `onGamePicked(cb)` | Listen for tray picks |
 | `onOpenSettings(cb)` | Listen for settings open request |
+
+
+## Gamepad / Controller Support
+
+GAPI Desktop supports **any standard gamepad** via the [Gamepad API](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API).
+Just connect a controller (Xbox, PlayStation, Switch Pro, etc.) and a HUD overlay
+will confirm it is detected.
+
+| Button | Action |
+|--------|--------|
+| **A / Cross** | Pick a Game |
+| **B / Circle** | Reroll |
+| **X / Square** | Navigate to Library panel |
+| **Y / Triangle** | Navigate to History panel |
+| **Start / Options** | Navigate to Settings panel |
+| **D-Pad Left / Right** | Cycle between panels |
+| **D-Pad Up / Down** | Scroll the active panel |
+| **LB / L1** | Previous pick mode |
+| **RB / R1** | Next pick mode |
+| **LT / L2** (held) | Cycle VR filter (All → VR Supported → VR Only → No VR) |
+| **Left stick (vertical)** | Scroll the active panel |
