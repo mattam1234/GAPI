@@ -4,8 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GAPI - Game Picker</title>
+    <!-- PWA: Web App Manifest + theme colour -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="GAPI">
+    <meta name="mobile-web-app-capable" content="yes">
     <!-- Chart.js for statistics visualizations -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- PWA: register service worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .catch((err) => console.warn('SW registration failed:', err));
+            });
+        }
+    </script>
     <!-- Toastr removed (use built-in showMessage fallback instead) -->
     <style>
         /* ── CSS Custom Properties (light + dark theme) ───────────────── */

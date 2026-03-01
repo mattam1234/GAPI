@@ -1,29 +1,34 @@
 # 🎮 GAPI - Multi-Platform Game Picker
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
 GAPI is a multi-platform game picker tool that helps you decide what to play from your Steam, Epic Games, and GOG libraries. It randomly picks games based on various filters and displays detailed information. Available in both **Web GUI** and **CLI** modes!
 
 ## 📋 Table of Contents
 
-- 🌐 **Multi-Platform Support**: Steam, Epic Games Store, and GOG Galaxy integration
-- 🌐 **Modern Web GUI**: Beautiful browser-based interface with tabs for game picking, library browsing, favorites, statistics, and multi-user management
-- 👥 **Multi-User Support**: Link multiple accounts across platforms and find common games among friends
-- 🎮 **Co-op Game Finder**: Automatically filter and pick co-op/multiplayer games for your group
-- 🤖 **Discord Bot Integration**: Pick games with friends directly from Discord with voting and auto-selection
-- 🎲 **Random Game Selection**: Pick a random game from all your game libraries
-- 🎯 **Smart Filters**: Filter by playtime (unplayed, barely played, well-played games)
-- 🎨 **Genre Filtering**: Filter games by genre/tags (Action, RPG, Strategy, etc.)
-- ⭐ **Favorites System**: Mark games as favorites and pick from your favorite games
-- 📊 **Library Statistics**: View stats about your game collection including top played games
-- 🔍 **Detailed Game Info**: Fetch descriptions, genres, release dates, and Metacritic scores
-- 🔗 **Direct Links**: Quick access to game store pages
-- 🎨 **Colorful Interface**: Easy-to-read colored terminal output (CLI mode)
-- 💾 **Smart History**: Avoids suggesting recently picked games
-- 📤 **Export/Import**: Export and import your game picking history
-- ⚡ **CLI Mode**: Command-line arguments for scripting and quick picks
-- 🔧 **Configurable**: Custom playtime filters and settings
+- [🎯 About](#-about)
+- [✨ Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [📦 Installation](#-installation)
+  - [Prerequisites](#prerequisites)
+  - [1 — Clone the repository](#1--clone-the-repository)
+  - [2 — Create a virtual environment](#2--create-a-virtual-environment-recommended)
+  - [3 — Install dependencies](#3--install-dependencies)
+  - [4 — Configure](#4--configure)
+  - [5 — Set up the database](#5--set-up-the-database)
+  - [6 — Run GAPI](#6--run-gapi)
+  - [7 — Run as a service](#7--optional-run-as-a-service)
+- [🔐 Authentication System](#-authentication-system)
+- [🎮 Usage](#-usage)
+- [⚙️ Configuration](#️-configuration)
+- [🔑 Getting Your Credentials](#-getting-your-credentials)
+- [❓ FAQ](#-faq)
+- [🔧 Troubleshooting](#-troubleshooting)
+- [🤝 Contributing](#-contributing)
+- [📚 Additional Resources](#-additional-resources)
+- [📜 License](#-license)
+- [🙏 Credits & Acknowledgments](#-credits--acknowledgments)
 
 ## 🎯 About
 
@@ -60,100 +65,223 @@ GAPI is a multi-platform game picker tool that helps you decide what to play fro
 
 ## 🚀 Quick Start
 
-### Try the Web GUI (Easiest!)
-
-GAPI now features a modern Web GUI with built-in user authentication. Simply:
-
 ```bash
 git clone https://github.com/mattam1234/GAPI.git
 cd GAPI
+python3 -m venv venv && source venv/bin/activate   # recommended
 pip install -r requirements.txt
+cp config_template.json config.json                 # then add your Steam API key
 python3 gapi_gui.py
 ```
 
-Then open your browser to **http://127.0.0.1:5000** and:
-1. **Register** with a username and password
-2. **Add your platform IDs** (Steam, Epic, GOG) in the Settings tab - or skip for now!
-3. **Start picking games!**
+Open **http://127.0.0.1:5000** → Register → add your Steam ID in Settings → pick games! 🎮
 
-### Full Setup (5 minutes)
-
-**Requirements:**
-- Python 3.6+
-- [Steam API Key](https://steamcommunity.com/dev/apikey) (free, takes 1 minute)
-
-**Installation:**
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/mattam1234/GAPI.git
-cd GAPI
-
-# 2. Install dependencies
-bash setup.sh  # or: pip install -r requirements.txt
-
-# 3. Configure Steam API Key
-cp config_template.json config.json
-# Edit config.json and add your Steam API Key only
-```
-
-**4. Run the Web GUI:**
-```bash
-python3 gapi_gui.py
-```
-
-Open your browser to **http://127.0.0.1:5000**, register an account, and add your Steam ID in Settings!
+> For the full step-by-step guide (virtual environment, database, Discord bot, systemd, Docker) see [**Installation**](#-installation) below.
 
 ## 📦 Installation
 
+> **TL;DR**: `git clone`, `pip install -r requirements.txt`, `python3 gapi_gui.py` — then open http://127.0.0.1:5000.
+
 ### Prerequisites
 
-- **Python 3.6+** - [Download Python](https://www.python.org/downloads/)
-- **Steam API Key** - [Get one here](https://steamcommunity.com/dev/apikey) (free, requires Steam account)
-- **Public Steam Profile** - Your profile must be public for the API to work
+| Requirement | Version | Notes |
+|---|---|---|
+| **Python** | 3.8+ | [Download](https://www.python.org/downloads/) |
+| **pip** | latest | Comes with Python |
+| **PostgreSQL** | 12+ (optional) | Only needed for multi-user web GUI; SQLite used otherwise |
+| **Steam API Key** | — | Free — [get one here](https://steamcommunity.com/dev/apikey) |
 
-### Step-by-Step Installation
+### 1 — Clone the repository
 
-**1. Clone the repository:**
 ```bash
 git clone https://github.com/mattam1234/GAPI.git
 cd GAPI
 ```
 
-**2. Install dependencies:**
+### 2 — Create a virtual environment (recommended)
 
-Option A - Automated setup (recommended):
 ```bash
-bash setup.sh
+# Create
+python3 -m venv venv
+
+# Activate — Linux / macOS
+source venv/bin/activate
+
+# Activate — Windows (Command Prompt)
+venv\Scripts\activate.bat
+
+# Activate — Windows (PowerShell)
+venv\Scripts\Activate.ps1
 ```
 
-Option B - Manual installation:
+### 3 — Install dependencies
+
 ```bash
+# Core install (web GUI + CLI — all you need for most users)
 pip install -r requirements.txt
 ```
 
-**3. Configure Steam API Key:**
+<details>
+<summary>Optional integrations</summary>
+
 ```bash
+# Full install — adds GOG Galaxy integration
+pip install -r requirements-full.txt
+
+# Install individual optional packages
+pip install howlongtobeatpy    # "How Long to Beat" time estimates
+pip install pypresence         # Discord Rich Presence (shows picked game in Discord)
+pip install discord.py         # Discord bot (discord_bot.py)
+pip install graphene           # GraphQL API (POST /api/graphql)
+```
+
+</details>
+
+### 4 — Configure
+
+```bash
+# Copy the template
 cp config_template.json config.json
 ```
 
-**4. Edit `config.json`** and add your Steam API Key:
+Open `config.json` and fill in your credentials:
+
 ```json
 {
-  "steam_api_key": "YOUR_ACTUAL_API_KEY"
+  "steam_api_key": "YOUR_STEAM_API_KEY",
+  "steam_id":      "YOUR_STEAM_64_ID",
+
+  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN"
 }
 ```
 
-**5. Run the Web GUI:**
+| Field | Required | Where to get it |
+|---|---|---|
+| `steam_api_key` | **Yes** (for Steam games) | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
+| `steam_id` | **Yes** (for Steam games) | [steamid.io](https://steamid.io/) — use the SteamID64 value |
+| `discord_bot_token` | No | [discord.com/developers/applications](https://discord.com/developers/applications) |
+
+> **Environment variables** are also supported and take precedence over `config.json`:
+> ```bash
+> export STEAM_API_KEY="..."
+> export STEAM_ID="..."
+> export DATABASE_URL="postgresql://user:pass@localhost/gapi"
+> ```
+
+### 5 — Set up the database
+
+GAPI stores user accounts, favorites, achievement data, and library cache in a database.
+
+**Option A — PostgreSQL (recommended for production / multi-user)**
+
+```bash
+# Create database (PostgreSQL)
+createdb gapi
+
+# Set connection URL
+export DATABASE_URL="postgresql://postgres:password@localhost/gapi"
+# or add to your .env file:
+echo 'DATABASE_URL=postgresql://postgres:password@localhost/gapi' >> .env
+```
+
+**Option B — SQLite (easiest — no server required)**
+
+```bash
+# Use SQLite by setting a sqlite:// URL
+echo 'DATABASE_URL=sqlite:///gapi.db' >> .env
+```
+
+The schema is created automatically on first run.
+
+### 6 — Run GAPI
+
+**Web GUI (recommended)**
+
 ```bash
 python3 gapi_gui.py
 ```
 
-**6. Create your account:**
-- Open http://127.0.0.1:5000 in your browser
-- Click "Register" and create your account
-- Go to Settings tab and add your **Steam ID** ([find it here](https://steamid.io/))
-- Your games will load automatically!
+Then open **http://127.0.0.1:5000** in your browser.
+
+1. Click **Register** and create an account.
+2. Go to the **Settings** tab and add your Steam ID (and optionally Epic / GOG IDs).
+3. Click **Sync Library** — your games will load!
+4. Go to the **Pick a Game** tab and start picking. 🎮
+
+**CLI mode**
+
+```bash
+# Interactive menu
+python3 gapi.py
+
+# One-shot random pick
+python3 gapi.py --pick
+
+# Pick an unplayed game
+python3 gapi.py --pick --filter unplayed
+
+# See all options
+python3 gapi.py --help
+```
+
+**Discord bot**
+
+```bash
+python3 discord_bot.py
+```
+
+Make sure `discord_bot_token` is set in `config.json` (or `DISCORD_BOT_TOKEN` env var).
+Available slash commands: `/link`, `/unlink`, `/pick`, `/vote`, `/common`, `/stats`, `/hunt`, `/ignore`.
+
+### 7 — (Optional) Run as a service
+
+**systemd (Linux)**
+
+```ini
+# /etc/systemd/system/gapi.service
+[Unit]
+Description=GAPI Game Picker Web GUI
+After=network.target postgresql.service
+
+[Service]
+User=youruser
+WorkingDirectory=/opt/GAPI
+EnvironmentFile=/opt/GAPI/.env
+ExecStart=/opt/GAPI/venv/bin/python3 gapi_gui.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now gapi
+```
+
+**Docker Compose (quick)**
+
+```yaml
+# docker-compose.yml
+version: "3.9"
+services:
+  gapi:
+    build: .
+    ports: ["5000:5000"]
+    environment:
+      DATABASE_URL: postgresql://gapi:gapi@db/gapi
+      STEAM_API_KEY: "${STEAM_API_KEY}"
+    depends_on: [db]
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gapi
+      POSTGRES_PASSWORD: gapi
+      POSTGRES_DB: gapi
+```
+
+```bash
+STEAM_API_KEY=your_key docker compose up -d
+```
 
 ### Web GUI Features
 
@@ -163,6 +291,9 @@ The Web GUI (`gapi_gui.py`) provides:
 - 👥 **Multi-User Support** - Multiple accounts can use the same GAPI instance
 - 📊 **Full Game Management** - Picking, favorites, library browsing, statistics
 - ⚙️ **Settings Management** - Update your platform IDs at any time
+- 🏆 **Achievement Tracking** - Sync achievements from Steam and hunt them with friends
+- 🔌 **GraphQL API** - `POST /api/graphql` for advanced integrations
+- 📄 **OpenAPI / Swagger** - Full REST API documented at `/api/docs`
 
 ### CLI Mode
 
@@ -690,6 +821,7 @@ For detailed guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md)
 - **[Roadmap](ROADMAP.md)** - Planned features and improvements
 - **[Changelog](CHANGELOG.md)** - Version history and changes
 - **[License](LICENSE)** - MIT License details
+- **[Demo script](demo.py)** - `python3 demo.py` — try all features without credentials
 
 ## 📜 License
 
@@ -698,12 +830,22 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 ## 🙏 Credits & Acknowledgments
 
 **APIs & Services:**
-- [Steam Web API](https://steamcommunity.com/dev) - Game library and player data
+- [Steam Web API](https://steamcommunity.com/dev) - Game library, achievements, and player data
 - [SteamDB](https://steamdb.info/) - Enhanced game information
+- [Epic Games Store](https://store.epicgames.com/) - Epic library integration
+- [GOG Galaxy](https://www.gog.com/) - GOG library integration
+- [How Long to Beat](https://howlongtobeat.com/) - Game completion-time estimates
 
 **Libraries:**
+- [Flask](https://flask.palletsprojects.com/) - Web framework
+- [SQLAlchemy](https://www.sqlalchemy.org/) - Database ORM
 - [Colorama](https://github.com/tartley/colorama) - Cross-platform colored terminal output
 - [Requests](https://requests.readthedocs.io/) - HTTP library for Python
+- [python-dotenv](https://github.com/theskumar/python-dotenv) - Environment variable management
+- [discord.py](https://discordpy.readthedocs.io/) - Discord bot integration
+- [graphene](https://graphene-python.org/) - GraphQL API
+- [pypresence](https://github.com/qwertyquerty/pypresence) - Discord Rich Presence
+- [howlongtobeatpy](https://github.com/ScrappyCocco/HowLongToBeat-PythonAPI) - HLTB integration
 
 ## ⚠️ Disclaimer
 

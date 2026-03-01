@@ -6,7 +6,9 @@ A modern web GUI for randomly picking games from your Steam library.
 
 import logging
 import argparse
-from flask import Flask, render_template, jsonify, request, session, Response
+import uuid
+import secrets
+from flask import Flask, render_template, jsonify, request, session, Response, redirect as flask_redirect
 import threading
 import json
 import os
@@ -133,6 +135,32 @@ current_game: Optional[Dict] = None
 # Multi-user picker instance
 multi_picker: Optional[multiuser.MultiUserPicker] = None
 multi_picker_lock = threading.Lock()
+
+# In-memory live pick sessions keyed by session_id
+live_sessions: Dict[str, Dict] = {}
+live_sessions_lock = threading.Lock()
+
+# SSE subscriber queues: session_id -> list of queue.Queue
+import queue as _queue
+_sse_subscribers: Dict[str, list] = {}
+_sse_subscribers_lock = threading.Lock()
+
+
+def _sse_publish(session_id: str, event_type: str, data: Dict) -> None:
+    """Push a JSON event to all SSE subscribers of *session_id*."""
+    import json as _json
+    payload = _json.dumps({'event': event_type, 'data': data})
+    with _sse_subscribers_lock:
+        dead = []
+        for q in _sse_subscribers.get(session_id, []):
+            try:
+                q.put_nowait(payload)
+            except _queue.Full:
+                dead.append(q)
+        if dead:
+            _sse_subscribers[session_id] = [
+                q for q in _sse_subscribers.get(session_id, []) if q not in dead
+            ]
 
 # User authentication
 current_user: Optional[str] = None
@@ -290,6 +318,13 @@ ADMIN_MIGRATIONS = {
             "    game_picked VARCHAR(50),\n"
             "    picked_at TIMESTAMP\n"
             ");"
+        )
+    },
+    'users_last_seen_column': {
+        'label': 'Add last_seen to users table',
+        'description': 'Add last_seen column to users table for online presence tracking.',
+        'sql': (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP;"
         )
     },
     'favorite_games_table': {
@@ -1045,6 +1080,115 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/manifest.json')
+def pwa_manifest():
+    """Serve the Web App Manifest for Progressive Web App support."""
+    manifest = {
+        "name": "GAPI - Game Picker",
+        "short_name": "GAPI",
+        "description": "Randomly pick your next game from your Steam library.",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#667eea",
+        "theme_color": "#667eea",
+        "orientation": "any",
+        "icons": [
+            {
+                "src": "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6/svgs/solid/gamepad.svg",
+                "sizes": "any",
+                "type": "image/svg+xml",
+                "purpose": "any maskable",
+            }
+        ],
+        "categories": ["games", "entertainment", "utilities"],
+        "lang": "en",
+        "dir": "ltr",
+    }
+    return jsonify(manifest), 200, {
+        'Content-Type': 'application/manifest+json',
+        'Cache-Control': 'public, max-age=86400',
+    }
+
+
+@app.route('/sw.js')
+def pwa_service_worker():
+    """Serve the PWA service worker that enables offline-capable caching."""
+    sw_js = r"""// GAPI Service Worker — offline-first caching for the web shell
+'use strict';
+
+const CACHE_NAME = 'gapi-v1';
+// Core assets that make up the app shell — cached on install.
+const SHELL_ASSETS = [
+  '/',
+  '/manifest.json',
+];
+// API path prefixes that should never be served from cache.
+const NO_CACHE_PREFIXES = [
+  '/api/',
+];
+
+// ── Install: pre-cache the app shell ──────────────────────────────────────
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS))
+  );
+  self.skipWaiting();
+});
+
+// ── Activate: remove stale caches ─────────────────────────────────────────
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((k) => k !== CACHE_NAME)
+          .map((k) => caches.delete(k))
+      )
+    )
+  );
+  self.clients.claim();
+});
+
+// ── Fetch: network-first for API calls, cache-first for the app shell ─────
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
+  // Always go to the network for API requests (no stale data).
+  const isApi = NO_CACHE_PREFIXES.some((p) => url.pathname.startsWith(p));
+  if (isApi || event.request.method !== 'GET') {
+    return; // let the browser handle it normally
+  }
+
+  // Cache-first for the app shell; fall back to network.
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request).then((response) => {
+        if (!response || response.status !== 200 || response.type !== 'basic') {
+          return response;
+        }
+        const toCache = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, toCache));
+        return response;
+      }).catch(() => {
+        // Offline fallback: return the cached root page for navigation requests.
+        if (event.request.mode === 'navigate') {
+          return caches.match('/');
+        }
+      });
+    })
+  );
+});
+"""
+    return sw_js, 200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        # Service workers must be served without long-lived caching.
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Service-Worker-Allowed': '/',
+    }
+
+
+
 @app.route('/api/status')
 def api_status():
     """Get application status"""
@@ -1497,13 +1641,18 @@ def api_pick_game():
         tag_filter = data.get('tag', '').strip() or None
         platform_filter = data.get('platform_filter', '').strip().lower() or None
         device_filter = data.get('device_filter', '').strip().lower() or None
-        
+        min_rarity = data.get('min_rarity')
+        max_rarity = data.get('max_rarity')
+        vr_filter_raw = data.get('vr_filter', '').strip().lower() or None
+        vr_filter = vr_filter_raw if vr_filter_raw in ('vr_supported', 'vr_only', 'no_vr') else None
+
         if DB_AVAILABLE:
             db = None
             try:
                 db = database.SessionLocal()
                 if _ignored_games_service:
                     ignored_games = _ignored_games_service.get_ignored(db, username)
+
                 else:
                     ignored_games = database.get_ignored_games(db, username)
                 if ignored_games:
@@ -1511,6 +1660,37 @@ def api_pick_game():
                         exclude_game_ids.extend(ignored_games)
                     else:
                         exclude_game_ids = ignored_games
+
+                # Rarity filter: restrict to games that still have unfinished
+                # achievements within the requested rarity band.
+                if min_rarity is not None or max_rarity is not None:
+                    try:
+                        rarity_app_ids = database.get_games_with_rare_achievements(
+                            db, username,
+                            max_rarity=float(max_rarity) if max_rarity is not None else 100.0,
+                            min_rarity=float(min_rarity) if min_rarity is not None else 0.0,
+                        )
+                        if rarity_app_ids:
+                            # Narrow exclude list: keep only games in the rarity set
+                            # by excluding everything else
+                            rarity_set = set(str(aid) for aid in rarity_app_ids)
+                            extra_excludes = [
+                                str(g.get('appid', g.get('id', '')))
+                                for g in picker.games
+                                if str(g.get('appid', g.get('id', ''))) not in rarity_set
+                            ]
+                            if exclude_game_ids:
+                                exclude_game_ids.extend(extra_excludes)
+                            else:
+                                exclude_game_ids = extra_excludes
+                        else:
+                            # No games match the rarity filter — set impossible exclude
+                            gui_logger.info(
+                                "No games found matching rarity filter "
+                                "[%s, %s] for %s", min_rarity, max_rarity, username)
+                    except Exception as e:
+                        gui_logger.warning("Could not apply rarity filter: %s", e)
+
             except Exception as e:
                 gui_logger.warning(f"Could not fetch ignored games: {e}")
             finally:
@@ -1529,6 +1709,7 @@ def api_pick_game():
             'exclude_game_ids': exclude_game_ids,
             'platforms': [platform_filter] if platform_filter else None,
             'device_types': [device_filter] if device_filter else None,
+            'vr_filter': vr_filter,
         }
 
         with picker_lock:
@@ -1672,6 +1853,25 @@ def api_pick_game():
                         args=(webhook_url, wh_payload),
                         daemon=True,
                     ).start()
+
+                # Fire Slack / Teams / IFTTT / Home Assistant notifications
+                try:
+                    from webhook_notifier import WebhookNotifier
+                    _notifier = WebhookNotifier(picker.config or {})
+                    _has_extra = any(
+                        _notifier._get(k) for k in (
+                            'slack_webhook_url', 'teams_webhook_url',
+                            'ifttt_webhook_key', 'homeassistant_url',
+                        )
+                    )
+                    if _has_extra:
+                        threading.Thread(
+                            target=_notifier.notify_game_picked,
+                            args=(response,),
+                            daemon=True,
+                        ).start()
+                except Exception as _wh_exc:
+                    gui_logger.debug("WebhookNotifier error: %s", _wh_exc)
 
                 return jsonify(response)
             
@@ -3783,6 +3983,469 @@ def api_get_steam_achievements(app_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Achievement sync (Steam API → database)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/achievements/sync', methods=['POST'])
+@require_login
+def api_sync_achievements():
+    """Sync achievements for one or more games from the Steam API.
+
+    Request JSON::
+
+        {
+          "app_ids": ["620", "570"],   // optional – if omitted, syncs all cached games
+          "force": false               // optional – skip if synced within last hour
+        }
+
+    The endpoint fetches ``GetPlayerAchievements`` + ``GetSchemaForGame`` for
+    each requested app and upserts the results into the ``achievements`` table.
+
+    Response JSON::
+
+        {
+          "synced": [
+            {"app_id": "620", "game_name": "Portal 2",
+             "added": 10, "updated": 2, "total": 12},
+            ...
+          ],
+          "skipped": ["570"],
+          "errors":  ["730"]
+        }
+
+    Returns 503 if the database is unavailable, 400 if Steam API key or Steam
+    ID is not configured.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    # Load config to get Steam credentials
+    base_config = load_base_config()
+    steam_api_key = base_config.get('steam_api_key', '').strip()
+    if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
+        return jsonify({'error': 'Steam API key not configured'}), 400
+
+    # Resolve the user's Steam ID
+    db = next(database.get_db())
+    try:
+        user = database.get_user(db, username)
+        steam_id = user.steam_id if user else None
+    finally:
+        if db:
+            db.close()
+
+    if not steam_id:
+        return jsonify({'error': 'Steam ID not configured for this account'}), 400
+
+    data = request.json or {}
+    requested_app_ids: Optional[List[str]] = data.get('app_ids')
+
+    # If no explicit list provided, use the cached library
+    if not requested_app_ids:
+        db2 = next(database.get_db())
+        try:
+            cached = (
+                _library_service.get_cached(db2, username)
+                if _library_service
+                else database.get_cached_library(db2, username)
+            )
+        finally:
+            if db2:
+                db2.close()
+        if not cached:
+            return jsonify({'error': 'No games in library cache. Sync your library first.'}), 400
+        requested_app_ids = [str(g.get('app_id', '')) for g in (cached or [])
+                              if g.get('app_id')]
+
+    steam_client = gapi.SteamAPIClient(steam_api_key)
+    synced: List[Dict] = []
+    skipped: List[str] = []
+    errors: List[str] = []
+
+    # Resolve game names from library cache for display
+    db3 = next(database.get_db())
+    try:
+        cached_all = (
+            _library_service.get_cached(db3, username)
+            if _library_service
+            else database.get_cached_library(db3, username)
+        )
+    finally:
+        if db3:
+            db3.close()
+    name_map: Dict[str, str] = {
+        str(g.get('app_id', '')): g.get('name', g.get('app_id', ''))
+        for g in (cached_all or [])
+    }
+
+    for app_id in requested_app_ids[:50]:  # cap at 50 per call to avoid timeouts
+        app_id = str(app_id).strip()
+        if not app_id:
+            continue
+        game_name = name_map.get(app_id, app_id)
+        try:
+            player_achievements = steam_client.get_player_achievements(steam_id, app_id)
+            if not player_achievements:
+                skipped.append(app_id)
+                continue
+            schema = steam_client.get_schema_for_game(app_id)
+            db4 = next(database.get_db())
+            try:
+                result = database.sync_steam_achievements(
+                    db4, username, steam_id, app_id, game_name,
+                    player_achievements, schema
+                )
+            finally:
+                if db4:
+                    db4.close()
+            synced.append({
+                'app_id': app_id,
+                'game_name': game_name,
+                'added': result['added'],
+                'updated': result['updated'],
+                'total': result['total'],
+            })
+        except Exception as exc:
+            gui_logger.error("Error syncing achievements for app %s: %s", app_id, exc)
+            errors.append(app_id)
+
+    return jsonify({'synced': synced, 'skipped': skipped, 'errors': errors})
+
+
+# ---------------------------------------------------------------------------
+# Achievement statistics dashboard
+# ---------------------------------------------------------------------------
+
+@app.route('/api/achievements/stats')
+@require_login
+def api_achievement_stats():
+    """Return achievement statistics for the current user.
+
+    Response JSON::
+
+        {
+          "total_tracked": 120,
+          "total_unlocked": 45,
+          "completion_percent": 37.5,
+          "rarest_achievement": { ... },
+          "games": [ ... ],
+          "by_platform": [
+            {
+              "platform": "steam",
+              "total_tracked": 100,
+              "total_unlocked": 40,
+              "completion_percent": 40.0,
+              "game_count": 12
+            }
+          ]
+        }
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        stats = database.get_achievement_stats(db, username)
+        by_platform = database.get_achievement_stats_by_platform(db, username)
+    finally:
+        if db:
+            db.close()
+
+    if not stats:
+        return jsonify({
+            'total_tracked': 0, 'total_unlocked': 0,
+            'completion_percent': 0.0, 'rarest_achievement': None,
+            'games': [], 'by_platform': [],
+        })
+    stats['by_platform'] = by_platform
+    return jsonify(stats)
+
+
+# ---------------------------------------------------------------------------
+# iCalendar export for the game-night schedule
+# ---------------------------------------------------------------------------
+
+@app.route('/api/schedule/export.ics')
+@require_login
+def api_export_schedule_ics():
+    """Download the game-night schedule as an iCalendar (.ics) file.
+
+    Produces a standards-compliant RFC 5545 ``VCALENDAR`` document.
+    Each game-night event becomes a ``VEVENT`` with ``DTSTART``, ``SUMMARY``,
+    ``DESCRIPTION`` (notes + game name + attendees), and a ``UID`` derived
+    from the event ID.
+
+    Response: ``text/calendar`` attachment named ``gapi_schedule.ics``.
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+
+    with picker_lock:
+        events = picker.schedule_service.get_events()
+
+    lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//GAPI//Game Night Schedule//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+    ]
+
+    for ev in events:
+        date_str = ev.get('date', '')
+        time_str = ev.get('time', '00:00')
+        dtstart = ''
+        if date_str:
+            # Produce DTSTART in basic format: YYYYMMDDTHHMMSS
+            clean_date = date_str.replace('-', '')
+            clean_time = time_str.replace(':', '')
+            if len(clean_time) == 4:
+                clean_time += '00'
+            dtstart = f'{clean_date}T{clean_time}'
+        attendees = ', '.join(ev.get('attendees', []))
+        game_name = ev.get('game_name', '')
+        notes = ev.get('notes', '')
+        desc_parts = []
+        if game_name:
+            desc_parts.append(f'Game: {game_name}')
+        if attendees:
+            desc_parts.append(f'Attendees: {attendees}')
+        if notes:
+            desc_parts.append(notes)
+        description = '\\n'.join(desc_parts)
+        uid = f"{ev.get('id', 'unknown')}@gapi"
+
+        lines.append('BEGIN:VEVENT')
+        lines.append(f'UID:{uid}')
+        lines.append(f'SUMMARY:{ev.get("title", "Game Night")}')
+        if dtstart:
+            lines.append(f'DTSTART:{dtstart}')
+        if description:
+            lines.append(f'DESCRIPTION:{description}')
+        lines.append('END:VEVENT')
+
+    lines.append('END:VCALENDAR')
+
+    ical_body = '\r\n'.join(lines) + '\r\n'
+
+    from flask import Response as _Response
+    return _Response(
+        ical_body,
+        mimetype='text/calendar',
+        headers={
+            'Content-Disposition': 'attachment; filename="gapi_schedule.ics"',
+            'Content-Type': 'text/calendar; charset=utf-8',
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multiplayer Achievement Challenges
+# ---------------------------------------------------------------------------
+
+@app.route('/api/achievement-challenges', methods=['POST'])
+@require_login
+def api_create_achievement_challenge():
+    """Create a new multiplayer achievement challenge.
+
+    Request JSON::
+
+        {
+          "title": "Who completes Portal 2 first?",
+          "app_id": "620",
+          "game_name": "Portal 2",
+          "target_achievement_ids": ["ACH_WIN", "ACH_PARTNER"],   // optional
+          "starts_at": "2026-03-01T20:00:00",                     // optional
+          "ends_at":   "2026-03-08T20:00:00"                      // optional
+        }
+
+    Response JSON: the created challenge object (status 201).
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    title = str(data.get('title', '')).strip()
+    app_id = str(data.get('app_id', '')).strip()
+    game_name = str(data.get('game_name', '')).strip()
+    if not title or not app_id or not game_name:
+        return jsonify({'error': 'title, app_id, and game_name are required'}), 400
+
+    targets_raw = data.get('target_achievement_ids', [])
+    if isinstance(targets_raw, str):
+        target_ids = [t.strip() for t in targets_raw.split(',') if t.strip()]
+    else:
+        target_ids = [str(t).strip() for t in (targets_raw or []) if str(t).strip()]
+
+    db = next(database.get_db())
+    try:
+        challenge = database.create_achievement_challenge(
+            db, username, title, app_id, game_name,
+            target_achievement_ids=target_ids or None,
+            starts_at=str(data.get('starts_at', '')).strip(),
+            ends_at=str(data.get('ends_at', '')).strip(),
+        )
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Failed to create challenge'}), 500
+    return jsonify(challenge), 201
+
+
+@app.route('/api/achievement-challenges', methods=['GET'])
+@require_login
+def api_list_achievement_challenges():
+    """List achievement challenges for the current user (created or joined).
+
+    Response JSON::
+
+        {"challenges": [ {...}, ... ]}
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        challenges = database.get_achievement_challenges(db, username)
+    finally:
+        if db:
+            db.close()
+
+    return jsonify({'challenges': challenges})
+
+
+@app.route('/api/achievement-challenges/<challenge_id>', methods=['GET'])
+@require_login
+def api_get_achievement_challenge(challenge_id: str):
+    """Get details of a single achievement challenge by its ID.
+
+    Response JSON: the challenge object or 404 if not found.
+    """
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        challenge = database.get_achievement_challenge(db, challenge_id)
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Challenge not found'}), 404
+    return jsonify(challenge)
+
+
+@app.route('/api/achievement-challenges/<challenge_id>/join', methods=['POST'])
+@require_login
+def api_join_achievement_challenge(challenge_id: str):
+    """Join an existing achievement challenge.
+
+    Response JSON: updated challenge object.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        challenge = database.join_achievement_challenge(db, challenge_id, username)
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Challenge not found or could not join'}), 404
+    return jsonify(challenge)
+
+
+@app.route('/api/achievement-challenges/<challenge_id>/progress', methods=['PUT'])
+@require_login
+def api_update_challenge_progress(challenge_id: str):
+    """Update the current user's unlocked count for a challenge.
+
+    Request JSON::
+
+        {"unlocked_count": 3}
+
+    Response JSON: updated challenge object.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    try:
+        unlocked_count = int(data.get('unlocked_count', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'unlocked_count must be an integer'}), 400
+
+    db = next(database.get_db())
+    try:
+        challenge = database.record_challenge_unlock(
+            db, challenge_id, username, unlocked_count)
+    finally:
+        if db:
+            db.close()
+
+    if not challenge:
+        return jsonify({'error': 'Challenge or participant not found'}), 404
+    return jsonify(challenge)
+
+
+@app.route('/api/achievement-challenges/<challenge_id>', methods=['DELETE'])
+@require_login
+def api_cancel_achievement_challenge(challenge_id: str):
+    """Cancel an achievement challenge (creator only).
+
+    Response JSON::
+
+        {"success": true, "id": "<challenge_id>"}
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    db = next(database.get_db())
+    try:
+        ok = database.cancel_achievement_challenge(db, challenge_id, username)
+    finally:
+        if db:
+            db.close()
+
+    if not ok:
+        return jsonify({'error': 'Challenge not found or permission denied'}), 404
+    return jsonify({'success': True, 'id': challenge_id})
+
+
+# ---------------------------------------------------------------------------
 # Friend Activity API
 # ---------------------------------------------------------------------------
 
@@ -4096,6 +4759,88 @@ def api_export_favorites():
 
 
 # ---------------------------------------------------------------------------
+# User data backup / restore
+# ---------------------------------------------------------------------------
+
+@app.route('/api/export/user-data')
+@require_login
+def api_export_user_data():
+    """Export all persisted data for the current user as a JSON file.
+
+    The downloaded file can be re-imported via ``POST /api/import/user-data``
+    to restore the data on the same or a different GAPI instance.
+
+    Response: ``application/json`` attachment named ``gapi_<username>_backup.json``.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db = next(database.get_db())
+    try:
+        export = database.get_user_data_export(db, username)
+    finally:
+        if db:
+            db.close()
+    if not export:
+        return jsonify({'error': 'No data found for user'}), 404
+    import json as _json
+    payload = _json.dumps(export, indent=2, default=str)
+    from flask import Response as _Response
+    return _Response(
+        payload,
+        mimetype='application/json',
+        headers={
+            'Content-Disposition': f'attachment; filename="gapi_{username}_backup.json"',
+        },
+    )
+
+
+@app.route('/api/import/user-data', methods=['POST'])
+@require_login
+def api_import_user_data():
+    """Restore user data from a JSON backup (merge — existing records kept).
+
+    Accepts either a JSON body or a multipart ``file`` upload.
+
+    Response JSON:
+      - ``ignored_added``     – ignored-game records inserted
+      - ``favorites_added``   – favourite records inserted
+      - ``achievements_added``– achievement records inserted
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    data = None
+    if request.content_type and 'multipart' in request.content_type:
+        f = request.files.get('file')
+        if not f:
+            return jsonify({'error': 'No file uploaded'}), 400
+        try:
+            import json as _json
+            data = _json.load(f)
+        except Exception:
+            return jsonify({'error': 'Invalid JSON file'}), 400
+    else:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body must be JSON'}), 400
+
+    if data.get('username') and data['username'] != username:
+        return jsonify({'error': 'Backup belongs to a different user'}), 400
+
+    db = next(database.get_db())
+    try:
+        counts = database.import_user_data(db, username, data)
+    finally:
+        if db:
+            db.close()
+    if not counts and counts != {}:
+        return jsonify({'error': 'Import failed'}), 500
+    return jsonify(counts)
+
+
+# ---------------------------------------------------------------------------
 # User profile card API
 # ---------------------------------------------------------------------------
 
@@ -4166,16 +4911,18 @@ def api_update_profile():
 @app.route('/api/app-friends')
 @require_login
 def api_app_friends():
-    """Return the current user's in-app friends, sent requests, and received requests."""
+    """Return the current user's in-app friends, sent requests, and received requests.
+
+    The ``friends`` list includes ``steam_id``, ``epic_id``, ``gog_id``, and
+    ``is_online`` (active within the last 5 minutes) so that callers can use
+    friends directly in the multi-user game picker.
+    """
     global current_user
     with current_user_lock:
         username = current_user
     db = next(database.get_db())
     try:
-        if _friend_service:
-            result = _friend_service.get_friends(db, username)
-        else:
-            result = database.get_app_friends(db, username)
+        result = database.get_app_friends_with_platforms(db, username)
     finally:
         if db:
             db.close()
@@ -4271,6 +5018,355 @@ def api_remove_app_friend():
     if ok:
         return jsonify({'success': True})
     return jsonify({'error': 'Failed to remove friend'}), 500
+
+
+# ---------------------------------------------------------------------------
+# User presence API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/presence', methods=['POST'])
+@require_login
+def api_update_presence():
+    """Heartbeat endpoint – update the current user's ``last_seen`` timestamp.
+
+    Clients should call this periodically (e.g. every 60 s) while the user
+    has the app open so that other users can see them as online.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    if not DB_AVAILABLE:
+        return jsonify({'success': True})
+    db = next(database.get_db())
+    try:
+        database.update_user_presence(db, username)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/users/online')
+@require_login
+def api_online_users():
+    """Return users who have been active within the last 5 minutes."""
+    if not DB_AVAILABLE:
+        return jsonify({'users': []})
+    db = next(database.get_db())
+    try:
+        users = database.get_online_users(db)
+    finally:
+        if db:
+            db.close()
+    return jsonify({'users': users})
+
+
+# ---------------------------------------------------------------------------
+# Live Pick Sessions API
+# ---------------------------------------------------------------------------
+
+def _live_session_view(session: Dict) -> Dict:
+    """Return a JSON-serialisable view of a live session dict."""
+    return {
+        'session_id': session['session_id'],
+        'name': session.get('name', session['session_id']),
+        'host': session['host'],
+        'participants': session['participants'],
+        'status': session['status'],
+        'created_at': session['created_at'].isoformat(),
+        'picked_game': session.get('picked_game'),
+    }
+
+
+@app.route('/api/live-session/create', methods=['POST'])
+@require_login
+def api_live_session_create():
+    """Create a new live pick session.
+
+    The creating user is automatically added as host and first participant.
+
+    Request JSON (all optional):
+      - ``name``: human-readable session label
+
+    Returns the newly created session.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    data = request.get_json() or {}
+    session_id = str(uuid.uuid4())
+    session = {
+        'session_id': session_id,
+        'host': username,
+        'name': data.get('name', f"{username}'s session"),
+        'participants': [username],
+        'status': 'waiting',
+        'created_at': datetime.utcnow(),
+        'picked_game': None,
+    }
+    with live_sessions_lock:
+        live_sessions[session_id] = session
+    return jsonify(_live_session_view(session)), 201
+
+
+@app.route('/api/live-session/active')
+@require_login
+def api_live_session_active():
+    """Return all active (non-completed) live pick sessions."""
+    with live_sessions_lock:
+        active = [
+            _live_session_view(s)
+            for s in live_sessions.values()
+            if s['status'] != 'completed'
+        ]
+    return jsonify({'sessions': active})
+
+
+@app.route('/api/live-session/<session_id>/join', methods=['POST'])
+@require_login
+def api_live_session_join(session_id: str):
+    """Join an existing live pick session."""
+    global current_user
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session['status'] == 'completed':
+            return jsonify({'error': 'Session has already completed'}), 400
+        if username not in session['participants']:
+            session['participants'].append(username)
+        view = _live_session_view(session)
+    _sse_publish(session_id, 'session', view)
+    return jsonify(view)
+
+
+@app.route('/api/live-session/<session_id>/leave', methods=['POST'])
+@require_login
+def api_live_session_leave(session_id: str):
+    """Leave an active live pick session.
+
+    If the host leaves and there are remaining participants, the oldest
+    participant becomes the new host.  If no participants remain the session
+    is removed entirely.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if username in session['participants']:
+            session['participants'].remove(username)
+        if not session['participants']:
+            del live_sessions[session_id]
+            _sse_publish(session_id, 'session', {'status': 'closed', 'session_id': session_id})
+            return jsonify({'success': True, 'message': 'Session closed (no participants left)'})
+        if session['host'] == username:
+            session['host'] = session['participants'][0]
+        view = _live_session_view(session)
+    _sse_publish(session_id, 'session', view)
+    return jsonify({'success': True, 'session': view})
+
+
+@app.route('/api/live-session/<session_id>/pick', methods=['POST'])
+@require_login
+def api_live_session_pick(session_id: str):
+    """Pick a common game for all participants in the live session.
+
+    Only the session host may start a pick.  Delegates to the multi-user
+    picker using each participant's platform library.
+
+    Request JSON (all optional):
+      - ``coop_only``: boolean, default false
+    """
+    global current_user, multi_picker
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session['host'] != username:
+            return jsonify({'error': 'Only the session host can start a pick'}), 403
+        if session['status'] == 'completed':
+            return jsonify({'error': 'Session has already completed'}), 400
+        participants = list(session['participants'])
+        session['status'] = 'picking'
+
+    data = request.get_json() or {}
+    coop_only = bool(data.get('coop_only', False))
+
+    _ensure_multi_picker()
+    if not multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    with multi_picker_lock:
+        game = multi_picker.pick_common_game(
+            user_names=participants,
+            coop_only=coop_only,
+            max_players=len(participants),
+        )
+
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if session:
+            if game:
+                session['picked_game'] = game
+            session['status'] = 'completed'
+
+    if not game:
+        return jsonify({'error': 'No common game found for all participants'}), 404
+
+    # Notify all participants that a game was picked (best-effort)
+    if DB_AVAILABLE:
+        game_name = game.get('name', 'a game')
+        for participant in participants:
+            db = next(database.get_db())
+            try:
+                database.create_notification(
+                    db,
+                    participant,
+                    title='Game picked!',
+                    message=f'{username} picked "{game_name}" for your live session.',
+                    type='success',
+                )
+            except Exception as exc:
+                gui_logger.warning('Failed to notify %s after pick: %s', participant, exc)
+            finally:
+                if db:
+                    db.close()
+
+    # Publish completed session state to SSE subscribers
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if session:
+            _sse_publish(session_id, 'session', _live_session_view(session))
+
+    return jsonify(game)
+@require_login
+def api_live_session_get(session_id: str):
+    """Return the current state of a specific live pick session."""
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+    return jsonify(_live_session_view(session))
+
+
+@app.route('/api/live-session/<session_id>/invite', methods=['POST'])
+@require_login
+def api_live_session_invite(session_id: str):
+    """Invite one or more users to a live pick session by sending them an
+    in-app notification.
+
+    Only the session host may send invites.
+
+    Request JSON:
+      - ``usernames``: list of usernames to invite (required)
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session['host'] != username:
+            return jsonify({'error': 'Only the session host can invite users'}), 403
+        session_name = session.get('name', session_id)
+    data = request.get_json() or {}
+    usernames = data.get('usernames', [])
+    if not usernames or not isinstance(usernames, list):
+        return jsonify({'error': 'usernames (list) is required'}), 400
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available for notifications'}), 503
+    sent, failed = [], []
+    for target in usernames:
+        target = str(target).strip()
+        if not target:
+            continue
+        db = next(database.get_db())
+        try:
+            ok = database.create_notification(
+                db,
+                target,
+                title=f'Game session invite from {username}',
+                message=(
+                    f'{username} invited you to join their live pick session '
+                    f'"{session_name}". Session ID: {session_id}'
+                ),
+                type='info',
+            )
+            (sent if ok else failed).append(target)
+        except Exception as exc:
+            gui_logger.warning('Failed to send invite notification to %s: %s', target, exc)
+            failed.append(target)
+        finally:
+            if db:
+                db.close()
+    return jsonify({'sent': sent, 'failed': failed})
+
+
+@app.route('/api/live-session/<session_id>/events')
+@require_login
+def api_live_session_events(session_id: str):
+    """Server-Sent Events stream for a live pick session.
+
+    Clients connect once; the server pushes a ``session`` event whenever
+    the session state changes (join, leave, pick, invite).  A ``heartbeat``
+    event is sent every 25 seconds to keep the connection alive through
+    proxies and load-balancers.
+
+    The stream ends when the session is completed or no longer exists.
+    """
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        initial_data = _live_session_view(session)
+
+    sub_queue: _queue.Queue = _queue.Queue(maxsize=64)
+    with _sse_subscribers_lock:
+        _sse_subscribers.setdefault(session_id, []).append(sub_queue)
+
+    def _generate():
+        import json as _json
+        # Send initial state immediately
+        yield f"event: session\ndata: {_json.dumps(initial_data)}\n\n"
+        while True:
+            try:
+                payload = sub_queue.get(timeout=25)
+                yield f"event: session\ndata: {payload}\n\n"
+                # Stop streaming when the session is completed or closed
+                try:
+                    parsed = _json.loads(payload)
+                    if isinstance(parsed, dict):
+                        data_part = parsed.get('data', {})
+                        if data_part.get('status') in ('completed', 'closed'):
+                            break
+                except Exception:
+                    pass
+            except _queue.Empty:
+                yield "event: heartbeat\ndata: {}\n\n"
+        with _sse_subscribers_lock:
+            if session_id in _sse_subscribers:
+                try:
+                    _sse_subscribers[session_id].remove(sub_queue)
+                except ValueError:
+                    pass
+
+    from flask import Response as _Response, stream_with_context as _swc
+    return _Response(
+        _swc(_generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4590,6 +5686,35 @@ def api_toggle_plugin(plugin_id):
     return jsonify({'error': 'Plugin not found'}), 404
 
 
+@app.route('/api/plugins/<int:plugin_id>', methods=['DELETE'])
+@require_login
+def api_delete_plugin(plugin_id):
+    """Permanently delete a registered plugin (admin only)."""
+    global current_user
+    with current_user_lock:
+        username = current_user
+    db_check = next(database.get_db())
+    try:
+        if _plugin_service:
+            is_admin = _plugin_service.is_admin(db_check, username)
+        else:
+            is_admin = 'admin' in database.get_user_roles(db_check, username)
+    finally:
+        if db_check:
+            db_check.close()
+    if not is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    db = next(database.get_db())
+    try:
+        ok = database.delete_plugin(db, plugin_id)
+    finally:
+        if db:
+            db.close()
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'error': 'Plugin not found'}), 404
+
+
 # ---------------------------------------------------------------------------
 # App Settings API  (admin only)
 # ---------------------------------------------------------------------------
@@ -4743,6 +5868,1266 @@ def api_i18n_get(lang: str):
     if data is None:
         return jsonify({'error': f"Locale '{lang}' not found"}), 404
     return jsonify(data)
+
+
+# ---------------------------------------------------------------------------
+# GraphQL API (POST /api/graphql)
+# ---------------------------------------------------------------------------
+
+def _build_graphql_schema():
+    """Build and return the GAPI GraphQL schema using graphene.
+
+    Exposed types:
+    * **GameType** — a game in the user's library
+    * **AchievementType** — a single achievement row
+    * **StatsType** — library statistics
+    * **Query** — root type with ``games``, ``stats``, ``achievements`` fields
+    """
+    import graphene
+
+    class GameType(graphene.ObjectType):
+        app_id     = graphene.String()
+        name       = graphene.String()
+        platform   = graphene.String()
+        playtime_hours = graphene.Float()
+
+    class AchievementType(graphene.ObjectType):
+        app_id       = graphene.String()
+        game_name    = graphene.String()
+        achievement_id = graphene.String()
+        name         = graphene.String()
+        unlocked     = graphene.Boolean()
+        rarity       = graphene.Float()
+
+    class StatsType(graphene.ObjectType):
+        total_games        = graphene.Int()
+        unplayed_games     = graphene.Int()
+        played_games       = graphene.Int()
+        unplayed_percentage = graphene.Float()
+        total_playtime     = graphene.Float()
+        average_playtime   = graphene.Float()
+        total_achievements_tracked  = graphene.Int()
+        total_achievements_unlocked = graphene.Int()
+        achievement_completion_percent = graphene.Float()
+
+    class Query(graphene.ObjectType):
+        games = graphene.List(
+            GameType,
+            platform=graphene.String(default_value=''),
+            limit=graphene.Int(default_value=100),
+            description='Games in the current user\'s library',
+        )
+        stats = graphene.Field(
+            StatsType,
+            description='Library and achievement statistics for the current user',
+        )
+        achievements = graphene.List(
+            AchievementType,
+            app_id=graphene.String(default_value=''),
+            unlocked_only=graphene.Boolean(default_value=False),
+            description='Achievements tracked for the current user',
+        )
+
+        def resolve_games(root, info, platform='', limit=100):
+            username = info.context.get('username', '')
+            if not DB_AVAILABLE or not ensure_db_available():
+                return []
+            db = None
+            try:
+                db = database.SessionLocal()
+                cached = (
+                    _library_service.get_cached(db, username)
+                    if _library_service
+                    else database.get_cached_library(db, username)
+                )
+            finally:
+                if db:
+                    db.close()
+            games = cached or []
+            if platform:
+                games = [g for g in games if g.get('platform', 'steam').lower() == platform.lower()]
+            return [
+                GameType(
+                    app_id=str(g.get('app_id', '')),
+                    name=g.get('name', ''),
+                    platform=g.get('platform', 'steam'),
+                    playtime_hours=float(g.get('playtime_hours', 0)),
+                )
+                for g in games[:limit]
+            ]
+
+        def resolve_stats(root, info):
+            username = info.context.get('username', '')
+            lib_stats: dict = {}
+            ach_stats: dict = {}
+            if DB_AVAILABLE and ensure_db_available():
+                db = None
+                try:
+                    db = database.SessionLocal()
+                    cached = (
+                        _library_service.get_cached(db, username)
+                        if _library_service
+                        else database.get_cached_library(db, username)
+                    )
+                    cached = cached or []
+                    total = len(cached)
+                    unplayed = sum(1 for g in cached if g.get('playtime_hours', 0) == 0)
+                    total_pt = sum(g.get('playtime_hours', 0) for g in cached)
+                    lib_stats = {
+                        'total_games': total,
+                        'unplayed_games': unplayed,
+                        'played_games': total - unplayed,
+                        'unplayed_percentage': round(unplayed / total * 100, 1) if total else 0.0,
+                        'total_playtime': round(total_pt, 1),
+                        'average_playtime': round(total_pt / total, 1) if total else 0.0,
+                    }
+                    ach_stats = database.get_achievement_stats(db, username) or {}
+                finally:
+                    if db:
+                        db.close()
+            return StatsType(
+                total_games=lib_stats.get('total_games', 0),
+                unplayed_games=lib_stats.get('unplayed_games', 0),
+                played_games=lib_stats.get('played_games', 0),
+                unplayed_percentage=lib_stats.get('unplayed_percentage', 0.0),
+                total_playtime=lib_stats.get('total_playtime', 0.0),
+                average_playtime=lib_stats.get('average_playtime', 0.0),
+                total_achievements_tracked=ach_stats.get('total_tracked', 0),
+                total_achievements_unlocked=ach_stats.get('total_unlocked', 0),
+                achievement_completion_percent=ach_stats.get('completion_percent', 0.0),
+            )
+
+        def resolve_achievements(root, info, app_id='', unlocked_only=False):
+            username = info.context.get('username', '')
+            if not DB_AVAILABLE or not ensure_db_available():
+                return []
+            db = None
+            try:
+                db = database.SessionLocal()
+                grouped = database.get_user_achievements_grouped(db, username)
+            finally:
+                if db:
+                    db.close()
+            results = []
+            for game in (grouped or []):
+                if app_id and str(game.get('app_id', '')) != str(app_id):
+                    continue
+                for a in game.get('achievements', []):
+                    if unlocked_only and not a.get('unlocked'):
+                        continue
+                    results.append(AchievementType(
+                        app_id=str(game.get('app_id', '')),
+                        game_name=game.get('game_name', ''),
+                        achievement_id=a.get('achievement_id', ''),
+                        name=a.get('name', ''),
+                        unlocked=bool(a.get('unlocked')),
+                        rarity=a.get('rarity'),
+                    ))
+            return results
+
+    return graphene.Schema(query=Query)
+
+
+_graphql_schema = None
+_graphql_schema_lock = threading.Lock()
+
+
+def _get_graphql_schema():
+    global _graphql_schema
+    if _graphql_schema is None:
+        with _graphql_schema_lock:
+            if _graphql_schema is None:
+                try:
+                    _graphql_schema = _build_graphql_schema()
+                except Exception as exc:
+                    gui_logger.warning("GraphQL schema build failed: %s", exc)
+    return _graphql_schema
+
+
+@app.route('/api/graphql', methods=['POST'])
+@require_login
+def api_graphql():
+    """Execute a GraphQL query against the GAPI schema.
+
+    Request JSON::
+
+        {"query": "{ stats { total_games total_playtime } }"}
+
+    Optional variables::
+
+        {"query": "...", "variables": {"limit": 5}}
+
+    Response JSON::
+
+        {"data": { ... }}        // on success
+        {"errors": [ ... ]}     // on error
+
+    GraphQL schema:
+        - ``games(platform: String, limit: Int)`` → ``[GameType]``
+        - ``stats`` → ``StatsType``
+        - ``achievements(app_id: String, unlocked_only: Boolean)`` → ``[AchievementType]``
+
+    Requires `graphene` (``pip install graphene``).  Returns 503 if the
+    library is not available.
+    """
+    global current_user
+    with current_user_lock:
+        username = current_user
+
+    schema = _get_graphql_schema()
+    if schema is None:
+        return jsonify({'errors': [{'message': 'graphene library not available'}]}), 503
+
+    data = request.json or {}
+    query = data.get('query', '')
+    variables = data.get('variables') or {}
+    operation_name = data.get('operationName')
+
+    if not query:
+        return jsonify({'errors': [{'message': 'query is required'}]}), 400
+
+    try:
+        result = schema.execute(
+            query,
+            variables=variables,
+            operation_name=operation_name,
+            context={'username': username},
+        )
+        response: Dict = {}
+        if result.errors:
+            response['errors'] = [{'message': str(e)} for e in result.errors]
+        if result.data is not None:
+            response['data'] = result.data
+        status = 400 if result.errors and result.data is None else 200
+        return jsonify(response), status
+    except Exception as exc:
+        gui_logger.error("GraphQL execution error: %s", exc)
+        return jsonify({'errors': [{'message': str(exc)}]}), 500
+
+
+# ---------------------------------------------------------------------------
+# Twitch Integration — Trending games + library overlap
+# ---------------------------------------------------------------------------
+
+def _get_twitch_client():
+    """Return a TwitchClient using credentials from the app config.
+
+    Reads ``twitch_client_id`` and ``twitch_client_secret`` from the active
+    picker config.  Returns ``None`` when either credential is missing.
+    """
+    try:
+        from twitch_client import TwitchClient
+    except ImportError:
+        return None
+
+    if not picker:
+        return None
+
+    cfg = getattr(picker, 'config', {}) or {}
+    client_id     = cfg.get('twitch_client_id', '') or os.environ.get('TWITCH_CLIENT_ID', '')
+    client_secret = cfg.get('twitch_client_secret', '') or os.environ.get('TWITCH_CLIENT_SECRET', '')
+    if not client_id or not client_secret:
+        return None
+
+    try:
+        return TwitchClient(client_id=client_id, client_secret=client_secret)
+    except Exception as exc:
+        gui_logger.warning("Could not create TwitchClient: %s", exc)
+        return None
+
+
+@app.route('/api/twitch/trending')
+@require_login
+def api_twitch_trending():
+    """Return the top games currently live on Twitch.
+
+    Query params:
+        count (int, 1-100, default 20): Number of trending games to return.
+
+    Response JSON::
+
+        {
+          "trending": [
+            {
+              "id": "32982",
+              "name": "Grand Theft Auto V",
+              "viewer_count": 87452,
+              "box_art_url": "https://...",
+              "twitch_url": "https://www.twitch.tv/directory/game/..."
+            },
+            ...
+          ]
+        }
+
+    Returns 503 when Twitch credentials are not configured.
+    """
+    from twitch_client import TwitchAuthError, TwitchAPIError
+
+    client = _get_twitch_client()
+    if client is None:
+        return jsonify({
+            'error': (
+                'Twitch credentials not configured. '
+                'Add twitch_client_id and twitch_client_secret to config.json '
+                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
+            )
+        }), 503
+
+    try:
+        count = max(1, min(int(request.args.get('count', 20)), 100))
+    except (ValueError, TypeError):
+        count = 20
+
+    try:
+        trending = client.get_top_games(count=count)
+    except TwitchAuthError as exc:
+        gui_logger.error("Twitch auth error: %s", exc)
+        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
+    except TwitchAPIError as exc:
+        gui_logger.error("Twitch API error: %s", exc)
+        return jsonify({'error': f'Twitch API error: {exc}'}), 502
+    except Exception as exc:
+        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
+        return jsonify({'error': 'Unexpected error'}), 500
+
+    return jsonify({'trending': trending})
+
+
+@app.route('/api/twitch/library-overlap')
+@require_login
+def api_twitch_library_overlap():
+    """Return user library games that are currently trending on Twitch.
+
+    Fetches the top trending games and cross-references them against the
+    user's loaded game library by normalised name.  Useful for prompting
+    the user to pick a game they own that has an active Twitch community.
+
+    Query params:
+        count (int, 1-100, default 20): Number of trending Twitch games to
+            compare against.
+
+    Response JSON::
+
+        {
+          "overlap": [
+            {
+              "appid": 730,
+              "name": "Counter-Strike 2",
+              "playtime_forever": 4560,
+              "twitch_id": "32399",
+              "viewer_count": 75000,
+              "box_art_url": "https://...",
+              "twitch_url": "https://www.twitch.tv/directory/game/...",
+              "trending_rank": 3
+            },
+            ...
+          ],
+          "trending_count": 20
+        }
+
+    Returns 503 when Twitch credentials are not configured.
+    Returns 400 when the picker is not initialised.
+    """
+    from twitch_client import TwitchAuthError, TwitchAPIError
+
+    if not picker:
+        return jsonify({'error': 'Not initialized. Please log in.'}), 400
+
+    client = _get_twitch_client()
+    if client is None:
+        return jsonify({
+            'error': (
+                'Twitch credentials not configured. '
+                'Add twitch_client_id and twitch_client_secret to config.json '
+                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
+            )
+        }), 503
+
+    try:
+        count = max(1, min(int(request.args.get('count', 20)), 100))
+    except (ValueError, TypeError):
+        count = 20
+
+    try:
+        trending = client.get_top_games(count=count)
+    except TwitchAuthError as exc:
+        gui_logger.error("Twitch auth error: %s", exc)
+        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
+    except TwitchAPIError as exc:
+        gui_logger.error("Twitch API error: %s", exc)
+        return jsonify({'error': f'Twitch API error: {exc}'}), 502
+    except Exception as exc:
+        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
+        return jsonify({'error': 'Unexpected error'}), 500
+
+    with picker_lock:
+        user_games = list(picker.games) if picker.games else []
+
+    overlap = client.find_library_overlap(trending, user_games)
+    return jsonify({'overlap': overlap, 'trending_count': len(trending)})
+
+
+# ---------------------------------------------------------------------------
+# Platform OAuth — Epic Games, GOG Galaxy, Xbox Game Pass
+# ---------------------------------------------------------------------------
+
+def _get_platform_client(platform: str):
+    """Return the platform client for *platform*, or None."""
+    return picker.clients.get(platform) if picker else None
+
+
+@app.route('/api/epic/oauth/authorize')
+@require_login
+def api_epic_oauth_authorize():
+    """Redirect the browser to the Epic Games authorization page.
+
+    Query params:
+        redirect_uri (str): Override the default redirect URI from config.
+
+    Response: HTTP 302 redirect to Epic authorization URL.
+    Returns 503 if Epic OAuth is not configured.
+    """
+    from platform_clients import EpicOAuthClient
+    client = _get_platform_client('epic')
+    if not isinstance(client, EpicOAuthClient):
+        return jsonify({'error': 'Epic OAuth client not configured. '
+                        'Add epic_client_id and epic_enabled: true to config.json.'}), 503
+    redirect_uri = request.args.get('redirect_uri') or (
+        picker.config.get('epic_redirect_uri', '') if picker else ''
+    )
+    if not redirect_uri:
+        redirect_uri = request.url_root.rstrip('/') + '/api/epic/oauth/callback'
+    state = secrets.token_urlsafe(16)
+    session['epic_oauth_state'] = state
+    url = client.build_auth_url(redirect_uri=redirect_uri, state=state)
+    return flask_redirect(url)
+
+
+@app.route('/api/epic/oauth/callback')
+@require_login
+def api_epic_oauth_callback():
+    """Handle the Epic Games OAuth2 callback.
+
+    Query params:
+        code (str): Authorization code from Epic.
+
+    Response JSON::
+
+        {"success": true, "platform": "epic"}
+
+    Returns 400 on error, 503 if Epic client is not configured.
+    """
+    from platform_clients import EpicOAuthClient
+    client = _get_platform_client('epic')
+    if not isinstance(client, EpicOAuthClient):
+        return jsonify({'error': 'Epic OAuth client not configured.'}), 503
+    code = request.args.get('code', '')
+    if not code:
+        return jsonify({'error': 'Missing authorization code.'}), 400
+    redirect_uri = (picker.config.get('epic_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/epic/oauth/callback'
+    )
+    ok = client.exchange_code(code=code, redirect_uri=redirect_uri)
+    if not ok:
+        return jsonify({'error': 'Token exchange failed. Check server logs.'}), 400
+    return jsonify({'success': True, 'platform': 'epic'})
+
+
+@app.route('/api/epic/library')
+@require_login
+def api_epic_library():
+    """Return the authenticated user's Epic Games library.
+
+    Response JSON::
+
+        {
+          "games": [{"name": "...", "game_id": "epic:...", ...}],
+          "count": 42,
+          "platform": "epic"
+        }
+
+    Returns 503 if not authenticated.
+    """
+    from platform_clients import EpicOAuthClient
+    client = _get_platform_client('epic')
+    if not isinstance(client, EpicOAuthClient):
+        return jsonify({'error': 'Epic OAuth client not configured.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'Epic account not authenticated. '
+                        'Visit /api/epic/oauth/authorize first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'epic'})
+
+
+@app.route('/api/gog/oauth/authorize')
+@require_login
+def api_gog_oauth_authorize():
+    """Redirect the browser to the GOG Galaxy authorization page.
+
+    Response: HTTP 302 redirect.
+    Returns 503 if GOG OAuth is not configured.
+    """
+    from platform_clients import GOGOAuthClient
+    client = _get_platform_client('gog')
+    if not isinstance(client, GOGOAuthClient):
+        return jsonify({'error': 'GOG OAuth client not configured. '
+                        'Add gog_client_id and gog_enabled: true to config.json.'}), 503
+    redirect_uri = (picker.config.get('gog_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/gog/oauth/callback'
+    )
+    state = secrets.token_urlsafe(16)
+    session['gog_oauth_state'] = state
+    url = client.build_auth_url(redirect_uri=redirect_uri, state=state)
+    return flask_redirect(url)
+
+
+@app.route('/api/gog/oauth/callback')
+@require_login
+def api_gog_oauth_callback():
+    """Handle the GOG Galaxy OAuth2 callback.
+
+    Query params:
+        code (str): Authorization code from GOG.
+
+    Response JSON::
+
+        {"success": true, "platform": "gog"}
+    """
+    from platform_clients import GOGOAuthClient
+    client = _get_platform_client('gog')
+    if not isinstance(client, GOGOAuthClient):
+        return jsonify({'error': 'GOG OAuth client not configured.'}), 503
+    code = request.args.get('code', '')
+    if not code:
+        return jsonify({'error': 'Missing authorization code.'}), 400
+    redirect_uri = (picker.config.get('gog_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/gog/oauth/callback'
+    )
+    ok = client.exchange_code(code=code, redirect_uri=redirect_uri)
+    if not ok:
+        return jsonify({'error': 'Token exchange failed. Check server logs.'}), 400
+    return jsonify({'success': True, 'platform': 'gog'})
+
+
+@app.route('/api/gog/library')
+@require_login
+def api_gog_library():
+    """Return the authenticated user's GOG library.
+
+    Response JSON::
+
+        {
+          "games": [...],
+          "count": 15,
+          "platform": "gog"
+        }
+    """
+    from platform_clients import GOGOAuthClient
+    client = _get_platform_client('gog')
+    if not isinstance(client, GOGOAuthClient):
+        return jsonify({'error': 'GOG OAuth client not configured.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'GOG account not authenticated. '
+                        'Visit /api/gog/oauth/authorize first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'gog'})
+
+
+@app.route('/api/xbox/oauth/authorize')
+@require_login
+def api_xbox_oauth_authorize():
+    """Redirect the browser to the Microsoft/Xbox authorization page.
+
+    Response: HTTP 302 redirect.
+    Returns 503 if Xbox OAuth is not configured.
+    """
+    from platform_clients import XboxAPIClient
+    client = _get_platform_client('xbox')
+    if not isinstance(client, XboxAPIClient):
+        return jsonify({'error': 'Xbox OAuth client not configured. '
+                        'Add xbox_client_id and xbox_enabled: true to config.json.'}), 503
+    redirect_uri = (picker.config.get('xbox_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/xbox/oauth/callback'
+    )
+    state = secrets.token_urlsafe(16)
+    session['xbox_oauth_state'] = state
+    url = client.build_auth_url(redirect_uri=redirect_uri, state=state)
+    return flask_redirect(url)
+
+
+@app.route('/api/xbox/oauth/callback')
+@require_login
+def api_xbox_oauth_callback():
+    """Handle the Microsoft/Xbox OAuth2 callback.
+
+    Query params:
+        code (str): Authorization code from Microsoft.
+
+    Response JSON::
+
+        {"success": true, "platform": "xbox"}
+    """
+    from platform_clients import XboxAPIClient
+    client = _get_platform_client('xbox')
+    if not isinstance(client, XboxAPIClient):
+        return jsonify({'error': 'Xbox OAuth client not configured.'}), 503
+    code = request.args.get('code', '')
+    if not code:
+        return jsonify({'error': 'Missing authorization code.'}), 400
+    redirect_uri = (picker.config.get('xbox_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/xbox/oauth/callback'
+    )
+    ok = client.exchange_code(code=code, redirect_uri=redirect_uri)
+    if not ok:
+        return jsonify({'error': 'Token exchange failed. Check server logs.'}), 400
+    return jsonify({'success': True, 'platform': 'xbox'})
+
+
+@app.route('/api/xbox/library')
+@require_login
+def api_xbox_library():
+    """Return the authenticated user's Xbox title history / Game Pass library.
+
+    Response JSON::
+
+        {
+          "games": [...],
+          "count": 80,
+          "platform": "xbox"
+        }
+    """
+    from platform_clients import XboxAPIClient
+    client = _get_platform_client('xbox')
+    if not isinstance(client, XboxAPIClient):
+        return jsonify({'error': 'Xbox OAuth client not configured.'}), 503
+    if not client._xsts_token:
+        return jsonify({'error': 'Xbox account not authenticated. '
+                        'Visit /api/xbox/oauth/authorize first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'xbox'})
+
+
+@app.route('/api/platform/status')
+@require_login
+def api_platform_status():
+    """Return authentication / configuration status of all connected platforms.
+
+    Response JSON::
+
+        {
+          "platforms": {
+            "steam":     {"configured": true,  "authenticated": true},
+            "epic":      {"configured": true,  "authenticated": false},
+            "gog":       {"configured": false, "authenticated": false},
+            "xbox":      {"configured": false, "authenticated": false},
+            "psn":       {"configured": false, "authenticated": false},
+            "nintendo":  {"configured": false, "authenticated": false}
+          }
+        }
+    """
+    from platform_clients import EpicOAuthClient, GOGOAuthClient, XboxAPIClient, PSNClient, NintendoEShopClient
+    clients = picker.clients if picker else {}
+    status: Dict[str, Any] = {}
+
+    # Steam
+    steam = clients.get('steam')
+    status['steam'] = {
+        'configured': steam is not None,
+        'authenticated': steam is not None,
+    }
+
+    # Epic
+    epic = clients.get('epic')
+    status['epic'] = {
+        'configured': epic is not None,
+        'authenticated': isinstance(epic, EpicOAuthClient) and epic.is_authenticated,
+    }
+
+    # GOG
+    gog = clients.get('gog')
+    status['gog'] = {
+        'configured': gog is not None,
+        'authenticated': isinstance(gog, GOGOAuthClient) and gog.is_authenticated,
+    }
+
+    # Xbox
+    xbox = clients.get('xbox')
+    status['xbox'] = {
+        'configured': xbox is not None,
+        'authenticated': isinstance(xbox, XboxAPIClient) and xbox._xsts_token is not None,
+    }
+
+    # PSN
+    psn = clients.get('psn')
+    status['psn'] = {
+        'configured': psn is not None,
+        'authenticated': isinstance(psn, PSNClient) and psn.is_authenticated,
+    }
+
+    # Nintendo (catalog only — always "authenticated" when configured)
+    nintendo = clients.get('nintendo')
+    status['nintendo'] = {
+        'configured': nintendo is not None,
+        'authenticated': isinstance(nintendo, NintendoEShopClient),
+        'note': 'catalog only — no library API available',
+    }
+
+    return jsonify({'platforms': status})
+
+
+# ---------------------------------------------------------------------------
+# PlayStation Network
+# ---------------------------------------------------------------------------
+
+@app.route('/api/psn/connect', methods=['POST'])
+@require_login
+def api_psn_connect():
+    """Authenticate with PlayStation Network using an NPSSO token.
+
+    The NPSSO token can be obtained from the ``npsso`` cookie at
+    ``https://my.playstation.com`` after signing in.
+
+    Request JSON::
+
+        {"npsso": "YOUR_NPSSO_TOKEN_HERE"}
+
+    Response JSON::
+
+        {"success": true, "platform": "psn"}
+
+    Returns 400 if the NPSSO token is missing or invalid, 503 if PSN is
+    not configured.
+    """
+    from platform_clients import PSNClient
+    if not picker:
+        return jsonify({'error': 'Not initialized.'}), 400
+    client = picker.clients.get('psn')
+    if not isinstance(client, PSNClient):
+        # Auto-create a PSN client if not already configured
+        from platform_clients import PSNClient as _PSN
+        client = _PSN(timeout=picker.API_TIMEOUT)
+        picker.clients['psn'] = client
+    body  = request.get_json(silent=True) or {}
+    npsso = body.get('npsso', '').strip()
+    if not npsso:
+        return jsonify({'error': 'Missing npsso token in request body.'}), 400
+    ok = client.connect(npsso)
+    if not ok:
+        return jsonify({
+            'error': 'PSN authentication failed. '
+                     'The NPSSO token may be expired or invalid. '
+                     'Please obtain a fresh token from https://my.playstation.com'
+        }), 400
+    return jsonify({'success': True, 'platform': 'psn'})
+
+
+@app.route('/api/psn/library')
+@require_login
+def api_psn_library():
+    """Return the authenticated user's PlayStation game library.
+
+    Response JSON::
+
+        {
+          "games": [...],
+          "count": 42,
+          "platform": "psn"
+        }
+
+    Returns 503 if PSN is not configured or authenticated.
+    """
+    from platform_clients import PSNClient
+    client = picker.clients.get('psn') if picker else None
+    if not isinstance(client, PSNClient):
+        return jsonify({'error': 'PSN client not configured. '
+                        'POST /api/psn/connect with your npsso token first.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'PSN account not authenticated. '
+                        'POST /api/psn/connect with your npsso token first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'psn'})
+
+
+@app.route('/api/psn/trophies')
+@require_login
+def api_psn_trophies():
+    """Return the authenticated user's PlayStation trophy titles.
+
+    Response JSON::
+
+        {
+          "trophyTitles": [...],
+          "count": 15,
+          "platform": "psn"
+        }
+
+    Returns 503 if PSN is not configured or authenticated.
+    """
+    from platform_clients import PSNClient
+    client = picker.clients.get('psn') if picker else None
+    if not isinstance(client, PSNClient):
+        return jsonify({'error': 'PSN client not configured.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'PSN account not authenticated.'}), 503
+    trophies = client.get_trophies()
+    return jsonify({'trophyTitles': trophies, 'count': len(trophies), 'platform': 'psn'})
+
+
+# ---------------------------------------------------------------------------
+# Nintendo eShop
+# ---------------------------------------------------------------------------
+
+@app.route('/api/nintendo/search')
+@require_login
+def api_nintendo_search():
+    """Search the Nintendo eShop catalog.
+
+    Query params:
+        q          (str):  Search query (empty = browse all).
+        page       (int):  Zero-based page number (default 0).
+        per_page   (int):  Results per page 1-100 (default 20).
+        filters    (str):  Algolia filter string.
+
+    Response JSON::
+
+        {
+          "hits": [...],
+          "nbHits": 1234,
+          "page": 0,
+          "nbPages": 25,
+          "platform": "nintendo"
+        }
+
+    Returns 503 if Nintendo client is not configured.
+    """
+    from platform_clients import NintendoEShopClient
+    client = picker.clients.get('nintendo') if picker else None
+    if not isinstance(client, NintendoEShopClient):
+        # Auto-create a Nintendo client if not configured
+        if picker:
+            from platform_clients import NintendoEShopClient as _N
+            client = _N(timeout=picker.API_TIMEOUT)
+            picker.clients['nintendo'] = client
+        else:
+            return jsonify({'error': 'Nintendo client not configured. '
+                            'Add nintendo_enabled: true to config.json.'}), 503
+
+    query    = request.args.get('q', '')
+    page     = max(0, int(request.args.get('page', 0)))
+    per_page = max(1, min(int(request.args.get('per_page', 20)), 100))
+    filters  = request.args.get('filters', '')
+
+    result = client.search_games(
+        query=query,
+        filters=filters,
+        page=page,
+        hits_per_page=per_page,
+    )
+    result['platform'] = 'nintendo'
+    return jsonify(result)
+
+
+@app.route('/api/nintendo/game/<nsuid>')
+@require_login
+def api_nintendo_game(nsuid: str):
+    """Return details for a single Nintendo Switch game by nsuid.
+
+    Also fetches current eShop pricing.
+
+    Path param:
+        nsuid (str): 14-digit Nintendo Switch unique game ID.
+
+    Response JSON::
+
+        {
+          "game": {...},
+          "platform": "nintendo"
+        }
+
+    Returns 404 if the game is not in cache, 503 if not configured.
+    """
+    from platform_clients import NintendoEShopClient
+    client = picker.clients.get('nintendo') if picker else None
+    if not isinstance(client, NintendoEShopClient):
+        if picker:
+            from platform_clients import NintendoEShopClient as _N
+            client = _N(timeout=picker.API_TIMEOUT)
+            picker.clients['nintendo'] = client
+        else:
+            return jsonify({'error': 'Nintendo client not configured.'}), 503
+
+    game = client.get_game_by_nsuid(nsuid)
+    if game is None:
+        # Try to search for it
+        result = client.search_games(query='', page=0, hits_per_page=1)
+        game   = client.get_game_by_nsuid(nsuid)
+    if game is None:
+        return jsonify({'error': f'Game {nsuid} not found in cache. '
+                        'Search for it first via /api/nintendo/search.'}), 404
+    return jsonify({'game': game, 'platform': 'nintendo'})
+
+
+@app.route('/api/nintendo/prices')
+@require_login
+def api_nintendo_prices():
+    """Fetch current eShop prices for one or more games.
+
+    Query params:
+        nsuids  (str): Comma-separated list of 14-digit nsuid strings.
+        country (str): ISO country code (default ``US``).
+
+    Response JSON::
+
+        {
+          "prices": {"70010000000025": {"regular_price": "59.99", ...}},
+          "platform": "nintendo"
+        }
+    """
+    from platform_clients import NintendoEShopClient
+    client = picker.clients.get('nintendo') if picker else None
+    if not isinstance(client, NintendoEShopClient):
+        if picker:
+            from platform_clients import NintendoEShopClient as _N
+            client = _N(timeout=picker.API_TIMEOUT)
+            picker.clients['nintendo'] = client
+        else:
+            return jsonify({'error': 'Nintendo client not configured.'}), 503
+
+    nsuids_param = request.args.get('nsuids', '')
+    nsuids = [n.strip() for n in nsuids_param.split(',') if n.strip()]
+    if not nsuids:
+        return jsonify({'error': 'Provide one or more nsuids as ?nsuids=id1,id2'}), 400
+    country = request.args.get('country', 'US')
+    prices  = client.get_prices(nsuids=nsuids, country=country)
+    return jsonify({'prices': prices, 'platform': 'nintendo'})
+
+
+# ---------------------------------------------------------------------------
+# Smart Recommendations
+# ---------------------------------------------------------------------------
+
+@app.route('/api/recommendations/smart')
+@require_login
+def api_smart_recommendations():
+    """Return AI-enhanced game recommendations using multi-factor scoring.
+
+    Unlike the basic ``/api/recommendations`` endpoint this engine considers:
+
+    * Genre **and** Steam category/tag affinity from well-played titles
+    * Developer / publisher affinity
+    * Metacritic score influence (if cached)
+    * Diversity boosting (avoids clustering by developer)
+    * Recently-played history penalty
+
+    Query params:
+        count (int, 1-50, default 10): Number of recommendations to return.
+
+    Response JSON::
+
+        {
+          "recommendations": [
+            {
+              "appid": 620,
+              "name": "Portal 2",
+              "playtime_hours": 0.0,
+              "smart_score": 7.4,
+              "smart_reason": "Unplayed. Matches your Puzzle, Action preference. Metacritic 95",
+              ...
+            }
+          ],
+          "engine": "smart"
+        }
+
+    Returns 400 if the picker is not initialised.
+    """
+    from app.services.recommendation_service import SmartRecommendationEngine
+
+    if not picker:
+        return jsonify({
+            'error': 'Not initialized. Please log in and ensure your Steam ID is set.'
+        }), 400
+
+    try:
+        count = max(1, min(int(request.args.get('count', 10)), 50))
+    except (ValueError, TypeError):
+        count = 10
+
+    with picker_lock:
+        games   = list(picker.games) if picker.games else []
+        history = list(picker.history) if hasattr(picker, 'history') else []
+        # Collect details cache from the Steam client (if available)
+        cache: dict = {}
+        steam_client = picker.clients.get('steam') if hasattr(picker, 'clients') else None
+        if steam_client and hasattr(steam_client, 'details_cache'):
+            cache = dict(steam_client.details_cache)
+
+        well_mins   = getattr(picker, 'WELL_PLAYED_THRESHOLD_MINUTES', 600)
+        barely_mins = getattr(picker, 'BARELY_PLAYED_THRESHOLD_MINUTES', 120)
+
+    engine = SmartRecommendationEngine(
+        games=games,
+        details_cache=cache,
+        history=history,
+        well_played_mins=well_mins,
+        barely_played_mins=barely_mins,
+    )
+    recs = engine.recommend(count=count)
+    return jsonify({'recommendations': recs, 'engine': 'smart'})
+
+
+# ---------------------------------------------------------------------------
+# Machine Learning Recommendations
+# ---------------------------------------------------------------------------
+
+@app.route('/api/recommendations/ml')
+@require_login
+def api_ml_recommendations():
+    """Return machine-learning–powered game recommendations.
+
+    Uses :class:`~app.services.ml_recommendation_service.MLRecommendationEngine`
+    which offers item-based collaborative filtering, ALS matrix factorization,
+    and a hybrid blend.
+
+    Query params:
+        count  (int, 1-50, default 10): Number of recommendations to return.
+        method (str, default "cf"):     Scoring method — ``cf`` (item-based
+                                        collaborative filtering), ``mf`` (ALS
+                                        matrix factorization), or ``hybrid``.
+
+    Response JSON::
+
+        {
+          "recommendations": [
+            {
+              "name": "Portal 2",
+              "playtime_hours": 0.0,
+              "ml_score": 4.82,
+              "ml_reason": "Unplayed. Genre match: Puzzle, Action. Method: item-CF",
+              ...
+            }
+          ],
+          "engine": "ml",
+          "method": "cf"
+        }
+
+    Returns 400 if the picker is not initialised.
+    """
+    from app.services.ml_recommendation_service import MLRecommendationEngine
+
+    if not picker:
+        return jsonify({
+            'error': 'Not initialized. Please log in and ensure your Steam ID is set.'
+        }), 400
+
+    try:
+        count = max(1, min(int(request.args.get('count', 10)), 50))
+    except (ValueError, TypeError):
+        count = 10
+
+    method = request.args.get('method', 'cf')
+    if method not in ('cf', 'mf', 'hybrid'):
+        method = 'cf'
+
+    with picker_lock:
+        games   = list(picker.games) if picker.games else []
+        history = list(picker.history) if hasattr(picker, 'history') else []
+        cache: dict = {}
+        steam_client = picker.clients.get('steam') if hasattr(picker, 'clients') else None
+        if steam_client and hasattr(steam_client, 'details_cache'):
+            cache = dict(steam_client.details_cache)
+        well_mins   = getattr(picker, 'WELL_PLAYED_THRESHOLD_MINUTES', 600)
+        barely_mins = getattr(picker, 'BARELY_PLAYED_THRESHOLD_MINUTES', 120)
+
+    engine = MLRecommendationEngine(
+        games=games,
+        details_cache=cache,
+        history=history,
+        well_played_mins=well_mins,
+        barely_played_mins=barely_mins,
+    )
+    recs = engine.recommend(count=count, method=method)
+    return jsonify({'recommendations': recs, 'engine': 'ml', 'method': method})
+
+
+# ---------------------------------------------------------------------------
+# Webhook Notifications — Slack, Teams, IFTTT, Home Assistant
+# ---------------------------------------------------------------------------
+
+def _get_webhook_notifier() -> 'WebhookNotifier':  # type: ignore[name-defined]
+    """Return a WebhookNotifier initialised with the current picker config."""
+    from webhook_notifier import WebhookNotifier
+    cfg = (picker.config if picker else {}) or {}
+    return WebhookNotifier(cfg)
+
+
+@app.route('/api/notifications/slack/test', methods=['POST'])
+@require_login
+def api_test_slack_webhook():
+    """Send a test notification to the configured Slack Incoming Webhook.
+
+    Request JSON (optional)::
+
+        {
+          "webhook_url": "https://hooks.slack.com/services/..."  // overrides config
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "slack"}
+
+    Returns 503 if no webhook URL is configured and none was provided.
+    """
+    from webhook_notifier import WebhookNotifier
+    body      = request.get_json(silent=True) or {}
+    cfg       = dict((picker.config if picker else {}) or {})
+    override  = body.get('webhook_url', '')
+    if override:
+        cfg['slack_webhook_url'] = override
+    notifier  = WebhookNotifier(cfg)
+    slack_url = notifier._get('slack_webhook_url')
+    if not slack_url:
+        return jsonify({
+            'error': (
+                'Slack webhook URL not configured. '
+                'Add slack_webhook_url to config.json or supply it in the request body.'
+            )
+        }), 503
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = notifier.send_slack(slack_url, test_game)
+    return jsonify({'success': ok, 'service': 'slack'})
+
+
+@app.route('/api/notifications/teams/test', methods=['POST'])
+@require_login
+def api_test_teams_webhook():
+    """Send a test notification to the configured Microsoft Teams Incoming Webhook.
+
+    Request JSON (optional)::
+
+        {
+          "webhook_url": "https://...webhook.office.com/..."
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "teams"}
+    """
+    from webhook_notifier import WebhookNotifier
+    body     = request.get_json(silent=True) or {}
+    cfg      = dict((picker.config if picker else {}) or {})
+    override = body.get('webhook_url', '')
+    if override:
+        cfg['teams_webhook_url'] = override
+    notifier  = WebhookNotifier(cfg)
+    teams_url = notifier._get('teams_webhook_url')
+    if not teams_url:
+        return jsonify({
+            'error': (
+                'Teams webhook URL not configured. '
+                'Add teams_webhook_url to config.json or supply it in the request body.'
+            )
+        }), 503
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = notifier.send_teams(teams_url, test_game)
+    return jsonify({'success': ok, 'service': 'teams'})
+
+
+@app.route('/api/notifications/ifttt/test', methods=['POST'])
+@require_login
+def api_test_ifttt_webhook():
+    """Send a test event to the configured IFTTT Maker Webhooks channel.
+
+    Request JSON (optional)::
+
+        {
+          "ifttt_webhook_key":  "YOUR_IFTTT_KEY",
+          "ifttt_event_name":   "gapi_game_picked"
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "ifttt"}
+
+    Returns 503 if the IFTTT key is not configured.
+    """
+    from webhook_notifier import WebhookNotifier
+    body     = request.get_json(silent=True) or {}
+    cfg      = dict((picker.config if picker else {}) or {})
+    if body.get('ifttt_webhook_key'):
+        cfg['ifttt_webhook_key'] = body['ifttt_webhook_key']
+    if body.get('ifttt_event_name'):
+        cfg['ifttt_event_name']  = body['ifttt_event_name']
+    notifier = WebhookNotifier(cfg)
+    key      = notifier._get('ifttt_webhook_key')
+    if not key:
+        return jsonify({
+            'error': (
+                'IFTTT webhook key not configured. '
+                'Add ifttt_webhook_key to config.json or supply it in the request body.'
+            )
+        }), 503
+    event     = cfg.get('ifttt_event_name', 'gapi_game_picked')
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = WebhookNotifier.send_ifttt(key, event, test_game)
+    return jsonify({'success': ok, 'service': 'ifttt'})
+
+
+@app.route('/api/notifications/homeassistant/test', methods=['POST'])
+@require_login
+def api_test_homeassistant_webhook():
+    """Send a test event to the configured Home Assistant webhook.
+
+    Request JSON (optional)::
+
+        {
+          "homeassistant_url":        "http://homeassistant.local:8123",
+          "homeassistant_webhook_id": "gapi_game_picked",
+          "homeassistant_token":      "Bearer eyJ..."
+        }
+
+    Response JSON::
+
+        {"success": true, "service": "homeassistant"}
+
+    Returns 503 if the Home Assistant URL / webhook ID are not configured.
+    """
+    from webhook_notifier import WebhookNotifier
+    body = request.get_json(silent=True) or {}
+    cfg  = dict((picker.config if picker else {}) or {})
+    for key in ('homeassistant_url', 'homeassistant_webhook_id', 'homeassistant_token'):
+        if body.get(key):
+            cfg[key] = body[key]
+    notifier = WebhookNotifier(cfg)
+    ha_url   = notifier._get('homeassistant_url')
+    ha_id    = notifier._get('homeassistant_webhook_id')
+    if not ha_url or not ha_id:
+        return jsonify({
+            'error': (
+                'Home Assistant URL and webhook ID must be configured. '
+                'Add homeassistant_url and homeassistant_webhook_id to config.json '
+                'or supply them in the request body.'
+            )
+        }), 503
+    ha_token  = notifier._get('homeassistant_token')
+    test_game = {
+        'name': 'GAPI Test Notification',
+        'playtime_hours': 0.0,
+        'steam_url': 'https://store.steampowered.com',
+    }
+    ok = WebhookNotifier.send_homeassistant(ha_url, ha_id, test_game, token=ha_token)
+    return jsonify({'success': ok, 'service': 'homeassistant'})
 
 
 # ---------------------------------------------------------------------------
@@ -5279,9 +7664,31 @@ def create_templates():
                     <label class="filter-label" for="genre-filter">Genre (e.g., Action, RPG)</label>
                     <input type="text" id="genre-filter" class="genre-input" placeholder="Leave empty for any genre">
                 </div>
+
+                <div class="filter-group">
+                    <label class="filter-label" for="vr-filter">VR Filter</label>
+                    <select id="vr-filter" class="genre-input" style="cursor:pointer">
+                        <option value="">All games (no VR filter)</option>
+                        <option value="vr_supported">🥽 VR Supported (includes VR Only)</option>
+                        <option value="vr_only">🥽 VR Only (requires headset)</option>
+                        <option value="no_vr">🖥️ No VR (exclude VR games)</option>
+                    </select>
+                </div>
             </div>
-            
+
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="pick-button" onclick="pickGame()">🎲 Pick Random Game</button>
+            <button id="voice-pick-btn" class="pick-button" onclick="toggleVoicePick()"
+                    title="Use voice commands to pick a game"
+                    style="background:var(--button-bg,#4a90d9);flex:0 0 auto;padding:10px 14px;font-size:14px">
+                🎤 Voice
+            </button>
+            </div>
+            <div id="voice-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;
+                background:rgba(74,144,217,0.15);border:1px solid rgba(74,144,217,0.4);
+                color:var(--text-secondary,#aaa);font-size:13px">
+                🎤 Listening… say "<strong>pick</strong>", "<strong>reroll</strong>", or "<strong>stop</strong>"
+            </div>
             
             <div id="game-result" class="game-display" style="display: none;">
                 <!-- Game info will be displayed here -->
@@ -5356,8 +7763,21 @@ def create_templates():
             <!-- User Selection -->
             <div style="padding: 20px; border-radius: 10px; margin-bottom: 20px;">
                 <h3 style="margin-bottom: 15px;">Select Players</h3>
-                <div id="user-checkboxes" style="margin-top: 15px;">
-                    <div class="loading">Loading users...</div>
+
+                <!-- Friends section -->
+                <div style="margin-bottom: 12px;">
+                    <strong>👥 Friends</strong>
+                    <div id="friends-checkboxes" style="margin-top: 8px;">
+                        <div class="loading">Loading friends...</div>
+                    </div>
+                </div>
+
+                <!-- All users section -->
+                <div>
+                    <strong>👤 All Users</strong>
+                    <div id="user-checkboxes" style="margin-top: 8px;">
+                        <div class="loading">Loading users...</div>
+                    </div>
                 </div>
                 
                 <div style="margin-top: 15px;">
@@ -5387,6 +7807,73 @@ def create_templates():
                     🔍 Show Common Games
                 </button>
             </div>
+
+            <!-- Live Pick Sessions -->
+            <div style="margin-top: 30px; padding: 20px; border-radius: 10px; border: 2px solid #667eea;">
+                <h3 style="margin-bottom: 15px;">🔴 Live Pick Sessions</h3>
+                <p style="color: #888; margin-bottom: 12px; font-size: 0.95em;">
+                    Create a session for online friends to join and pick a game together in real-time.
+                </p>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
+                    <button onclick="createLiveSession()" style="padding: 10px 24px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                        ➕ Create Live Session
+                    </button>
+                    <button onclick="refreshLiveSessions()" style="padding: 10px 18px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                        🔄 Refresh
+                    </button>
+                    <span style="color: #888; font-size: 0.85em;" id="session-refresh-status"></span>
+                </div>
+                <!-- Join by session ID -->
+                <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                    <input id="join-session-id" type="text" placeholder="Session ID…"
+                           style="flex: 1; max-width: 320px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95em;">
+                    <button onclick="joinBySessionId()" style="padding: 8px 18px; background: #764ba2; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                        🔗 Join by ID
+                    </button>
+                </div>
+                <div id="live-sessions-list" style="margin-top: 15px;">
+                    <div class="loading">Loading sessions...</div>
+                </div>
+            </div>
+
+            <!-- Invite Modal -->
+            <div id="invite-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+                 background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+                <div style="background:white; border-radius:10px; padding:24px; min-width:320px; max-width:480px; width:90%;">
+                    <h3 style="margin-bottom:14px;">📨 Invite Friends</h3>
+                    <div id="invite-friends-list" style="max-height:280px; overflow-y:auto; margin-bottom:14px;">
+                        Loading…
+                    </div>
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button onclick="sendInvites()" style="padding:8px 20px; background:#28a745; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                            Send Invites
+                        </button>
+                        <button onclick="closeInviteModal()" style="padding:8px 16px; background:#6c757d; color:white; border:none; border-radius:6px; cursor:pointer;">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Chat Modal -->
+            <div id="session-chat-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+                 background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+                <div style="background:white; border-radius:10px; padding:24px; min-width:340px; max-width:520px; width:92%; display:flex; flex-direction:column; max-height:80vh;">
+                    <h3 style="margin-bottom:10px;">💬 Session Chat – <span id="chat-session-name" style="color:#667eea;"></span></h3>
+                    <div id="chat-messages" style="flex:1; overflow-y:auto; border:1px solid #ddd; border-radius:6px; padding:10px; margin-bottom:10px; min-height:200px; font-size:0.9em;">
+                        <div class="loading">Loading messages…</div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <input id="chat-input" type="text" placeholder="Type a message…" maxlength="500"
+                               style="flex:1; padding:8px 12px; border:1px solid #ccc; border-radius:6px; font-size:0.9em;"
+                               onkeydown="if(event.key==='Enter') sendSessionChatMessage()">
+                        <button onclick="sendSessionChatMessage()" style="padding:8px 16px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Send</button>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+                        <button onclick="closeSessionChat()" style="padding:6px 16px; background:#6c757d; color:white; border:none; border-radius:6px; cursor:pointer;">Close</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -5400,6 +7887,15 @@ def create_templates():
             loadFavorites();
             loadStats();
             loadUsers();
+            // Send an initial presence heartbeat and repeat every 60 s
+            sendPresenceHeartbeat();
+            setInterval(sendPresenceHeartbeat, 60000);
+        }
+
+        async function sendPresenceHeartbeat() {
+            try {
+                await fetch('/api/presence', {method: 'POST'});
+            } catch (_) {}
         }
         
         async function updateStatus() {
@@ -5434,13 +7930,19 @@ def create_templates():
             if (tabName === 'users') loadUsers();
             if (tabName === 'multiuser') {
                 loadUsersForMultiUser();
+                loadFriendsForMultiUser();
+                refreshLiveSessions();
+                startLiveSessionPolling();
                 document.getElementById('common-games-list').innerHTML = '<div class="loading">Select users and click "Show Common Games"</div>';
+            } else {
+                stopLiveSessionPolling();
             }
         }
         
         async function pickGame() {
             const filterValue = document.querySelector('input[name="filter"]:checked').value;
             const genreValue = document.getElementById('genre-filter').value.trim();
+            const vrFilter = document.getElementById('vr-filter').value || null;
             
             try {
                 const response = await fetch('/api/pick', {
@@ -5448,7 +7950,8 @@ def create_templates():
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         filter: filterValue,
-                        genre: genreValue
+                        genre: genreValue,
+                        vr_filter: vrFilter
                     })
                 });
                 
@@ -5465,6 +7968,80 @@ def create_templates():
             } catch (error) {
                 alert('Error: ' + error.message);
             }
+        }
+
+        // ── Voice commands (Web Speech API) ───────────────────────────────────
+        let _voiceRecognition = null;
+        let _voiceActive = false;
+
+        function toggleVoicePick() {
+            if (!('SpeechRecognition' in window) && !('webkitSpeechRecognition' in window)) {
+                alert('Voice commands are not supported in this browser.\nTry Chrome or Edge.');
+                return;
+            }
+            if (_voiceActive) {
+                _stopVoice();
+            } else {
+                _startVoice();
+            }
+        }
+
+        function _startVoice() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            _voiceRecognition = new SR();
+            _voiceRecognition.lang = 'en-US';
+            _voiceRecognition.continuous = true;
+            _voiceRecognition.interimResults = false;
+            _voiceRecognition.maxAlternatives = 1;
+
+            _voiceRecognition.onstart = () => {
+                _voiceActive = true;
+                document.getElementById('voice-status').style.display = 'block';
+                document.getElementById('voice-pick-btn').textContent = '🎤 Stop';
+                document.getElementById('voice-pick-btn').style.background = '#d94a4a';
+            };
+
+            _voiceRecognition.onend = () => {
+                if (_voiceActive) {
+                    // Auto-restart so it stays active until the user explicitly stops
+                    try { _voiceRecognition.start(); } catch(e) {}
+                }
+            };
+
+            _voiceRecognition.onerror = (ev) => {
+                if (ev.error !== 'no-speech') {
+                    _stopVoice();
+                    console.warn('Voice recognition error:', ev.error);
+                }
+            };
+
+            _voiceRecognition.onresult = (ev) => {
+                const transcript = ev.results[ev.results.length - 1][0].transcript
+                    .trim().toLowerCase();
+                if (transcript.includes('pick') || transcript.includes('choose') ||
+                        transcript.includes('random')) {
+                    pickGame();
+                } else if (transcript.includes('reroll') || transcript.includes('re-roll') ||
+                        transcript.includes('again') || transcript.includes('another')) {
+                    pickGame();
+                } else if (transcript.includes('stop') || transcript.includes('quit') ||
+                        transcript.includes('cancel')) {
+                    _stopVoice();
+                }
+            };
+
+            try { _voiceRecognition.start(); } catch(e) { console.error(e); }
+        }
+
+        function _stopVoice() {
+            _voiceActive = false;
+            if (_voiceRecognition) {
+                try { _voiceRecognition.stop(); } catch(e) {}
+                _voiceRecognition = null;
+            }
+            document.getElementById('voice-status').style.display = 'none';
+            document.getElementById('voice-pick-btn').textContent = '🎤 Voice';
+            document.getElementById('voice-pick-btn').style.background = '';
         }
         
         async function displayGame(game) {
@@ -5880,6 +8457,42 @@ def create_templates():
                 checkboxDiv.innerHTML = '<div class="error">Error loading users</div>';
             }
         }
+
+        async function loadFriendsForMultiUser() {
+            const div = document.getElementById('friends-checkboxes');
+            div.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const response = await fetch('/api/app-friends');
+                if (!response.ok) {
+                    div.innerHTML = '<div class="loading">Log in to see friends.</div>';
+                    return;
+                }
+                const data = await response.json();
+                const friends = data.friends || [];
+                if (friends.length === 0) {
+                    div.innerHTML = '<div class="loading">No friends yet. Add friends in your profile!</div>';
+                    return;
+                }
+                let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">';
+                friends.forEach(friend => {
+                    const onlineDot = friend.is_online
+                        ? '<span style="color:#28a745;font-size:0.8em;" title="Online">🟢</span>'
+                        : '<span style="color:#aaa;font-size:0.8em;" title="Offline">⚫</span>';
+                    const hasPlatform = friend.steam_id || friend.epic_id || friend.gog_id;
+                    const disabledAttr = hasPlatform ? '' : 'disabled title="No platform ID linked"';
+                    html += `
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 10px; background: white; border-radius: 8px; cursor: ${hasPlatform ? 'pointer' : 'default'}; opacity: ${hasPlatform ? '1' : '0.5'};">
+                            <input type="checkbox" class="user-checkbox" value="${friend.username}" style="width: 18px; height: 18px;" ${disabledAttr}>
+                            <span>${onlineDot} <strong>${friend.display_name}</strong></span>
+                        </label>
+                    `;
+                });
+                html += '</div>';
+                div.innerHTML = html;
+            } catch (error) {
+                div.innerHTML = '<div class="error">Error loading friends</div>';
+            }
+        }
         
         function getSelectedUsers() {
             const checkboxes = document.querySelectorAll('.user-checkbox:checked');
@@ -5977,6 +8590,380 @@ def create_templates():
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading common games</div>';
             }
+        }
+
+        // Live Pick Session Functions
+        let _inviteSessionId = null;
+        let _liveSessionPollTimer = null;
+        let _liveSessionSSE = null;   // active EventSource (per-session)
+        let _activeSessions = {};     // sessionId -> session object (updated by SSE / poll)
+
+        // ---- SSE helpers ----
+
+        function _subscribeSessionSSE(sessionId) {
+            if (_liveSessionSSE) {
+                _liveSessionSSE.close();
+                _liveSessionSSE = null;
+            }
+            if (!window.EventSource) return;  // browser doesn't support SSE
+            const es = new EventSource(`/api/live-session/${sessionId}/events`);
+            es.addEventListener('session', (e) => {
+                try {
+                    const raw = JSON.parse(e.data);
+                    // Payload is {event, data} from _sse_publish; fall back to raw for
+                    // the initial state message which is sent as a plain session dict.
+                    const data = (raw && raw.data) ? raw.data : raw;
+                    if (!data || typeof data !== 'object') return;
+                    if (data.status === 'closed') {
+                        delete _activeSessions[sessionId];
+                    } else {
+                        _activeSessions[sessionId] = data;
+                    }
+                    _renderLiveSessions();
+                } catch (err) {
+                    console.error('SSE session parse error:', err);
+                }
+            });
+            es.onerror = () => {
+                es.close();
+                if (_liveSessionSSE === es) _liveSessionSSE = null;
+            };
+            _liveSessionSSE = es;
+        }
+
+        function _closeSessionSSE() {
+            if (_liveSessionSSE) {
+                _liveSessionSSE.close();
+                _liveSessionSSE = null;
+            }
+        }
+
+        // ---- Render the sessions list from _activeSessions ----
+
+        function _renderLiveSessions() {
+            const listDiv = document.getElementById('live-sessions-list');
+            if (!listDiv) return;
+            const sessions = Object.values(_activeSessions);
+            const statusEl = document.getElementById('session-refresh-status');
+            if (statusEl) statusEl.textContent = `Last updated ${new Date().toLocaleTimeString()}`;
+            if (sessions.length === 0) {
+                listDiv.innerHTML = '<div class="loading">No active sessions. Create one above!</div>';
+                return;
+            }
+            let html = '';
+            sessions.forEach(s => {
+                const pickedInfo = s.picked_game
+                    ? `<br><small style="color:#28a745;">✅ Game picked: <strong>${s.picked_game.name || s.picked_game.app_id || '?'}</strong></small>`
+                    : '';
+                html += `
+                    <div style="padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; background: white;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
+                            <div>
+                                <strong>${s.name || s.session_id}</strong>
+                                <span style="font-size:0.8em; color:#888; margin-left: 8px;">${s.status}</span><br>
+                                <small style="color:#555;">Host: ${s.host} &nbsp;|&nbsp; Participants: ${s.participants.join(', ')}</small>
+                                ${pickedInfo}
+                            </div>
+                            <div style="display:flex; gap:6px; flex-wrap: wrap;">
+                                <button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer;">Join</button>
+                                <button onclick="pickForLiveSession('${s.session_id}')" style="padding:6px 14px; background:#764ba2; color:white; border:none; border-radius:6px; cursor:pointer;">🎲 Pick</button>
+                                <button onclick="openInviteModal('${s.session_id}')" style="padding:6px 14px; background:#fd7e14; color:white; border:none; border-radius:6px; cursor:pointer;">📨 Invite</button>
+                                <button onclick="openSessionChat('${s.session_id}')" style="padding:6px 14px; background:#20c997; color:white; border:none; border-radius:6px; cursor:pointer;">💬 Chat</button>
+                                <button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 14px; background:#dc3545; color:white; border:none; border-radius:6px; cursor:pointer;">Leave</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            listDiv.innerHTML = html;
+        }
+
+        async function createLiveSession() {
+            try {
+                const response = await fetch('/api/live-session/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to create session');
+                    return;
+                }
+                const session = await response.json();
+                alert(`Live session created! Session ID:\\n${session.session_id}\\n\\nShare this ID with friends so they can join.`);
+                _activeSessions[session.session_id] = session;
+                _subscribeSessionSSE(session.session_id);
+                _renderLiveSessions();
+            } catch (error) {
+                alert('Error creating session: ' + error.message);
+            }
+        }
+
+        async function joinLiveSession(sessionId) {
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/join`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to join session');
+                    return;
+                }
+                const data = await response.json();
+                const session = data.session || data;
+                if (session.session_id) {
+                    _activeSessions[session.session_id] = session;
+                    _subscribeSessionSSE(session.session_id);
+                    _renderLiveSessions();
+                } else {
+                    refreshLiveSessions();
+                }
+            } catch (error) {
+                alert('Error joining session: ' + error.message);
+            }
+        }
+
+        async function joinBySessionId() {
+            const input = document.getElementById('join-session-id');
+            const sessionId = (input ? input.value : '').trim();
+            if (!sessionId) {
+                alert('Please enter a session ID first.');
+                return;
+            }
+            await joinLiveSession(sessionId);
+            if (input) input.value = '';
+        }
+
+        async function leaveLiveSession(sessionId) {
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/leave`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to leave session');
+                    return;
+                }
+                refreshLiveSessions();
+            } catch (error) {
+                alert('Error leaving session: ' + error.message);
+            }
+        }
+
+        async function pickForLiveSession(sessionId) {
+            const coopOnly = document.getElementById('coop-only').checked;
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/pick`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({coop_only: coopOnly})
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'No common game found');
+                    return;
+                }
+                const resultDiv = document.getElementById('multiuser-result');
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `
+                    <h3 style="color: #667eea; margin-bottom: 15px;">🎮 ${data.name}</h3>
+                    <p>Picked for live session <em>${sessionId}</em></p>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <a href="${data.steam_url}" target="_blank" class="btn btn-link">🔗 Steam Store</a>
+                        <a href="${data.steamdb_url}" target="_blank" class="btn btn-link">📊 SteamDB</a>
+                    </div>
+                `;
+                refreshLiveSessions();
+            } catch (error) {
+                alert('Error picking game: ' + error.message);
+            }
+        }
+
+        function openInviteModal(sessionId) {
+            _inviteSessionId = sessionId;
+            const modal = document.getElementById('invite-modal');
+            modal.style.display = 'flex';
+            const listDiv = document.getElementById('invite-friends-list');
+            listDiv.innerHTML = 'Loading friends…';
+            fetch('/api/app-friends')
+                .then(r => r.json())
+                .then(data => {
+                    const friends = (data.friends || []);
+                    if (friends.length === 0) {
+                        listDiv.innerHTML = '<p style="color:#888;">No friends found. Add friends first!</p>';
+                        return;
+                    }
+                    let html = '';
+                    friends.forEach(f => {
+                        const dot = f.is_online
+                            ? '<span style="color:#28a745;">🟢</span>'
+                            : '<span style="color:#aaa;">⚫</span>';
+                        html += `
+                            <label style="display:flex; align-items:center; gap:10px; padding:8px; border-bottom:1px solid #eee; cursor:pointer;">
+                                <input type="checkbox" class="invite-checkbox" value="${f.username}">
+                                ${dot} <strong>${f.display_name}</strong>
+                                <small style="color:#888;">(${f.username})</small>
+                            </label>
+                        `;
+                    });
+                    listDiv.innerHTML = html;
+                })
+                .catch(() => {
+                    listDiv.innerHTML = '<p style="color:red;">Error loading friends</p>';
+                });
+        }
+
+        function closeInviteModal() {
+            document.getElementById('invite-modal').style.display = 'none';
+            _inviteSessionId = null;
+        }
+
+        // ---- Session Chat ----
+
+        let _chatSessionId = null;
+        let _chatPollTimer = null;
+        let _chatLastId = 0;
+
+        function openSessionChat(sessionId) {
+            _chatSessionId = sessionId;
+            _chatLastId = 0;
+            const modal = document.getElementById('session-chat-modal');
+            modal.style.display = 'flex';
+            const session = _activeSessions[sessionId] || {};
+            document.getElementById('chat-session-name').textContent = session.name || sessionId;
+            document.getElementById('chat-messages').innerHTML = '<div class="loading">Loading messages…</div>';
+            _loadChatMessages(true);
+            if (_chatPollTimer) clearInterval(_chatPollTimer);
+            _chatPollTimer = setInterval(() => _loadChatMessages(false), 3000);
+        }
+
+        function closeSessionChat() {
+            document.getElementById('session-chat-modal').style.display = 'none';
+            if (_chatPollTimer) { clearInterval(_chatPollTimer); _chatPollTimer = null; }
+            _chatSessionId = null;
+        }
+
+        async function _loadChatMessages(initial) {
+            if (!_chatSessionId) return;
+            const room = `session:${_chatSessionId}`;
+            try {
+                const url = `/api/chat/messages?room=${encodeURIComponent(room)}&since_id=${_chatLastId}&limit=50`;
+                const response = await fetch(url);
+                if (!response.ok) return;
+                const data = await response.json();
+                const msgs = data.messages || [];
+                if (!msgs.length && initial) {
+                    document.getElementById('chat-messages').innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No messages yet. Say hello!</div>';
+                    return;
+                }
+                if (!msgs.length) return;
+                _chatLastId = msgs[msgs.length - 1].id;
+                const container = document.getElementById('chat-messages');
+                const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 10;
+                msgs.forEach(m => {
+                    const el = document.createElement('div');
+                    el.style.cssText = 'padding:4px 0; border-bottom:1px solid #f0f0f0;';
+                    const ts = new Date(m.created_at).toLocaleTimeString();
+                    el.innerHTML = `<strong style="color:#667eea;">${_escapeHtml(m.sender)}</strong> <small style="color:#aaa;">${ts}</small><br>${_escapeHtml(m.message)}`;
+                    container.appendChild(el);
+                });
+                if (atBottom || initial) container.scrollTop = container.scrollHeight;
+            } catch (_) {}
+        }
+
+        async function sendSessionChatMessage() {
+            if (!_chatSessionId) return;
+            const input = document.getElementById('chat-input');
+            const message = (input ? input.value : '').trim();
+            if (!message) return;
+            const room = `session:${_chatSessionId}`;
+            try {
+                const response = await fetch('/api/chat/send', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({room, message})
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    alert(err.error || 'Failed to send message');
+                    return;
+                }
+                if (input) input.value = '';
+                await _loadChatMessages(false);
+            } catch (error) {
+                alert('Error sending message: ' + error.message);
+            }
+        }
+
+        function _escapeHtml(str) {
+            return String(str)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        async function sendInvites() {
+            const sessionId = _inviteSessionId;
+            if (!sessionId) return;
+            const checkboxes = document.querySelectorAll('.invite-checkbox:checked');
+            const usernames = Array.from(checkboxes).map(cb => cb.value);
+            if (usernames.length === 0) {
+                alert('Select at least one friend to invite.');
+                return;
+            }
+            try {
+                const response = await fetch(`/api/live-session/${sessionId}/invite`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({usernames})
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'Failed to send invites');
+                    return;
+                }
+                const sentCount = (data.sent || []).length;
+                const failCount = (data.failed || []).length;
+                alert(`Invites sent: ${sentCount}${failCount ? `, failed: ${failCount}` : ''}`);
+                closeInviteModal();
+            } catch (error) {
+                alert('Error sending invites: ' + error.message);
+            }
+        }
+
+        async function refreshLiveSessions() {
+            const listDiv = document.getElementById('live-sessions-list');
+            if (!listDiv) return;
+            try {
+                const response = await fetch('/api/live-session/active');
+                if (!response.ok) {
+                    listDiv.innerHTML = '<div class="loading">Could not load sessions.</div>';
+                    return;
+                }
+                const data = await response.json();
+                _activeSessions = {};
+                (data.sessions || []).forEach(s => { _activeSessions[s.session_id] = s; });
+                _renderLiveSessions();
+            } catch (error) {
+                listDiv.innerHTML = '<div class="error">Error loading sessions</div>';
+            }
+        }
+
+        function startLiveSessionPolling() {
+            // Use SSE for individual session we just joined/created when possible.
+            // Fall back to 5-second polling for the full active list (covers sessions we're not subscribed to).
+            if (_liveSessionPollTimer) return;
+            _liveSessionPollTimer = setInterval(refreshLiveSessions, 5000);
+        }
+
+        function stopLiveSessionPolling() {
+            if (_liveSessionPollTimer) {
+                clearInterval(_liveSessionPollTimer);
+                _liveSessionPollTimer = null;
+            }
+            _closeSessionSSE();
         }
         
         // Initialize on page load

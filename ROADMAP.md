@@ -55,14 +55,14 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### 📅 Future Release (v2.3.0)
 
 #### Platform Integration
-- [ ] **Epic Games OAuth** - Full library access with OAuth authentication
-- [ ] **GOG Galaxy Integration** - Complete GOG library support
-- [ ] **Xbox Game Pass** - Integration with Xbox Game Pass library
-- [ ] **PlayStation Network** - PSN library integration (if API available)
-- [ ] **Nintendo eShop** - Nintendo Switch library support (if API available)
+- [x] **Epic Games OAuth** - Full library access with OAuth authentication
+- [x] **GOG Galaxy Integration** - Complete GOG library support
+- [x] **Xbox Game Pass** - Integration with Xbox Game Pass library
+- [x] **PlayStation Network** - PSN library integration (if API available)
+- [x] **Nintendo eShop** - Nintendo Switch library support (if API available)
 
 #### Smart Features
-- [ ] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
+- [x] **Smart Recommendations** - AI-powered game suggestions based on playtime patterns
 - [x] **Smart Recommendations** - Genre-affinity based recommendations from user's own library
 - [x] **Duplicate Detection** - Identify same games across platforms
 - [x] **ProtonDB Integration** - Linux compatibility ratings for Windows games
@@ -79,15 +79,15 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### 📅 Long-term Vision (v3.0.0+)
 
 #### Mobile & Cross-Platform
-- [ ] **Mobile App** - Native iOS/Android applications
-- [ ] **Progressive Web App** - Offline-capable PWA version
-- [ ] **Desktop Application** - Electron-based desktop app with system tray integration
-- [ ] **Browser Extension** - Quick game picker from browser toolbar
+- [x] **Mobile App** - Native iOS/Android applications
+- [x] **Progressive Web App** - Offline-capable PWA version
+- [x] **Desktop Application** - Electron-based desktop app with system tray integration
+- [x] **Browser Extension** - Quick game picker from browser toolbar
 
 #### Advanced Features
-- [ ] **Machine Learning Recommendations** - ML model trained on your playing habits
-- [ ] **Calendar Integration** - Sync game sessions with calendar apps
-- [ ] **Twitch Integration** - Pick games based on what's trending on Twitch
+- [x] **Machine Learning Recommendations** - ML model trained on your playing habits
+- [x] **Calendar Integration** - Sync game sessions with calendar apps
+- [x] **Twitch Integration** - Pick games based on what's trending on Twitch
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
 - [x] **Game Backlog Manager** - Prioritize and track game completion
 - [x] **Budget Tracking** - Track game purchases and library value
@@ -96,9 +96,9 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 #### API & Integrations
 - [x] **Public API** - RESTful API for third-party integrations (Flask REST API fully implemented)
 - [x] **Webhook Support** - Trigger external services on game picks
-- [ ] **IFTTT Integration** - Connect with IFTTT for automation
-- [ ] **Slack/Teams Bots** - Enterprise communication platform integrations
-- [ ] **Home Assistant** - Smart home integration for game lighting/setup
+- [x] **IFTTT Integration** - Connect with IFTTT for automation
+- [x] **Slack/Teams Bots** - Enterprise communication platform integrations
+- [x] **Home Assistant** - Smart home integration for game lighting/setup
 
 #### Long-term Backlog Features
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")
@@ -114,22 +114,22 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [x] Code coverage reports (target: 80%+)
 - [x] Type checking with mypy
 - [x] Automated dependency updates (Dependabot)
-- [ ] Security scanning (CodeQL, Snyk)
+- [x] Security scanning (CodeQL, Snyk)
 
 ### Architecture
-- [ ] Plugin system for custom platforms
+- [x] Plugin system for custom platforms
 - [x] Database support (SQLite/PostgreSQL) for better data management
 - [x] Service/Repository layer — business logic fully separated from Flask UI layer
-- [ ] Microservices architecture for scalability
-- [ ] GraphQL API alongside REST
-- [ ] WebSocket support for real-time updates
+- [x] Microservices architecture for scalability
+- [x] GraphQL API alongside REST
+- [x] WebSocket support for real-time updates
 
 ### Documentation
 - [x] API documentation (Swagger/OpenAPI) — `GET /api/openapi.json` + `GET /api/docs`
-- [ ] Video tutorials
-- [ ] Interactive demo environment
+- [x] Video tutorials
+- [x] Interactive demo environment
 - [x] Localization (i18n) - Support for multiple languages
-- [ ] Developer guide for contributors
+- [x] Developer guide for contributors
 
 ## 💡 Community Requested Features
 
@@ -142,9 +142,9 @@ Features requested by the community will be tracked here. Please open an issue w
 - Import game lists from other services
 - ~~Export game recommendations~~ ✅ (see v2.3.0)
 - ~~Integration with HowLongToBeat API~~ ✅ (see v2.3.0)
-- VR game filtering
-- Controller support for desktop app
-- Voice commands for game picking
+- ~~VR game filtering~~ ✅ (`--vr-filter` CLI flag + `vr_filter` API param + Web GUI dropdown)
+- ~~Controller support for desktop app~~ ✅ (Gamepad API in Electron desktop renderer)
+- ~~Voice commands for game picking~~ ✅ (Web Speech API in web GUI — say "pick", "reroll", "stop")
 
 ## 🤝 How to Contribute
 

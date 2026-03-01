@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>GAPI Game Picker</title>
+  <style>
+    /* ─── Reset & base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── Title bar spacer (macOS hiddenInset) ─────────────────────── */
+    .title-bar-spacer {
+      height: 28px;
+      -webkit-app-region: drag;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding-left: 76px; /* room for traffic lights */
+    }
+    .title-bar-spacer h1 { font-size: 13px; color: #8b949e; font-weight: 500; }
+
+    /* ─── Sidebar + content layout ──────────────────────────────────── */
+    .layout { display: flex; flex: 1; overflow: hidden; }
+
+    .sidebar {
+      width: 180px;
+      flex-shrink: 0;
+      background: #161b22;
+      border-right: 1px solid #30363d;
+      display: flex;
+      flex-direction: column;
+      padding: 8px 0;
+    }
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: #8b949e;
+      font-size: 13px;
+      text-align: left;
+      width: 100%;
+      border-radius: 0;
+      transition: background 0.1s, color 0.1s;
+    }
+    .nav-btn:hover { background: #21262d; color: #e6edf3; }
+    .nav-btn.active { background: #1c2433; color: #58a6ff; font-weight: 600; }
+    .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+
+    .sidebar-spacer { flex: 1; }
+    .sidebar-status {
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #8b949e;
+      border-top: 1px solid #30363d;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .online  { background: #3fb950; }
+    .offline { background: #f85149; }
+
+    /* ─── Main content ──────────────────────────────────────────────── */
+    .content { flex: 1; overflow-y: auto; padding: 24px; }
+
+    /* ─── Panels ────────────────────────────────────────────────────── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ─── Pick panel ────────────────────────────────────────────────── */
+    .mode-row { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .mode-btn {
+      padding: 7px 14px;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+      background: #21262d;
+      color: #8b949e;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .mode-btn:hover { background: #30363d; color: #e6edf3; }
+    .mode-btn.active { border-color: #58a6ff; background: #1c2433; color: #58a6ff; font-weight: 600; }
+
+    .game-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .game-card .placeholder { text-align: center; color: #8b949e; padding: 20px 0; }
+    .game-card .placeholder-emoji { font-size: 40px; display: block; margin-bottom: 10px; }
+    .game-name  { font-size: 22px; font-weight: 700; color: #e6edf3; margin-bottom: 6px; }
+    .game-meta  { color: #8b949e; font-size: 13px; margin-bottom: 10px; }
+    .reason-box {
+      background: #1c2433; border-radius: 6px; padding: 10px 14px;
+      color: #79c0ff; font-size: 13px; margin-bottom: 10px;
+    }
+    .genre-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .genre-chip {
+      background: #21262d; border-radius: 20px;
+      padding: 3px 10px; font-size: 11px; color: #8b949e;
+    }
+
+    .pick-btn {
+      background: #238636; border: 1px solid #2ea043; border-radius: 8px;
+      color: #fff; font-size: 16px; font-weight: 700;
+      padding: 14px 28px; cursor: pointer; width: 100%;
+      transition: background 0.15s;
+    }
+    .pick-btn:hover { background: #2ea043; }
+    .pick-btn:disabled { background: #21262d; border-color: #30363d; color: #484f58; cursor: not-allowed; }
+
+    .secondary-row { display: flex; gap: 8px; margin-top: 10px; }
+    .secondary-btn {
+      flex: 1; padding: 9px; border-radius: 8px;
+      border: 1px solid #30363d; background: #21262d;
+      color: #e6edf3; font-size: 13px; cursor: pointer;
+    }
+    .secondary-btn:hover { background: #30363d; }
+
+    /* ─── Platform badge ─────────────────────────────────────────────── */
+    .platform-badge {
+      display: inline-block; padding: 3px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    }
+
+    /* ─── Library panel ──────────────────────────────────────────────── */
+    .search-row { display: flex; gap: 8px; margin-bottom: 10px; }
+    .search-input {
+      flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      color: #e6edf3; padding: 9px 14px; font-size: 14px;
+    }
+    .search-input:focus { outline: none; border-color: #58a6ff; }
+    .filter-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .filter-chip {
+      padding: 4px 12px; border-radius: 20px; border: 1px solid #30363d;
+      background: #161b22; color: #8b949e; font-size: 12px; cursor: pointer;
+    }
+    .filter-chip.active { border-color: #58a6ff; background: #1c2433; color: #58a6ff; font-weight: 700; }
+    .game-count { font-size: 12px; color: #6e7681; margin-bottom: 8px; }
+    .game-list  { list-style: none; }
+    .game-list li {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 4px; border-bottom: 1px solid #21262d;
+    }
+    .game-list li .name  { flex: 1; font-size: 14px; font-weight: 500; color: #e6edf3; }
+    .game-list li .play  { font-size: 12px; color: #8b949e; }
+
+    /* ─── History panel ──────────────────────────────────────────────── */
+    .history-list { list-style: none; }
+    .history-list li {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 4px; border-bottom: 1px solid #21262d;
+    }
+    .history-idx { width: 24px; height: 24px; border-radius: 50%; background: #21262d;
+                   text-align: center; line-height: 24px; font-size: 11px; color: #8b949e; flex-shrink: 0; }
+    .history-list .name { flex: 1; font-size: 14px; font-weight: 500; color: #e6edf3; }
+    .history-list .meta { font-size: 12px; color: #8b949e; }
+
+    /* ─── Settings panel ─────────────────────────────────────────────── */
+    .setting-group { margin-bottom: 24px; }
+    .setting-group label { display: block; color: #8b949e; font-size: 12px; margin-bottom: 6px; }
+    .setting-group input {
+      width: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      color: #e6edf3; padding: 10px 14px; font-size: 14px; margin-bottom: 4px;
+    }
+    .setting-group input:focus { outline: none; border-color: #58a6ff; }
+    .setting-hint { font-size: 11px; color: #6e7681; }
+    .save-btn {
+      background: #238636; border: 1px solid #2ea043; border-radius: 8px;
+      color: #fff; font-size: 14px; font-weight: 600; padding: 10px 24px;
+      cursor: pointer; margin-top: 4px;
+    }
+    .save-btn:hover { background: #2ea043; }
+    .save-status { margin-left: 12px; font-size: 12px; color: #3fb950; display: none; }
+
+    /* ─── Error bar ──────────────────────────────────────────────────── */
+    .error-bar {
+      background: #2d1315; border: 1px solid #6e3030; border-radius: 6px;
+      color: #f85149; font-size: 13px; padding: 10px 14px; margin-bottom: 12px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- macOS title bar spacer -->
+  <div class="title-bar-spacer">
+    <h1>GAPI Game Picker</h1>
+  </div>
+
+  <div class="layout">
+    <!-- Sidebar -->
+    <nav class="sidebar" aria-label="Navigation">
+      <button class="nav-btn active" data-panel="pick" aria-current="page">
+        <span class="nav-icon">🎮</span> Pick a Game
+      </button>
+      <button class="nav-btn" data-panel="library">
+        <span class="nav-icon">📚</span> Library
+      </button>
+      <button class="nav-btn" data-panel="history">
+        <span class="nav-icon">🕒</span> History
+      </button>
+      <div class="sidebar-spacer"></div>
+      <button class="nav-btn" data-panel="settings">
+        <span class="nav-icon">⚙️</span> Settings
+      </button>
+      <!-- Connection status -->
+      <div class="sidebar-status">
+        <div class="status-dot offline" id="nav-status-dot"></div>
+        <span id="nav-status-text">Connecting…</span>
+      </div>
+    </nav>
+
+    <!-- Content area -->
+    <main class="content">
+
+      <!-- ── Pick panel ──────────────────────────────────────────────── -->
+      <section class="panel active" id="panel-pick" aria-label="Pick a game">
+        <div class="mode-row" role="group" aria-label="Pick mode">
+          <button class="mode-btn active" data-mode="random">🎲 Random</button>
+          <button class="mode-btn" data-mode="unplayed">🆕 Unplayed</button>
+          <button class="mode-btn" data-mode="barely_played">⏱ Barely Played</button>
+        </div>
+
+        <div id="error-bar" class="error-bar" role="alert"></div>
+
+        <div class="game-card" id="game-card">
+          <div class="placeholder" id="placeholder">
+            <span class="placeholder-emoji">🎮</span>
+            <p>Click "Pick a Game" to get started!</p>
+          </div>
+          <div id="game-display" style="display:none">
+            <div class="game-name" id="game-name"></div>
+            <div class="game-meta" id="game-meta"></div>
+            <div class="reason-box" id="reason-box" style="display:none"></div>
+            <div class="genre-row" id="genre-row"></div>
+          </div>
+        </div>
+
+        <button class="pick-btn" id="btn-pick">🎮  Pick a Game</button>
+
+        <div class="secondary-row" id="secondary-row" style="display:none">
+          <button class="secondary-btn" id="btn-reroll">↺  Reroll</button>
+          <button class="secondary-btn" id="btn-open-store">Open Store Page ↗</button>
+        </div>
+      </section>
+
+      <!-- ── Library panel ───────────────────────────────────────────── -->
+      <section class="panel" id="panel-library" aria-label="Game library">
+        <div class="search-row">
+          <input type="search" class="search-input" id="library-search"
+                 placeholder="Search games…" aria-label="Search games" />
+        </div>
+        <div class="filter-row" id="filter-row" role="group" aria-label="Platform filter"></div>
+        <p class="game-count" id="game-count"></p>
+        <ul class="game-list" id="game-list" aria-label="Game list"></ul>
+      </section>
+
+      <!-- ── History panel ───────────────────────────────────────────── -->
+      <section class="panel" id="panel-history" aria-label="Pick history">
+        <h2 style="color:#e6edf3;font-size:16px;margin-bottom:12px;">Recent Picks</h2>
+        <ul class="history-list" id="history-list" aria-label="Pick history list"></ul>
+      </section>
+
+      <!-- ── Settings panel ──────────────────────────────────────────── -->
+      <section class="panel" id="panel-settings" aria-label="Settings">
+        <h2 style="color:#e6edf3;font-size:16px;margin-bottom:20px;">Settings</h2>
+        <div class="setting-group">
+          <label for="server-url-input">GAPI Server URL</label>
+          <input type="url" id="server-url-input" placeholder="http://localhost:5000" />
+          <p class="setting-hint">The URL of your running GAPI web server.</p>
+          <button class="save-btn" id="btn-save-settings">Save &amp; Test</button>
+          <span class="save-status" id="save-status">✓ Saved!</span>
+        </div>
+        <div class="setting-group">
+          <button class="secondary-btn" id="btn-open-gapi"
+                  style="width:auto;padding:9px 20px">
+            Open GAPI in Browser ↗
+          </button>
+        </div>
+        <div class="setting-group" style="margin-top:32px">
+          <p style="color:#6e7681;font-size:12px;line-height:1.6">
+            GAPI Desktop v1.0.0<br/>
+            github.com/mattam1234/GAPI
+          </p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
