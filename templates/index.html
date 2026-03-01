@@ -4255,6 +4255,7 @@
         // ==============================================================================================
         
         function setAuthenticatedUI(isAuthenticated, userRole, username = null) {
+            console.log('🔐 setAuthenticatedUI called:', { isAuthenticated, userRole, username });
             // Show/hide auth modal and user info
             const authModal = document.getElementById('auth-modal');
             const userInfo = document.getElementById('user-info');
@@ -4274,11 +4275,16 @@
                     document.getElementById('achievements-tab-btn')
                 ];
                 
-                authTabs.forEach(tab => {
+                console.log('🎯 Auth tabs found:', authTabs.map(t => t ? t.id || t.tagName : 'null'));
+                
+                authTabs.forEach((tab, index) => {
                     if (tab) {
                         // Use inline-block for buttons, inline-flex for links
                         const displayValue = tab.tagName === 'A' ? 'inline-flex' : 'inline-block';
                         tab.style.setProperty('display', displayValue, 'important');
+                        console.log(`✅ Showing tab ${index}:`, tab.id || tab.tagName, 'display:', displayValue);
+                    } else {
+                        console.warn(`❌ Tab ${index} not found`);
                     }
                 });
                 
@@ -4334,12 +4340,15 @@
         }
         
         async function checkAuthStatus() {
+            console.log('🔍 Checking auth status...');
             try {
                 const response = await fetch('/api/auth/current');
                 const data = await response.json();
+                console.log('📥 Auth response:', data);
                 
                 if (data.username) {
                     // User is logged in
+                    console.log('✅ User logged in:', data.username, 'role:', data.role);
                     document.getElementById('current-username').textContent = data.username;
                     
                     // Store user role for UI controls
@@ -4352,10 +4361,11 @@
                     init();
                 } else {
                     // User is not logged in
+                    console.log('❌ User not logged in');
                     setAuthenticatedUI(false, null, null);
                 }
             } catch (error) {
-                console.error('Error checking auth status:', error);
+                console.error('❌ Error checking auth status:', error);
                 setAuthenticatedUI(false, null, null);
             }
         }
@@ -5005,6 +5015,7 @@
         
         // Initialize auth status on page load
         document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 Page loaded, checking auth status...');
             checkAuthStatus();
 
             const loginForm = document.getElementById('login-form');
