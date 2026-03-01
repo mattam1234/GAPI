@@ -5044,23 +5044,6 @@ def api_get_challenges():
     return jsonify({'challenges': challenges, 'total_xp': total_xp})
 
 
-# ---------------------------------------------------------------------------
-# Friends & Social API
-# ---------------------------------------------------------------------------
-
-@app.route('/api/friends', methods=['GET'])
-@require_login
-def api_get_friends():
-    """Return user's friends and following"""
-    username = get_current_username()
-    friends = [
-        {'username': 'gamer123', 'status': 'accepted'},
-        {'username': 'player_pro', 'status': 'accepted'},
-        {'username': 'legendary_gamer', 'status': 'following'},
-    ]
-    return jsonify({'friends': friends})
-
-
 @app.route('/api/friends/add', methods=['POST'])
 @require_login
 def api_add_friend():
