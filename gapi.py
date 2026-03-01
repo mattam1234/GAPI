@@ -710,16 +710,48 @@ class GamePicker:
         # Initialize Epic Games client if enabled
         if self.config.get('epic_enabled', False):
             try:
-                self.clients['epic'] = EpicAPIClient()
+                epic_client_id = self.config.get('epic_client_id', '')
+                if epic_client_id and not is_placeholder_value(epic_client_id):
+                    from platform_clients import EpicOAuthClient
+                    self.clients['epic'] = EpicOAuthClient(
+                        client_id=epic_client_id,
+                        client_secret=self.config.get('epic_client_secret', ''),
+                        timeout=self.API_TIMEOUT,
+                    )
+                else:
+                    self.clients['epic'] = EpicAPIClient()
             except Exception as e:
                 self._log.warning("Could not initialize Epic Games client: %s", e)
 
         # Initialize GOG client if enabled
         if self.config.get('gog_enabled', False):
             try:
-                self.clients['gog'] = GOGAPIClient()
+                gog_client_id = self.config.get('gog_client_id', '')
+                if gog_client_id and not is_placeholder_value(gog_client_id):
+                    from platform_clients import GOGOAuthClient
+                    self.clients['gog'] = GOGOAuthClient(
+                        client_id=gog_client_id,
+                        client_secret=self.config.get('gog_client_secret', ''),
+                        timeout=self.API_TIMEOUT,
+                    )
+                else:
+                    self.clients['gog'] = GOGAPIClient()
             except Exception as e:
                 self._log.warning("Could not initialize GOG client: %s", e)
+
+        # Initialize Xbox client if enabled
+        if self.config.get('xbox_enabled', False):
+            try:
+                xbox_client_id = self.config.get('xbox_client_id', '')
+                if xbox_client_id and not is_placeholder_value(xbox_client_id):
+                    from platform_clients import XboxAPIClient
+                    self.clients['xbox'] = XboxAPIClient(
+                        client_id=xbox_client_id,
+                        client_secret=self.config.get('xbox_client_secret', ''),
+                        timeout=self.API_TIMEOUT,
+                    )
+            except Exception as e:
+                self._log.warning("Could not initialize Xbox client: %s", e)
 
         # For backward compatibility, keep steam_client reference
         self.steam_client = self.clients.get('steam')

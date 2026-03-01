@@ -7,7 +7,8 @@ A modern web GUI for randomly picking games from your Steam library.
 import logging
 import argparse
 import uuid
-from flask import Flask, render_template, jsonify, request, session, Response
+import secrets
+from flask import Flask, render_template, jsonify, request, session, Response, redirect as flask_redirect
 import threading
 import json
 import os
@@ -6264,6 +6265,297 @@ def api_twitch_library_overlap():
 
 
 # ---------------------------------------------------------------------------
+# Platform OAuth — Epic Games, GOG Galaxy, Xbox Game Pass
+# ---------------------------------------------------------------------------
+
+def _get_platform_client(platform: str):
+    """Return the platform client for *platform*, or None."""
+    return picker.clients.get(platform) if picker else None
+
+
+@app.route('/api/epic/oauth/authorize')
+@require_login
+def api_epic_oauth_authorize():
+    """Redirect the browser to the Epic Games authorization page.
+
+    Query params:
+        redirect_uri (str): Override the default redirect URI from config.
+
+    Response: HTTP 302 redirect to Epic authorization URL.
+    Returns 503 if Epic OAuth is not configured.
+    """
+    from platform_clients import EpicOAuthClient
+    client = _get_platform_client('epic')
+    if not isinstance(client, EpicOAuthClient):
+        return jsonify({'error': 'Epic OAuth client not configured. '
+                        'Add epic_client_id and epic_enabled: true to config.json.'}), 503
+    redirect_uri = request.args.get('redirect_uri') or (
+        picker.config.get('epic_redirect_uri', '') if picker else ''
+    )
+    if not redirect_uri:
+        redirect_uri = request.url_root.rstrip('/') + '/api/epic/oauth/callback'
+    state = secrets.token_urlsafe(16)
+    session['epic_oauth_state'] = state
+    url = client.build_auth_url(redirect_uri=redirect_uri, state=state)
+    return flask_redirect(url)
+
+
+@app.route('/api/epic/oauth/callback')
+@require_login
+def api_epic_oauth_callback():
+    """Handle the Epic Games OAuth2 callback.
+
+    Query params:
+        code (str): Authorization code from Epic.
+
+    Response JSON::
+
+        {"success": true, "platform": "epic"}
+
+    Returns 400 on error, 503 if Epic client is not configured.
+    """
+    from platform_clients import EpicOAuthClient
+    client = _get_platform_client('epic')
+    if not isinstance(client, EpicOAuthClient):
+        return jsonify({'error': 'Epic OAuth client not configured.'}), 503
+    code = request.args.get('code', '')
+    if not code:
+        return jsonify({'error': 'Missing authorization code.'}), 400
+    redirect_uri = (picker.config.get('epic_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/epic/oauth/callback'
+    )
+    ok = client.exchange_code(code=code, redirect_uri=redirect_uri)
+    if not ok:
+        return jsonify({'error': 'Token exchange failed. Check server logs.'}), 400
+    return jsonify({'success': True, 'platform': 'epic'})
+
+
+@app.route('/api/epic/library')
+@require_login
+def api_epic_library():
+    """Return the authenticated user's Epic Games library.
+
+    Response JSON::
+
+        {
+          "games": [{"name": "...", "game_id": "epic:...", ...}],
+          "count": 42,
+          "platform": "epic"
+        }
+
+    Returns 503 if not authenticated.
+    """
+    from platform_clients import EpicOAuthClient
+    client = _get_platform_client('epic')
+    if not isinstance(client, EpicOAuthClient):
+        return jsonify({'error': 'Epic OAuth client not configured.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'Epic account not authenticated. '
+                        'Visit /api/epic/oauth/authorize first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'epic'})
+
+
+@app.route('/api/gog/oauth/authorize')
+@require_login
+def api_gog_oauth_authorize():
+    """Redirect the browser to the GOG Galaxy authorization page.
+
+    Response: HTTP 302 redirect.
+    Returns 503 if GOG OAuth is not configured.
+    """
+    from platform_clients import GOGOAuthClient
+    client = _get_platform_client('gog')
+    if not isinstance(client, GOGOAuthClient):
+        return jsonify({'error': 'GOG OAuth client not configured. '
+                        'Add gog_client_id and gog_enabled: true to config.json.'}), 503
+    redirect_uri = (picker.config.get('gog_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/gog/oauth/callback'
+    )
+    state = secrets.token_urlsafe(16)
+    session['gog_oauth_state'] = state
+    url = client.build_auth_url(redirect_uri=redirect_uri, state=state)
+    return flask_redirect(url)
+
+
+@app.route('/api/gog/oauth/callback')
+@require_login
+def api_gog_oauth_callback():
+    """Handle the GOG Galaxy OAuth2 callback.
+
+    Query params:
+        code (str): Authorization code from GOG.
+
+    Response JSON::
+
+        {"success": true, "platform": "gog"}
+    """
+    from platform_clients import GOGOAuthClient
+    client = _get_platform_client('gog')
+    if not isinstance(client, GOGOAuthClient):
+        return jsonify({'error': 'GOG OAuth client not configured.'}), 503
+    code = request.args.get('code', '')
+    if not code:
+        return jsonify({'error': 'Missing authorization code.'}), 400
+    redirect_uri = (picker.config.get('gog_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/gog/oauth/callback'
+    )
+    ok = client.exchange_code(code=code, redirect_uri=redirect_uri)
+    if not ok:
+        return jsonify({'error': 'Token exchange failed. Check server logs.'}), 400
+    return jsonify({'success': True, 'platform': 'gog'})
+
+
+@app.route('/api/gog/library')
+@require_login
+def api_gog_library():
+    """Return the authenticated user's GOG library.
+
+    Response JSON::
+
+        {
+          "games": [...],
+          "count": 15,
+          "platform": "gog"
+        }
+    """
+    from platform_clients import GOGOAuthClient
+    client = _get_platform_client('gog')
+    if not isinstance(client, GOGOAuthClient):
+        return jsonify({'error': 'GOG OAuth client not configured.'}), 503
+    if not client.is_authenticated:
+        return jsonify({'error': 'GOG account not authenticated. '
+                        'Visit /api/gog/oauth/authorize first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'gog'})
+
+
+@app.route('/api/xbox/oauth/authorize')
+@require_login
+def api_xbox_oauth_authorize():
+    """Redirect the browser to the Microsoft/Xbox authorization page.
+
+    Response: HTTP 302 redirect.
+    Returns 503 if Xbox OAuth is not configured.
+    """
+    from platform_clients import XboxAPIClient
+    client = _get_platform_client('xbox')
+    if not isinstance(client, XboxAPIClient):
+        return jsonify({'error': 'Xbox OAuth client not configured. '
+                        'Add xbox_client_id and xbox_enabled: true to config.json.'}), 503
+    redirect_uri = (picker.config.get('xbox_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/xbox/oauth/callback'
+    )
+    state = secrets.token_urlsafe(16)
+    session['xbox_oauth_state'] = state
+    url = client.build_auth_url(redirect_uri=redirect_uri, state=state)
+    return flask_redirect(url)
+
+
+@app.route('/api/xbox/oauth/callback')
+@require_login
+def api_xbox_oauth_callback():
+    """Handle the Microsoft/Xbox OAuth2 callback.
+
+    Query params:
+        code (str): Authorization code from Microsoft.
+
+    Response JSON::
+
+        {"success": true, "platform": "xbox"}
+    """
+    from platform_clients import XboxAPIClient
+    client = _get_platform_client('xbox')
+    if not isinstance(client, XboxAPIClient):
+        return jsonify({'error': 'Xbox OAuth client not configured.'}), 503
+    code = request.args.get('code', '')
+    if not code:
+        return jsonify({'error': 'Missing authorization code.'}), 400
+    redirect_uri = (picker.config.get('xbox_redirect_uri', '') if picker else '') or (
+        request.url_root.rstrip('/') + '/api/xbox/oauth/callback'
+    )
+    ok = client.exchange_code(code=code, redirect_uri=redirect_uri)
+    if not ok:
+        return jsonify({'error': 'Token exchange failed. Check server logs.'}), 400
+    return jsonify({'success': True, 'platform': 'xbox'})
+
+
+@app.route('/api/xbox/library')
+@require_login
+def api_xbox_library():
+    """Return the authenticated user's Xbox title history / Game Pass library.
+
+    Response JSON::
+
+        {
+          "games": [...],
+          "count": 80,
+          "platform": "xbox"
+        }
+    """
+    from platform_clients import XboxAPIClient
+    client = _get_platform_client('xbox')
+    if not isinstance(client, XboxAPIClient):
+        return jsonify({'error': 'Xbox OAuth client not configured.'}), 503
+    if not client._xsts_token:
+        return jsonify({'error': 'Xbox account not authenticated. '
+                        'Visit /api/xbox/oauth/authorize first.'}), 503
+    games = client.get_owned_games()
+    return jsonify({'games': games, 'count': len(games), 'platform': 'xbox'})
+
+
+@app.route('/api/platform/status')
+@require_login
+def api_platform_status():
+    """Return authentication / configuration status of all connected platforms.
+
+    Response JSON::
+
+        {
+          "platforms": {
+            "steam":  {"configured": true,  "authenticated": true},
+            "epic":   {"configured": true,  "authenticated": false},
+            "gog":    {"configured": false, "authenticated": false},
+            "xbox":   {"configured": false, "authenticated": false}
+          }
+        }
+    """
+    from platform_clients import EpicOAuthClient, GOGOAuthClient, XboxAPIClient
+    clients = picker.clients if picker else {}
+    status: Dict[str, Any] = {}
+
+    # Steam
+    steam = clients.get('steam')
+    status['steam'] = {
+        'configured': steam is not None,
+        'authenticated': steam is not None,
+    }
+
+    # Epic
+    epic = clients.get('epic')
+    status['epic'] = {
+        'configured': epic is not None,
+        'authenticated': isinstance(epic, EpicOAuthClient) and epic.is_authenticated,
+    }
+
+    # GOG
+    gog = clients.get('gog')
+    status['gog'] = {
+        'configured': gog is not None,
+        'authenticated': isinstance(gog, GOGOAuthClient) and gog.is_authenticated,
+    }
+
+    # Xbox
+    xbox = clients.get('xbox')
+    status['xbox'] = {
+        'configured': xbox is not None,
+        'authenticated': isinstance(xbox, XboxAPIClient) and xbox._xsts_token is not None,
+    }
+
+    return jsonify({'platforms': status})
+
+
+# ---------------------------------------------------------------------------
 # Smart Recommendations
 # ---------------------------------------------------------------------------
 
@@ -6334,6 +6626,80 @@ def api_smart_recommendations():
     )
     recs = engine.recommend(count=count)
     return jsonify({'recommendations': recs, 'engine': 'smart'})
+
+
+# ---------------------------------------------------------------------------
+# Machine Learning Recommendations
+# ---------------------------------------------------------------------------
+
+@app.route('/api/recommendations/ml')
+@require_login
+def api_ml_recommendations():
+    """Return machine-learning–powered game recommendations.
+
+    Uses :class:`~app.services.ml_recommendation_service.MLRecommendationEngine`
+    which offers item-based collaborative filtering, ALS matrix factorization,
+    and a hybrid blend.
+
+    Query params:
+        count  (int, 1-50, default 10): Number of recommendations to return.
+        method (str, default "cf"):     Scoring method — ``cf`` (item-based
+                                        collaborative filtering), ``mf`` (ALS
+                                        matrix factorization), or ``hybrid``.
+
+    Response JSON::
+
+        {
+          "recommendations": [
+            {
+              "name": "Portal 2",
+              "playtime_hours": 0.0,
+              "ml_score": 4.82,
+              "ml_reason": "Unplayed. Genre match: Puzzle, Action. Method: item-CF",
+              ...
+            }
+          ],
+          "engine": "ml",
+          "method": "cf"
+        }
+
+    Returns 400 if the picker is not initialised.
+    """
+    from app.services.ml_recommendation_service import MLRecommendationEngine
+
+    if not picker:
+        return jsonify({
+            'error': 'Not initialized. Please log in and ensure your Steam ID is set.'
+        }), 400
+
+    try:
+        count = max(1, min(int(request.args.get('count', 10)), 50))
+    except (ValueError, TypeError):
+        count = 10
+
+    method = request.args.get('method', 'cf')
+    if method not in ('cf', 'mf', 'hybrid'):
+        method = 'cf'
+
+    with picker_lock:
+        games   = list(picker.games) if picker.games else []
+        history = list(picker.history) if hasattr(picker, 'history') else []
+        cache: dict = {}
+        steam_client = picker.clients.get('steam') if hasattr(picker, 'clients') else None
+        if steam_client and hasattr(steam_client, 'details_cache'):
+            cache = dict(steam_client.details_cache)
+        well_mins   = getattr(picker, 'WELL_PLAYED_THRESHOLD_MINUTES', 600)
+        barely_mins = getattr(picker, 'BARELY_PLAYED_THRESHOLD_MINUTES', 120)
+
+    engine = MLRecommendationEngine(
+        games=games,
+        details_cache=cache,
+        history=history,
+        well_played_mins=well_mins,
+        barely_played_mins=barely_mins,
+    )
+    recs = engine.recommend(count=count, method=method)
+    return jsonify({'recommendations': recs, 'engine': 'ml', 'method': method})
 
 
 # ---------------------------------------------------------------------------

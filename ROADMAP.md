@@ -55,9 +55,9 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 ### 📅 Future Release (v2.3.0)
 
 #### Platform Integration
-- [ ] **Epic Games OAuth** - Full library access with OAuth authentication
-- [ ] **GOG Galaxy Integration** - Complete GOG library support
-- [ ] **Xbox Game Pass** - Integration with Xbox Game Pass library
+- [x] **Epic Games OAuth** - Full library access with OAuth authentication
+- [x] **GOG Galaxy Integration** - Complete GOG library support
+- [x] **Xbox Game Pass** - Integration with Xbox Game Pass library
 - [ ] **PlayStation Network** - PSN library integration (if API available)
 - [ ] **Nintendo eShop** - Nintendo Switch library support (if API available)
 
@@ -85,7 +85,7 @@ This document outlines the planned features and improvements for GAPI (Game Pick
 - [ ] **Browser Extension** - Quick game picker from browser toolbar
 
 #### Advanced Features
-- [ ] **Machine Learning Recommendations** - ML model trained on your playing habits
+- [x] **Machine Learning Recommendations** - ML model trained on your playing habits
 - [x] **Calendar Integration** - Sync game sessions with calendar apps
 - [x] **Twitch Integration** - Pick games based on what's trending on Twitch
 - [x] **Custom Playlists** - Create themed game lists (e.g., "Cozy Games", "Quick Sessions")

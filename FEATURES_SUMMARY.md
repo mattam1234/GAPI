@@ -171,6 +171,28 @@ If PostgreSQL is not available:
 - [x] Achievement statistics by platform
 
 ### Recently Completed
+- [x] **Epic Games OAuth** — `EpicOAuthClient` in `platform_clients.py` implements the full
+  OAuth2 PKCE authorization code flow.  After completing `/api/epic/oauth/authorize` →
+  `/api/epic/oauth/callback` the user's Epic library is available at `GET /api/epic/library`.
+  Tokens are refreshed automatically.  Configure via `epic_enabled`, `epic_client_id`,
+  `epic_client_secret`, `epic_redirect_uri` in `config.json`.
+- [x] **GOG Galaxy Integration** — `GOGOAuthClient` implements standard OAuth2 (no PKCE) against
+  `auth.gog.com`.  Library fetched from `embed.gog.com/user/data/games`; game details from
+  GOG API v2.  Endpoints: `/api/gog/oauth/authorize`, `/api/gog/oauth/callback`,
+  `GET /api/gog/library`.  Config: `gog_enabled`, `gog_client_id`, `gog_client_secret`.
+- [x] **Xbox Game Pass** — `XboxAPIClient` performs Microsoft Identity MSA token exchange,
+  then Xbox Live (XBL) and XSTS authentication, and paginates the `titlehub` API to list
+  owned + Game Pass titles.  Endpoints: `/api/xbox/oauth/authorize`,
+  `/api/xbox/oauth/callback`, `GET /api/xbox/library`.  Config: `xbox_enabled`,
+  `xbox_client_id`, `xbox_client_secret`.  `GET /api/platform/status` reports auth state
+  for all four platforms simultaneously.
+- [x] **Machine Learning Recommendations** — `MLRecommendationEngine` in
+  `app/services/ml_recommendation_service.py` provides three scoring modes:
+  * **CF** — item-based collaborative filtering: cosine similarity in genre feature space
+  * **MF** — ALS implicit-feedback matrix factorization (pure numpy, no external ML library)
+  * **Hybrid** — weighted blend (60% CF + 40% MF)
+  Endpoint: `GET /api/recommendations/ml?count=10&method=cf|mf|hybrid`.
+  Graceful fallback to heuristic ranker when numpy is unavailable.
 - [x] **Smart Recommendations** — `GET /api/recommendations/smart` uses the new
   `SmartRecommendationEngine` which scores games by genre **and** Steam category/tag
   affinity, developer/publisher affinity, Metacritic score, diversity boosting, and
