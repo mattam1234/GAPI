@@ -5,7 +5,8 @@ from typing import Dict, List, Optional
 
 from ..repositories.schedule_repository import ScheduleRepository
 
-_EDITABLE_FIELDS = ('title', 'date', 'time', 'attendees', 'game_name', 'notes')
+_EDITABLE_FIELDS = ('title', 'date', 'time', 'attendees', 'game_name', 'notes', 
+                     'game_appid', 'attendee_ids', 'discord_event_id', 'game_image_url')
 
 
 class ScheduleService:
@@ -22,7 +23,10 @@ class ScheduleService:
 
     def add_event(self, title: str, date: str, time_str: str,
                   attendees: Optional[List[str]] = None,
-                  game_name: str = '', notes: str = '') -> Dict:
+                  game_name: str = '', notes: str = '',
+                  game_appid: Optional[str] = None,
+                  attendee_ids: Optional[List[str]] = None,
+                  game_image_url: Optional[str] = None) -> Dict:
         """Create a new event and persist it.
 
         Args:
@@ -32,6 +36,9 @@ class ScheduleService:
             attendees: Participant names.
             game_name: Pre-chosen game (optional).
             notes:     Free-text notes.
+            game_appid: Steam app ID or platform-specific game ID (optional).
+            attendee_ids: List of attendee identifiers (Discord IDs, user names, etc).
+            game_image_url: URL to game image (for Discord event).
 
         Returns:
             The new event dict including the generated ``id`` and
@@ -46,6 +53,10 @@ class ScheduleService:
             'attendees': attendees or [],
             'game_name': game_name,
             'notes': notes,
+            'game_appid': game_appid,
+            'attendee_ids': attendee_ids or [],
+            'game_image_url': game_image_url,
+            'discord_event_id': None,  # Will be set when Discord event is created
             'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         self._repo.upsert(event_id, event)
@@ -74,6 +85,25 @@ class ScheduleService:
     def remove_event(self, event_id: str) -> bool:
         """Delete an event.  Returns ``True`` if it existed."""
         return self._repo.delete(event_id)
+
+    def set_discord_event_id(self, event_id: str, discord_event_id: str) -> Optional[Dict]:
+        """Set the Discord event ID for a scheduled event.
+        
+        Args:
+            event_id: The schedule event ID.
+            discord_event_id: The Discord scheduled event ID.
+            
+        Returns:
+            Updated event dict, or ``None`` if event_id not found.
+        """
+        event = self._repo.find(event_id)
+        if event is None:
+            return None
+        event = dict(event)
+        event['discord_event_id'] = discord_event_id
+        event['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._repo.upsert(event_id, event)
+        return event
 
     def get_events(self) -> List[Dict]:
         """Return all events sorted by date then time (ascending)."""

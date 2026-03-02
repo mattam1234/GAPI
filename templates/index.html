@@ -1237,14 +1237,21 @@
             <div id="schedule-form-panel" style="background:var(--list-hover); padding:20px; border-radius:10px; margin-bottom:20px;">
                 <h3 id="schedule-form-title">➕ New Event</h3>
                 <input type="hidden" id="schedule-edit-id" value="">
+                <input type="hidden" id="sch-game-appid" value="">
+                <input type="hidden" id="sch-game-image-url" value="">
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:15px;">
                     <div>
                         <label style="display:block; margin-bottom:5px; font-weight:600;">Title *</label>
                         <input type="text" id="sch-title" class="search-input" placeholder="Game Night" style="margin-bottom:0;">
                     </div>
                     <div>
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Game (optional)</label>
-                        <input type="text" id="sch-game" class="search-input" placeholder="Picked game" style="margin-bottom:0;">
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Game (fuzzy search)</label>
+                        <div style="position:relative;">
+                            <input type="text" id="sch-game" class="search-input" placeholder="Search by title or App ID" 
+                                   onkeyup="searchGames(this.value)" oninput="showGameSearch()" style="margin-bottom:0;">
+                            <div id="game-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; max-height:200px; overflow-y:auto; z-index:1000; margin-top:2px;">
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label style="display:block; margin-bottom:5px; font-weight:600;">Date</label>
@@ -1255,15 +1262,27 @@
                         <input type="time" id="sch-time" class="search-input" style="margin-bottom:0;">
                     </div>
                     <div style="grid-column:span 2;">
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Attendees (comma-separated)</label>
-                        <input type="text" id="sch-attendees" class="search-input" placeholder="Alice, Bob, Charlie" style="margin-bottom:0;">
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Attendees (fuzzy search)</label>
+                        <div style="position:relative;">
+                            <input type="text" id="sch-attendees" class="search-input" placeholder="Start typing to search friends…" 
+                                   onkeyup="searchAttendees(this.value)" oninput="showAttendeeSearch()" style="margin-bottom:0;">
+                            <div id="attendee-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; max-height:200px; overflow-y:auto; z-index:1000; margin-top:2px;">
+                            </div>
+                        </div>
+                        <div id="attendee-tags" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
                     </div>
                     <div style="grid-column:span 2;">
                         <label style="display:block; margin-bottom:5px; font-weight:600;">Notes</label>
                         <input type="text" id="sch-notes" class="search-input" placeholder="Optional notes…" style="margin-bottom:0;">
                     </div>
+                    <div style="grid-column:span 2;">
+                        <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                            <input type="checkbox" id="sch-create-discord" style="width:18px; height:18px; cursor:pointer;">
+                            <span style="font-weight:600;">Create Discord event (if game image available)</span>
+                        </label>
+                    </div>
                 </div>
-                <div style="display:flex; gap:10px; margin-top:15px;">
+                <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
                     <button onclick="submitScheduleForm()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">💾 Save Event</button>
                     <button onclick="clearScheduleForm()" style="padding:10px 18px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer;">✕ Clear</button>
                 </div>
@@ -4160,6 +4179,21 @@
 
         // Authentication is initialized via DOMContentLoaded below
 
+        // Close search dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            const gameDropdown = document.getElementById('game-search-dropdown');
+            const attendeeDropdown = document.getElementById('attendee-search-dropdown');
+            const gameField = document.getElementById('sch-game');
+            const attendeeField = document.getElementById('sch-attendees');
+            
+            if (gameDropdown && gameField && !gameField.contains(event.target) && !gameDropdown.contains(event.target)) {
+                gameDropdown.style.display = 'none';
+            }
+            if (attendeeDropdown && attendeeField && !attendeeField.contains(event.target) && !attendeeDropdown.contains(event.target)) {
+                attendeeDropdown.style.display = 'none';
+            }
+        });
+
         // ---- Game Night Scheduler ----
 
         async function loadSchedule() {
@@ -4186,20 +4220,38 @@
             const safeGame  = (ev.game_name||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             const safeNotes = (ev.notes||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             const safeAttendees = attendees.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            
+            // Build game image or use fallback
+            let gameImageHtml = '';
+            if (ev.game_image_url) {
+                gameImageHtml = `<img src="${ev.game_image_url}" alt="Game" style="max-width:100px; max-height:60px; border-radius:6px; margin-right:10px; object-fit:cover;">`;
+            }
+            
+            // Discord event indicator
+            let discordBadge = '';
+            if (ev.discord_event_id) {
+                discordBadge = `<span style="margin-left:8px; padding:4px 8px; background:#5865F2; color:white; border-radius:4px; font-size:0.8em;">📢 Discord Event</span>`;
+            }
+            
             return `<div style="padding:15px 20px; border:1px solid var(--card-border); border-radius:10px; margin-bottom:10px; background:var(--card-bg);">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
-                    <div>
-                        <strong style="font-size:1.1em;">${safeTitle}</strong>
-                        ${safeGame ? `<span style="margin-left:8px; padding:2px 8px; background:var(--list-hover); border-radius:10px; font-size:0.85em;">🎮 ${safeGame}</span>` : ''}
+                    <div style="display:flex; align-items:center; flex:1; min-width:0;">
+                        ${gameImageHtml}
+                        <div style="flex:1;">
+                            <strong style="font-size:1.1em;">${safeTitle}</strong>
+                            ${safeGame ? `<span style="margin-left:8px; padding:2px 8px; background:var(--list-hover); border-radius:10px; font-size:0.85em;">🎮 ${safeGame}</span>` : ''}
+                            ${discordBadge}
+                        </div>
                     </div>
-                    <div style="color:var(--text-secondary); font-size:0.9em;">${ev.date||''} ${ev.time||''}</div>
+                    <div style="color:var(--text-secondary); font-size:0.9em; white-space:nowrap;">${ev.date||''} ${ev.time||''}</div>
                 </div>
                 <div style="margin-top:6px; color:var(--text-secondary); font-size:0.9em;">
                     👥 ${safeAttendees}
                     ${safeNotes ? `<span style="margin-left:12px;">📝 ${safeNotes}</span>` : ''}
                 </div>
-                <div style="margin-top:10px; display:flex; gap:8px;">
+                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
                     <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
+                    ${!ev.discord_event_id && ev.game_appid ? `<button onclick="createDiscordEventForSchedule('${ev.id}', '${safeGame}')" style="padding:5px 14px; background:#5865F2; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">📢 Create Discord Event</button>` : ''}
                     <button onclick="deleteScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
                 </div>
             </div>`;
@@ -4209,13 +4261,17 @@
             const editId = document.getElementById('schedule-edit-id').value;
             const title = document.getElementById('sch-title').value.trim();
             if (!title) { alert('Title is required'); return; }
+            
             const body = {
                 title,
                 date: document.getElementById('sch-date').value,
                 time: document.getElementById('sch-time').value,
                 attendees: document.getElementById('sch-attendees').value,
                 game_name: document.getElementById('sch-game').value.trim(),
+                game_appid: document.getElementById('sch-game-appid').value,
+                game_image_url: document.getElementById('sch-game-image-url').value,
                 notes: document.getElementById('sch-notes').value.trim(),
+                create_discord_event: document.getElementById('sch-create-discord').checked,
             };
             try {
                 let resp;
@@ -4226,6 +4282,166 @@
                 }
                 if (!resp.ok) { const d=await resp.json(); alert(d.error||'Failed to save event'); return; }
                 clearScheduleForm();
+                loadSchedule();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        // Game search functionality
+        let gameSearchTimeout;
+        async function searchGames(query) {
+            clearTimeout(gameSearchTimeout);
+            if (!query || query.length < 2) {
+                document.getElementById('game-search-dropdown').style.display = 'none';
+                return;
+            }
+            
+            gameSearchTimeout = setTimeout(async () => {
+                try {
+                    const resp = await fetch('/api/schedule/search-games', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({query: query, limit: 10})
+                    });
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    const dropdown = document.getElementById('game-search-dropdown');
+                    if (!data.results || data.results.length === 0) {
+                        dropdown.innerHTML = '<div style="padding:10px; color:var(--text-secondary);">No games found</div>';
+                        dropdown.style.display = 'block';
+                        return;
+                    }
+                    dropdown.innerHTML = data.results.map(game => `
+                        <div onclick="selectGame('${game.appid}', '${game.name.replace(/'/g,"\\'")}', '${game.image_url.replace(/'/g,"\\'")}'" 
+                             style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); display:flex; align-items:center; gap:8px; transition:background 0.2s;">
+                            ${game.image_url ? `<img src="${game.image_url}" alt="" style="width:40px; height:24px; object-fit:cover; border-radius:4px;">` : ''}
+                            <div>
+                                <strong>${game.name}</strong>
+                                <span style="font-size:0.8em; color:var(--text-secondary); margin-left:8px;">App ID: ${game.appid}</span>
+                            </div>
+                        </div>
+                    `).join('');
+                    dropdown.style.display = 'block';
+                } catch (e) {
+                    console.error('Game search error:', e);
+                }
+            }, 300);
+        }
+
+        function showGameSearch() {
+            const query = document.getElementById('sch-game').value.trim();
+            if (query.length >= 2) {
+                searchGames(query);
+            }
+        }
+
+        function selectGame(appid, name, imageUrl) {
+            document.getElementById('sch-game').value = name;
+            document.getElementById('sch-game-appid').value = appid;
+            document.getElementById('sch-game-image-url').value = imageUrl;
+            document.getElementById('game-search-dropdown').style.display = 'none';
+        }
+
+        // Attendee search functionality
+        let attendeeSearchTimeout;
+        async function searchAttendees(query) {
+            clearTimeout(attendeeSearchTimeout);
+            if (!query || query.length < 1) {
+                document.getElementById('attendee-search-dropdown').style.display = 'none';
+                return;
+            }
+            
+            attendeeSearchTimeout = setTimeout(async () => {
+                try {
+                    const resp = await fetch('/api/schedule/search-attendees', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({query: query, limit: 10})
+                    });
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    const dropdown = document.getElementById('attendee-search-dropdown');
+                    if (!data.results || data.results.length === 0) {
+                        dropdown.innerHTML = '<div style="padding:10px; color:var(--text-secondary);">No friends found</div>';
+                        dropdown.style.display = 'block';
+                        return;
+                    }
+                    dropdown.innerHTML = data.results.map(user => `
+                        <div onclick="addAttendee('${user.name.replace(/'/g,"\\'")}'" 
+                             style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); width:100%;">
+                            <strong>${user.name}</strong>
+                        </div>
+                    `).join('');
+                    dropdown.style.display = 'block';
+                } catch (e) {
+                    console.error('Attendee search error:', e);
+                }
+            }, 300);
+        }
+
+        function showAttendeeSearch() {
+            const query = document.getElementById('sch-attendees').value.trim();
+            if (query.length >= 1) {
+                searchAttendees(query);
+            }
+        }
+
+        function addAttendee(name) {
+            const field = document.getElementById('sch-attendees');
+            const tags = document.getElementById('attendee-tags');
+            const existing = field.value.split(',').map(x => x.trim()).filter(x => x);
+            
+            if (!existing.includes(name)) {
+                existing.push(name);
+                field.value = existing.join(', ');
+                updateAttendeeTagsDisplay();
+            }
+            document.getElementById('attendee-search-dropdown').style.display = 'none';
+            document.getElementById('sch-attendees').value = '';
+        }
+
+        function updateAttendeeTagsDisplay() {
+            const field = document.getElementById('sch-attendees');
+            const tags = document.getElementById('attendee-tags');
+            const attendees = field.value.split(',').map(x => x.trim()).filter(x => x);
+            tags.innerHTML = attendees.map(name => `
+                <span style="padding:4px 10px; background:#667eea; color:white; border-radius:16px; font-size:0.85em;">
+                    ${name}
+                    <span onclick="removeAttendee('${name.replace(/'/g,"\\'")}'" style="margin-left:6px; cursor:pointer;">×</span>
+                </span>
+            `).join('');
+        }
+
+        function removeAttendee(name) {
+            const field = document.getElementById('sch-attendees');
+            const attendees = field.value.split(',').map(x => x.trim()).filter(x => x && x !== name);
+            field.value = attendees.join(', ');
+            updateAttendeeTagsDisplay();
+        }
+
+        async function createDiscordEventForSchedule(eventId, gameName) {
+            if (!confirm(`Create Discord event for "${gameName}"?`)) return;
+            try {
+                // First fetch the event to get current data
+                const resp = await fetch('/api/schedule');
+                if (!resp.ok) { alert('Could not load event'); return; }
+                const data = await resp.json();
+                const event = (data.events || []).find(e => e.id === eventId);
+                if (!event) { alert('Event not found'); return; }
+                
+                // Call the endpoint to create Discord event
+                const discordResp = await safeFetch(`/api/schedule/${eventId}/create-discord-event`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        guild_id: null,  // User would need to provide this
+                    })
+                });
+                if (!discordResp.ok) { 
+                    const err = await discordResp.json();
+                    alert(err.error || 'Failed to create Discord event'); 
+                    return; 
+                }
+                alert('Discord event creation initiated!');
                 loadSchedule();
             } catch (e) { alert('Error: ' + e.message); }
         }
@@ -4253,7 +4469,11 @@
                 document.getElementById('sch-time').value = ev.time || '';
                 document.getElementById('sch-attendees').value = (ev.attendees||[]).join(', ');
                 document.getElementById('sch-game').value = ev.game_name || '';
+                document.getElementById('sch-game-appid').value = ev.game_appid || '';
+                document.getElementById('sch-game-image-url').value = ev.game_image_url || '';
                 document.getElementById('sch-notes').value = ev.notes || '';
+                document.getElementById('sch-create-discord').checked = !!ev.discord_event_id;
+                updateAttendeeTagsDisplay();
                 document.getElementById('schedule-form-panel').scrollIntoView({behavior:'smooth'});
             } catch (e) { alert('Error: ' + e.message); }
         }
@@ -4261,8 +4481,13 @@
         function clearScheduleForm() {
             document.getElementById('schedule-edit-id').value = '';
             document.getElementById('schedule-form-title').textContent = '➕ New Event';
-            ['sch-title','sch-date','sch-time','sch-attendees','sch-game','sch-notes']
-                .forEach(id => { document.getElementById(id).value = ''; });
+            ['sch-title','sch-date','sch-time','sch-attendees','sch-game','sch-notes',
+             'sch-game-appid','sch-game-image-url']
+                .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            document.getElementById('sch-create-discord').checked = false;
+            document.getElementById('attendee-tags').innerHTML = '';
+            document.getElementById('game-search-dropdown').style.display = 'none';
+            document.getElementById('attendee-search-dropdown').style.display = 'none';
         }
 
         // =====================================================================

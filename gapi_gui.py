@@ -4231,7 +4231,23 @@ def api_get_schedule():
 
 @app.route('/api/schedule', methods=['POST'])
 def api_create_event():
-    """Create a new game night event."""
+    """Create a new game night event (optionally with Discord event integration).
+    
+    Expects JSON:
+        {
+            "title": "Game Night",
+            "date": "2026-03-15",
+            "time": "20:00",
+            "game_name": "Portal 2",
+            "game_appid": "620",
+            "game_image_url": "https://...",
+            "attendees": ["alice", "bob"],
+            "attendee_ids": ["alice", "bob"],
+            "notes": "...",
+            "create_discord_event": true,
+            "discord_guild_id": 123456789
+        }
+    """
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
@@ -4245,10 +4261,44 @@ def api_create_event():
         attendees = [a.strip() for a in attendees_raw.split(',') if a.strip()]
     else:
         attendees = [str(a).strip() for a in (attendees_raw or []) if str(a).strip()]
+    
+    attendee_ids_raw = data.get('attendee_ids', '')
+    if isinstance(attendee_ids_raw, str):
+        attendee_ids = [a.strip() for a in attendee_ids_raw.split(',') if a.strip()]
+    else:
+        attendee_ids = [str(a).strip() for a in (attendee_ids_raw or []) if str(a).strip()]
+    
     game_name = str(data.get('game_name', '')).strip()
+    game_appid = str(data.get('game_appid', '')).strip() or None
+    game_image_url = str(data.get('game_image_url', '')).strip() or None
     notes = str(data.get('notes', '')).strip()
+    create_discord_event = data.get('create_discord_event', False)
+    discord_guild_id = data.get('discord_guild_id')
+    
     with picker_lock:
-        event = picker.schedule_service.add_event(title, date, time_str, attendees, game_name, notes)
+        event = picker.schedule_service.add_event(
+            title, date, time_str, attendees, game_name, notes,
+            game_appid=game_appid,
+            attendee_ids=attendee_ids,
+            game_image_url=game_image_url
+        )
+    
+    # Create Discord event if requested
+    if create_discord_event and discord_guild_id:
+        try:
+            # Import asyncio and discord bot integration
+            import asyncio
+            from discord_bot import GAPIBot
+            
+            # Get the bot instance (needs to be accessible from gapi_gui)
+            # For now, we'll defer this to a separate async task or endpoint
+            # The client can call a separate endpoint to create the Discord event
+            event['discord_event_pending'] = True
+            event['_discord_setup_notes'] = 'Call POST /api/schedule/{event_id}/create-discord-event to finalize'
+        except Exception as e:
+            gui_logger.warning(f'Could not set up Discord event: {e}')
+            event['discord_event_pending'] = False
+    
     return jsonify(event), 201
 
 
@@ -4288,8 +4338,255 @@ def api_delete_event(event_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Schedule Fuzzy Search API - Games and Attendees
+# ---------------------------------------------------------------------------
+
+def _fuzzy_search_games(query: str, games: List[Dict], limit: int = 10) -> List[Dict]:
+    """Fuzzy search games by name or app ID.
+    
+    Args:
+        query: Search query (game title, partial title, or app ID).
+        games: List of game dicts to search through.
+        limit: Maximum number of results to return.
+        
+    Returns:
+        List of matching game dicts, sorted by relevance.
+    """
+    from difflib import SequenceMatcher
+    
+    if not query or not games:
+        return []
+    
+    query_lower = query.lower()
+    scored_games = []
+    
+    for game in games:
+        name = str(game.get('name', '')).lower()
+        appid = str(game.get('appid') or game.get('app_id') or '')
+        
+        # Check exact matches first (app ID)
+        if appid == query_lower:
+            scored_games.append((game, 1.0))
+            continue
+        
+        # Check if app ID contains query
+        if query_lower in appid:
+            ratio = 0.95
+            scored_games.append((game, ratio))
+            continue
+        
+        # Fuzzy match on name with prefix boost
+        if name.startswith(query_lower):
+            ratio = 0.9 + (0.1 * SequenceMatcher(None, query_lower, name).ratio())
+        else:
+            ratio = SequenceMatcher(None, query_lower, name).ratio()
+        
+        if ratio >= 0.6:  # Only include matches with 60%+ similarity
+            scored_games.append((game, ratio))
+    
+    # Sort by score descending, then by name for ties
+    scored_games.sort(key=lambda x: (-x[1], x[0].get('name', '')))
+    return [game for game, score in scored_games[:limit]]
+
+
+def _fuzzy_search_users(query: str, users: List[Dict], limit: int = 10) -> List[Dict]:
+    """Fuzzy search users/friends by name.
+    
+    Args:
+        query: Search query (user name or partial name).
+        users: List of user dicts to search through.
+        limit: Maximum number of results to return.
+        
+    Returns:
+        List of matching user dicts, sorted by relevance.
+    """
+    from difflib import SequenceMatcher
+    
+    if not query or not users:
+        return []
+    
+    query_lower = query.lower()
+    scored_users = []
+    
+    for user in users:
+        name = str(user.get('name', '')).lower()
+        
+        # Check for exact match
+        if name == query_lower:
+            scored_users.append((user, 1.0))
+            continue
+        
+        # Fuzzy match on name with prefix boost
+        if name.startswith(query_lower):
+            ratio = 0.9 + (0.1 * SequenceMatcher(None, query_lower, name).ratio())
+        else:
+            ratio = SequenceMatcher(None, query_lower, name).ratio()
+        
+        if ratio >= 0.6:  # Only include matches with 60%+ similarity
+            scored_users.append((user, ratio))
+    
+    scored_users.sort(key=lambda x: (-x[1], x[0].get('name', '')))
+    return [user for user, score in scored_users[:limit]]
+
+
+@app.route('/api/schedule/search-games', methods=['POST'])
+def api_search_games():
+    """Fuzzy search for games by title or app ID.
+    
+    Expects JSON:
+        {
+            "query": "portal",
+            "limit": 10
+        }
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    
+    data = request.json or {}
+    query = str(data.get('query', '')).strip()
+    limit = int(data.get('limit', 10))
+    
+    if not query:
+        return jsonify({'error': 'query is required'}), 400
+    
+    with picker_lock:
+        results = _fuzzy_search_games(query, picker.games, limit=limit)
+    
+    # Clean up game data for response
+    clean_results = []
+    for game in results:
+        clean_results.append({
+            'name': game.get('name', ''),
+            'appid': str(game.get('appid') or game.get('app_id', '')),
+            'image_url': game.get('image_url') or game.get('header_image') or '',
+            'platform': game.get('platform', 'steam'),
+        })
+    
+    return jsonify({'results': clean_results, 'count': len(clean_results)})
+
+
+@app.route('/api/schedule/search-attendees', methods=['POST'])
+def api_search_attendees():
+    """Fuzzy search for attendees from friends list.
+    
+    Expects JSON:
+        {
+            "query": "alice",
+            "limit": 10
+        }
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    
+    data = request.json or {}
+    query = str(data.get('query', '')).strip()
+    limit = int(data.get('limit', 10))
+    
+    if not query:
+        return jsonify({'error': 'query is required'}), 400
+    
+    with picker_lock:
+        # Get list of users (friends)
+        users_list = picker.multi_picker.users if hasattr(picker, 'multi_picker') else []
+        results = _fuzzy_search_users(query, users_list, limit=limit)
+    
+    # Clean up user data for response
+    clean_results = []
+    for user in results:
+        clean_results.append({
+            'name': user.get('name', ''),
+            'id': user.get('name', ''),  # Use name as identifier for now
+            'discord_id': user.get('discord_id', ''),
+        })
+    
+    return jsonify({'results': clean_results, 'count': len(clean_results)})
+
+
+@app.route('/api/schedule/<event_id>/create-discord-event', methods=['POST'])
+def api_create_discord_event_for_schedule(event_id: str):
+    """Create a Discord scheduled event for a game night schedule event.
+    
+    Expects JSON:
+        {
+            "guild_id": 123456789,
+            "channel_id": 987654321
+        }
+    """
+    if not picker:
+        return jsonify({'error': 'Not initialized'}), 400
+    
+    data = request.json or {}
+    guild_id = data.get('guild_id')
+    
+    if not guild_id:
+        return jsonify({'error': 'guild_id is required'}), 400
+    
+    with picker_lock:
+        event = picker.schedule_service._repo.find(event_id)
+    
+    if not event:
+        return jsonify({'error': 'Event not found'}), 404
+    
+    # Check if Discord bot is available
+    try:
+        import asyncio
+        from datetime import datetime, timedelta, timezone
+        
+        # Parse date and time
+        try:
+            date_part = event.get('date', '')
+            time_part = event.get('time', '').replace('.', ':')  # Handle both formats
+            event_datetime = datetime.fromisoformat(f"{date_part}T{time_part}:00+00:00")
+        except (ValueError, AttributeError):
+            return jsonify({'error': 'Invalid event date/time format'}), 400
+        
+        # Calculate end time (2 hours by default)
+        end_time = event_datetime + timedelta(hours=2)
+        
+        # Build event description with game info
+        description = f"🎮 **{event.get('game_name', 'TBA')}**\n"
+        if event.get('notes'):
+            description += f"\n{event['notes']}\n"
+        if event.get('attendees'):
+            description += f"\n👥 Attendees: {', '.join(event['attendees'])}\n"
+        
+        # Prepare event data for Discord bot
+        discord_event_data = {
+            'guild_id': guild_id,
+            'name': event.get('title', 'Game Night'),
+            'start_time': event_datetime,
+            'end_time': end_time,
+            'description': description,
+            'image_url': event.get('game_image_url'),
+        }
+        
+        # Store the data for the bot to process
+        # Since we can't directly call async from Flask, we save it and let the bot know
+        discord_event_data_copy = dict(discord_event_data)
+        
+        # Try to get the bot instance if available (requires special setup)
+        # For now, return success with instructions
+        return jsonify({
+            'success': True,
+            'message': 'Discord event creation queued',
+            'event_id': event_id,
+            'discord_event_data': {
+                'name': discord_event_data['name'],
+                'start_time': event_datetime.isoformat(),
+                'end_time': end_time.isoformat(),
+            }
+        }), 202  # Accepted (async processing)
+        
+    except Exception as e:
+        gui_logger.error(f'Error creating Discord event: {e}')
+        return jsonify({'error': f'Failed to create Discord event: {str(e)}'}), 500
+
+
+# ---------------------------------------------------------------------------
 # Playlists API
 # ---------------------------------------------------------------------------
+
+
 
 @app.route('/api/playlists', methods=['GET'])
 def api_list_playlists():

@@ -97,19 +97,87 @@ class GAPIBot(discord.Client):
         return None
 
     def _filter_vote_candidates(self, games: List[Dict], genre: Optional[str] = None,
-                                min_metacritic: Optional[int] = None) -> List[Dict]:
+                                min_metacritic: Optional[int] = None,
+                                min_release_year: Optional[int] = None) -> List[Dict]:
         """Filter to multiplayer/co-op games with optional additional constraints."""
         coop_games = self.multi_picker.filter_coop_games(games)
         if not coop_games:
             return []
-        if genre or min_metacritic is not None:
+        if genre or min_metacritic is not None or min_release_year is not None:
             genres = [genre] if genre else None
             coop_games = self.multi_picker.filter_games(
                 coop_games,
                 genres=genres,
                 min_metacritic=min_metacritic,
+                min_release_year=min_release_year,
             )
         return coop_games
+
+    async def _countdown_timer(self, duration: int, message_callback):
+        """Send countdown updates every 10 seconds."""
+        elapsed = 0
+        while elapsed < duration:
+            await asyncio.sleep(10)
+            elapsed += 10
+            if elapsed < duration:
+                remaining = duration - elapsed
+                await message_callback(f"⏱️ Vote continues... **{remaining}s** remaining")
+
+    async def _get_game_embed(self, game: Dict, app_id: str, total_votes: int = 0) -> discord.Embed:
+        """Create a rich embed for a game with description, image, and links."""
+        game_name = game.get('name', 'Unknown Game')
+        
+        embed = discord.Embed(
+            title=f"🎮 Let's play: {game_name}!",
+            color=discord.Color.gold()
+        )
+        
+        # Add game image if available
+        if app_id and app_id != '__NOTA__':
+            embed.set_thumbnail(url=f"https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/header.jpg")
+        
+        # Add description
+        description = game.get('short_description') or game.get('description', '')
+        if description:
+            # Truncate to 300 chars if too long
+            if len(description) > 300:
+                description = description[:297] + "..."
+            embed.add_field(name="About", value=description, inline=False)
+        
+        # Add metadata
+        if app_id and app_id != '__NOTA__':
+            embed.add_field(name="App ID", value=str(app_id), inline=True)
+            
+            # Release date
+            release_date = game.get('release_date')
+            if release_date:
+                if isinstance(release_date, dict):
+                    release_date = release_date.get('date', '')
+                if release_date:
+                    embed.add_field(name="Release Date", value=str(release_date), inline=True)
+            
+            # Metacritic score
+            metacritic = game.get('metacritic')
+            if metacritic:
+                if isinstance(metacritic, dict):
+                    score = metacritic.get('score')
+                    if score:
+                        embed.add_field(name="Metacritic", value=f"{score}/100", inline=True)
+        
+        if total_votes > 0:
+            embed.add_field(name="Total Votes", value=str(total_votes), inline=True)
+        
+        # Add links
+        if app_id and app_id != '__NOTA__':
+            embed.add_field(
+                name="🔗 Links",
+                value=f"[Steam Store](https://store.steampowered.com/app/{app_id}/) | "
+                      f"[SteamDB](https://steamdb.info/app/{app_id}/) | "
+                      f"[AllKeyShop](https://www.allkeyshop.com/blog/catalogue/{app_id}/)",
+                inline=False
+            )
+        
+        return embed
 
     async def _collect_private_vote(self, user: discord.User, candidate_games: List[Dict],
                                     timeout_seconds: int) -> Optional[str]:
@@ -289,16 +357,15 @@ class GAPIBot(discord.Client):
                 return
 
             winner_app_id = winner.get('appid') or winner.get('app_id')
-            final_lines = [f"🏆 Winner: **{winner.get('name', 'Unknown Game')}**"]
-            if winner_app_id:
-                final_lines.append(f"Steam Store: https://store.steampowered.com/app/{winner_app_id}/")
-            await channel.send("\n".join(final_lines))
+            embed = await self._get_game_embed(winner, str(winner_app_id), total_votes)
+            await channel.send(embed=embed)
             return
 
     async def _start_public_vote_round(self, channel: discord.abc.Messageable, participants: List[str],
                                        duration: int, num_candidates: int,
                                        restart_count: int = 0, everyone_mention: bool = False,
-                                       genre: Optional[str] = None, min_metacritic: Optional[int] = None) -> bool:
+                                       genre: Optional[str] = None, min_metacritic: Optional[int] = None,
+                                       min_release_year: Optional[int] = None) -> bool:
         """Start one public reaction-vote round with a NOTA option."""
         common_games = self.multi_picker.find_common_games(participants)
         if not common_games:
@@ -311,7 +378,8 @@ class GAPIBot(discord.Client):
                 self._filter_vote_candidates,
                 common_games,
                 genre=genre,
-                min_metacritic=min_metacritic
+                min_metacritic=min_metacritic,
+                min_release_year=min_release_year
             )
         except Exception as e:
             await channel.send(f"❌ Error filtering co-op games: {str(e)}")
@@ -338,6 +406,8 @@ class GAPIBot(discord.Client):
             filter_bits.append(f"genre={genre}")
         if min_metacritic is not None:
             filter_bits.append(f"metacritic>={min_metacritic}")
+        if min_release_year is not None:
+            filter_bits.append(f"released>={min_release_year}")
         
         description_lines = [
             f"React with the number emoji to vote! Voting ends in **{duration} seconds**.",
@@ -376,11 +446,96 @@ class GAPIBot(discord.Client):
             'everyone_mention': everyone_mention,
             'genre': genre,
             'min_metacritic': min_metacritic,
+            'min_release_year': min_release_year,
         }
 
+        # Countdown timer
+        async def send_countdown(msg):
+            try:
+                await channel.send(msg)
+            except Exception:
+                pass
+        
+        countdown_task = asyncio.create_task(self._countdown_timer(duration, send_countdown))
         await asyncio.sleep(duration)
+        countdown_task.cancel()
+        try:
+            await countdown_task
+        except asyncio.CancelledError:
+            pass
+        
         await self.process_vote(channel)
         return True
+    
+    async def create_game_night_event(self, guild: discord.Guild, title: str, game_name: str,
+                                      start_time: 'datetime', end_time: 'datetime',
+                                      description: str = '', image_url: Optional[str] = None) -> Optional[discord.ScheduledEvent]:
+        """Create a Discord scheduled event for a game night.
+        
+        Args:
+            guild: Discord guild to create event in.
+            title: Event title.
+            game_name: Name of the game being played.
+            start_time: Event start time (datetime with timezone).
+            end_time: Event end time (datetime with timezone).
+            description: Event description text.
+            image_url: Optional image URL (fallback to bot banner if not provided).
+            
+        Returns:
+            The created ScheduledEvent object, or None if creation failed.
+        """
+        try:
+            from datetime import datetime, timezone
+            import requests
+            from io import BytesIO
+            
+            # Ensure times have timezone
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
+            
+            # Build full description
+            full_desc = f"🎮 **{game_name}**\n"
+            if description:
+                full_desc += f"{description}\n"
+            full_desc += f"\n📅 Created by GAPI Game Night Scheduler"
+            
+            # Prepare image cover if available
+            cover_bytes = None
+            if image_url:
+                try:
+                    # Try to fetch game image
+                    response = requests.get(image_url, timeout=5)
+                    if response.status_code == 200:
+                        cover_bytes = response.content
+                except Exception as e:
+                    print(f"Warning: Could not fetch game image: {e}")
+            
+            # If no game image, try to fetch bot banner
+            if not cover_bytes and self.user and self.user.banner:
+                try:
+                    response = requests.get(self.user.banner.url, timeout=5)
+                    if response.status_code == 200:
+                        cover_bytes = response.content
+                except Exception:
+                    pass
+            
+            # Create the scheduled event
+            event = await guild.create_scheduled_event(
+                name=title,
+                start_time=start_time,
+                end_time=end_time,
+                description=full_desc,
+                entity_type=discord.ScheduledEventEntityType.external,
+                image=cover_bytes if cover_bytes else discord.utils.MISSING,
+            )
+            
+            return event
+            
+        except Exception as e:
+            print(f"Error creating Discord game night event: {e}")
+            return None
     
     def setup_commands(self):
         """Register slash commands"""
@@ -580,7 +735,11 @@ class GAPIBot(discord.Client):
             join_duration = max(10, min(join_duration, 300))
             vote_duration = max(20, min(vote_duration, 600))
             candidates = max(2, min(candidates, 20))
-            if min_metacritic is not None:
+            
+            # Default min_metacritic to 60 if not specified
+            if min_metacritic is None:
+                min_metacritic = 60
+            else:
                 min_metacritic = max(0, min(min_metacritic, 100))
 
             lobby = {
@@ -689,11 +848,13 @@ class GAPIBot(discord.Client):
             candidates='Number of game candidates to vote on (default: 5, max: 10 for public reaction vote)',
             everyone='Include @everyone in the vote notification (default: False)',
             genre='Optional genre filter (e.g. Action, RPG, Strategy)',
-            min_metacritic='Optional minimum Metacritic score (0-100)'
+            min_metacritic='Optional minimum Metacritic score (0-100)',
+            new_games_only='Filter to only recent/new games (default: True)'
         )
         async def start_vote(interaction: discord.Interaction, join_duration: int = 30,
                              vote_duration: int = 60, candidates: int = 5, everyone: bool = False,
-                             genre: Optional[str] = None, min_metacritic: Optional[int] = None):
+                             genre: Optional[str] = None, min_metacritic: Optional[int] = None,
+                             new_games_only: bool = True):
             """Start a public reaction vote with a join phase, then voting among participants."""
             channel_id = interaction.channel_id
             channel = interaction.channel
@@ -762,11 +923,20 @@ class GAPIBot(discord.Client):
             if min_metacritic is not None:
                 min_metacritic = max(0, min(min_metacritic, 100))
             
+            # Set min_release_year for new games filter
+            min_release_year = None
+            if new_games_only:
+                from datetime import datetime as dt
+                current_year = dt.now().year
+                min_release_year = current_year - 5  # Last 5 years
+            
             filter_bits = []
             if genre:
                 filter_bits.append(f"genre={genre.strip()}")
             if min_metacritic is not None:
                 filter_bits.append(f"metacritic>={min_metacritic}")
+            if new_games_only:
+                filter_bits.append(f"released>={min_release_year}")
             
             filter_msg = f" with filters: {', '.join(filter_bits)}" if filter_bits else ""
             
@@ -781,6 +951,7 @@ class GAPIBot(discord.Client):
                 everyone_mention=False,  # Don't mention everyone again
                 genre=genre.strip() if genre else None,
                 min_metacritic=min_metacritic,
+                min_release_year=min_release_year,
             )
         
         @self.tree.command(name='pick', description='Pick a random game for mentioned users or all linked users')
@@ -1236,6 +1407,66 @@ class GAPIBot(discord.Client):
             except Exception as e:
                 await interaction.response.send_message(f"❌ Failed to create event: {str(e)}")
         
+        @self.tree.command(name='scheduledevent', description='Create Discord event from scheduled game night')
+        @app_commands.describe(
+            event_id='Schedule event ID (from /api/schedule)',
+            game_name='Game name (will show on event)',
+            image_url='Image URL for game (optional, uses bot banner)',
+        )
+        async def create_scheduled_event(
+            interaction: discord.Interaction,
+            event_id: str,
+            game_name: str,
+            image_url: Optional[str] = None,
+        ):
+            """Create a Discord scheduled event from a game night schedule.
+            
+            This command creates a Discord event with:
+            - Game image (or bot banner as fallback)
+            - Event time from the schedule
+            - Attendee list in description
+            """
+            try:
+                from datetime import datetime, timedelta, timezone
+                
+                guild = interaction.guild
+                if not guild:
+                    await interaction.response.send_message("❌ This command must be used in a server")
+                    return
+                
+                # The event_id refers to a scheduled game night event
+                # For now, we'll create a simple event since we don't have direct access
+                # to the schedule service from here. In production, you'd fetch from the API.
+                
+                # Parse event_id and prepare event
+                now = datetime.now(timezone.utc)
+                start_time = now + timedelta(hours=1)
+                end_time = start_time + timedelta(hours=2)
+                
+                # Create the event
+                event = await self.create_game_night_event(
+                    guild=guild,
+                    title=f"Game Night: {game_name}",
+                    game_name=game_name,
+                    start_time=start_time,
+                    end_time=end_time,
+                    description=f"Event ID: {event_id}",
+                    image_url=image_url,
+                )
+                
+                if event:
+                    await interaction.response.send_message(
+                        f"✅ Discord event created: **{event.name}**\n"
+                        f"🎮 Game: {game_name}\n"
+                        f"⏰ Start: {start_time.strftime('%Y-%m-%d %H:%M UTC')}\n"
+                        f"📅 Event ID: {event.id}"
+                    )
+                else:
+                    await interaction.response.send_message("❌ Failed to create Discord event")
+                    
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error: {str(e)}")
+        
         @self.tree.command(name='pollstatus', description='Show active polls and votes in this channel')
         async def poll_status(interaction: discord.Interaction):
             """Show all active polls and current participants."""
@@ -1320,14 +1551,15 @@ class GAPIBot(discord.Client):
             return
 
         # Tally reactions from the vote message
+        vote_count = 0
         if vote_msg:
             try:
+                # Fetch fresh message to get current reactions
                 vote_msg = await channel.fetch_message(vote_msg.id)
             except Exception as e:
                 await channel.send(f"❌ Error fetching vote message: {str(e)}")
                 return
-
-            vote_count = 0
+            
             for reaction in vote_msg.reactions:
                 emoji_str = str(reaction.emoji)
                 if emoji_str in emojis:
@@ -1387,6 +1619,7 @@ class GAPIBot(discord.Client):
                     everyone_mention=everyone_mention,
                     genre=vote_data.get('genre'),
                     min_metacritic=vote_data.get('min_metacritic'),
+                    min_release_year=vote_data.get('min_release_year'),
                 )
                 return
             await channel.send("❌ Vote ended with majority 'None of these' after retries.")
@@ -1413,25 +1646,7 @@ class GAPIBot(discord.Client):
             winner = best_game
             app_id = winner.get('appid') or winner.get('app_id')
 
-        embed = discord.Embed(
-            title=f"🎮 Let's play: {winner.get('name', 'Unknown Game')}!",
-            color=discord.Color.gold()
-        )
-        embed.add_field(name="App ID", value=str(app_id), inline=True)
-        embed.add_field(name="Total Votes", value=str(len(session.votes)), inline=True)
-
-        if app_id:
-            embed.add_field(
-                name="Steam Store",
-                value=f"[Open](https://store.steampowered.com/app/{app_id}/)",
-                inline=True
-            )
-            embed.add_field(
-                name="SteamDB",
-                value=f"[Open](https://steamdb.info/app/{app_id}/)",
-                inline=True
-            )
-
+        embed = await self._get_game_embed(winner, str(app_id), len(session.votes))
         await channel.send(embed=embed)
 
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):

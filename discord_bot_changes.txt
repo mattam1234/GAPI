@@ -1,0 +1,9 @@
+Changes needed for discord_bot.py:
+
+1. Insert countdown_timer and _get_game_embed functions after line 114
+2. Update _filter_vote_candidates to include min_release_year
+3. Update /vote command to add new_games_only parameter
+4. Update /voteprivate to default min_metacritic to 60
+5. Update _start_public_vote_round to include min_release_year and countdown timer
+6. Update process_vote to use enhanced embed display
+7. Update private vote display to use enhanced embed
