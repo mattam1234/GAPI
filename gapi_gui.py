@@ -411,6 +411,42 @@ def _add_cache_control(response):
 
 
 # ---------------------------------------------------------------------------
+# API Deprecation Headers  (Item 9 — API Documentation / Quality Gates)
+# ---------------------------------------------------------------------------
+# Map endpoint function name → deprecation message.
+# When a request matches one of these endpoints, the response will carry
+# ``Deprecation: true``, ``X-Deprecation-Message``, and a ``Sunset`` header
+# indicating when the endpoint is planned to be removed.
+_DEPRECATED_ENDPOINTS: dict = {
+    # Legacy multi-user endpoints replaced by authenticated multi-user sessions
+    'api_users_list_legacy': (
+        'This endpoint is deprecated. Use GET /api/users/all instead.',
+        '2027-01-01',
+    ),
+    # Old un-paginated common-library endpoint
+    'api_multiuser_common': (
+        'This endpoint is deprecated. Use POST /api/multiuser/common with pagination.',
+        '2027-01-01',
+    ),
+}
+
+
+@app.after_request
+def _add_deprecation_headers(response):
+    """Attach RFC 8594 Deprecation + Sunset headers to deprecated endpoint responses."""
+    try:
+        endpoint = request.endpoint
+        if endpoint and endpoint in _DEPRECATED_ENDPOINTS:
+            message, sunset_date = _DEPRECATED_ENDPOINTS[endpoint]
+            response.headers.setdefault('Deprecation', 'true')
+            response.headers.setdefault('Sunset', sunset_date)
+            response.headers.setdefault('X-Deprecation-Message', message)
+    except Exception:
+        pass  # never break a request
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Client-side error ring-buffer
 # ---------------------------------------------------------------------------
 
@@ -12051,6 +12087,321 @@ def api_get_recommendation_variant():
         return jsonify({'experiment': experiment_name, 'variant': variant})
     except Exception as e:
         gui_logger.error('api_get_recommendation_variant error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# User Suspension / Account Status  (Item 5 — Advanced User Management)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/users/search', methods=['GET'])
+@require_admin
+def api_admin_search_users():
+    """Search and filter users — admin only.
+
+    Query parameters:
+      ``q``       – partial username match
+      ``role``    – filter by role name
+      ``status``  – ``active``, ``suspended``, or ``banned``
+      ``limit``   – max results (default 50, max 200)
+      ``offset``  – pagination offset (default 0)
+
+    Response JSON:
+      ``users`` – list of ``{username, display_name, status, roles, created_at, last_seen}``
+      ``count`` – number of results returned
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'users': [], 'count': 0})
+    q = request.args.get('q', '').strip()
+    role = request.args.get('role', '').strip()
+    status = request.args.get('status', '').strip().lower()
+    try:
+        limit = max(1, min(200, int(request.args.get('limit', 50))))
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (ValueError, TypeError):
+        limit, offset = 50, 0
+    try:
+        db = next(database.get_db())
+        users = database.search_users_admin(db, query=q, role=role,
+                                            status=status, limit=limit, offset=offset)
+        return jsonify({'users': users, 'count': len(users)})
+    except Exception as e:
+        gui_logger.error('api_admin_search_users error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/suspend', methods=['POST'])
+@require_admin
+def api_admin_suspend_user(username: str):
+    """Suspend or permanently ban a user (admin only).
+
+    Request JSON body:
+      ``reason``            – suspension reason (required)
+      ``duration_minutes``  – suspension duration in minutes; omit for permanent ban
+
+    Response JSON: suspension status dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    reason = str(data.get('reason', '')).strip()
+    if not reason:
+        return jsonify({'error': "'reason' is required"}), 400
+    duration = data.get('duration_minutes')
+    if duration is not None:
+        try:
+            duration = int(duration)
+            if duration <= 0:
+                return jsonify({'error': "'duration_minutes' must be a positive integer"}), 400
+        except (ValueError, TypeError):
+            return jsonify({'error': "'duration_minutes' must be an integer"}), 400
+    try:
+        db = next(database.get_db())
+        result = database.suspend_user(
+            db, username, reason=reason,
+            suspended_by=get_current_username(),
+            duration_minutes=duration,
+        )
+        if not result:
+            return jsonify({'error': f"User '{username}' not found"}), 404
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_suspend_user error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/suspend', methods=['DELETE'])
+@require_admin
+def api_admin_unsuspend_user(username: str):
+    """Lift a user's suspension or ban (admin only).
+
+    Response JSON:
+      ``ok``  – True on success
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        ok = database.unsuspend_user(db, username)
+        if not ok:
+            return jsonify({'error': f"User '{username}' not found or not suspended"}), 404
+        return jsonify({'ok': True, 'username': username})
+    except Exception as e:
+        gui_logger.error('api_admin_unsuspend_user error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/status', methods=['GET'])
+@require_admin
+def api_admin_get_user_status(username: str):
+    """Get the account status for a user (admin only).
+
+    Response JSON:
+      ``username``, ``status`` (``active``/``suspended``/``banned``),
+      ``is_suspended``, ``suspended_until``, ``suspended_reason``, etc.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        result = database.get_user_status(db, username)
+        if not result:
+            return jsonify({'error': f"User '{username}' not found"}), 404
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_get_user_status error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# User Groups  (Item 5 — Advanced User Management)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/user-groups', methods=['POST'])
+@require_admin
+def api_create_user_group():
+    """Create a new user group (admin only).
+
+    Request JSON body:
+      ``name``         – unique group name (required)
+      ``description``  – optional description
+
+    Response JSON: group dict (201).
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': "'name' is required"}), 400
+    description = str(data.get('description', '')).strip()
+    try:
+        db = next(database.get_db())
+        grp = database.create_user_group(db, name=name, description=description,
+                                         created_by=get_current_username())
+        if not grp:
+            return jsonify({'error': 'Failed to create group (name may already exist)'}), 409
+        return jsonify(grp), 201
+    except Exception as e:
+        gui_logger.error('api_create_user_group error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups', methods=['GET'])
+@require_admin
+def api_list_user_groups():
+    """List all user groups with member counts (admin only).
+
+    Response JSON:
+      ``groups`` – list of group dicts each with ``member_count``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'groups': []})
+    try:
+        db = next(database.get_db())
+        groups = database.list_user_groups(db)
+        return jsonify({'groups': groups})
+    except Exception as e:
+        gui_logger.error('api_list_user_groups error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>', methods=['DELETE'])
+@require_admin
+def api_delete_user_group(group_id: int):
+    """Delete a user group and all memberships (admin only)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        ok = database.delete_user_group(db, group_id)
+        if not ok:
+            return jsonify({'error': 'Group not found'}), 404
+        return jsonify({'ok': True})
+    except Exception as e:
+        gui_logger.error('api_delete_user_group error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>/members', methods=['POST'])
+@require_admin
+def api_add_group_member(group_id: int):
+    """Add a user to a user group (admin only).
+
+    Request JSON body:
+      ``username``  – username to add (required)
+
+    Response JSON: ``{ok, username, group_id}``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    username = str(data.get('username', '')).strip()
+    if not username:
+        return jsonify({'error': "'username' is required"}), 400
+    try:
+        db = next(database.get_db())
+        result = database.add_group_member(db, group_id, username,
+                                           added_by=get_current_username())
+        if not result.get('ok'):
+            status = 409 if 'Already a member' in result.get('error', '') else 404
+            return jsonify(result), status
+        return jsonify(result), 201
+    except Exception as e:
+        gui_logger.error('api_add_group_member error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>/members/<username>', methods=['DELETE'])
+@require_admin
+def api_remove_group_member(group_id: int, username: str):
+    """Remove a user from a user group (admin only)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        ok = database.remove_group_member(db, group_id, username)
+        if not ok:
+            return jsonify({'error': 'Member not found in group'}), 404
+        return jsonify({'ok': True})
+    except Exception as e:
+        gui_logger.error('api_remove_group_member error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>/members', methods=['GET'])
+@require_admin
+def api_get_group_members(group_id: int):
+    """Get the list of members for a user group (admin only).
+
+    Response JSON:
+      ``group_id`` – group identifier
+      ``members``  – list of username strings
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'group_id': group_id, 'members': []})
+    try:
+        db = next(database.get_db())
+        members = database.get_group_members(db, group_id)
+        return jsonify({'group_id': group_id, 'members': members})
+    except Exception as e:
+        gui_logger.error('api_get_group_members error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# User Reputation  (Item 7 — Content Moderation)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/users/<username>/reputation', methods=['GET'])
+@require_login
+def api_get_user_reputation(username: str):
+    """Return the reputation/trust score for *username* (login required).
+
+    Response JSON:
+      ``username``, ``score``, ``violation_count``, ``last_updated``, ``last_action``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'username': username, 'score': 100, 'violation_count': 0,
+                        'last_updated': None, 'last_action': None})
+    try:
+        db = next(database.get_db())
+        rep = database.get_reputation(db, username)
+        if not rep:
+            return jsonify({'error': f"User '{username}' not found"}), 404
+        return jsonify(rep)
+    except Exception as e:
+        gui_logger.error('api_get_user_reputation error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/low-reputation', methods=['GET'])
+@require_admin
+def api_admin_low_reputation_users():
+    """List users with reputation scores at or below a threshold (admin only).
+
+    Query parameters:
+      ``threshold``  – score threshold (default: REPUTATION_AUTO_BAN_THRESHOLD)
+      ``limit``      – max results (default 50, max 200)
+
+    Response JSON:
+      ``threshold``  – threshold used
+      ``users``      – list of ``{username, score, violation_count, last_action, last_updated}``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'threshold': database.REPUTATION_AUTO_BAN_THRESHOLD, 'users': []})
+    try:
+        threshold = int(request.args.get('threshold', database.REPUTATION_AUTO_BAN_THRESHOLD))
+        limit = max(1, min(200, int(request.args.get('limit', 50))))
+    except (ValueError, TypeError):
+        threshold = database.REPUTATION_AUTO_BAN_THRESHOLD
+        limit = 50
+    try:
+        db = next(database.get_db())
+        users = database.get_low_reputation_users(db, threshold=threshold, limit=limit)
+        return jsonify({'threshold': threshold, 'users': users})
+    except Exception as e:
+        gui_logger.error('api_admin_low_reputation_users error: %s', e)
         return jsonify({'error': str(e)}), 500
 
 

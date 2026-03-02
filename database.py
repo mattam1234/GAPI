@@ -8,7 +8,7 @@ import os
 import json
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint, Index
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 
 logger = logging.getLogger('gapi.database')
@@ -89,6 +89,12 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_seen = Column(DateTime, nullable=True)  # Last activity timestamp for presence
+    # Account suspension / ban (Item 5)
+    is_suspended = Column(Boolean, default=False, nullable=False)
+    suspended_until = Column(DateTime, nullable=True)       # None = permanent ban
+    suspended_reason = Column(String(500), nullable=True)
+    suspended_by = Column(String(255), nullable=True)       # admin who issued the suspension
+    suspended_at = Column(DateTime, nullable=True)
     
     # Relationships
     roles = relationship("Role", secondary=user_roles, back_populates="users")
@@ -510,6 +516,73 @@ class UserNotificationPreference(Base):
     system_announcements = Column(Boolean, default=True)
     digest_frequency = Column(String(20), default='never')   # 'never','daily','weekly'
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+
+# ---------------------------------------------------------------------------
+# User Reputation / Trust Score  (Item 7 — Content Moderation)
+# ---------------------------------------------------------------------------
+
+class UserReputation(Base):
+    """Reputation (trust) score for each user.
+
+    Score starts at 100 and is decremented when moderation actions are taken.
+    Automatic bans are triggered when the score falls below
+    ``REPUTATION_AUTO_BAN_THRESHOLD``.
+    """
+    __tablename__ = "user_reputations"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), unique=True, nullable=False, index=True)
+    score = Column(Integer, default=100, nullable=False)         # 0–200, starts at 100
+    violation_count = Column(Integer, default=0, nullable=False) # total moderation actions
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_action = Column(String(255), nullable=True)             # most recent action label
+
+
+# Score deducted per moderation action severity
+REPUTATION_PENALTIES: dict = {
+    'warn': 5,
+    'mute': 10,
+    'suspend': 20,
+    'ban': 40,
+    'delete_content': 3,
+    'default': 5,
+}
+
+# Score below which an automatic suspension is issued
+REPUTATION_AUTO_BAN_THRESHOLD: int = 40
+
+# Starting reputation score for new users
+REPUTATION_DEFAULT_SCORE: int = 100
+
+
+# ---------------------------------------------------------------------------
+# User Groups  (Item 5 — Advanced User Management)
+# ---------------------------------------------------------------------------
+
+class UserGroup(Base):
+    """Admin-defined user groups for bulk permission/role management."""
+    __tablename__ = "user_groups"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserGroupMember(Base):
+    """Membership record linking a user to a group."""
+    __tablename__ = "user_group_members"
+
+    id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, ForeignKey("user_groups.id"), nullable=False, index=True)
+    username = Column(String(255), nullable=False, index=True)
+    added_by = Column(String(255), nullable=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('group_id', 'username', name='uq_group_member'),)
 
 
 # ---------------------------------------------------------------------------
@@ -4151,3 +4224,377 @@ def get_similar_games(db, app_id: str, platform: str = 'steam', limit: int = 10)
     except Exception as e:
         logger.error('get_similar_games error: %s', e)
         return []
+
+
+# ---------------------------------------------------------------------------
+# User Suspension helpers  (Item 5)
+# ---------------------------------------------------------------------------
+
+def suspend_user(db, username: str, reason: str, suspended_by: str,
+                 duration_minutes: int | None = None) -> dict:
+    """Suspend *username* for *duration_minutes* (or permanently if None).
+
+    Returns a summary dict on success, empty dict on failure.
+    """
+    if not db or not username:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+        now = datetime.utcnow()
+        until = (now + timedelta(minutes=duration_minutes)) if duration_minutes else None
+        user.is_suspended = True
+        user.suspended_until = until
+        user.suspended_reason = reason
+        user.suspended_by = suspended_by
+        user.suspended_at = now
+        db.commit()
+        return {
+            'username': username,
+            'is_suspended': True,
+            'suspended_until': until.isoformat() if until else None,
+            'suspended_reason': reason,
+            'suspended_by': suspended_by,
+            'suspended_at': now.isoformat(),
+        }
+    except Exception as e:
+        logger.error('suspend_user error: %s', e)
+        db.rollback()
+        return {}
+
+
+def unsuspend_user(db, username: str) -> bool:
+    """Lift the suspension for *username*.  Returns True on success."""
+    if not db or not username:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        user.is_suspended = False
+        user.suspended_until = None
+        user.suspended_reason = None
+        user.suspended_by = None
+        user.suspended_at = None
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error('unsuspend_user error: %s', e)
+        db.rollback()
+        return False
+
+
+def get_user_status(db, username: str) -> dict:
+    """Return account status for *username* (active / suspended / banned).
+
+    Automatically expires time-limited suspensions that have passed.
+    Returns empty dict if user not found.
+    """
+    if not db or not username:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+        # Auto-expire elapsed suspensions
+        if user.is_suspended and user.suspended_until:
+            if user.suspended_until <= datetime.utcnow():
+                user.is_suspended = False
+                user.suspended_until = None
+                db.commit()
+        status = 'active'
+        if user.is_suspended:
+            status = 'suspended' if user.suspended_until else 'banned'
+        return {
+            'username': username,
+            'status': status,
+            'is_suspended': user.is_suspended,
+            'suspended_until': user.suspended_until.isoformat() if user.suspended_until else None,
+            'suspended_reason': user.suspended_reason,
+            'suspended_by': user.suspended_by,
+            'suspended_at': user.suspended_at.isoformat() if user.suspended_at else None,
+        }
+    except Exception as e:
+        logger.error('get_user_status error: %s', e)
+        return {}
+
+
+def search_users_admin(db, query: str = '', role: str = '',
+                       status: str = '', limit: int = 50, offset: int = 0) -> list:
+    """Search users with optional filters — for admin use only.
+
+    ``status``  – ``'active'``, ``'suspended'``, or ``'banned'`` (empty = all)
+    ``role``    – role name to filter by (empty = all)
+    ``query``   – partial match on username
+
+    Returns list of dicts with ``username``, ``display_name``, ``status``,
+    ``roles``, ``created_at``, ``last_seen``.
+    """
+    if not db:
+        return []
+    try:
+        q = db.query(User)
+        if query:
+            q = q.filter(User.username.ilike(f'%{query}%'))
+        if status == 'suspended':
+            q = q.filter(User.is_suspended.is_(True), User.suspended_until.isnot(None))
+        elif status == 'banned':
+            q = q.filter(User.is_suspended.is_(True), User.suspended_until.is_(None))
+        elif status == 'active':
+            q = q.filter(User.is_suspended.is_(False))
+        users = q.order_by(User.username).offset(offset).limit(limit).all()
+        now = datetime.utcnow()
+        result = []
+        for u in users:
+            # Auto-expire
+            if u.is_suspended and u.suspended_until and u.suspended_until <= now:
+                u.is_suspended = False
+                u.suspended_until = None
+            roles_list = [r.name for r in u.roles] if u.roles else []
+            if role and role not in roles_list:
+                continue
+            acct_status = 'active'
+            if u.is_suspended:
+                acct_status = 'suspended' if u.suspended_until else 'banned'
+            result.append({
+                'username': u.username,
+                'display_name': u.display_name or u.username,
+                'status': acct_status,
+                'roles': roles_list,
+                'created_at': u.created_at.isoformat() if u.created_at else None,
+                'last_seen': u.last_seen.isoformat() if u.last_seen else None,
+            })
+        db.commit()
+        return result
+    except Exception as e:
+        logger.error('search_users_admin error: %s', e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# User Reputation helpers  (Item 7)
+# ---------------------------------------------------------------------------
+
+def get_reputation(db, username: str) -> dict:
+    """Return the reputation dict for *username*, creating a default row if needed."""
+    if not db or not username:
+        return {}
+    try:
+        rep = db.query(UserReputation).filter(UserReputation.username == username).first()
+        if not rep:
+            rep = UserReputation(username=username, score=REPUTATION_DEFAULT_SCORE,
+                                 violation_count=0)
+            db.add(rep)
+            db.commit()
+            db.refresh(rep)
+        return {
+            'username': rep.username,
+            'score': rep.score,
+            'violation_count': rep.violation_count,
+            'last_updated': rep.last_updated.isoformat() if rep.last_updated else None,
+            'last_action': rep.last_action,
+        }
+    except Exception as e:
+        logger.error('get_reputation error: %s', e)
+        return {}
+
+
+def update_reputation(db, username: str, action: str) -> dict:
+    """Deduct reputation for *username* based on moderation *action*.
+
+    If the score drops below ``REPUTATION_AUTO_BAN_THRESHOLD`` the user is
+    automatically suspended.  Returns updated reputation dict.
+    """
+    if not db or not username:
+        return {}
+    try:
+        rep = db.query(UserReputation).filter(UserReputation.username == username).first()
+        if not rep:
+            # Explicitly set Python-side defaults — SQLAlchemy column defaults
+            # are applied at INSERT time only and won't be available before flush.
+            rep = UserReputation(username=username, score=REPUTATION_DEFAULT_SCORE,
+                                violation_count=0)
+            db.add(rep)
+        penalty = REPUTATION_PENALTIES.get(action, REPUTATION_PENALTIES['default'])
+        current_score = rep.score if rep.score is not None else REPUTATION_DEFAULT_SCORE
+        rep.score = max(0, current_score - penalty)
+        rep.violation_count = (rep.violation_count or 0) + 1
+        rep.last_action = action
+        db.commit()
+        # Auto-ban if score drops below threshold
+        if rep.score <= REPUTATION_AUTO_BAN_THRESHOLD:
+            suspend_user(
+                db, username,
+                reason=f'Automatic suspension: reputation score {rep.score} below threshold',
+                suspended_by='system',
+                duration_minutes=None,  # permanent until reviewed
+            )
+        db.refresh(rep)
+        return {
+            'username': rep.username,
+            'score': rep.score,
+            'violation_count': rep.violation_count,
+            'last_updated': rep.last_updated.isoformat() if rep.last_updated else None,
+            'last_action': rep.last_action,
+            'auto_suspended': rep.score <= REPUTATION_AUTO_BAN_THRESHOLD,
+        }
+    except Exception as e:
+        logger.error('update_reputation error: %s', e)
+        db.rollback()
+        return {}
+
+
+def get_low_reputation_users(db, threshold: int | None = None,
+                             limit: int = 50) -> list:
+    """Return users whose reputation score is at or below *threshold*.
+
+    Defaults to ``REPUTATION_AUTO_BAN_THRESHOLD`` when not provided.
+    """
+    if not db:
+        return []
+    threshold = threshold if threshold is not None else REPUTATION_AUTO_BAN_THRESHOLD
+    try:
+        rows = (
+            db.query(UserReputation)
+            .filter(UserReputation.score <= threshold)
+            .order_by(UserReputation.score)
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                'username': r.username,
+                'score': r.score,
+                'violation_count': r.violation_count,
+                'last_action': r.last_action,
+                'last_updated': r.last_updated.isoformat() if r.last_updated else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error('get_low_reputation_users error: %s', e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# User Group helpers  (Item 5)
+# ---------------------------------------------------------------------------
+
+def create_user_group(db, name: str, description: str = '',
+                      created_by: str = '') -> dict:
+    """Create a named user group.  Returns the group dict on success, empty on failure."""
+    if not db or not name:
+        return {}
+    try:
+        grp = UserGroup(name=name, description=description, created_by=created_by)
+        db.add(grp)
+        db.commit()
+        db.refresh(grp)
+        return _group_to_dict(grp, member_count=0)
+    except Exception as e:
+        logger.error('create_user_group error: %s', e)
+        db.rollback()
+        return {}
+
+
+def list_user_groups(db) -> list:
+    """Return all user groups with their member counts."""
+    if not db:
+        return []
+    try:
+        groups = db.query(UserGroup).order_by(UserGroup.name).all()
+        result = []
+        for grp in groups:
+            count = db.query(UserGroupMember).filter(
+                UserGroupMember.group_id == grp.id
+            ).count()
+            result.append(_group_to_dict(grp, member_count=count))
+        return result
+    except Exception as e:
+        logger.error('list_user_groups error: %s', e)
+        return []
+
+
+def delete_user_group(db, group_id: int) -> bool:
+    """Delete a user group and all its memberships."""
+    if not db:
+        return False
+    try:
+        db.query(UserGroupMember).filter(UserGroupMember.group_id == group_id).delete()
+        deleted = db.query(UserGroup).filter(UserGroup.id == group_id).delete()
+        db.commit()
+        return deleted > 0
+    except Exception as e:
+        logger.error('delete_user_group error: %s', e)
+        db.rollback()
+        return False
+
+
+def add_group_member(db, group_id: int, username: str, added_by: str = '') -> dict:
+    """Add *username* to user group *group_id*.
+
+    Returns ``{'ok': True, 'username': ..., 'group_id': ...}`` or error dict.
+    """
+    if not db:
+        return {'ok': False, 'error': 'no db'}
+    try:
+        grp = db.query(UserGroup).get(group_id)
+        if not grp:
+            return {'ok': False, 'error': 'Group not found'}
+        existing = db.query(UserGroupMember).filter(
+            UserGroupMember.group_id == group_id,
+            UserGroupMember.username == username,
+        ).first()
+        if existing:
+            return {'ok': False, 'error': 'Already a member'}
+        mem = UserGroupMember(group_id=group_id, username=username, added_by=added_by)
+        db.add(mem)
+        db.commit()
+        return {'ok': True, 'username': username, 'group_id': group_id}
+    except Exception as e:
+        logger.error('add_group_member error: %s', e)
+        db.rollback()
+        return {'ok': False, 'error': str(e)}
+
+
+def remove_group_member(db, group_id: int, username: str) -> bool:
+    """Remove *username* from user group *group_id*."""
+    if not db:
+        return False
+    try:
+        deleted = db.query(UserGroupMember).filter(
+            UserGroupMember.group_id == group_id,
+            UserGroupMember.username == username,
+        ).delete()
+        db.commit()
+        return deleted > 0
+    except Exception as e:
+        logger.error('remove_group_member error: %s', e)
+        db.rollback()
+        return False
+
+
+def get_group_members(db, group_id: int) -> list:
+    """Return list of member usernames for *group_id*."""
+    if not db:
+        return []
+    try:
+        members = db.query(UserGroupMember).filter(
+            UserGroupMember.group_id == group_id
+        ).all()
+        return [m.username for m in members]
+    except Exception as e:
+        logger.error('get_group_members error: %s', e)
+        return []
+
+
+def _group_to_dict(grp, member_count: int = 0) -> dict:
+    return {
+        'id': grp.id,
+        'name': grp.name,
+        'description': grp.description or '',
+        'created_by': grp.created_by or '',
+        'created_at': grp.created_at.isoformat() if grp.created_at else None,
+        'member_count': member_count,
+    }
