@@ -420,7 +420,6 @@ class GAPIBot(discord.Client):
             )
             await interaction.response.send_message(
                 f"🔗 GAPI URL: {base_url}\n"
-                f"Admin: {base_url}/#admin\n"
                 f"Sessions: Open the 🎯 Sessions tab from {base_url}"
             )
 
