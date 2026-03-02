@@ -368,31 +368,3 @@ function showPerformanceStats() {
     frontendMonitor.displayStats('perf-timing-table');
 }
 
-// Add performance button to UI if available
-function addPerformancePanel() {
-    const perfButton = document.createElement('button');
-    perfButton.onclick = showPerformanceStats;
-    perfButton.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        padding: 10px 15px;
-        background: #667eea;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 0.9em;
-        z-index: 9999;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    `;
-    perfButton.textContent = '⚡ Perf';
-    perfButton.title = 'Click to view performance metrics';
-    
-    document.body.appendChild(perfButton);
-}
-
-// Initialize when page loads
-document.addEventListener('DOMContentLoaded', () => {
-    addPerformancePanel();
-});

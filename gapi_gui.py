@@ -1611,13 +1611,6 @@ def favicon():
     return flask_redirect('/static/favicon.svg?v=2', code=302)
 
 
-@app.route('/game-sessions')
-@require_login
-def game_sessions():
-    """Dedicated game sessions page - requires login"""
-    return render_template('game_sessions.html')
-
-
 @app.route('/manifest.json')
 def pwa_manifest():
     """Serve the Web App Manifest for Progressive Web App support."""
@@ -2057,11 +2050,51 @@ def api_auth_update_ids():
     steam_id = data.get('steam_id', '').strip()
     epic_id = data.get('epic_id', '').strip()
     gog_id = data.get('gog_id', '').strip()
+    discord_id = data.get('discord_id', '').strip()
     
     success = user_manager.update_user_ids(username, steam_id, epic_id, gog_id)
     
     if not success:
         return jsonify({'error': 'Failed to update IDs'}), 400
+
+    # Optional: persist Discord ID mapping (discord_id -> steam_id)
+    if discord_id:
+        if not discord_id.isdigit():
+            return jsonify({'error': 'Discord ID must be numeric'}), 400
+
+        # Use the newly saved Steam ID, or existing one if unchanged in this request.
+        resolved_steam_id = steam_id
+        if not resolved_steam_id:
+            current_ids = user_manager.get_user_ids(username)
+            resolved_steam_id = (current_ids.get('steam_id') or '').strip()
+
+        if not resolved_steam_id or not resolved_steam_id.isdigit():
+            return jsonify({'error': 'A valid Steam ID is required before setting Discord ID'}), 400
+
+        discord_cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+        discord_cfg: Dict = {}
+        if os.path.exists(discord_cfg_path):
+            try:
+                with open(discord_cfg_path, 'r') as fh:
+                    discord_cfg = json.load(fh)
+            except (json.JSONDecodeError, IOError):
+                discord_cfg = {}
+
+        mappings = discord_cfg.get('user_mappings', {})
+        if not isinstance(mappings, dict):
+            mappings = {}
+
+        # Ensure a Steam ID maps to only one Discord ID by removing stale entries.
+        stale_ids = [k for k, v in mappings.items() if str(v) == resolved_steam_id and str(k) != discord_id]
+        for stale_id in stale_ids:
+            del mappings[stale_id]
+
+        mappings[discord_id] = resolved_steam_id
+        discord_cfg['user_mappings'] = mappings
+        try:
+            gapi._atomic_write_json(discord_cfg_path, discord_cfg)
+        except IOError as exc:
+            return jsonify({'error': f'Failed to save Discord mapping: {exc}'}), 500
     
     # Trigger library sync if Steam ID was added/changed
     user_ids = user_manager.get_user_ids(username)
@@ -2114,6 +2147,25 @@ def api_auth_get_ids():
                     user_ids[key] = db_ids[key]
         except Exception as e:
             gui_logger.exception('Failed to read IDs from DB for %s: %s', username, e)
+
+    # Include mapped Discord ID (if any) by reversing discord_config user_mappings.
+    user_ids['discord_id'] = ''
+    try:
+        steam_id = (user_ids.get('steam_id') or '').strip()
+        if steam_id:
+            discord_cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+            if os.path.exists(discord_cfg_path):
+                with open(discord_cfg_path, 'r') as fh:
+                    discord_cfg = json.load(fh)
+                mappings = discord_cfg.get('user_mappings', {})
+                if isinstance(mappings, dict):
+                    for discord_id, mapped_steam in mappings.items():
+                        if str(mapped_steam) == steam_id:
+                            user_ids['discord_id'] = str(discord_id)
+                            break
+    except Exception as e:
+        gui_logger.warning('Failed to resolve discord_id for %s: %s', username, e)
+
     return jsonify(user_ids)
 
 
@@ -10023,6 +10075,64 @@ def api_discord_bot_list_users():
     mappings = cfg.get('user_mappings', {})
     users = [{'discord_id': str(k), 'steam_id': v} for k, v in mappings.items()]
     return jsonify({'users': users})
+
+
+@app.route('/api/admin/discord-bot/users', methods=['POST'])
+@require_admin
+def api_discord_bot_add_user():
+    """Add or update a Discord→Steam mapping (admin only).
+
+    Request JSON:
+      - ``discord_id``: str (required)
+      - ``steam_id``: str (required)
+      - ``username``: str (optional; defaults to ``discord_<discord_id>``)
+    """
+    data = request.get_json(silent=True) or {}
+    discord_id = str(data.get('discord_id', '')).strip()
+    steam_id = str(data.get('steam_id', '')).strip()
+    username = str(data.get('username', '')).strip()
+
+    if not discord_id or not steam_id:
+        return jsonify({'error': 'discord_id and steam_id are required'}), 400
+    if not discord_id.isdigit():
+        return jsonify({'error': 'discord_id must be numeric'}), 400
+    if not steam_id.isdigit():
+        return jsonify({'error': 'steam_id must be numeric'}), 400
+
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+    cfg: Dict = {}
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r') as fh:
+                cfg = json.load(fh)
+        except (json.JSONDecodeError, IOError):
+            cfg = {}
+
+    mappings = cfg.get('user_mappings', {})
+    if not isinstance(mappings, dict):
+        mappings = {}
+    mappings[discord_id] = steam_id
+    cfg['user_mappings'] = mappings
+
+    try:
+        gapi._atomic_write_json(config_file, cfg)
+    except IOError as exc:
+        return jsonify({'error': f'Failed to save discord_config.json: {exc}'}), 500
+
+    # Also add/update entry in multiuser users for slash command workflows.
+    try:
+        picker_cfg = load_base_config()
+        picker = multiuser.MultiUserPicker(picker_cfg)
+        auto_name = username if username else f'discord_{discord_id}'
+        # Update existing user by discord ID if present; otherwise add a new user.
+        updated = picker.update_user(discord_id, name=auto_name, discord_id=discord_id, steam_id=steam_id)
+        if not updated:
+            picker.add_user(auto_name, steam_id=steam_id, discord_id=discord_id)
+    except Exception:
+        # Mapping was saved already; keep request successful even if user sync fails.
+        pass
+
+    return jsonify({'saved': True, 'discord_id': discord_id, 'steam_id': steam_id})
 
 
 @app.route('/api/admin/discord-bot/users/<discord_id>', methods=['DELETE'])

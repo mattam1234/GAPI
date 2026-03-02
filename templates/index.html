@@ -40,6 +40,26 @@
             --status-bar-color: white;
             --accent: #667eea;
         }
+
+        html[data-theme="dark"] {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
+            --card-bg: #111827;
+            --card-border: #374151;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9ca3af;
+            --list-hover: rgba(99, 102, 241, 0.20);
+            --input-bg: #1f2937;
+            --input-border: #4b5563;
+            --tab-inactive-bg: rgba(255,255,255,0.08);
+            --tab-inactive-color: #d1d5db;
+            --tab-hover-bg: rgba(255,255,255,0.14);
+            --tab-active-bg: #111827;
+            --tab-active-color: #a5b4fc;
+            --header-color: #e5e7eb;
+            --status-bar-bg: rgba(17,24,39,0.65);
+            --status-bar-color: #d1d5db;
+            --accent: #818cf8;
+        }
         
         * {
             margin: 0;
@@ -823,7 +843,6 @@
             <button id="leaderboard-tab-btn" class="tab auth-required" onclick="switchTab('leaderboard', event)" data-tooltip="View top players and rankings">🏆 Leaderboard</button>
             <button id="chat-tab-btn" class="tab auth-required" onclick="switchTab('chat', event)" data-tooltip="Chat with other users">💬 Chat</button>
             <button id="sessions-tab-btn" class="tab auth-required" onclick="switchTab('sessions', event)" data-tooltip="Join multiplayer sessions">🎯 Sessions</button>
-            <a id="full-sessions-link" href="/game-sessions" class="tab auth-required" style="text-decoration: none; display: inline-flex; align-items: center;">🎬 Full Sessions Page</a>
             <button id="notifications-tab-btn" class="tab" onclick="switchTab('notifications', event)">🔔 Alerts <span id="notif-badge" style="display:none;background:#e74c3c;color:white;border-radius:50%;padding:1px 6px;font-size:0.75em;margin-left:4px;"></span></button>
             <button class="tab" onclick="switchTab('plugins', event)">🧩 Plugins</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
@@ -1453,23 +1472,13 @@
                 <button onclick="sendPickerCommand('/picker start')" style="padding:6px 12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">▶️ Start Session</button>
                 <button onclick="sendPickerCommand('/picker join')" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤝 Join Session</button>
                 <button onclick="sendPickerCommand('/picker pick')" style="padding:6px 12px; background:#9b59b6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎲 Pick Game</button>
-                <button onclick="openSessionsTab()" style="padding:6px 12px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Open Sessions Page</button>
+                <button onclick="openSessionsTab()" style="padding:6px 12px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Open Sessions Tab</button>
                 <button onclick="showUserProfiles()" style="padding:6px 12px; background:#8e44ad; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👥 User Profiles</button>
                 <button onclick="showNotifications()" style="padding:6px 12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Notifications</button>
                 <button onclick="showChallenges()" style="padding:6px 12px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Challenges</button>
                 <button onclick="showFriendsModal()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👫 Friends</button>
-                <button onclick="showMessagesModal()" style="padding:6px 12px; background:#9b59b6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💬 Messages</button>
                 <button onclick="showLibraryCompare()" style="padding:6px 12px; background:#1abc9c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📚 Compare Libraries</button>
-                <button onclick="showSessionHistory()" style="padding:6px 12px; background:#34495e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📜 Session History</button>
-                <button onclick="showProfileEdit()" style="padding:6px 12px; background:#16a085; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✏️ Edit Profile</button>
-                <button onclick="showSeasonalLeaderboards()" style="padding:6px 12px; background:#c0392b; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🏅 Seasonal Ranks</button>
-                <button onclick="showShop()" style="padding:6px 12px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🏪 Shop</button>
-                <button onclick="showStreaming()" style="padding:6px 12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📡 Streaming</button>
-                <button onclick="showTrading()" style="padding:6px 12px; background:#1abc9c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Trading</button>
                 <button onclick="showAIRecommend()" style="padding:6px 12px; background:#8e44ad; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤖 AI</button>
-                <button onclick="showTeams()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👥 Teams</button>
-                <button onclick="showRanked()" style="padding:6px 12px; background:#d4af37; color:black; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🏆 Ranked</button>
-                <button onclick="showAntiCheat()" style="padding:6px 12px; background:#95a5a6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔒 Fairness</button>
                 <button onclick="showAdvancedNotif()" style="padding:6px 12px; background:#16a085; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Settings</button>
             </div>
             <div style="display:flex; gap:12px; flex:1;">
@@ -1634,6 +1643,15 @@
                         <span style="font-weight: 600;">GOG ID</span>
                         <input type="text" id="settings-gog-id" placeholder="Your GOG ID (optional)"
                                style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </label>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Discord ID</span>
+                        <input type="text" id="settings-discord-id" placeholder="Your Discord user ID (optional)"
+                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        <small style="color: #666;">Used for Discord bot account linking.</small>
                     </label>
                 </div>
                 
@@ -1842,6 +1860,27 @@
             <!-- Linked Users list -->
             <details id="discord-bot-users-details" style="margin-bottom:14px;" ontoggle="if(this.open) loadDiscordBotUsers()">
                 <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">👥 Linked Users</summary>
+                <div style="display:grid; gap:10px; margin-top:10px; margin-bottom:10px; padding:10px; border:1px solid var(--card-border); border-radius:8px; background:var(--card-bg);">
+                    <div style="font-weight:600;">➕ Link Discord User Manually</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:8px; align-items:end;">
+                        <label style="display:flex; flex-direction:column; gap:4px; font-size:0.85em;">
+                            <span>Discord ID</span>
+                            <input type="text" id="discord-link-discord-id" placeholder="e.g. 123456789012345678"
+                                   style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                        </label>
+                        <label style="display:flex; flex-direction:column; gap:4px; font-size:0.85em;">
+                            <span>Steam ID</span>
+                            <input type="text" id="discord-link-steam-id" placeholder="64-bit Steam ID"
+                                   style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                        </label>
+                        <label style="display:flex; flex-direction:column; gap:4px; font-size:0.85em;">
+                            <span>Username (optional)</span>
+                            <input type="text" id="discord-link-username" placeholder="Display name"
+                                   style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
+                        </label>
+                        <button onclick="discordBotAddUser()" style="padding:9px 14px; background:linear-gradient(135deg,#27ae60,#2ecc71); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Link</button>
+                    </div>
+                </div>
                 <div id="discord-bot-users-list" style="margin-top:10px;">
                     <p style="color:var(--text-secondary); font-size:0.9em;">Click to load linked users…</p>
                 </div>
@@ -2076,23 +2115,21 @@
         }
 
         // ---- Dark Mode ----
+        function applyTheme(theme) {
+            const normalized = theme === 'dark' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', normalized);
+            localStorage.setItem('gapi_theme', normalized);
+            const btn = document.getElementById('dark-mode-btn');
+            if (btn) btn.textContent = normalized === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
         function toggleDarkMode() {
-            const html = document.documentElement;
-            const isDark = html.getAttribute('data-theme') === 'dark';
-            html.setAttribute('data-theme', isDark ? 'light' : 'dark');
-            document.getElementById('dark-mode-btn').textContent = isDark ? '🌙 Dark Mode' : '☀️ Light Mode';
-            localStorage.setItem('gapi_theme', isDark ? 'light' : 'dark');
+            const current = document.documentElement.getAttribute('data-theme') || 'light';
+            applyTheme(current === 'dark' ? 'light' : 'dark');
         }
         // Restore saved theme on load
         (function() {
-            const saved = localStorage.getItem('gapi_theme');
-            if (saved) {
-                document.documentElement.setAttribute('data-theme', saved);
-                document.addEventListener('DOMContentLoaded', () => {
-                    const btn = document.getElementById('dark-mode-btn');
-                    if (btn) btn.textContent = saved === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
-                });
-            }
+            const saved = localStorage.getItem('gapi_theme') || 'light';
+            document.addEventListener('DOMContentLoaded', () => applyTheme(saved));
         })();
 
         // Initialize
@@ -4390,7 +4427,6 @@
                 // Show all auth-required tabs by removing !important with inline style
                 const authTabs = [
                     document.getElementById('sessions-tab-btn'),
-                    document.getElementById('full-sessions-link'),
                     document.getElementById('chat-tab-btn'),
                     document.getElementById('friends-tab-btn'),
                     document.getElementById('recommendations-tab-btn'),
@@ -4436,7 +4472,6 @@
                 // Hide all auth-protected tabs
                 const authTabs = [
                     document.getElementById('sessions-tab-btn'),
-                    document.getElementById('full-sessions-link'),
                     document.getElementById('chat-tab-btn'),
                     document.getElementById('friends-tab-btn'),
                     document.getElementById('recommendations-tab-btn'),
@@ -4641,6 +4676,7 @@
                 document.getElementById('settings-steam-id').value = data.steam_id || '';
                 document.getElementById('settings-epic-id').value = data.epic_id || '';
                 document.getElementById('settings-gog-id').value = data.gog_id || '';
+                document.getElementById('settings-discord-id').value = data.discord_id || '';
 
                 await loadSyncStatus();
                 await loadSyncSettings();
@@ -4896,6 +4932,7 @@
             const steamId = document.getElementById('settings-steam-id').value.trim();
             const epicId = document.getElementById('settings-epic-id').value.trim();
             const gogId = document.getElementById('settings-gog-id').value.trim();
+            const discordId = document.getElementById('settings-discord-id').value.trim();
             const messageDiv = document.getElementById('settings-message');
             
             try {
@@ -4905,7 +4942,8 @@
                     body: JSON.stringify({
                         steam_id: steamId,
                         epic_id: epicId,
-                        gog_id: gogId
+                        gog_id: gogId,
+                        discord_id: discordId
                     })
                 });
                 
@@ -7522,6 +7560,41 @@
                 container.innerHTML = html;
             } catch (e) {
                 container.innerHTML = `<p style="color:#e74c3c;">Error: ${e.message}</p>`;
+            }
+        }
+
+        async function discordBotAddUser() {
+            const discordIdEl = document.getElementById('discord-link-discord-id');
+            const steamIdEl = document.getElementById('discord-link-steam-id');
+            const usernameEl = document.getElementById('discord-link-username');
+            const discordId = ((discordIdEl && discordIdEl.value) || '').trim();
+            const steamId = ((steamIdEl && steamIdEl.value) || '').trim();
+            const username = ((usernameEl && usernameEl.value) || '').trim();
+
+            if (!discordId || !steamId) {
+                _discordBotShowMsg('❌ Discord ID and Steam ID are required', 'error');
+                return;
+            }
+
+            try {
+                const resp = await fetch('/api/admin/discord-bot/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ discord_id: discordId, steam_id: steamId, username }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    _discordBotShowMsg('✅ Discord user linked successfully', 'success');
+                    if (discordIdEl) discordIdEl.value = '';
+                    if (steamIdEl) steamIdEl.value = '';
+                    if (usernameEl) usernameEl.value = '';
+                    loadDiscordBotUsers();
+                    loadDiscordBotStatus();
+                } else {
+                    _discordBotShowMsg('❌ ' + (data.error || 'Failed to link user'), 'error');
+                }
+            } catch (e) {
+                _discordBotShowMsg('❌ Error: ' + e.message, 'error');
             }
         }
 
