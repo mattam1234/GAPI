@@ -8,7 +8,7 @@ import os
 import json
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint, Index
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 
 logger = logging.getLogger('gapi.database')
@@ -89,6 +89,12 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_seen = Column(DateTime, nullable=True)  # Last activity timestamp for presence
+    # Account suspension / ban (Item 5)
+    is_suspended = Column(Boolean, default=False, nullable=False)
+    suspended_until = Column(DateTime, nullable=True)       # None = permanent ban
+    suspended_reason = Column(String(500), nullable=True)
+    suspended_by = Column(String(255), nullable=True)       # admin who issued the suspension
+    suspended_at = Column(DateTime, nullable=True)
     
     # Relationships
     roles = relationship("Role", secondary=user_roles, back_populates="users")
@@ -446,6 +452,183 @@ class SavedSearch(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
     use_count = Column(Integer, default=0)
+
+
+class SearchHistory(Base):
+    """Per-user search history — last N searches for autocomplete & analytics."""
+    __tablename__ = "search_history"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    query = Column(String(500), nullable=False)
+    filters = Column(Text, nullable=True)   # JSON
+    result_count = Column(Integer, nullable=True)
+    searched_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ---------------------------------------------------------------------------
+# Fine-grained Permission System  (Tier 2, item 5)
+# ---------------------------------------------------------------------------
+
+# Built-in permission set. ``'*'`` means "all permissions".
+PERMISSIONS: dict = {
+    'admin': ['*'],
+    'moderator': ['moderate_chat', 'flag_reviews', 'manage_users',
+                  'view_audit_logs', 'manage_reports'],
+    'creator': ['create_content', 'stream', 'analytics_read'],
+    'vip': ['early_access', 'cosmetics', 'analytics_read'],
+    'user': ['analytics_read'],
+}
+
+# Complete list of discrete permissions available in the system.
+ALL_PERMISSIONS: list = [
+    'analytics_read',
+    'create_content',
+    'cosmetics',
+    'early_access',
+    'flag_reviews',
+    'manage_reports',
+    'manage_users',
+    'moderate_chat',
+    'stream',
+    'view_audit_logs',
+]
+
+
+class UserPermission(Base):
+    """Per-user permission overrides (grants or explicit denials on top of role perms)."""
+    __tablename__ = "user_permissions"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    permission = Column(String(100), nullable=False, index=True)
+    granted = Column(Boolean, default=True)   # True = grant, False = explicit deny
+    granted_by = Column(String(255), nullable=True)
+    granted_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('username', 'permission', name='uq_user_permission'),)
+
+
+# ---------------------------------------------------------------------------
+# Notification Preferences  (Tier 2, item 6)
+# ---------------------------------------------------------------------------
+
+class UserNotificationPreference(Base):
+    """Per-user notification channel / category preferences."""
+    __tablename__ = "user_notification_preferences"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, unique=True, index=True)
+    email_enabled = Column(Boolean, default=False)
+    push_enabled = Column(Boolean, default=True)
+    friend_requests = Column(Boolean, default=True)
+    challenge_updates = Column(Boolean, default=True)
+    trade_offers = Column(Boolean, default=True)
+    team_events = Column(Boolean, default=True)
+    system_announcements = Column(Boolean, default=True)
+    digest_frequency = Column(String(20), default='never')   # 'never','daily','weekly'
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+
+# ---------------------------------------------------------------------------
+# User Reputation / Trust Score  (Item 7 — Content Moderation)
+# ---------------------------------------------------------------------------
+
+class UserReputation(Base):
+    """Reputation (trust) score for each user.
+
+    Score starts at 100 and is decremented when moderation actions are taken.
+    Automatic bans are triggered when the score falls below
+    ``REPUTATION_AUTO_BAN_THRESHOLD``.
+    """
+    __tablename__ = "user_reputations"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), unique=True, nullable=False, index=True)
+    score = Column(Integer, default=100, nullable=False)         # 0–200, starts at 100
+    violation_count = Column(Integer, default=0, nullable=False) # total moderation actions
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_action = Column(String(255), nullable=True)             # most recent action label
+
+
+# Score deducted per moderation action severity
+REPUTATION_PENALTIES: dict = {
+    'warn': 5,
+    'mute': 10,
+    'suspend': 20,
+    'ban': 40,
+    'delete_content': 3,
+    'default': 5,
+}
+
+# Score below which an automatic suspension is issued
+REPUTATION_AUTO_BAN_THRESHOLD: int = 40
+
+# Starting reputation score for new users
+REPUTATION_DEFAULT_SCORE: int = 100
+
+
+# ---------------------------------------------------------------------------
+# User Groups  (Item 5 — Advanced User Management)
+# ---------------------------------------------------------------------------
+
+class UserGroup(Base):
+    """Admin-defined user groups for bulk permission/role management."""
+    __tablename__ = "user_groups"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserGroupMember(Base):
+    """Membership record linking a user to a group."""
+    __tablename__ = "user_group_members"
+
+    id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, ForeignKey("user_groups.id"), nullable=False, index=True)
+    username = Column(String(255), nullable=False, index=True)
+    added_by = Column(String(255), nullable=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('group_id', 'username', name='uq_group_member'),)
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing Framework for Recommendations  (Tier 4 / Item 13)
+# ---------------------------------------------------------------------------
+
+class RecommendationExperiment(Base):
+    """A/B experiment definition for recommendation algorithms."""
+    __tablename__ = "recommendation_experiments"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    # Comma-separated variant names, e.g. "control,collaborative,ml"
+    variants = Column(Text, nullable=False, default='control,treatment')
+    # 'draft' | 'active' | 'paused' | 'concluded'
+    status = Column(String(50), default='draft', index=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+
+
+class ExperimentAssignment(Base):
+    """Records which variant a user is assigned to for a given experiment."""
+    __tablename__ = "experiment_assignments"
+
+    id = Column(Integer, primary_key=True)
+    experiment_id = Column(Integer, ForeignKey("recommendation_experiments.id"), nullable=False, index=True)
+    username = Column(String(255), nullable=False, index=True)
+    variant = Column(String(100), nullable=False)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('experiment_id', 'username', name='uq_exp_user'),)
 
 
 def get_db():
@@ -3376,3 +3559,1142 @@ class CosmeticCollection(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User")
+
+# ---------------------------------------------------------------------------
+# Database Optimization & Maintenance helpers  (Tier 3, item 10)
+# ---------------------------------------------------------------------------
+
+def get_table_stats(db) -> list:
+    """Return row counts and (where available) on-disk sizes for every table.
+
+    Returns a list of dicts sorted by row count descending:
+      ``table``     – table name
+      ``rows``      – approximate row count (exact for SQLite, estimate for Postgres)
+      ``size_bytes``– on-disk size in bytes (PostgreSQL only; ``None`` for SQLite)
+
+    If *db* is None or an error occurs, returns an empty list.
+    """
+    if not db or not engine:
+        return []
+    try:
+        from sqlalchemy import inspect as _inspect, text as _text
+        from sqlalchemy.sql import quoted_name
+        inspector = _inspect(engine)
+        table_names = inspector.get_table_names()
+        dialect = engine.dialect.name
+        stats = []
+        for tbl in table_names:
+            # tbl comes from the inspector so it is always a real table name;
+            # we still quote it to guard against unusual names.
+            safe_tbl = str(quoted_name(tbl, quote=True))
+            try:
+                count_row = db.execute(_text(f"SELECT COUNT(*) FROM {safe_tbl}")).fetchone()
+                row_count = int(count_row[0]) if count_row else 0
+            except Exception:
+                row_count = 0
+            size_bytes = None
+            if dialect == 'postgresql':
+                try:
+                    size_row = db.execute(
+                        _text("SELECT pg_total_relation_size(:tbl)"),
+                        {'tbl': tbl},
+                    ).fetchone()
+                    size_bytes = int(size_row[0]) if size_row else None
+                except Exception:
+                    pass
+            stats.append({'table': tbl, 'rows': row_count, 'size_bytes': size_bytes})
+        stats.sort(key=lambda r: r['rows'], reverse=True)
+        return stats
+    except Exception as e:
+        logger.error(f"get_table_stats error: {e}")
+        return []
+
+
+def get_db_size_bytes() -> int:
+    """Return total on-disk size of the database in bytes.
+
+    For SQLite, reads ``os.path.getsize`` on the database file.
+    For PostgreSQL, queries ``pg_database_size``.
+    Returns 0 on error or when the database is not available.
+    """
+    if not engine:
+        return 0
+    try:
+        dialect = engine.dialect.name
+        if dialect == 'sqlite':
+            db_url = str(engine.url)
+            # sqlite:////path/to/db.sqlite  →  /path/to/db.sqlite
+            path = db_url.replace('sqlite:///', '').replace('sqlite://', '')
+            if path and os.path.exists(path):
+                return os.path.getsize(path)
+            return 0
+        elif dialect == 'postgresql':
+            from sqlalchemy import text as _text
+            with engine.connect() as conn:
+                row = conn.execute(_text("SELECT pg_database_size(current_database())")).fetchone()
+                return int(row[0]) if row else 0
+        return 0
+    except Exception as e:
+        logger.error(f"get_db_size_bytes error: {e}")
+        return 0
+
+
+def apply_indexes(db, dry_run: bool = True) -> dict:
+    """Create recommended database indexes that do not yet exist.
+
+    Uses ``IndexAnalyzer.analyze_query_bottlenecks()`` from the *performance*
+    module to obtain the index DDL statements, then for each statement checks
+    whether the index already exists and, if *dry_run* is ``False``, executes
+    ``CREATE INDEX … IF NOT EXISTS …`` (or the equivalent).
+
+    Returns a dict:
+      ``applied``   – list of DDL statements executed
+      ``skipped``   – list of DDL statements where the index already existed
+      ``errors``    – list of ``{sql, error}`` dicts for any failed statements
+      ``dry_run``   – reflects the *dry_run* parameter
+    """
+    result = {'applied': [], 'skipped': [], 'errors': [], 'dry_run': dry_run}
+    if not db or not engine:
+        return result
+    try:
+        from performance import IndexAnalyzer
+        from sqlalchemy import inspect as _inspect, text as _text
+        suggestions = IndexAnalyzer.analyze_query_bottlenecks()
+        inspector = _inspect(engine)
+        # Build set of existing index names (lower-cased) per table
+        existing: dict = {}
+        for tbl in inspector.get_table_names():
+            for idx in inspector.get_indexes(tbl):
+                existing[idx['name'].lower()] = True
+        for ddl in suggestions:
+            # Extract the index name from "CREATE INDEX idx_xxx ON ..."
+            parts = ddl.split()
+            idx_name = ''
+            if len(parts) >= 3:
+                idx_name = parts[2].lower()
+            if idx_name and idx_name in existing:
+                result['skipped'].append(ddl)
+                continue
+            if dry_run:
+                result['applied'].append(ddl)
+            else:
+                try:
+                    # Convert to IF NOT EXISTS form for safety
+                    safe_ddl = ddl.replace(
+                        'CREATE INDEX ', 'CREATE INDEX IF NOT EXISTS ', 1
+                    ).replace(
+                        'CREATE UNIQUE INDEX ', 'CREATE UNIQUE INDEX IF NOT EXISTS ', 1
+                    )
+                    with engine.begin() as conn:
+                        conn.execute(_text(safe_ddl.rstrip(';')))
+                    result['applied'].append(ddl)
+                    logger.info(f"Created index: {idx_name}")
+                except Exception as e:
+                    result['errors'].append({'sql': ddl, 'error': str(e)})
+    except Exception as e:
+        logger.error(f"apply_indexes error: {e}")
+    return result
+
+
+def archive_old_picks(db, days: int = 365) -> dict:
+    """Delete pick/session records older than *days* days.
+
+    Removes rows from:
+      - ``picks``        – all rows whose ``created_at`` is before the cutoff date
+      - ``live_sessions``– rows whose ``created_at`` is before the cutoff date
+        **and** whose ``status`` is ``'completed'`` or ``'ended'``
+
+    Returns a dict:
+      ``deleted_picks``    – number of pick rows removed
+      ``deleted_sessions`` – number of live_session rows removed
+      ``cutoff_date``      – ISO 8601 timestamp used as cutoff
+      ``days``             – reflects the *days* parameter
+    """
+    result = {'deleted_picks': 0, 'deleted_sessions': 0,
+              'cutoff_date': '', 'days': days}
+    if not db or not engine:
+        return result
+    try:
+        from sqlalchemy import text as _text, inspect as _inspect
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        result['cutoff_date'] = cutoff.isoformat()
+        inspector = _inspect(engine)
+        table_names = set(inspector.get_table_names())
+        # Archive picks
+        if 'picks' in table_names:
+            r = db.execute(
+                _text("DELETE FROM picks WHERE created_at < :cutoff"),
+                {'cutoff': cutoff},
+            )
+            result['deleted_picks'] = r.rowcount
+            db.commit()
+        # Archive completed live_sessions
+        if 'live_sessions' in table_names:
+            r = db.execute(
+                _text(
+                    "DELETE FROM live_sessions "
+                    "WHERE created_at < :cutoff "
+                    "AND (status = 'completed' OR status = 'ended')"
+                ),
+                {'cutoff': cutoff},
+            )
+            result['deleted_sessions'] = r.rowcount
+            db.commit()
+        logger.info(
+            f"archive_old_picks: removed {result['deleted_picks']} picks, "
+            f"{result['deleted_sessions']} sessions (older than {days} days)"
+        )
+    except Exception as e:
+        logger.error(f"archive_old_picks error: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Fine-grained Permission helpers  (Tier 2, item 5)
+# ---------------------------------------------------------------------------
+
+def get_user_permissions(db, username: str) -> dict:
+    """Return effective permissions for *username*.
+
+    Merges role-based permissions with per-user overrides.
+
+    Returns a dict:
+      ``effective``  – sorted list of permission strings the user currently has
+      ``from_roles`` – permissions derived from the user's roles
+      ``granted``    – explicit per-user grants (override adds)
+      ``denied``     – explicit per-user denials (override removes)
+      ``is_admin``   – True when the user has the wildcard ``'*'`` permission
+    """
+    result = {
+        'effective': [],
+        'from_roles': [],
+        'granted': [],
+        'denied': [],
+        'is_admin': False,
+    }
+    if not db:
+        return result
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return result
+
+        # Accumulate role-based perms
+        role_perms: set = set()
+        for role in (user.roles or []):
+            for perm in PERMISSIONS.get(role.name, []):
+                role_perms.add(perm)
+
+        if '*' in role_perms:
+            result['is_admin'] = True
+            result['from_roles'] = ALL_PERMISSIONS[:]
+            result['effective'] = ALL_PERMISSIONS[:]
+            return result
+
+        result['from_roles'] = sorted(role_perms)
+
+        # Apply per-user overrides
+        overrides = (
+            db.query(UserPermission)
+            .filter(UserPermission.username == username)
+            .all()
+        )
+        granted_extra: set = set()
+        denied: set = set()
+        for o in overrides:
+            if o.granted:
+                granted_extra.add(o.permission)
+            else:
+                denied.add(o.permission)
+
+        result['granted'] = sorted(granted_extra)
+        result['denied'] = sorted(denied)
+
+        effective = (role_perms | granted_extra) - denied
+        result['effective'] = sorted(effective)
+    except Exception as e:
+        logger.error(f"get_user_permissions error: {e}")
+    return result
+
+
+def has_permission(db, username: str, permission: str) -> bool:
+    """Return True if *username* has *permission*.
+
+    Admins (wildcard ``'*'``) automatically pass every permission check.
+    """
+    if not db:
+        return False
+    try:
+        perms = get_user_permissions(db, username)
+        if perms.get('is_admin'):
+            return True
+        return permission in perms.get('effective', [])
+    except Exception as e:
+        logger.error(f"has_permission error: {e}")
+        return False
+
+
+def set_user_permission_override(db, username: str, permission: str,
+                                  granted: bool, granted_by: str = '') -> bool:
+    """Grant or deny a single *permission* for *username*.
+
+    Creates or updates the ``UserPermission`` row.
+    Returns ``True`` on success.
+    """
+    if not db:
+        return False
+    try:
+        existing = (
+            db.query(UserPermission)
+            .filter(
+                UserPermission.username == username,
+                UserPermission.permission == permission,
+            )
+            .first()
+        )
+        if existing:
+            existing.granted = granted
+            existing.granted_by = granted_by
+            existing.granted_at = datetime.utcnow()
+        else:
+            row = UserPermission(
+                username=username,
+                permission=permission,
+                granted=granted,
+                granted_by=granted_by,
+            )
+            db.add(row)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"set_user_permission_override error: {e}")
+        db.rollback()
+        return False
+
+
+def remove_user_permission_override(db, username: str, permission: str) -> bool:
+    """Remove a per-user override for *permission*, reverting to role-based default."""
+    if not db:
+        return False
+    try:
+        row = (
+            db.query(UserPermission)
+            .filter(
+                UserPermission.username == username,
+                UserPermission.permission == permission,
+            )
+            .first()
+        )
+        if row:
+            db.delete(row)
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"remove_user_permission_override error: {e}")
+        db.rollback()
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Notification preference helpers  (Tier 2, item 6)
+# ---------------------------------------------------------------------------
+
+_NOTIF_PREF_BOOL_FIELDS = (
+    'email_enabled', 'push_enabled', 'friend_requests',
+    'challenge_updates', 'trade_offers', 'team_events', 'system_announcements',
+)
+_NOTIF_PREF_DIGEST_VALUES = ('never', 'daily', 'weekly')
+
+
+def _notif_pref_to_dict(pref) -> dict:
+    return {
+        'email_enabled': pref.email_enabled,
+        'push_enabled': pref.push_enabled,
+        'friend_requests': pref.friend_requests,
+        'challenge_updates': pref.challenge_updates,
+        'trade_offers': pref.trade_offers,
+        'team_events': pref.team_events,
+        'system_announcements': pref.system_announcements,
+        'digest_frequency': pref.digest_frequency,
+        'updated_at': pref.updated_at.isoformat() if pref.updated_at else None,
+    }
+
+
+def get_notification_prefs(db, username: str) -> dict:
+    """Return notification preferences for *username*.
+
+    Creates a default row if none exists yet.  Returns a dict of all fields or
+    an empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        pref = (
+            db.query(UserNotificationPreference)
+            .filter(UserNotificationPreference.username == username)
+            .first()
+        )
+        if not pref:
+            pref = UserNotificationPreference(username=username)
+            db.add(pref)
+            db.commit()
+            db.refresh(pref)
+        return _notif_pref_to_dict(pref)
+    except Exception as e:
+        logger.error(f"get_notification_prefs error: {e}")
+        return {}
+
+
+def set_notification_prefs(db, username: str, updates: dict) -> dict:
+    """Update notification preferences for *username*.
+
+    Only recognized fields are applied; unknown keys are ignored.
+    Returns the updated preference dict on success, or an empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        pref = (
+            db.query(UserNotificationPreference)
+            .filter(UserNotificationPreference.username == username)
+            .first()
+        )
+        if not pref:
+            pref = UserNotificationPreference(username=username)
+            db.add(pref)
+        for field in _NOTIF_PREF_BOOL_FIELDS:
+            if field in updates:
+                setattr(pref, field, bool(updates[field]))
+        if 'digest_frequency' in updates:
+            val = str(updates['digest_frequency']).lower()
+            if val in _NOTIF_PREF_DIGEST_VALUES:
+                pref.digest_frequency = val
+        pref.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(pref)
+        return _notif_pref_to_dict(pref)
+    except Exception as e:
+        logger.error(f"set_notification_prefs error: {e}")
+        db.rollback()
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing helpers  (Item 13)
+# ---------------------------------------------------------------------------
+
+import hashlib as _hashlib
+
+
+def create_experiment(db, name: str, variants: list, description: str = '',
+                      created_by: str = '') -> dict:
+    """Create a new recommendation experiment in *draft* status.
+
+    Returns the serialised experiment dict on success, empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        exp = RecommendationExperiment(
+            name=name,
+            description=description,
+            variants=','.join(v.strip() for v in variants),
+            status='draft',
+            created_by=created_by,
+        )
+        db.add(exp)
+        db.commit()
+        db.refresh(exp)
+        return _experiment_to_dict(exp)
+    except Exception as e:
+        logger.error('create_experiment error: %s', e)
+        db.rollback()
+        return {}
+
+
+def list_experiments(db) -> list:
+    """Return all experiments as a list of dicts."""
+    if not db:
+        return []
+    try:
+        exps = db.query(RecommendationExperiment).order_by(
+            RecommendationExperiment.created_at.desc()
+        ).all()
+        return [_experiment_to_dict(e) for e in exps]
+    except Exception as e:
+        logger.error('list_experiments error: %s', e)
+        return []
+
+
+def update_experiment_status(db, experiment_id: int, status: str) -> dict:
+    """Change the status of an experiment.
+
+    Allowed transitions:  draft→active, active→paused, paused→active,
+    active→concluded, paused→concluded.
+    Returns the updated dict or empty dict on failure.
+    """
+    if not db:
+        return {}
+    valid = ('draft', 'active', 'paused', 'concluded')
+    if status not in valid:
+        return {}
+    try:
+        exp = db.query(RecommendationExperiment).get(experiment_id)
+        if not exp:
+            return {}
+        exp.status = status
+        if status == 'active' and not exp.started_at:
+            exp.started_at = datetime.utcnow()
+        if status == 'concluded':
+            exp.ended_at = datetime.utcnow()
+        db.commit()
+        db.refresh(exp)
+        return _experiment_to_dict(exp)
+    except Exception as e:
+        logger.error('update_experiment_status error: %s', e)
+        db.rollback()
+        return {}
+
+
+def get_or_assign_variant(db, username: str, experiment_name: str) -> str | None:
+    """Return (or assign) the variant for *username* in *experiment_name*.
+
+    Assignment is deterministic via ``hash(username + experiment_name)`` so the
+    same user always lands in the same bucket even if the row is missing.
+    Returns the variant string, or ``None`` if the experiment doesn't exist /
+    isn't active.
+    """
+    if not db or not username or not experiment_name:
+        return None
+    try:
+        exp = (
+            db.query(RecommendationExperiment)
+            .filter(
+                RecommendationExperiment.name == experiment_name,
+                RecommendationExperiment.status == 'active',
+            )
+            .first()
+        )
+        if not exp:
+            return None
+        variants_list = [v.strip() for v in exp.variants.split(',') if v.strip()]
+        if not variants_list:
+            return None
+        # Check for existing assignment
+        assignment = (
+            db.query(ExperimentAssignment)
+            .filter(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.username == username,
+            )
+            .first()
+        )
+        if assignment:
+            return assignment.variant
+        # Deterministic bucket assignment
+        digest = int(_hashlib.sha256(f'{username}:{experiment_name}'.encode()).hexdigest(), 16)
+        variant = variants_list[digest % len(variants_list)]
+        row = ExperimentAssignment(
+            experiment_id=exp.id,
+            username=username,
+            variant=variant,
+        )
+        db.add(row)
+        db.commit()
+        return variant
+    except Exception as e:
+        logger.error('get_or_assign_variant error: %s', e)
+        db.rollback()
+        return None
+
+
+def get_experiment_variant_counts(db, experiment_id: int) -> dict:
+    """Return per-variant assignment counts for *experiment_id*."""
+    if not db:
+        return {}
+    try:
+        counts: dict = {}
+        assignments = (
+            db.query(ExperimentAssignment)
+            .filter(ExperimentAssignment.experiment_id == experiment_id)
+            .all()
+        )
+        for a in assignments:
+            counts[a.variant] = counts.get(a.variant, 0) + 1
+        return counts
+    except Exception as e:
+        logger.error('get_experiment_variant_counts error: %s', e)
+        return {}
+
+
+def _experiment_to_dict(exp) -> dict:
+    return {
+        'id': exp.id,
+        'name': exp.name,
+        'description': exp.description or '',
+        'variants': [v.strip() for v in exp.variants.split(',') if v.strip()],
+        'status': exp.status,
+        'created_by': exp.created_by or '',
+        'created_at': exp.created_at.isoformat() if exp.created_at else None,
+        'started_at': exp.started_at.isoformat() if exp.started_at else None,
+        'ended_at': exp.ended_at.isoformat() if exp.ended_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Similar Games helper  (Item 8)
+# ---------------------------------------------------------------------------
+
+def get_similar_games(db, app_id: str, platform: str = 'steam', limit: int = 10) -> list:
+    """Return up to *limit* games similar to the game identified by *app_id*.
+
+    Similarity is computed by comparing genre/tag tokens extracted from the
+    ``GameDetailsCache.details_json`` blob.  Falls back to games from the same
+    platform when no cached details are available.
+
+    Returns a list of dicts:
+      ``app_id``, ``game_name``, ``platform``, ``similarity_score``
+    """
+    if not db:
+        return []
+    try:
+        target = (
+            db.query(GameDetailsCache)
+            .filter(GameDetailsCache.app_id == str(app_id),
+                    GameDetailsCache.platform == platform)
+            .first()
+        )
+        target_tokens: set = set()
+        target_name: str = ''
+        if target and target.details_json:
+            try:
+                details = json.loads(target.details_json)
+                target_name = details.get('name', '')
+                # Collect genre/category tokens
+                for genre in details.get('genres', []):
+                    if isinstance(genre, dict):
+                        target_tokens.add(genre.get('description', '').lower())
+                    elif isinstance(genre, str):
+                        target_tokens.add(genre.lower())
+                for cat in details.get('categories', []):
+                    if isinstance(cat, dict):
+                        target_tokens.add(cat.get('description', '').lower())
+                for tag in details.get('tags', []):
+                    target_tokens.add(str(tag).lower())
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Query all OTHER cached games on same platform
+        candidates = (
+            db.query(GameDetailsCache)
+            .filter(GameDetailsCache.app_id != str(app_id),
+                    GameDetailsCache.platform == platform)
+            .limit(500)
+            .all()
+        )
+
+        scored: list = []
+        for cand in candidates:
+            cand_tokens: set = set()
+            cand_name: str = cand.app_id
+            if cand.details_json:
+                try:
+                    det = json.loads(cand.details_json)
+                    cand_name = det.get('name', cand.app_id)
+                    for genre in det.get('genres', []):
+                        if isinstance(genre, dict):
+                            cand_tokens.add(genre.get('description', '').lower())
+                        elif isinstance(genre, str):
+                            cand_tokens.add(genre.lower())
+                    for cat in det.get('categories', []):
+                        if isinstance(cat, dict):
+                            cand_tokens.add(cat.get('description', '').lower())
+                    for tag in det.get('tags', []):
+                        cand_tokens.add(str(tag).lower())
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if target_tokens and cand_tokens:
+                intersection = len(target_tokens & cand_tokens)
+                union = len(target_tokens | cand_tokens)
+                score = round(intersection / union, 4) if union else 0.0
+            else:
+                score = 0.0
+            if score > 0:
+                scored.append({
+                    'app_id': cand.app_id,
+                    'game_name': cand_name,
+                    'platform': cand.platform,
+                    'similarity_score': score,
+                })
+        scored.sort(key=lambda x: x['similarity_score'], reverse=True)
+        return scored[:limit]
+    except Exception as e:
+        logger.error('get_similar_games error: %s', e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# User Suspension helpers  (Item 5)
+# ---------------------------------------------------------------------------
+
+def suspend_user(db, username: str, reason: str, suspended_by: str,
+                 duration_minutes: int | None = None) -> dict:
+    """Suspend *username* for *duration_minutes* (or permanently if None).
+
+    Returns a summary dict on success, empty dict on failure.
+    """
+    if not db or not username:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+        now = datetime.utcnow()
+        until = (now + timedelta(minutes=duration_minutes)) if duration_minutes else None
+        user.is_suspended = True
+        user.suspended_until = until
+        user.suspended_reason = reason
+        user.suspended_by = suspended_by
+        user.suspended_at = now
+        db.commit()
+        return {
+            'username': username,
+            'is_suspended': True,
+            'suspended_until': until.isoformat() if until else None,
+            'suspended_reason': reason,
+            'suspended_by': suspended_by,
+            'suspended_at': now.isoformat(),
+        }
+    except Exception as e:
+        logger.error('suspend_user error: %s', e)
+        db.rollback()
+        return {}
+
+
+def unsuspend_user(db, username: str) -> bool:
+    """Lift the suspension for *username*.  Returns True on success."""
+    if not db or not username:
+        return False
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return False
+        user.is_suspended = False
+        user.suspended_until = None
+        user.suspended_reason = None
+        user.suspended_by = None
+        user.suspended_at = None
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error('unsuspend_user error: %s', e)
+        db.rollback()
+        return False
+
+
+def get_user_status(db, username: str) -> dict:
+    """Return account status for *username* (active / suspended / banned).
+
+    Automatically expires time-limited suspensions that have passed.
+    Returns empty dict if user not found.
+    """
+    if not db or not username:
+        return {}
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return {}
+        # Auto-expire elapsed suspensions
+        if user.is_suspended and user.suspended_until:
+            if user.suspended_until <= datetime.utcnow():
+                user.is_suspended = False
+                user.suspended_until = None
+                db.commit()
+        status = 'active'
+        if user.is_suspended:
+            status = 'suspended' if user.suspended_until else 'banned'
+        return {
+            'username': username,
+            'status': status,
+            'is_suspended': user.is_suspended,
+            'suspended_until': user.suspended_until.isoformat() if user.suspended_until else None,
+            'suspended_reason': user.suspended_reason,
+            'suspended_by': user.suspended_by,
+            'suspended_at': user.suspended_at.isoformat() if user.suspended_at else None,
+        }
+    except Exception as e:
+        logger.error('get_user_status error: %s', e)
+        return {}
+
+
+def search_users_admin(db, query: str = '', role: str = '',
+                       status: str = '', limit: int = 50, offset: int = 0) -> list:
+    """Search users with optional filters — for admin use only.
+
+    ``status``  – ``'active'``, ``'suspended'``, or ``'banned'`` (empty = all)
+    ``role``    – role name to filter by (empty = all)
+    ``query``   – partial match on username
+
+    Returns list of dicts with ``username``, ``display_name``, ``status``,
+    ``roles``, ``created_at``, ``last_seen``.
+    """
+    if not db:
+        return []
+    try:
+        q = db.query(User)
+        if query:
+            q = q.filter(User.username.ilike(f'%{query}%'))
+        if status == 'suspended':
+            q = q.filter(User.is_suspended.is_(True), User.suspended_until.isnot(None))
+        elif status == 'banned':
+            q = q.filter(User.is_suspended.is_(True), User.suspended_until.is_(None))
+        elif status == 'active':
+            q = q.filter(User.is_suspended.is_(False))
+        users = q.order_by(User.username).offset(offset).limit(limit).all()
+        now = datetime.utcnow()
+        result = []
+        for u in users:
+            # Auto-expire
+            if u.is_suspended and u.suspended_until and u.suspended_until <= now:
+                u.is_suspended = False
+                u.suspended_until = None
+            roles_list = [r.name for r in u.roles] if u.roles else []
+            if role and role not in roles_list:
+                continue
+            acct_status = 'active'
+            if u.is_suspended:
+                acct_status = 'suspended' if u.suspended_until else 'banned'
+            result.append({
+                'username': u.username,
+                'display_name': u.display_name or u.username,
+                'status': acct_status,
+                'roles': roles_list,
+                'created_at': u.created_at.isoformat() if u.created_at else None,
+                'last_seen': u.last_seen.isoformat() if u.last_seen else None,
+            })
+        db.commit()
+        return result
+    except Exception as e:
+        logger.error('search_users_admin error: %s', e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# User Reputation helpers  (Item 7)
+# ---------------------------------------------------------------------------
+
+def get_reputation(db, username: str) -> dict:
+    """Return the reputation dict for *username*, creating a default row if needed."""
+    if not db or not username:
+        return {}
+    try:
+        rep = db.query(UserReputation).filter(UserReputation.username == username).first()
+        if not rep:
+            rep = UserReputation(username=username, score=REPUTATION_DEFAULT_SCORE,
+                                 violation_count=0)
+            db.add(rep)
+            db.commit()
+            db.refresh(rep)
+        return {
+            'username': rep.username,
+            'score': rep.score,
+            'violation_count': rep.violation_count,
+            'last_updated': rep.last_updated.isoformat() if rep.last_updated else None,
+            'last_action': rep.last_action,
+        }
+    except Exception as e:
+        logger.error('get_reputation error: %s', e)
+        return {}
+
+
+def update_reputation(db, username: str, action: str) -> dict:
+    """Deduct reputation for *username* based on moderation *action*.
+
+    If the score drops below ``REPUTATION_AUTO_BAN_THRESHOLD`` the user is
+    automatically suspended.  Returns updated reputation dict.
+    """
+    if not db or not username:
+        return {}
+    try:
+        rep = db.query(UserReputation).filter(UserReputation.username == username).first()
+        if not rep:
+            # Explicitly set Python-side defaults — SQLAlchemy column defaults
+            # are applied at INSERT time only and won't be available before flush.
+            rep = UserReputation(username=username, score=REPUTATION_DEFAULT_SCORE,
+                                violation_count=0)
+            db.add(rep)
+        penalty = REPUTATION_PENALTIES.get(action, REPUTATION_PENALTIES['default'])
+        current_score = rep.score if rep.score is not None else REPUTATION_DEFAULT_SCORE
+        rep.score = max(0, current_score - penalty)
+        rep.violation_count = (rep.violation_count or 0) + 1
+        rep.last_action = action
+        db.commit()
+        # Auto-ban if score drops below threshold
+        if rep.score <= REPUTATION_AUTO_BAN_THRESHOLD:
+            suspend_user(
+                db, username,
+                reason=f'Automatic suspension: reputation score {rep.score} below threshold',
+                suspended_by='system',
+                duration_minutes=None,  # permanent until reviewed
+            )
+        db.refresh(rep)
+        return {
+            'username': rep.username,
+            'score': rep.score,
+            'violation_count': rep.violation_count,
+            'last_updated': rep.last_updated.isoformat() if rep.last_updated else None,
+            'last_action': rep.last_action,
+            'auto_suspended': rep.score <= REPUTATION_AUTO_BAN_THRESHOLD,
+        }
+    except Exception as e:
+        logger.error('update_reputation error: %s', e)
+        db.rollback()
+        return {}
+
+
+def get_low_reputation_users(db, threshold: int | None = None,
+                             limit: int = 50) -> list:
+    """Return users whose reputation score is at or below *threshold*.
+
+    Defaults to ``REPUTATION_AUTO_BAN_THRESHOLD`` when not provided.
+    """
+    if not db:
+        return []
+    threshold = threshold if threshold is not None else REPUTATION_AUTO_BAN_THRESHOLD
+    try:
+        rows = (
+            db.query(UserReputation)
+            .filter(UserReputation.score <= threshold)
+            .order_by(UserReputation.score)
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                'username': r.username,
+                'score': r.score,
+                'violation_count': r.violation_count,
+                'last_action': r.last_action,
+                'last_updated': r.last_updated.isoformat() if r.last_updated else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error('get_low_reputation_users error: %s', e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# User Group helpers  (Item 5)
+# ---------------------------------------------------------------------------
+
+def create_user_group(db, name: str, description: str = '',
+                      created_by: str = '') -> dict:
+    """Create a named user group.  Returns the group dict on success, empty on failure."""
+    if not db or not name:
+        return {}
+    try:
+        grp = UserGroup(name=name, description=description, created_by=created_by)
+        db.add(grp)
+        db.commit()
+        db.refresh(grp)
+        return _group_to_dict(grp, member_count=0)
+    except Exception as e:
+        logger.error('create_user_group error: %s', e)
+        db.rollback()
+        return {}
+
+
+def list_user_groups(db) -> list:
+    """Return all user groups with their member counts."""
+    if not db:
+        return []
+    try:
+        groups = db.query(UserGroup).order_by(UserGroup.name).all()
+        result = []
+        for grp in groups:
+            count = db.query(UserGroupMember).filter(
+                UserGroupMember.group_id == grp.id
+            ).count()
+            result.append(_group_to_dict(grp, member_count=count))
+        return result
+    except Exception as e:
+        logger.error('list_user_groups error: %s', e)
+        return []
+
+
+def delete_user_group(db, group_id: int) -> bool:
+    """Delete a user group and all its memberships."""
+    if not db:
+        return False
+    try:
+        db.query(UserGroupMember).filter(UserGroupMember.group_id == group_id).delete()
+        deleted = db.query(UserGroup).filter(UserGroup.id == group_id).delete()
+        db.commit()
+        return deleted > 0
+    except Exception as e:
+        logger.error('delete_user_group error: %s', e)
+        db.rollback()
+        return False
+
+
+def add_group_member(db, group_id: int, username: str, added_by: str = '') -> dict:
+    """Add *username* to user group *group_id*.
+
+    Returns ``{'ok': True, 'username': ..., 'group_id': ...}`` or error dict.
+    """
+    if not db:
+        return {'ok': False, 'error': 'no db'}
+    try:
+        grp = db.get(UserGroup, group_id)
+        if not grp:
+            return {'ok': False, 'error': 'Group not found'}
+        existing = db.query(UserGroupMember).filter(
+            UserGroupMember.group_id == group_id,
+            UserGroupMember.username == username,
+        ).first()
+        if existing:
+            return {'ok': False, 'error': 'Already a member'}
+        mem = UserGroupMember(group_id=group_id, username=username, added_by=added_by)
+        db.add(mem)
+        db.commit()
+        return {'ok': True, 'username': username, 'group_id': group_id}
+    except Exception as e:
+        logger.error('add_group_member error: %s', e)
+        db.rollback()
+        return {'ok': False, 'error': str(e)}
+
+
+def remove_group_member(db, group_id: int, username: str) -> bool:
+    """Remove *username* from user group *group_id*."""
+    if not db:
+        return False
+    try:
+        deleted = db.query(UserGroupMember).filter(
+            UserGroupMember.group_id == group_id,
+            UserGroupMember.username == username,
+        ).delete()
+        db.commit()
+        return deleted > 0
+    except Exception as e:
+        logger.error('remove_group_member error: %s', e)
+        db.rollback()
+        return False
+
+
+def get_group_members(db, group_id: int) -> list:
+    """Return list of member usernames for *group_id*."""
+    if not db:
+        return []
+    try:
+        members = db.query(UserGroupMember).filter(
+            UserGroupMember.group_id == group_id
+        ).all()
+        return [m.username for m in members]
+    except Exception as e:
+        logger.error('get_group_members error: %s', e)
+        return []
+
+
+def _group_to_dict(grp, member_count: int = 0) -> dict:
+    return {
+        'id': grp.id,
+        'name': grp.name,
+        'description': grp.description or '',
+        'created_by': grp.created_by or '',
+        'created_at': grp.created_at.isoformat() if grp.created_at else None,
+        'member_count': member_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Search History helpers  (Item 3 — Advanced Search)
+# ---------------------------------------------------------------------------
+
+# Maximum number of history entries kept per user.
+SEARCH_HISTORY_MAX: int = 50
+
+
+def record_search(db, username: str, query: str, filters: dict = None,
+                  result_count: int = None) -> bool:
+    """Persist a search to the user's history.
+
+    Silently returns ``False`` on any error so callers never need to handle
+    search-history failures.  Prunes older rows once the per-user cap is
+    exceeded.
+    """
+    if not db or not username or not query:
+        return False
+    try:
+        entry = SearchHistory(
+            username=username,
+            query=query[:500],
+            filters=json.dumps(filters) if filters else None,
+            result_count=result_count,
+        )
+        db.add(entry)
+        db.commit()
+        # Prune: keep only the most recent SEARCH_HISTORY_MAX rows per user
+        all_ids = (
+            db.query(SearchHistory.id)
+            .filter(SearchHistory.username == username)
+            .order_by(SearchHistory.searched_at.desc())
+            .all()
+        )
+        if len(all_ids) > SEARCH_HISTORY_MAX:
+            old_ids = [r.id for r in all_ids[SEARCH_HISTORY_MAX:]]
+            db.query(SearchHistory).filter(SearchHistory.id.in_(old_ids)).delete(
+                synchronize_session=False
+            )
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error('record_search error: %s', e)
+        db.rollback()
+        return False
+
+
+def get_search_history(db, username: str, limit: int = 20) -> list:
+    """Return the most recent searches for *username* (newest first)."""
+    if not db or not username:
+        return []
+    try:
+        rows = (
+            db.query(SearchHistory)
+            .filter(SearchHistory.username == username)
+            .order_by(SearchHistory.searched_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                'id': r.id,
+                'query': r.query,
+                'filters': json.loads(r.filters) if r.filters else None,
+                'result_count': r.result_count,
+                'searched_at': r.searched_at.isoformat() if r.searched_at else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error('get_search_history error: %s', e)
+        return []
+
+
+def clear_search_history(db, username: str) -> bool:
+    """Delete all search history for *username*."""
+    if not db or not username:
+        return False
+    try:
+        db.query(SearchHistory).filter(SearchHistory.username == username).delete()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error('clear_search_history error: %s', e)
+        db.rollback()
+        return False

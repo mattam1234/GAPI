@@ -18,8 +18,11 @@ import csv
 import hashlib
 import io
 import tempfile
+import subprocess
+import signal
+import collections
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Deque
 from functools import wraps
 from werkzeug.local import LocalProxy
 from urllib.parse import unquote
@@ -52,6 +55,22 @@ try:
     PERFORMANCE_AVAILABLE = True
 except ImportError:
     PERFORMANCE_AVAILABLE = False
+
+try:
+    from flask_compress import Compress as _FlaskCompress
+    _COMPRESS_AVAILABLE = True
+except ImportError:
+    _FlaskCompress = None  # type: ignore[assignment,misc]
+    _COMPRESS_AVAILABLE = False
+
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    _LIMITER_AVAILABLE = True
+except ImportError:
+    Limiter = None  # type: ignore[assignment,misc]
+    get_remote_address = None  # type: ignore[assignment]
+    _LIMITER_AVAILABLE = False
 
 # DB-backed services — instantiated lazily after database import so the
 # module can still start without a database being present.
@@ -157,8 +176,283 @@ def ensure_db_available() -> bool:
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
+# ---------------------------------------------------------------------------
+# Response compression (gzip / brotli)
+# ---------------------------------------------------------------------------
+if _COMPRESS_AVAILABLE:
+    _compress = _FlaskCompress()
+    _compress.init_app(app)
+
+# ---------------------------------------------------------------------------
+# Rate limiting — protect auth endpoints from brute-force attacks.
+# Limits are intentionally generous for normal usage but prevent rapid
+# scripted abuse.  They can be tightened via RATELIMIT_DEFAULT env var.
+# ---------------------------------------------------------------------------
+if _LIMITER_AVAILABLE:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        app=app,
+        default_limits=[],  # no global limit — applied per-endpoint
+        # NOTE: "memory://" stores counters in-process only. This is
+        # sufficient for single-process deployments (Flask dev server).
+        # For multi-process deployments (e.g. gunicorn -w N) set
+        # RATELIMIT_STORAGE_URI=redis://... in the environment to share
+        # counters across workers.
+        storage_uri=os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
+    )
+else:
+    # Stub: @limiter.limit(...) becomes a no-op
+    class _NoOpLimiter:
+        def limit(self, *args, **kwargs):
+            def decorator(f):
+                return f
+            return decorator
+        def exempt(self, f):
+            return f
+    limiter = _NoOpLimiter()  # type: ignore[assignment]
+
 # Use the shared GAPI logger so level is controlled by config/setup_logging()
 gui_logger = logging.getLogger('gapi.gui')
+
+
+# ---------------------------------------------------------------------------
+# HTTP security headers — applied to every response
+# ---------------------------------------------------------------------------
+@app.after_request
+def add_security_headers(response):
+    """Attach security-related HTTP headers to every outgoing response.
+
+    These headers defend against common browser-based attacks such as
+    clickjacking (X-Frame-Options), MIME-sniffing (X-Content-Type-Options),
+    unintended cross-origin resource leakage (Referrer-Policy),
+    protocol downgrade attacks (Strict-Transport-Security), and
+    inline script injection (Content-Security-Policy).
+    """
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault(
+        'Permissions-Policy',
+        'geolocation=(), microphone=(), camera=()',
+    )
+    # Instruct browsers to only connect over HTTPS for the next year.
+    # includeSubDomains is omitted intentionally to avoid affecting subdomains
+    # that may not have certificates.
+    response.headers.setdefault(
+        'Strict-Transport-Security',
+        'max-age=31536000',
+    )
+    # Content-Security-Policy — default-deny with pragmatic exceptions for
+    # inline scripts/styles used throughout the single-page UI.
+    response.headers.setdefault(
+        'Content-Security-Policy',
+        (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        ),
+    )
+    return response
+
+
+# ---------------------------------------------------------------------------
+# CSRF Protection — double-submit cookie pattern  (Item 19)
+# ---------------------------------------------------------------------------
+
+_CSRF_COOKIE_NAME = 'csrf_token'
+_CSRF_HEADER_NAME = 'X-CSRF-Token'
+# Endpoints that are explicitly exempt from CSRF checks (e.g. machine-to-machine)
+_CSRF_EXEMPT_ENDPOINTS: frozenset = frozenset()
+# State-changing methods that require a valid CSRF token
+_CSRF_PROTECTED_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
+
+
+def _generate_csrf_token() -> str:
+    """Return a new cryptographically-random CSRF token string."""
+    import secrets
+    return secrets.token_hex(32)
+
+
+@app.route('/api/csrf-token', methods=['GET'])
+def api_get_csrf_token():
+    """Issue (or refresh) a CSRF token for the current browser session.
+
+    Sets a ``csrf_token`` cookie (SameSite=Lax, HttpOnly=False so JavaScript
+    can read it) and returns the same value in the JSON body so SPAs can store
+    it and send it as the ``X-CSRF-Token`` request header.
+
+    Response JSON:
+      ``token``  – CSRF token string
+    """
+    token = _generate_csrf_token()
+    resp = jsonify({'token': token})
+    # Use HTTPS-only cookies in production; allow HTTP in development.
+    # Set GAPI_CSRF_SECURE=true (or any truthy value) in the environment to
+    # enforce the Secure flag when the app is deployed behind TLS.
+    _csrf_secure = os.environ.get('GAPI_CSRF_SECURE', '').lower() in ('1', 'true', 'yes')
+    resp.set_cookie(
+        _CSRF_COOKIE_NAME,
+        token,
+        samesite='Lax',
+        httponly=False,     # must be readable by JS to send as header
+        secure=_csrf_secure,
+        max_age=86400,      # 1 day
+        path='/',
+    )
+    return resp
+
+
+@app.before_request
+def _validate_csrf():
+    """Enforce the CSRF double-submit-cookie check on state-changing requests.
+
+    Skips:
+    - Non-mutating methods (GET, HEAD, OPTIONS)
+    - Requests from the test client (TESTING flag)
+    - Endpoints in ``_CSRF_EXEMPT_ENDPOINTS``
+    """
+    if app.config.get('TESTING'):
+        return  # skip in unit tests
+    if request.method not in _CSRF_PROTECTED_METHODS:
+        return
+    if request.endpoint in _CSRF_EXEMPT_ENDPOINTS:
+        return
+    # Paths outside /api/ are served as HTML pages and are not covered
+    if not request.path.startswith('/api/'):
+        return
+    cookie_token = request.cookies.get(_CSRF_COOKIE_NAME, '')
+    header_token = request.headers.get(_CSRF_HEADER_NAME, '')
+    if not cookie_token or not header_token or cookie_token != header_token:
+        return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
+
+# ---------------------------------------------------------------------------
+# API usage statistics — lightweight per-endpoint call counter + latency
+# ---------------------------------------------------------------------------
+
+_api_stats_lock = threading.Lock()
+# endpoint_name -> {'calls': int, 'errors': int, 'total_ms': float,
+#                   'min_ms': float, 'max_ms': float}
+_api_endpoint_stats: Dict[str, Dict] = {}
+# Thread-local storage for per-request start time
+_request_start = threading.local()
+
+_CLIENT_ERROR_MAX = 200  # ring-buffer cap
+
+
+@app.before_request
+def _record_request_start():
+    """Stamp start time on every request for latency tracking."""
+    import time as _time
+    _request_start.t = _time.monotonic()
+
+
+@app.after_request
+def _record_request_stats(response):
+    """Accumulate per-endpoint call counts and latency."""
+    import time as _time
+    try:
+        endpoint = request.endpoint or 'unknown'
+        # Skip non-API and built-in static routes
+        if endpoint in ('static', 'unknown') or not endpoint:
+            return response
+        elapsed_ms = (_time.monotonic() - getattr(_request_start, 't', _time.monotonic())) * 1000
+        is_error = response.status_code >= 400
+        with _api_stats_lock:
+            s = _api_endpoint_stats.setdefault(endpoint, {
+                'calls': 0, 'errors': 0,
+                'total_ms': 0.0, 'min_ms': None, 'max_ms': 0.0,
+            })
+            s['calls'] += 1
+            if is_error:
+                s['errors'] += 1
+            s['total_ms'] += elapsed_ms
+            if s['min_ms'] is None or elapsed_ms < s['min_ms']:
+                s['min_ms'] = elapsed_ms
+            if elapsed_ms > s['max_ms']:
+                s['max_ms'] = elapsed_ms
+    except Exception:
+        pass  # never let instrumentation break a request
+    return response
+
+
+# Public read-only API paths that can be cached briefly by clients/CDNs.
+# These paths serve the same data to all callers and don't carry session state.
+_CACHEABLE_API_PREFIXES = (
+    '/api/permissions',
+    '/api/changelog',
+    '/api/health',
+)
+
+
+@app.after_request
+def _add_cache_control(response):
+    """Set Cache-Control on responses that are safe to cache (Item 18).
+
+    - Public read-only API endpoints: ``public, max-age=60, stale-while-revalidate=120``
+    - All other API responses: ``no-store`` (prevent sensitive data caching)
+    - Non-API HTML/static responses: no override (let Flask defaults apply)
+    """
+    path = request.path
+    if not path.startswith('/api/'):
+        return response
+    if response.headers.get('Cache-Control'):
+        return response  # respect explicitly set headers
+    if request.method == 'GET' and response.status_code == 200:
+        if any(path.startswith(p) for p in _CACHEABLE_API_PREFIXES):
+            response.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=120'
+            return response
+    response.headers.setdefault('Cache-Control', 'no-store')
+    return response
+
+
+# ---------------------------------------------------------------------------
+# API Deprecation Headers  (Item 9 — API Documentation / Quality Gates)
+# ---------------------------------------------------------------------------
+# Map endpoint function name → deprecation message.
+# When a request matches one of these endpoints, the response will carry
+# ``Deprecation: true``, ``X-Deprecation-Message``, and a ``Sunset`` header
+# indicating when the endpoint is planned to be removed.
+_DEPRECATED_ENDPOINTS: dict = {
+    # Legacy multi-user endpoints replaced by authenticated multi-user sessions
+    'api_users_list_legacy': (
+        'This endpoint is deprecated. Use GET /api/users/all instead.',
+        '2027-01-01',
+    ),
+    # Old un-paginated common-library endpoint
+    'api_multiuser_common': (
+        'This endpoint is deprecated. Use POST /api/multiuser/common with pagination.',
+        '2027-01-01',
+    ),
+}
+
+
+@app.after_request
+def _add_deprecation_headers(response):
+    """Attach RFC 8594 Deprecation + Sunset headers to deprecated endpoint responses."""
+    try:
+        endpoint = request.endpoint
+        if endpoint and endpoint in _DEPRECATED_ENDPOINTS:
+            message, sunset_date = _DEPRECATED_ENDPOINTS[endpoint]
+            response.headers.setdefault('Deprecation', 'true')
+            response.headers.setdefault('Sunset', sunset_date)
+            response.headers.setdefault('X-Deprecation-Message', message)
+    except Exception:
+        pass  # never break a request
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Client-side error ring-buffer
+# ---------------------------------------------------------------------------
+
+_client_errors_lock = threading.Lock()
+_client_errors: collections.deque = collections.deque(maxlen=_CLIENT_ERROR_MAX)
+
 
 # Global game picker instance
 picker: Optional[gapi.GamePicker] = None
@@ -298,6 +592,12 @@ def _invite_to_chat_room(inviter: str, target_username: str,
 
 # User authentication
 _demo_current_user: Optional[str] = None
+
+# Discord bot process management
+_discord_bot_process: Optional[subprocess.Popen] = None
+_discord_bot_lock = threading.Lock()
+# Bounded deque automatically drops oldest lines when the bot produces many lines
+_discord_bot_log_lines: Deque[str] = collections.deque(maxlen=200)
 
 
 def _resolve_current_user() -> Optional[str]:
@@ -965,12 +1265,27 @@ def load_base_config(config_path: str = 'config.json') -> Dict:
     return config
 
 
+def _resolve_current_username_str() -> str:
+    """Return the effective current username as a plain string.
+
+    Reads the module-level ``current_user`` first (which tests can patch via
+    ``@patch('gapi_gui.current_user', 'testuser')``) and falls back to the
+    session-based :func:`get_current_username` when it is a proxy.
+    """
+    _cu = current_user
+    if isinstance(_cu, str):
+        return _cu
+    return get_current_username() or ''
+
+
 def require_login(f):
     """Decorator to require user to be logged in"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        username = get_current_username()
-        if not username:
+        # `current_user` is the module-level variable; tests can patch it
+        # directly with @patch('gapi_gui.current_user', 'testuser').
+        # In production it is a LocalProxy that resolves from the session.
+        if not current_user:
             return jsonify({'error': 'Not logged in'}), 401
         return f(*args, **kwargs)
     return decorated_function
@@ -980,13 +1295,39 @@ def require_admin(f):
     """Decorator to require admin privileges"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        username = get_current_username()
-        if not username:
+        if not current_user:
             return jsonify({'error': 'Not logged in'}), 401
-        if not user_manager.is_admin(username):
+        username = _resolve_current_username_str()
+        if not username or not user_manager.is_admin(username):
             return jsonify({'error': 'Admin privileges required'}), 403
         return f(*args, **kwargs)
     return decorated_function
+
+
+def _audit(action: str, resource_type: str = None, resource_id: str = None,
+           description: str = None, old_value: dict = None, new_value: dict = None,
+           actor: str = None, status: str = 'success', error: str = None):
+    """Best-effort fire-and-forget audit log entry.
+
+    Silently ignored if ``_audit_service`` is not available or DB is down so
+    it never breaks the calling request handler.
+    """
+    if not _audit_service or not DB_AVAILABLE:
+        return
+    try:
+        db = next(database.get_db())
+        username = actor or get_current_username() or 'anonymous'
+        ip = request.remote_addr if has_request_context() else None
+        ua = (request.headers.get('User-Agent', '') if has_request_context() else None)
+        _audit_service.log_action(
+            db, username=username, action=action,
+            resource_type=resource_type, resource_id=resource_id,
+            description=description, old_value=old_value, new_value=new_value,
+            ip_address=ip, user_agent=ua,
+            status=status, error_message=error,
+        )
+    except Exception:
+        pass  # audit failures must never break the request
 
 
 PLATFORM_DEVICE_MAP = {
@@ -1466,6 +1807,7 @@ def api_auth_current():
 
 
 @app.route('/api/auth/register', methods=['POST'])
+@limiter.limit("10 per hour")
 def api_auth_register():
     """Register a new user"""
     data = request.json or {}
@@ -1550,6 +1892,7 @@ def api_setup_initial_admin():
 
 
 @app.route('/api/auth/login', methods=['POST'])
+@limiter.limit("20 per minute; 100 per hour")
 def api_auth_login():
     """Log in a user"""
     global picker, multi_picker
@@ -1565,10 +1908,14 @@ def api_auth_login():
     success, message = user_manager.login(username, password)
     
     if not success:
+        _audit('login', resource_type='auth', resource_id=username,
+               description='Login failed', actor=username, status='failure', error=message)
         return jsonify({'error': message}), 401
     
     session['username'] = username
     gui_logger.info('User logged in: %s', username)
+    _audit('login', resource_type='auth', resource_id=username,
+           description='Login successful', actor=username)
     
     # Initialize picker for this user
     user_ids = user_manager.get_user_ids(username)
@@ -1633,7 +1980,10 @@ def api_auth_logout():
     """Log out the current user"""
     global picker, multi_picker
 
-    gui_logger.info('User logged out: %s', session.get('username'))
+    _username = session.get('username')
+    gui_logger.info('User logged out: %s', _username)
+    _audit('logout', resource_type='auth', resource_id=_username,
+           description='User logged out', actor=_username)
     session.pop('username', None)
 
     with picker_lock:
@@ -6810,11 +7160,20 @@ def api_search_advanced():
         filters = data.get('filters', {})
         
         results = _search_service.search_games(db, query, filters, username)
-        
+        count = len(results)
+
+        # Record in search history (best-effort, never blocks the response)
+        if username and query:
+            try:
+                database.record_search(db, username, query, filters,
+                                       result_count=count)
+            except Exception:
+                pass
+
         return jsonify({
             'query': query,
             'results': results[:50],  # Limit to 50 results
-            'count': len(results),
+            'count': count,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -6905,6 +7264,54 @@ def api_trending_searches():
     finally:
         if db:
             db.close()
+
+
+@app.route('/api/search/history', methods=['GET'])
+@require_login
+def api_get_search_history():
+    """Return the current user's recent search history (Item 3).
+
+    Query parameters:
+      ``limit``  – max results (default 20, max 50)
+
+    Response JSON:
+      ``history``  – list of ``{id, query, filters, result_count, searched_at}``
+      ``count``    – number of results returned
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'history': [], 'count': 0})
+    try:
+        limit = max(1, min(50, int(request.args.get('limit', 20))))
+    except (ValueError, TypeError):
+        limit = 20
+    try:
+        username = get_current_username()
+        db = next(database.get_db())
+        history = database.get_search_history(db, username, limit=limit)
+        return jsonify({'history': history, 'count': len(history)})
+    except Exception as e:
+        gui_logger.error('api_get_search_history error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/search/history', methods=['DELETE'])
+@require_login
+def api_clear_search_history():
+    """Clear the current user's search history (Item 3).
+
+    Response JSON:
+      ``ok``  – True on success
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'ok': True})
+    try:
+        username = get_current_username()
+        db = next(database.get_db())
+        ok = database.clear_search_history(db, username)
+        return jsonify({'ok': ok})
+    except Exception as e:
+        gui_logger.error('api_clear_search_history error: %s', e)
+        return jsonify({'error': str(e)}), 500
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -9250,6 +9657,360 @@ def api_public_settings():
         'leaderboard_public': leaderboard_public == 'true',
         'plugins_enabled': plugins_enabled == 'true',
     })
+
+
+# ---------------------------------------------------------------------------
+# Discord Bot Management API  (admin only)
+# ---------------------------------------------------------------------------
+
+def _discord_bot_is_running() -> bool:
+    """Return True if the managed Discord bot process is alive."""
+    global _discord_bot_process
+    if _discord_bot_process is None:
+        return False
+    return _discord_bot_process.poll() is None
+
+
+def _capture_bot_output(proc: subprocess.Popen) -> None:
+    """Background thread: read stdout/stderr from bot and store recent lines."""
+    try:
+        for raw in proc.stdout:  # type: ignore[union-attr]
+            line = raw.rstrip('\n')
+            with _discord_bot_lock:
+                _discord_bot_log_lines.append(line)
+    except Exception:
+        pass
+
+
+@app.route('/api/admin/discord-bot/status', methods=['GET'])
+@require_admin
+def api_discord_bot_status():
+    """Return the current status of the Discord bot process (admin only).
+
+    Response JSON:
+      - ``running``: bool – whether the bot process is alive
+      - ``pid``: int|null – OS process ID when running
+      - ``log``: list[str] – recent log lines (up to 200)
+    """
+    with _discord_bot_lock:
+        running = _discord_bot_is_running()
+        pid = _discord_bot_process.pid if running else None
+        log = list(_discord_bot_log_lines)
+    return jsonify({'running': running, 'pid': pid, 'log': log})
+
+
+@app.route('/api/admin/discord-bot/start', methods=['POST'])
+@require_admin
+def api_discord_bot_start():
+    """Start the Discord bot process (admin only).
+
+    Expects JSON body with optional ``config_path`` (default: ``config.json``).
+    Returns ``{'started': True}`` on success or an error message.
+
+    The config path is passed to the bot subprocess via the ``GAPI_DISCORD_CONFIG``
+    environment variable, which discord_bot.py should read to locate its config file.
+    """
+    global _discord_bot_process, _discord_bot_log_lines
+    data = request.get_json(silent=True) or {}
+    config_path = data.get('config_path', 'config.json')
+    # Prevent path traversal: resolve against the application base directory and
+    # verify the result stays within that directory.
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    abs_config = os.path.normpath(os.path.join(base_dir, config_path))
+    try:
+        if os.path.commonpath([base_dir, abs_config]) != base_dir:
+            return jsonify({'error': 'Invalid config_path'}), 400
+    except ValueError:
+        return jsonify({'error': 'Invalid config_path'}), 400
+
+    with _discord_bot_lock:
+        if _discord_bot_is_running():
+            return jsonify({'error': 'Discord bot is already running'}), 409
+
+        bot_script = os.path.join(base_dir, 'discord_bot.py')
+        if not os.path.exists(bot_script):
+            return jsonify({'error': 'discord_bot.py not found'}), 500
+
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, bot_script],
+                # GAPI_DISCORD_CONFIG tells discord_bot.py which config file to use
+                env={**os.environ, 'GAPI_DISCORD_CONFIG': abs_config},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            _discord_bot_process = proc
+            _discord_bot_log_lines.clear()
+        except OSError as exc:
+            return jsonify({'error': f'Failed to start bot: {exc}'}), 500
+
+    # Capture output in background thread
+    t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
+    t.start()
+
+    return jsonify({'started': True, 'pid': proc.pid})
+
+
+@app.route('/api/admin/discord-bot/stop', methods=['POST'])
+@require_admin
+def api_discord_bot_stop():
+    """Stop the Discord bot process (admin only).
+
+    Returns ``{'stopped': True}`` on success or an error if not running.
+    """
+    global _discord_bot_process
+    with _discord_bot_lock:
+        if not _discord_bot_is_running():
+            return jsonify({'error': 'Discord bot is not running'}), 409
+
+        proc = _discord_bot_process
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        except OSError:
+            pass
+        _discord_bot_process = None
+
+    return jsonify({'stopped': True})
+
+
+@app.route('/api/admin/discord-bot/stats', methods=['GET'])
+@require_admin
+def api_discord_bot_stats():
+    """Return Discord bot statistics from the config file (admin only).
+
+    Response JSON:
+      - ``running``: bool
+      - ``linked_users``: int – number of Discord→Steam mappings
+      - ``config_exists``: bool – whether discord_config.json is present
+    """
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+    linked_users = 0
+    config_exists = os.path.exists(config_file)
+    if config_exists:
+        try:
+            with open(config_file, 'r') as fh:
+                cfg = json.load(fh)
+                linked_users = len(cfg.get('user_mappings', {}))
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    with _discord_bot_lock:
+        running = _discord_bot_is_running()
+
+    return jsonify({
+        'running': running,
+        'linked_users': linked_users,
+        'config_exists': config_exists,
+    })
+
+
+@app.route('/api/admin/discord-bot/config', methods=['GET'])
+@require_admin
+def api_discord_bot_get_config():
+    """Return Discord bot configuration (admin only).
+
+    Sensitive values (token, API key) are partially masked.
+    Response JSON:
+      - ``discord_token_set``: bool
+      - ``steam_api_key_set``: bool
+      - ``config_exists``: bool
+    """
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    if not os.path.exists(config_path):
+        return jsonify({'config_exists': False, 'discord_token_set': False, 'steam_api_key_set': False})
+    try:
+        with open(config_path, 'r') as fh:
+            cfg = json.load(fh)
+    except (json.JSONDecodeError, IOError):
+        return jsonify({'error': 'Failed to read config.json'}), 500
+
+    token = cfg.get('discord_bot_token', '')
+    steam_key = cfg.get('steam_api_key', '')
+    return jsonify({
+        'config_exists': True,
+        'discord_token_set': bool(token),
+        'steam_api_key_set': bool(steam_key),
+    })
+
+
+@app.route('/api/admin/discord-bot/config', methods=['POST'])
+@require_admin
+def api_discord_bot_save_config():
+    """Save Discord bot token and/or Steam API key (admin only).
+
+    Request JSON (all fields optional):
+      - ``discord_bot_token``: str
+      - ``steam_api_key``: str
+
+    Only non-empty values overwrite the existing config.
+    """
+    data = request.get_json(silent=True) or {}
+    token = data.get('discord_bot_token', '').strip()
+    steam_key = data.get('steam_api_key', '').strip()
+
+    if not token and not steam_key:
+        return jsonify({'error': 'Provide at least discord_bot_token or steam_api_key'}), 400
+
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    cfg: Dict = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as fh:
+                cfg = json.load(fh)
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    if token:
+        cfg['discord_bot_token'] = token
+    if steam_key:
+        cfg['steam_api_key'] = steam_key
+
+    try:
+        gapi._atomic_write_json(config_path, cfg)
+    except IOError as exc:
+        return jsonify({'error': f'Failed to save config: {exc}'}), 500
+
+    return jsonify({'saved': True})
+
+
+@app.route('/api/admin/discord-bot/restart', methods=['POST'])
+@require_admin
+def api_discord_bot_restart():
+    """Restart the Discord bot process (admin only).
+
+    Stops the running bot (if any), then starts a fresh subprocess.
+    Expects optional JSON body with ``config_path``.
+    Returns ``{'restarted': True, 'pid': <pid>}`` on success.
+    """
+    global _discord_bot_process, _discord_bot_log_lines
+    data = request.get_json(silent=True) or {}
+    config_path = data.get('config_path', 'config.json')
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    abs_config = os.path.normpath(os.path.join(base_dir, config_path))
+    try:
+        if os.path.commonpath([base_dir, abs_config]) != base_dir:
+            return jsonify({'error': 'Invalid config_path'}), 400
+    except ValueError:
+        return jsonify({'error': 'Invalid config_path'}), 400
+
+    with _discord_bot_lock:
+        # Terminate existing process if running
+        if _discord_bot_is_running():
+            proc = _discord_bot_process
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            except OSError:
+                pass
+            _discord_bot_process = None
+
+        bot_script = os.path.join(base_dir, 'discord_bot.py')
+        if not os.path.exists(bot_script):
+            return jsonify({'error': 'discord_bot.py not found'}), 500
+
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, bot_script],
+                env={**os.environ, 'GAPI_DISCORD_CONFIG': abs_config},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            _discord_bot_process = proc
+            _discord_bot_log_lines.clear()
+        except OSError as exc:
+            return jsonify({'error': f'Failed to start bot: {exc}'}), 500
+
+    t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
+    t.start()
+    return jsonify({'restarted': True, 'pid': proc.pid})
+
+
+@app.route('/api/admin/discord-bot/users', methods=['GET'])
+@require_admin
+def api_discord_bot_list_users():
+    """List all Discord→Steam user mappings stored in discord_config.json (admin only).
+
+    Response JSON:
+      - ``users``: list of ``{discord_id, steam_id}`` objects
+    """
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+    if not os.path.exists(config_file):
+        return jsonify({'users': []})
+    try:
+        with open(config_file, 'r') as fh:
+            cfg = json.load(fh)
+    except (json.JSONDecodeError, IOError):
+        return jsonify({'users': []})
+
+    mappings = cfg.get('user_mappings', {})
+    users = [{'discord_id': str(k), 'steam_id': v} for k, v in mappings.items()]
+    return jsonify({'users': users})
+
+
+@app.route('/api/admin/discord-bot/users/<discord_id>', methods=['DELETE'])
+@require_admin
+def api_discord_bot_remove_user(discord_id: str):
+    """Remove a Discord→Steam mapping from discord_config.json (admin only).
+
+    Path parameter:
+      - ``discord_id``: the Discord user ID string to remove
+
+    Returns ``{'removed': True}`` on success or ``{'error': ...}`` if not found.
+    """
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+    if not os.path.exists(config_file):
+        return jsonify({'error': 'discord_config.json not found'}), 404
+    try:
+        with open(config_file, 'r') as fh:
+            cfg = json.load(fh)
+    except (json.JSONDecodeError, IOError):
+        return jsonify({'error': 'Failed to read discord_config.json'}), 500
+
+    mappings = cfg.get('user_mappings', {})
+    # Keys may be stored as strings; normalize for lookup
+    if discord_id not in mappings:
+        return jsonify({'error': 'User not found'}), 404
+
+    del mappings[discord_id]
+    cfg['user_mappings'] = mappings
+    try:
+        gapi._atomic_write_json(config_file, cfg)
+    except IOError as exc:
+        return jsonify({'error': f'Failed to save config: {exc}'}), 500
+
+    return jsonify({'removed': True})
+
+
+@app.route('/api/admin/security-info', methods=['GET'])
+@require_admin
+def api_admin_security_info():
+    """Return the active security feature flags (admin only).
+
+    Response JSON:
+      - ``compression_enabled``: bool – Flask-Compress loaded
+      - ``rate_limiting_enabled``: bool – Flask-Limiter loaded
+      - ``security_headers_enabled``: bool – always True (built-in hook)
+    """
+    return jsonify({
+        'compression_enabled': _COMPRESS_AVAILABLE,
+        'rate_limiting_enabled': _LIMITER_AVAILABLE,
+        'security_headers_enabled': True,
+    })
+
+
 # Localization / i18n endpoints
 # ---------------------------------------------------------------------------
 
@@ -10631,6 +11392,1145 @@ def api_swagger_ui():
     return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
+# ---------------------------------------------------------------------------
+# API Usage Statistics  (Phase 9C)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/api-stats', methods=['GET'])
+@require_admin
+def api_admin_api_stats():
+    """Return per-endpoint call counts and latency statistics (admin only).
+
+    Response JSON:
+      ``stats``          – list of endpoint entries, sorted descending by call count.
+                           Each entry has ``endpoint``, ``calls``, ``errors``,
+                           ``avg_ms``, ``min_ms``, ``max_ms``, ``total_ms``.
+      ``endpoint_count`` – number of distinct tracked endpoints.
+    """
+    with _api_stats_lock:
+        rows = [
+            {
+                'endpoint': ep,
+                'calls': s['calls'],
+                'errors': s['errors'],
+                'avg_ms': round(s['total_ms'] / s['calls'], 2) if s['calls'] else 0.0,
+                'min_ms': round(s['min_ms'], 2) if s['min_ms'] is not None else 0.0,
+                'max_ms': round(s['max_ms'], 2),
+                'total_ms': round(s['total_ms'], 2),
+            }
+            for ep, s in _api_endpoint_stats.items()
+        ]
+    # Sort descending by call count for convenience
+    rows.sort(key=lambda r: r['calls'], reverse=True)
+    return jsonify({'stats': rows, 'endpoint_count': len(rows)})
+
+
+@app.route('/api/admin/api-stats/reset', methods=['POST'])
+@require_admin
+def api_admin_api_stats_reset():
+    """Reset all in-memory API usage counters (admin only)."""
+    with _api_stats_lock:
+        _api_endpoint_stats.clear()
+    return jsonify({'reset': True})
+
+
+# ---------------------------------------------------------------------------
+# Client-Side Error Reporting  (Phase 9C)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/errors/report', methods=['POST'])
+def api_errors_report():
+    """Accept a JavaScript error report from the browser.
+
+    Expected JSON body (all fields optional):
+      ``message``    – error message string
+      ``stack``      – stack trace string
+      ``url``        – page URL where the error occurred
+      ``line``       – line number (int)
+      ``col``        – column number (int)
+      ``user_agent`` – browser user-agent string
+
+    The report is stored in a fixed-size ring buffer (most recent
+    ``_CLIENT_ERROR_MAX`` entries) and logged at WARNING level.
+    """
+    data = request.get_json(silent=True, force=True) or {}
+    entry = {
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'message': str(data.get('message', ''))[:500],
+        'stack': str(data.get('stack', ''))[:2000],
+        'url': str(data.get('url', ''))[:500],
+        'line': data.get('line'),
+        'col': data.get('col'),
+        'user_agent': str(
+            data.get('user_agent') or request.headers.get('User-Agent', '')
+        )[:300],
+        'username': get_current_username(),
+    }
+    gui_logger.warning('Client-side error reported: %s at %s', entry['message'], entry['url'])
+    with _client_errors_lock:
+        _client_errors.append(entry)
+    return jsonify({'recorded': True}), 201
+
+
+@app.route('/api/admin/client-errors', methods=['GET'])
+@require_admin
+def api_admin_client_errors():
+    """Return recent client-side error reports (admin only).
+
+    Query params:
+      ``limit`` – max entries to return (default 50, max 200)
+    """
+    try:
+        limit = min(int(request.args.get('limit', 50)), _CLIENT_ERROR_MAX)
+    except (ValueError, TypeError):
+        limit = 50
+    with _client_errors_lock:
+        # Iterate the deque in reverse (newest first) and take only `limit`
+        # items — avoids copying the entire buffer when limit is small.
+        total = len(_client_errors)
+        recent = list(reversed(list(_client_errors)[-limit:] if limit < total else _client_errors))
+    return jsonify({'errors': recent, 'total_stored': total})
+
+
+@app.route('/api/admin/client-errors/clear', methods=['POST'])
+@require_admin
+def api_admin_client_errors_clear():
+    """Clear the client-side error ring buffer (admin only)."""
+    with _client_errors_lock:
+        _client_errors.clear()
+    return jsonify({'cleared': True})
+
+
+# ---------------------------------------------------------------------------
+# API Changelog  (Phase 9C)
+# ---------------------------------------------------------------------------
+
+_API_CHANGELOG = [
+    {
+        'version': 'v2.10.0',
+        'date': '2026-03-02',
+        'changes': [
+            'Added GET /api/admin/api-stats — per-endpoint call counts and latency',
+            'Added POST /api/admin/api-stats/reset — reset usage counters',
+            'Added POST /api/errors/report — client-side JS error ingestion',
+            'Added GET /api/admin/client-errors — view recent client errors',
+            'Added POST /api/admin/client-errors/clear — clear error buffer',
+            'Added GET /api/changelog — this endpoint',
+        ],
+    },
+    {
+        'version': 'v2.9.0',
+        'date': '2026-03-02',
+        'changes': [
+            'Added HTTP security headers (X-Content-Type-Options, X-Frame-Options, '
+            'Referrer-Policy, Permissions-Policy) to all responses',
+            'Added API rate limiting on POST /api/auth/login (20/min, 100/hr) '
+            'and POST /api/auth/register (10/hr) via Flask-Limiter',
+            'Added gzip/brotli response compression via Flask-Compress',
+            'Added GET /api/admin/security-info — security feature status',
+        ],
+    },
+    {
+        'version': 'v2.8.0',
+        'date': '2026-03-01',
+        'changes': [
+            'Added Discord bot admin management endpoints',
+            'Added GET /api/admin/discord/status',
+            'Added POST /api/admin/discord/restart',
+            'Added GET/POST /api/admin/discord/config',
+            'Added GET /api/admin/discord/users',
+            'Added DELETE /api/admin/discord/users/<discord_id>',
+        ],
+    },
+    {
+        'version': 'v2.7.0',
+        'date': '2026-02-15',
+        'changes': [
+            'Phase 9A/9B: Advanced Analytics Dashboard',
+            'Phase 9A/9B: Audit Logging & Activity Tracking',
+            'Phase 9A/9B: Batch Operations (tag, status, playlist, delete, export)',
+            'Phase 9A/9B: Advanced Search & Filtering with saved searches',
+            'Phase 9A/9B: Content Moderation (report, review, profanity filter)',
+        ],
+    },
+]
+
+
+@app.route('/api/changelog', methods=['GET'])
+def api_changelog():
+    """Return a structured API changelog.
+
+    Query params:
+      ``limit`` – max versions to return (default all)
+    """
+    try:
+        limit = int(request.args.get('limit', len(_API_CHANGELOG)))
+        limit = max(1, min(limit, len(_API_CHANGELOG)))
+    except (ValueError, TypeError):
+        limit = len(_API_CHANGELOG)
+    return jsonify({
+        'changelog': _API_CHANGELOG[:limit],
+        'total_versions': len(_API_CHANGELOG),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Database Optimization & Maintenance  (Tier 3, item 10)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/db/stats', methods=['GET'])
+@require_admin
+def api_admin_db_stats():
+    """Return per-table row counts and total database size (admin only).
+
+    Response JSON:
+      ``tables``     – list of ``{table, rows, size_bytes}`` sorted by row count
+      ``total_size_bytes`` – total on-disk DB size (0 if not measurable)
+      ``db_available``     – whether the DB module is loaded
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available', 'db_available': False}), 503
+    try:
+        db = next(database.get_db())
+        tables = database.get_table_stats(db)
+        total_size = database.get_db_size_bytes()
+        return jsonify({
+            'tables': tables,
+            'total_size_bytes': total_size,
+            'db_available': True,
+        })
+    except Exception as e:
+        gui_logger.error('api_admin_db_stats error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/apply-indexes', methods=['GET'])
+@require_admin
+def api_admin_db_apply_indexes_dryrun():
+    """Dry-run: list recommended indexes that are not yet present (admin only).
+
+    Response JSON mirrors ``POST /api/admin/db/apply-indexes`` with
+    ``dry_run: true``.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        result = database.apply_indexes(db, dry_run=True)
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_db_apply_indexes_dryrun error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/apply-indexes', methods=['POST'])
+@require_admin
+def api_admin_db_apply_indexes():
+    """Create all missing recommended indexes (admin only).
+
+    Response JSON:
+      ``applied``  – DDL statements executed
+      ``skipped``  – DDL statements where the index already existed
+      ``errors``   – ``[{sql, error}]`` for any failures
+      ``dry_run``  – always ``false``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        result = database.apply_indexes(db, dry_run=False)
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_db_apply_indexes error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/archive-old-picks', methods=['POST'])
+@require_admin
+def api_admin_db_archive_old_picks():
+    """Delete pick and completed live-session records older than N days (admin only).
+
+    Request JSON body (all optional):
+      ``days`` – retention period in days (default 365, min 1)
+
+    Response JSON:
+      ``deleted_picks``    – number of pick rows removed
+      ``deleted_sessions`` – number of live_session rows removed
+      ``cutoff_date``      – ISO 8601 cutoff timestamp
+      ``days``             – retention period used
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    try:
+        days = max(1, int(data.get('days', 365)))
+    except (ValueError, TypeError):
+        days = 365
+    try:
+        db = next(database.get_db())
+        result = database.archive_old_picks(db, days=days)
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_db_archive_old_picks error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/backup', methods=['GET'])
+@require_admin
+def api_admin_db_backup():
+    """Download a database backup (admin only).
+
+    For SQLite databases: streams the database file as an attachment.
+    For PostgreSQL or other engines: returns connection info and instructions
+    for using pg_dump (no file is streamed).
+
+    Response for non-SQLite:
+      ``message``  – human-readable instructions
+      ``dialect``  – database dialect name
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        import sqlalchemy as _sa
+        dialect = database.engine.dialect.name if database.engine else 'unknown'
+        if dialect == 'sqlite':
+            db_url = str(database.engine.url)
+            path = db_url.replace('sqlite:///', '').replace('sqlite://', '')
+            if not path or not os.path.exists(path):
+                return jsonify({'error': 'SQLite file not found', 'path': path}), 404
+            filename = os.path.basename(path) or 'gapi.db'
+            import datetime as _dt
+            stamp = _dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            download_name = f'gapi_backup_{stamp}.db'
+            return Response(
+                _stream_file(path),
+                mimetype='application/octet-stream',
+                headers={
+                    'Content-Disposition': f'attachment; filename="{download_name}"',
+                    'Content-Length': str(os.path.getsize(path)),
+                },
+            )
+        else:
+            return jsonify({
+                'message': (
+                    f'Automated backup download is only supported for SQLite. '
+                    f'For {dialect}, use the appropriate dump tool '
+                    f'(e.g., pg_dump for PostgreSQL) against your database server.'
+                ),
+                'dialect': dialect,
+            }), 200
+    except Exception as e:
+        gui_logger.error('api_admin_db_backup error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+def _stream_file(path: str, chunk_size: int = 65536):
+    """Generator that yields a file in chunks for streaming responses."""
+    with open(path, 'rb') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+
+# ---------------------------------------------------------------------------
+# Fine-grained Permission endpoints  (Tier 2, item 5)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/permissions', methods=['GET'])
+def api_permissions_list():
+    """Return all defined permissions and the role-to-permission matrix (public).
+
+    Response JSON:
+      ``permissions``   – sorted list of all discrete permission strings
+      ``role_matrix``   – dict mapping role name → list of permissions
+    """
+    return jsonify({
+        'permissions': database.ALL_PERMISSIONS if DB_AVAILABLE else [],
+        'role_matrix': database.PERMISSIONS if DB_AVAILABLE else {},
+    })
+
+
+@app.route('/api/users/<username>/permissions', methods=['GET'])
+@require_login
+def api_get_user_permissions(username: str):
+    """Return the effective permissions for *username* (login required).
+
+    Response JSON mirrors ``database.get_user_permissions``:
+      ``effective``   – currently active permissions
+      ``from_roles``  – permissions derived from roles
+      ``granted``     – explicit per-user grants
+      ``denied``      – explicit per-user denials
+      ``is_admin``    – True when user has wildcard access
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        perms = database.get_user_permissions(db, username)
+        return jsonify(perms)
+    except Exception as e:
+        gui_logger.error('api_get_user_permissions error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/permissions', methods=['POST'])
+@require_admin
+def api_set_user_permissions(username: str):
+    """Grant, deny, or remove a permission override for *username* (admin only).
+
+    Request JSON body:
+      ``permission``   – permission string (required)
+      ``action``       – ``'grant'`` | ``'deny'`` | ``'remove'`` (required)
+
+    Response JSON:
+      ``ok``           – True on success
+      ``permissions``  – updated effective permissions dict
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    permission = str(data.get('permission', '')).strip()
+    action = str(data.get('action', '')).strip().lower()
+    if not permission or action not in ('grant', 'deny', 'remove'):
+        return jsonify({'error': "Required fields: 'permission' and 'action' (grant/deny/remove)"}), 400
+    if permission not in database.ALL_PERMISSIONS:
+        return jsonify({'error': f"Unknown permission '{permission}'"}), 400
+    try:
+        db = next(database.get_db())
+        requesting_user = get_current_username()
+        if action == 'remove':
+            ok = database.remove_user_permission_override(db, username, permission)
+        else:
+            ok = database.set_user_permission_override(
+                db, username, permission,
+                granted=(action == 'grant'),
+                granted_by=requesting_user,
+            )
+        if not ok:
+            return jsonify({'error': 'Failed to update permission'}), 500
+        perms = database.get_user_permissions(db, username)
+        return jsonify({'ok': True, 'permissions': perms})
+    except Exception as e:
+        gui_logger.error('api_set_user_permissions error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/roles/bulk-assign', methods=['POST'])
+@require_admin
+def api_admin_bulk_assign_role():
+    """Assign a role to multiple users at once (admin only).
+
+    Request JSON body:
+      ``role``       – role name to assign (required)
+      ``usernames``  – list of usernames (required, max 200)
+
+    Response JSON:
+      ``assigned``   – list of usernames that were updated
+      ``skipped``    – list of usernames that already had the role / not found
+      ``errors``     – list of ``{username, error}`` for failures
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    role = str(data.get('role', '')).strip()
+    usernames = data.get('usernames', [])
+    if not role:
+        return jsonify({'error': "'role' is required"}), 400
+    if not isinstance(usernames, list) or len(usernames) == 0:
+        return jsonify({'error': "'usernames' must be a non-empty list"}), 400
+    if len(usernames) > 200:
+        return jsonify({'error': "'usernames' may not exceed 200 entries per request"}), 400
+    assigned, skipped, errors = [], [], []
+    try:
+        requesting_user = get_current_username()
+        for uname in usernames:
+            uname = str(uname).strip()
+            if not uname:
+                continue
+            ok, _ = user_manager.update_user_roles(uname, [role], requesting_user)
+            if ok:
+                assigned.append(uname)
+            else:
+                skipped.append(uname)
+        if assigned:
+            _audit('bulk_role_assign', resource_type='user_role', resource_id=role,
+                   description=f'Bulk assigned role "{role}" to {len(assigned)} user(s)',
+                   new_value={'role': role, 'assigned': assigned, 'skipped': skipped})
+    except Exception as e:
+        gui_logger.error('api_admin_bulk_assign_role error: %s', e)
+        errors.append({'error': str(e)})
+    return jsonify({'assigned': assigned, 'skipped': skipped, 'errors': errors})
+
+
+# ---------------------------------------------------------------------------
+# Notification Preferences  (Tier 2, item 6)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/notifications/preferences', methods=['GET'])
+@require_login
+def api_get_notification_prefs():
+    """Return the current user's notification preferences (login required).
+
+    Response JSON fields:
+      ``email_enabled``, ``push_enabled``, ``friend_requests``,
+      ``challenge_updates``, ``trade_offers``, ``team_events``,
+      ``system_announcements``, ``digest_frequency``, ``updated_at``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    username = get_current_username()
+    try:
+        db = next(database.get_db())
+        prefs = database.get_notification_prefs(db, username)
+        return jsonify(prefs)
+    except Exception as e:
+        gui_logger.error('api_get_notification_prefs error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notifications/preferences', methods=['PUT'])
+@require_login
+def api_set_notification_prefs():
+    """Update the current user's notification preferences (login required).
+
+    Accepted JSON body fields (all optional):
+      ``email_enabled`` (bool), ``push_enabled`` (bool),
+      ``friend_requests`` (bool), ``challenge_updates`` (bool),
+      ``trade_offers`` (bool), ``team_events`` (bool),
+      ``system_announcements`` (bool),
+      ``digest_frequency`` (str: ``'never'``|``'daily'``|``'weekly'``)
+
+    Response JSON: updated preference dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    username = get_current_username()
+    data = request.get_json(silent=True, force=True) or {}
+    try:
+        db = next(database.get_db())
+        updated = database.set_notification_prefs(db, username, data)
+        if not updated:
+            return jsonify({'error': 'Failed to save preferences'}), 500
+        return jsonify(updated)
+    except Exception as e:
+        gui_logger.error('api_set_notification_prefs error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notifications/history', methods=['GET'])
+@require_login
+def api_notification_history():
+    """Return paginated notification history for the current user (login required).
+
+    Query parameters:
+      ``limit``   – max results (default 50, max 200)
+      ``offset``  – skip N records (default 0)
+      ``unread``  – if ``'true'``, return only unread notifications
+
+    Response JSON:
+      ``notifications`` – list of notification objects
+      ``total``         – total count of notifications for this user
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'notifications': [], 'total': 0})
+    username = get_current_username()
+    try:
+        limit = max(1, min(200, int(request.args.get('limit', 50))))
+    except (ValueError, TypeError):
+        limit = 50
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (ValueError, TypeError):
+        offset = 0
+    unread_only = request.args.get('unread', '').lower() in ('true', '1', 'yes')
+    try:
+        db = next(database.get_db())
+        notifications = database.get_notifications(db, username, unread_only=unread_only)
+        total = len(notifications)
+        page = notifications[offset: offset + limit]
+        return jsonify({'notifications': page, 'total': total})
+    except Exception as e:
+        gui_logger.error('api_notification_history error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/notifications/broadcast', methods=['POST'])
+@require_admin
+def api_admin_broadcast_notification():
+    """Broadcast a notification to all users or a specific subset (admin only).
+
+    Request JSON body:
+      ``title``      – notification title (required)
+      ``message``    – notification body (required)
+      ``type``       – notification type: ``'info'``|``'warning'``|``'success'``|``'error'``
+                       (default ``'info'``)
+      ``usernames``  – optional list of target usernames; if omitted all users receive it
+
+    Response JSON:
+      ``sent``       – number of notifications created
+      ``skipped``    – number of users skipped (not found in DB)
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    title = str(data.get('title', '')).strip()
+    message = str(data.get('message', '')).strip()
+    notif_type = str(data.get('type', 'info')).strip()
+    if notif_type not in ('info', 'warning', 'success', 'error'):
+        notif_type = 'info'
+    if not title or not message:
+        return jsonify({'error': "'title' and 'message' are required"}), 400
+    target_usernames = data.get('usernames')
+    sent = skipped = 0
+    try:
+        db = next(database.get_db())
+        if target_usernames:
+            usernames = [str(u).strip() for u in target_usernames if str(u).strip()]
+        else:
+            all_users = database.get_all_users(db)
+            usernames = [u.username for u in all_users]
+        for uname in usernames:
+            ok = database.create_notification(db, uname, title, message, notif_type)
+            if ok:
+                sent += 1
+            else:
+                skipped += 1
+        return jsonify({'sent': sent, 'skipped': skipped})
+    except Exception as e:
+        gui_logger.error('api_admin_broadcast_notification error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Error Rate Dashboard  (Tier 3, item 12)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/errors/rate', methods=['GET'])
+@require_admin
+def api_admin_error_rate():
+    """Return client-side error counts bucketed by hour for the last 24 hours (admin only).
+
+    Response JSON:
+      ``buckets``      – list of ``{hour, count}`` objects, newest last (24 items)
+      ``total_24h``    – total errors in last 24h window
+      ``total_all``    – total in the ring buffer (may span > 24h)
+    """
+    from datetime import timedelta
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=24)
+    # Build 24 hour slots: 0 = oldest, 23 = most recent (current partial hour)
+    buckets = [{'hour': (now - timedelta(hours=23 - i)).strftime('%Y-%m-%dT%H:00Z'), 'count': 0}
+               for i in range(24)]
+    total_24h = 0
+    with _client_errors_lock:
+        errors_snapshot = list(_client_errors)
+        total_all = len(errors_snapshot)
+    for err in errors_snapshot:
+        ts_str = err.get('timestamp', '')
+        if not ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_str.replace('Z', ''))
+            # Strip timezone info if present so arithmetic stays offset-naive.
+            if ts.tzinfo is not None:
+                ts = ts.replace(tzinfo=None)
+        except (ValueError, AttributeError):
+            continue
+        if ts < cutoff:
+            continue
+        total_24h += 1
+        diff_hours = int((now - ts).total_seconds() // 3600)
+        slot = 23 - min(diff_hours, 23)
+        buckets[slot]['count'] += 1
+    return jsonify({
+        'buckets': buckets,
+        'total_24h': total_24h,
+        'total_all': total_all,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Similar Games endpoint  (Item 8)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/games/<app_id>/similar', methods=['GET'])
+@require_login
+def api_similar_games(app_id: str):
+    """Return games similar to *app_id* based on genre/tag overlap (login required).
+
+    Query parameters:
+      ``platform``  – game platform (default ``'steam'``)
+      ``limit``     – max results (default 10, max 50)
+
+    Response JSON:
+      ``app_id``    – queried game id
+      ``platform``  – queried platform
+      ``similar``   – list of ``{app_id, game_name, platform, similarity_score}``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'app_id': app_id, 'similar': []})
+    platform = request.args.get('platform', 'steam').strip().lower()
+    try:
+        limit = max(1, min(50, int(request.args.get('limit', 10))))
+    except (ValueError, TypeError):
+        limit = 10
+    try:
+        db = next(database.get_db())
+        similar = database.get_similar_games(db, app_id, platform=platform, limit=limit)
+        return jsonify({'app_id': app_id, 'platform': platform, 'similar': similar})
+    except Exception as e:
+        gui_logger.error('api_similar_games error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing endpoints for Recommendations  (Item 13)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/ab-tests', methods=['POST'])
+@require_admin
+def api_create_ab_test():
+    """Create a new recommendation A/B experiment (admin only).
+
+    Request JSON body:
+      ``name``         – unique experiment name (required)
+      ``variants``     – list of variant strings, e.g. ``["control","ml","collab"]``
+                         (required, min 2)
+      ``description``  – optional description
+
+    Response JSON: serialised experiment dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    name = str(data.get('name', '')).strip()
+    variants = data.get('variants', [])
+    description = str(data.get('description', '')).strip()
+    if not name:
+        return jsonify({'error': "'name' is required"}), 400
+    if not isinstance(variants, list) or len(variants) < 2:
+        return jsonify({'error': "'variants' must be a list with at least 2 entries"}), 400
+    try:
+        db = next(database.get_db())
+        exp = database.create_experiment(
+            db, name=name, variants=variants, description=description,
+            created_by=get_current_username(),
+        )
+        if not exp:
+            return jsonify({'error': 'Failed to create experiment (name may already exist)'}), 409
+        return jsonify(exp), 201
+    except Exception as e:
+        gui_logger.error('api_create_ab_test error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/ab-tests', methods=['GET'])
+@require_admin
+def api_list_ab_tests():
+    """List all recommendation A/B experiments with variant assignment counts (admin only).
+
+    Response JSON:
+      ``experiments`` – list of experiment dicts each containing a ``variant_counts`` sub-dict
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'experiments': []})
+    try:
+        db = next(database.get_db())
+        exps = database.list_experiments(db)
+        for exp in exps:
+            exp['variant_counts'] = database.get_experiment_variant_counts(db, exp['id'])
+        return jsonify({'experiments': exps})
+    except Exception as e:
+        gui_logger.error('api_list_ab_tests error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/ab-tests/<int:experiment_id>', methods=['PATCH'])
+@require_admin
+def api_update_ab_test(experiment_id: int):
+    """Update the status of a recommendation A/B experiment (admin only).
+
+    Request JSON body:
+      ``status``  – one of ``draft``, ``active``, ``paused``, ``concluded``
+
+    Response JSON: updated experiment dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    status = str(data.get('status', '')).strip().lower()
+    valid_statuses = ('draft', 'active', 'paused', 'concluded')
+    if status not in valid_statuses:
+        return jsonify({'error': f"'status' must be one of: {', '.join(valid_statuses)}"}), 400
+    try:
+        db = next(database.get_db())
+        updated = database.update_experiment_status(db, experiment_id, status)
+        if not updated:
+            return jsonify({'error': 'Experiment not found'}), 404
+        return jsonify(updated)
+    except Exception as e:
+        gui_logger.error('api_update_ab_test error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recommendations/variant', methods=['GET'])
+@require_login
+def api_get_recommendation_variant():
+    """Return the A/B experiment variant assigned to the current user (login required).
+
+    Query parameters:
+      ``experiment``  – experiment name (required)
+
+    Response JSON:
+      ``experiment``  – experiment name
+      ``variant``     – assigned variant string, or ``null`` if no active experiment
+    """
+    experiment_name = request.args.get('experiment', '').strip()
+    if not experiment_name:
+        return jsonify({'error': "'experiment' query parameter is required"}), 400
+    if not DB_AVAILABLE:
+        return jsonify({'experiment': experiment_name, 'variant': None})
+    try:
+        db = next(database.get_db())
+        username = get_current_username()
+        variant = database.get_or_assign_variant(db, username, experiment_name)
+        return jsonify({'experiment': experiment_name, 'variant': variant})
+    except Exception as e:
+        gui_logger.error('api_get_recommendation_variant error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# User Suspension / Account Status  (Item 5 — Advanced User Management)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/users/search', methods=['GET'])
+@require_admin
+def api_admin_search_users():
+    """Search and filter users — admin only.
+
+    Query parameters:
+      ``q``       – partial username match
+      ``role``    – filter by role name
+      ``status``  – ``active``, ``suspended``, or ``banned``
+      ``limit``   – max results (default 50, max 200)
+      ``offset``  – pagination offset (default 0)
+
+    Response JSON:
+      ``users`` – list of ``{username, display_name, status, roles, created_at, last_seen}``
+      ``count`` – number of results returned
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'users': [], 'count': 0})
+    q = request.args.get('q', '').strip()
+    role = request.args.get('role', '').strip()
+    status = request.args.get('status', '').strip().lower()
+    try:
+        limit = max(1, min(200, int(request.args.get('limit', 50))))
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (ValueError, TypeError):
+        limit, offset = 50, 0
+    try:
+        db = next(database.get_db())
+        users = database.search_users_admin(db, query=q, role=role,
+                                            status=status, limit=limit, offset=offset)
+        return jsonify({'users': users, 'count': len(users)})
+    except Exception as e:
+        gui_logger.error('api_admin_search_users error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/suspend', methods=['POST'])
+@require_admin
+def api_admin_suspend_user(username: str):
+    """Suspend or permanently ban a user (admin only).
+
+    Request JSON body:
+      ``reason``            – suspension reason (required)
+      ``duration_minutes``  – suspension duration in minutes; omit for permanent ban
+
+    Response JSON: suspension status dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    reason = str(data.get('reason', '')).strip()
+    if not reason:
+        return jsonify({'error': "'reason' is required"}), 400
+    duration = data.get('duration_minutes')
+    if duration is not None:
+        try:
+            duration = int(duration)
+            if duration <= 0:
+                return jsonify({'error': "'duration_minutes' must be a positive integer"}), 400
+        except (ValueError, TypeError):
+            return jsonify({'error': "'duration_minutes' must be an integer"}), 400
+    try:
+        db = next(database.get_db())
+        result = database.suspend_user(
+            db, username, reason=reason,
+            suspended_by=get_current_username(),
+            duration_minutes=duration,
+        )
+        if not result:
+            return jsonify({'error': f"User '{username}' not found"}), 404
+        action = 'suspend_user' if duration else 'ban_user'
+        _audit(action, resource_type='user', resource_id=username,
+               description=f'{"Temporary suspension" if duration else "Permanent ban"}: {reason}',
+               new_value={'reason': reason, 'duration_minutes': duration})
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_suspend_user error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/suspend', methods=['DELETE'])
+@require_admin
+def api_admin_unsuspend_user(username: str):
+    """Lift a user's suspension or ban (admin only).
+
+    Response JSON:
+      ``ok``  – True on success
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        ok = database.unsuspend_user(db, username)
+        if not ok:
+            return jsonify({'error': f"User '{username}' not found or not suspended"}), 404
+        _audit('unsuspend_user', resource_type='user', resource_id=username,
+               description=f'Suspension/ban lifted for user "{username}"')
+        return jsonify({'ok': True, 'username': username})
+    except Exception as e:
+        gui_logger.error('api_admin_unsuspend_user error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/status', methods=['GET'])
+@require_admin
+def api_admin_get_user_status(username: str):
+    """Get the account status for a user (admin only).
+
+    Response JSON:
+      ``username``, ``status`` (``active``/``suspended``/``banned``),
+      ``is_suspended``, ``suspended_until``, ``suspended_reason``, etc.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        result = database.get_user_status(db, username)
+        if not result:
+            return jsonify({'error': f"User '{username}' not found"}), 404
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_get_user_status error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# User Groups  (Item 5 — Advanced User Management)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/user-groups', methods=['POST'])
+@require_admin
+def api_create_user_group():
+    """Create a new user group (admin only).
+
+    Request JSON body:
+      ``name``         – unique group name (required)
+      ``description``  – optional description
+
+    Response JSON: group dict (201).
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': "'name' is required"}), 400
+    description = str(data.get('description', '')).strip()
+    try:
+        db = next(database.get_db())
+        grp = database.create_user_group(db, name=name, description=description,
+                                         created_by=get_current_username())
+        if not grp:
+            return jsonify({'error': 'Failed to create group (name may already exist)'}), 409
+        _audit('create_user_group', resource_type='user_group', resource_id=str(grp.get('id')),
+               description=f'Created user group "{name}"')
+        return jsonify(grp), 201
+    except Exception as e:
+        gui_logger.error('api_create_user_group error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups', methods=['GET'])
+@require_admin
+def api_list_user_groups():
+    """List all user groups with member counts (admin only).
+
+    Response JSON:
+      ``groups`` – list of group dicts each with ``member_count``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'groups': []})
+    try:
+        db = next(database.get_db())
+        groups = database.list_user_groups(db)
+        return jsonify({'groups': groups})
+    except Exception as e:
+        gui_logger.error('api_list_user_groups error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>', methods=['DELETE'])
+@require_admin
+def api_delete_user_group(group_id: int):
+    """Delete a user group and all memberships (admin only)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        ok = database.delete_user_group(db, group_id)
+        if not ok:
+            return jsonify({'error': 'Group not found'}), 404
+        _audit('delete_user_group', resource_type='user_group', resource_id=str(group_id),
+               description=f'Deleted user group {group_id}')
+        return jsonify({'ok': True})
+    except Exception as e:
+        gui_logger.error('api_delete_user_group error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>/members', methods=['POST'])
+@require_admin
+def api_add_group_member(group_id: int):
+    """Add a user to a user group (admin only).
+
+    Request JSON body:
+      ``username``  – username to add (required)
+
+    Response JSON: ``{ok, username, group_id}``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    username = str(data.get('username', '')).strip()
+    if not username:
+        return jsonify({'error': "'username' is required"}), 400
+    try:
+        db = next(database.get_db())
+        result = database.add_group_member(db, group_id, username,
+                                           added_by=get_current_username())
+        if not result.get('ok'):
+            status = 409 if 'Already a member' in result.get('error', '') else 404
+            return jsonify(result), status
+        _audit('add_group_member', resource_type='user_group', resource_id=str(group_id),
+               description=f'Added "{username}" to group {group_id}')
+        return jsonify(result), 201
+    except Exception as e:
+        gui_logger.error('api_add_group_member error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>/members/<username>', methods=['DELETE'])
+@require_admin
+def api_remove_group_member(group_id: int, username: str):
+    """Remove a user from a user group (admin only)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        ok = database.remove_group_member(db, group_id, username)
+        if not ok:
+            return jsonify({'error': 'Member not found in group'}), 404
+        _audit('remove_group_member', resource_type='user_group', resource_id=str(group_id),
+               description=f'Removed "{username}" from group {group_id}')
+        return jsonify({'ok': True})
+    except Exception as e:
+        gui_logger.error('api_remove_group_member error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-groups/<int:group_id>/members', methods=['GET'])
+@require_admin
+def api_get_group_members(group_id: int):
+    """Get the list of members for a user group (admin only).
+
+    Response JSON:
+      ``group_id`` – group identifier
+      ``members``  – list of username strings
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'group_id': group_id, 'members': []})
+    try:
+        db = next(database.get_db())
+        members = database.get_group_members(db, group_id)
+        return jsonify({'group_id': group_id, 'members': members})
+    except Exception as e:
+        gui_logger.error('api_get_group_members error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# User Reputation  (Item 7 — Content Moderation)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/users/<username>/reputation', methods=['GET'])
+@require_login
+def api_get_user_reputation(username: str):
+    """Return the reputation/trust score for *username* (login required).
+
+    Response JSON:
+      ``username``, ``score``, ``violation_count``, ``last_updated``, ``last_action``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'username': username, 'score': 100, 'violation_count': 0,
+                        'last_updated': None, 'last_action': None})
+    try:
+        db = next(database.get_db())
+        rep = database.get_reputation(db, username)
+        if not rep:
+            return jsonify({'error': f"User '{username}' not found"}), 404
+        return jsonify(rep)
+    except Exception as e:
+        gui_logger.error('api_get_user_reputation error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/low-reputation', methods=['GET'])
+@require_admin
+def api_admin_low_reputation_users():
+    """List users with reputation scores at or below a threshold (admin only).
+
+    Query parameters:
+      ``threshold``  – score threshold (default: REPUTATION_AUTO_BAN_THRESHOLD)
+      ``limit``      – max results (default 50, max 200)
+
+    Response JSON:
+      ``threshold``  – threshold used
+      ``users``      – list of ``{username, score, violation_count, last_action, last_updated}``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'threshold': database.REPUTATION_AUTO_BAN_THRESHOLD, 'users': []})
+    try:
+        threshold = int(request.args.get('threshold', database.REPUTATION_AUTO_BAN_THRESHOLD))
+        limit = max(1, min(200, int(request.args.get('limit', 50))))
+    except (ValueError, TypeError):
+        threshold = database.REPUTATION_AUTO_BAN_THRESHOLD
+        limit = 50
+    try:
+        db = next(database.get_db())
+        users = database.get_low_reputation_users(db, threshold=threshold, limit=limit)
+        return jsonify({'threshold': threshold, 'users': users})
+    except Exception as e:
+        gui_logger.error('api_admin_low_reputation_users error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
 def create_templates():
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)
@@ -10642,6 +12542,12 @@ def create_templates():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GAPI - Game Picker</title>
+    <!-- Performance: resource hints for external origins -->
+    <link rel="dns-prefetch" href="//fonts.googleapis.com">
+    <link rel="dns-prefetch" href="//fonts.gstatic.com">
+    <link rel="dns-prefetch" href="//store.steampowered.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <style>
         * {
             margin: 0;

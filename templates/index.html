@@ -4,9 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GAPI - Game Picker</title>
+    <!-- Performance: resource hints for external origins -->
+    <link rel="dns-prefetch" href="//fonts.googleapis.com">
+    <link rel="dns-prefetch" href="//fonts.gstatic.com">
+    <link rel="dns-prefetch" href="//store.steampowered.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <!-- PWA: Web App Manifest + theme colour -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#667eea">
+    <!-- PWA: iOS / Android meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="mobile-web-app-capable" content="yes">
     <style>
         :root {
             /* Color scheme variables - light theme defaults */
@@ -1795,6 +1805,73 @@
 
         <div id="admin-settings-message" style="display:none; padding:10px; border-radius:8px; margin-bottom:14px;"></div>
         <button onclick="saveAdminSettings()" style="padding:12px 32px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:1em;">💾 Save Settings</button>
+
+        <!-- Discord Bot Management -->
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-top:24px;">
+            <h3 style="margin-top:0;">🤖 Discord Bot Management</h3>
+            <p style="color:var(--text-secondary); font-size:0.9em; margin-bottom:16px;">Start, stop and monitor the GAPI Discord bot directly from the admin panel.</p>
+
+            <!-- Status row -->
+            <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px;">
+                <span id="discord-bot-status-dot" style="display:inline-block; width:14px; height:14px; border-radius:50%; background:#ccc; flex-shrink:0;"></span>
+                <span id="discord-bot-status-text" style="font-weight:600;">Unknown</span>
+                <span id="discord-bot-pid" style="color:var(--text-secondary); font-size:0.85em;"></span>
+                <button onclick="loadDiscordBotStatus()" style="margin-left:auto; padding:6px 14px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">🔄 Refresh</button>
+            </div>
+
+            <!-- Stats row -->
+            <div id="discord-bot-stats" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; margin-bottom:16px;">
+                <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; padding:10px; text-align:center;">
+                    <div style="font-size:1.4em; font-weight:700;" id="discord-bot-linked-users">—</div>
+                    <div style="font-size:0.8em; color:var(--text-secondary);">Linked Users</div>
+                </div>
+            </div>
+
+            <!-- Start / Stop buttons -->
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+                <button id="discord-bot-start-btn" onclick="discordBotStart()" style="padding:9px 22px; background:linear-gradient(135deg,#27ae60,#2ecc71); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">▶ Start Bot</button>
+                <button id="discord-bot-stop-btn" onclick="discordBotStop()" style="padding:9px 22px; background:linear-gradient(135deg,#e74c3c,#c0392b); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">⏹ Stop Bot</button>
+                <button id="discord-bot-restart-btn" onclick="discordBotRestart()" style="padding:9px 22px; background:linear-gradient(135deg,#f39c12,#e67e22); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔁 Restart Bot</button>
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-left:auto; font-size:0.88em; color:var(--text-secondary);">
+                    <input type="checkbox" id="discord-bot-autorefresh" onchange="toggleDiscordBotAutoRefresh(this.checked)"> Auto-refresh log
+                </label>
+            </div>
+
+            <!-- Linked Users list -->
+            <details id="discord-bot-users-details" style="margin-bottom:14px;" ontoggle="if(this.open) loadDiscordBotUsers()">
+                <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">👥 Linked Users</summary>
+                <div id="discord-bot-users-list" style="margin-top:10px;">
+                    <p style="color:var(--text-secondary); font-size:0.9em;">Click to load linked users…</p>
+                </div>
+            </details>
+
+            <!-- Configuration -->
+            <details style="margin-bottom:14px;">
+                <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">⚙️ Bot Configuration</summary>
+                <div style="display:grid; gap:12px; margin-top:10px;">
+                    <div id="discord-bot-config-status" style="font-size:0.85em; color:var(--text-secondary);"></div>
+                    <label style="display:flex; flex-direction:column; gap:5px;">
+                        <span style="font-weight:600;">Discord Bot Token</span>
+                        <input type="password" id="discord-bot-token-input" placeholder="Paste new token (leave blank to keep existing)"
+                               style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px;">
+                        <span style="font-weight:600;">Steam API Key</span>
+                        <input type="password" id="discord-bot-steam-key-input" placeholder="Paste new Steam API key (leave blank to keep existing)"
+                               style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                    </label>
+                    <button onclick="saveDiscordBotConfig()" style="padding:9px 22px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; align-self:flex-start;">💾 Save Config</button>
+                </div>
+            </details>
+
+            <!-- Log viewer -->
+            <details>
+                <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">📋 Bot Log</summary>
+                <pre id="discord-bot-log" style="background:#1a1a2e; color:#a8ff78; font-size:0.78em; padding:12px; border-radius:8px; max-height:220px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; margin-top:10px;">No log entries yet.</pre>
+            </details>
+
+            <div id="discord-bot-message" style="display:none; padding:10px; border-radius:8px; margin-top:10px;"></div>
+        </div>
     </div>
 
     <!-- Share Modal -->
@@ -7194,6 +7271,224 @@
         }
 
         // ==============================================================================================
+        // Discord Bot Management
+        // ==============================================================================================
+
+        function _discordBotShowMsg(msg, type) {
+            const el = document.getElementById('discord-bot-message');
+            if (!el) return;
+            el.style.display = 'block';
+            el.style.background = type === 'error' ? '#f8d7da' : '#d4edda';
+            el.style.color = type === 'error' ? '#721c24' : '#155724';
+            el.textContent = msg;
+            setTimeout(() => { el.style.display = 'none'; }, 4000);
+        }
+
+        async function loadDiscordBotStatus() {
+            try {
+                const [statusResp, statsResp] = await Promise.all([
+                    fetch('/api/admin/discord-bot/status'),
+                    fetch('/api/admin/discord-bot/stats'),
+                ]);
+                if (!statusResp.ok) return;
+                const status = await statusResp.json();
+                const dot = document.getElementById('discord-bot-status-dot');
+                const text = document.getElementById('discord-bot-status-text');
+                const pidEl = document.getElementById('discord-bot-pid');
+                if (dot) dot.style.background = status.running ? '#27ae60' : '#e74c3c';
+                if (text) text.textContent = status.running ? 'Running' : 'Stopped';
+                if (pidEl) pidEl.textContent = status.pid ? `PID: ${status.pid}` : '';
+
+                const logEl = document.getElementById('discord-bot-log');
+                if (logEl) {
+                    logEl.textContent = (status.log && status.log.length)
+                        ? status.log.join('\n')
+                        : 'No log entries yet.';
+                    logEl.scrollTop = logEl.scrollHeight;
+                }
+
+                if (statsResp.ok) {
+                    const stats = await statsResp.json();
+                    const luEl = document.getElementById('discord-bot-linked-users');
+                    if (luEl) luEl.textContent = stats.linked_users ?? '—';
+                }
+            } catch (e) {
+                console.warn('Could not load bot status:', e);
+            }
+        }
+
+        async function loadDiscordBotConfig() {
+            try {
+                const resp = await fetch('/api/admin/discord-bot/config');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const cfgStatus = document.getElementById('discord-bot-config-status');
+                if (cfgStatus) {
+                    const parts = [];
+                    parts.push(data.discord_token_set ? '✅ Discord token is set' : '❌ Discord token not set');
+                    parts.push(data.steam_api_key_set ? '✅ Steam API key is set' : '❌ Steam API key not set');
+                    cfgStatus.textContent = parts.join(' · ');
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        async function discordBotStart() {
+            const btn = document.getElementById('discord-bot-start-btn');
+            if (btn) btn.disabled = true;
+            try {
+                const resp = await fetch('/api/admin/discord-bot/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    _discordBotShowMsg(`✅ Discord bot started (PID ${data.pid})`, 'success');
+                    setTimeout(loadDiscordBotStatus, 1000);
+                } else {
+                    _discordBotShowMsg('❌ ' + (data.error || 'Failed to start bot'), 'error');
+                }
+            } catch (e) {
+                _discordBotShowMsg('❌ Error: ' + e.message, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function discordBotStop() {
+            const btn = document.getElementById('discord-bot-stop-btn');
+            if (btn) btn.disabled = true;
+            try {
+                const resp = await fetch('/api/admin/discord-bot/stop', { method: 'POST' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    _discordBotShowMsg('✅ Discord bot stopped', 'success');
+                    setTimeout(loadDiscordBotStatus, 500);
+                } else {
+                    _discordBotShowMsg('❌ ' + (data.error || 'Failed to stop bot'), 'error');
+                }
+            } catch (e) {
+                _discordBotShowMsg('❌ Error: ' + e.message, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function saveDiscordBotConfig() {
+            const token = (document.getElementById('discord-bot-token-input') || {}).value || '';
+            const steamKey = (document.getElementById('discord-bot-steam-key-input') || {}).value || '';
+            if (!token && !steamKey) {
+                _discordBotShowMsg('❌ Provide at least one value to save', 'error');
+                return;
+            }
+            try {
+                const body = {};
+                if (token) body.discord_bot_token = token;
+                if (steamKey) body.steam_api_key = steamKey;
+                const resp = await fetch('/api/admin/discord-bot/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    _discordBotShowMsg('✅ Config saved', 'success');
+                    const tokenInput = document.getElementById('discord-bot-token-input');
+                    const steamInput = document.getElementById('discord-bot-steam-key-input');
+                    if (tokenInput) tokenInput.value = '';
+                    if (steamInput) steamInput.value = '';
+                    loadDiscordBotConfig();
+                } else {
+                    _discordBotShowMsg('❌ ' + (data.error || 'Failed to save config'), 'error');
+                }
+            } catch (e) {
+                _discordBotShowMsg('❌ Error: ' + e.message, 'error');
+            }
+        }
+
+        async function discordBotRestart() {
+            const btn = document.getElementById('discord-bot-restart-btn');
+            if (btn) btn.disabled = true;
+            try {
+                const resp = await fetch('/api/admin/discord-bot/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    _discordBotShowMsg(`✅ Discord bot restarted (PID ${data.pid})`, 'success');
+                    setTimeout(loadDiscordBotStatus, 1000);
+                } else {
+                    _discordBotShowMsg('❌ ' + (data.error || 'Failed to restart bot'), 'error');
+                }
+            } catch (e) {
+                _discordBotShowMsg('❌ Error: ' + e.message, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        let _discordBotAutoRefreshTimer = null;
+
+        function toggleDiscordBotAutoRefresh(enabled) {
+            if (enabled) {
+                _discordBotAutoRefreshTimer = setInterval(loadDiscordBotStatus, 5000);
+            } else {
+                clearInterval(_discordBotAutoRefreshTimer);
+                _discordBotAutoRefreshTimer = null;
+            }
+        }
+
+        // Stop auto-refresh when page unloads to avoid dangling timers
+        window.addEventListener('beforeunload', () => {
+            if (_discordBotAutoRefreshTimer) clearInterval(_discordBotAutoRefreshTimer);
+        });
+
+        async function loadDiscordBotUsers() {
+            const container = document.getElementById('discord-bot-users-list');
+            if (!container) return;
+            container.innerHTML = '<p style="color:var(--text-secondary); font-size:0.9em;">Loading…</p>';
+            try {
+                const resp = await fetch('/api/admin/discord-bot/users');
+                if (!resp.ok) {
+                    container.innerHTML = '<p style="color:#e74c3c;">Failed to load users.</p>';
+                    return;
+                }
+                const data = await resp.json();
+                const users = data.users || [];
+                if (!users.length) {
+                    container.innerHTML = '<p style="color:var(--text-secondary); font-size:0.9em;">No linked users found.</p>';
+                    return;
+                }
+                let html = '<table style="width:100%; border-collapse:collapse; font-size:0.88em;">';
+                html += '<thead><tr><th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--card-border);">Discord ID</th><th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--card-border);">Steam ID</th><th style="padding:6px 8px; border-bottom:1px solid var(--card-border);"></th></tr></thead><tbody>';
+                users.forEach(u => {
+                    html += `<tr>
+                        <td style="padding:6px 8px;">${u.discord_id}</td>
+                        <td style="padding:6px 8px;">${u.steam_id}</td>
+                        <td style="padding:6px 8px; text-align:right;">
+                            <button onclick="discordBotRemoveUser('${u.discord_id}')" style="padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">🗑 Remove</button>
+                        </td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = `<p style="color:#e74c3c;">Error: ${e.message}</p>`;
+            }
+        }
+
+        async function discordBotRemoveUser(discordId) {
+            if (!confirm(`Remove Discord user ${discordId} from linked accounts?`)) return;
+            try {
+                const resp = await fetch(`/api/admin/discord-bot/users/${encodeURIComponent(discordId)}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    _discordBotShowMsg('✅ User removed', 'success');
+                    loadDiscordBotUsers();
+                    loadDiscordBotStatus(); // refresh stats
+                } else {
+                    _discordBotShowMsg('❌ ' + (data.error || 'Failed to remove user'), 'error');
+                }
+            } catch (e) {
+                _discordBotShowMsg('❌ Error: ' + e.message, 'error');
+            }
+        }
+
+        // ==============================================================================================
         // Library Grid / List view toggle
         // ==============================================================================================
 
@@ -7304,7 +7599,13 @@
             // Show/hide admin-tab div (it's outside the normal tab-content set)
             const adminDiv = document.getElementById('admin-tab');
             if (adminDiv) adminDiv.classList.toggle('active', tabName === 'admin');
-            if (tabName === 'admin') loadAdminSettings();
+            if (tabName === 'admin') { loadAdminSettings(); loadDiscordBotStatus(); loadDiscordBotConfig(); }
+            // Pause auto-refresh when leaving the admin tab
+            if (tabName !== 'admin' && _discordBotAutoRefreshTimer) {
+                toggleDiscordBotAutoRefresh(false);
+                const cb = document.getElementById('discord-bot-autorefresh');
+                if (cb) cb.checked = false;
+            }
         };
 
         // Create Room Modal Functions
@@ -9326,6 +9627,19 @@
 
     <!-- Load Phase 9 scripts -->
     <script src="{{ url_for('static', filename='phase9_admin_features.js') }}"></script>
+
+    <!-- PWA: Service worker registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js').then(function(reg) {
+                    console.log('ServiceWorker registered:', reg.scope);
+                }).catch(function(err) {
+                    console.log('ServiceWorker registration failed:', err);
+                });
+            });
+        }
+    </script>
 
 </body>
 </html>
