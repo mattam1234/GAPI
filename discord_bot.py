@@ -582,11 +582,16 @@ class GAPIBot(discord.Client):
             if lobby['min_metacritic'] is not None:
                 filter_bits.append(f"metacritic>={lobby['min_metacritic']}")
 
-            vote_msg = await interaction.response.send_message(
+            await interaction.response.send_message(
                 f"🗳️ Private vote lobby created by {interaction.user.mention}!\n"
                 f"Use `/joinvote` in this channel to join, or react with ✅ below. Join window: **{join_duration}s**\n"
                 f"Vote duration: **{vote_duration}s**, candidates: **{candidates}**\n"
                 f"Filters: {', '.join(filter_bits)}"
+            )
+            
+            # Use followup to get actual message object for reactions
+            vote_msg = await interaction.followup.send(
+                "✅ React with ✅ below to join this private vote!"
             )
             
             # Add join reaction
@@ -1047,7 +1052,12 @@ class GAPIBot(discord.Client):
             )
             embed.set_footer(text=f"Created by {interaction.user.name}")
             
-            poll_msg = await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed)
+            
+            # Use followup to get actual message object for reactions
+            poll_msg = await interaction.followup.send(
+                "React with your choice or ✅ to join!"
+            )
             
             # Store poll data for tracking
             self.active_polls[poll_msg.id] = {
