@@ -51,6 +51,10 @@ class GAPIBot(discord.Client):
         self.active_votes: Dict[int, Dict] = {}  # channel_id -> vote_data
         self.private_vote_lobbies: Dict[int, Dict] = {}  # channel_id -> lobby data
         
+        # Track polls and votes by message ID for reaction-based joining
+        self.active_polls: Dict[int, Dict] = {}  # message_id -> poll_data
+        self.poll_participants: Dict[int, Set[int]] = {}  # message_id -> set of user_ids who joined
+        
         # Discord user to Steam ID mapping
         self.user_mappings: Dict[int, str] = {}  # discord_user_id -> steam_id
         self.load_user_mappings()
@@ -286,7 +290,7 @@ class GAPIBot(discord.Client):
 
     async def _start_public_vote_round(self, channel: discord.abc.Messageable, participants: List[str],
                                        duration: int, num_candidates: int,
-                                       restart_count: int = 0) -> bool:
+                                       restart_count: int = 0, everyone_mention: bool = False) -> bool:
         """Start one public reaction-vote round with a NOTA option."""
         common_games = self.multi_picker.find_common_games(participants)
         if not common_games:
@@ -316,6 +320,7 @@ class GAPIBot(discord.Client):
         for i, game in enumerate(candidate_games):
             description_lines.append(f"{NUMBER_EMOJIS[i]}  **{game.get('name', 'Unknown')}**")
         description_lines.append(f"{nota_emoji}  **None of these**")
+        description_lines.append(f"\n✅ React with ✅ to join this vote!")
 
         embed = discord.Embed(
             title="🗳️ Vote for a Game!" + (f" (Restart {restart_count})" if restart_count else ""),
@@ -323,11 +328,21 @@ class GAPIBot(discord.Client):
             color=discord.Color.green(),
         )
         embed.set_footer(text=f"Session ID: {session.session_id[:8]}")
-        vote_msg = await channel.send(embed=embed)
+        
+        mention_prefix = "@everyone " if everyone_mention else ""
+        vote_msg = await channel.send(mention_prefix, embed=embed)
 
         for i in range(len(candidate_games)):
             await vote_msg.add_reaction(NUMBER_EMOJIS[i])
         await vote_msg.add_reaction(nota_emoji)
+        await vote_msg.add_reaction('✅')  # Join reaction
+
+        # Track for join reactions
+        self.active_polls[vote_msg.id] = {
+            'type': 'vote',
+            'channel_id': channel.id,
+        }
+        self.poll_participants[vote_msg.id] = set()
 
         self.active_votes[channel.id] = {
             'session': session,
@@ -340,6 +355,7 @@ class GAPIBot(discord.Client):
             'num_candidates': num_candidates,
             'restart_count': restart_count,
             'max_restarts': 2,
+            'everyone_mention': everyone_mention,
         }
 
         await asyncio.sleep(duration)
@@ -420,7 +436,7 @@ class GAPIBot(discord.Client):
             )
             await interaction.response.send_message(
                 f"🔗 GAPI URL: {base_url}\n"
-                f"Sessions: Open the 🎯 Sessions tab from {base_url}"
+                f"Sessions: Open the 🎯 Sessions tab from {base_url}/"
             )
 
         @self.tree.command(name='linked', description='Show your current linked Steam account')
@@ -442,11 +458,13 @@ class GAPIBot(discord.Client):
             embed = discord.Embed(
                 title="🤖 GAPI Bot Commands",
                 color=discord.Color.blurple(),
-                description="Quick reference for common commands (votes include a 'None of these' option)"
+                description="Quick reference for common commands. Join polls/votes by reacting with ✅!"
             )
             embed.add_field(name="Account", value="`/link` • `/unlink` • `/linked` • `/users`", inline=False)
             embed.add_field(name="Game Picks", value="`/pick` • `/common` • `/vote` • `/voteprivate` • `/joinvote` • `/leavevote` • `/stats`", inline=False)
+            embed.add_field(name="Events & Polls", value="`/createevent` • `/createpoll` • `/pollstatus`", inline=False)
             embed.add_field(name="Utilities", value="`/url` • `/invite` • `/ping` • `/botstatus` • `/ignore` • `/hunt`", inline=False)
+            embed.add_field(name="ℹ️ Joining", value="React with ✅ to join any active poll, vote, or private vote lobby!", inline=False)
             await interaction.response.send_message(embed=embed)
 
         @self.tree.command(name='ping', description='Check bot latency and API reachability')
@@ -564,14 +582,25 @@ class GAPIBot(discord.Client):
             if lobby['min_metacritic'] is not None:
                 filter_bits.append(f"metacritic>={lobby['min_metacritic']}")
 
-            await interaction.response.send_message(
+            vote_msg = await interaction.response.send_message(
                 f"🗳️ Private vote lobby created by {interaction.user.mention}!\n"
-                f"Use `/joinvote` in this channel to join. Join window: **{join_duration}s**\n"
+                f"Use `/joinvote` in this channel to join, or react with ✅ below. Join window: **{join_duration}s**\n"
                 f"Vote duration: **{vote_duration}s**, candidates: **{candidates}**\n"
                 f"Filters: {', '.join(filter_bits)}"
             )
+            
+            # Add join reaction
+            await vote_msg.add_reaction('✅')
+            
+            # Track this message for ✅ join reactions
+            self.active_polls[vote_msg.id] = {
+                'type': 'private_vote',
+                'channel_id': channel_id,
+                'lobby_id': lobby['lobby_id'],
+            }
+            self.poll_participants[vote_msg.id] = {interaction.user.id}
 
-            asyncio.create_task(self._run_private_vote(channel, lobby))
+            asyncio.create_task(self._run_private_vote(interaction.channel, lobby))
 
         @self.tree.command(name='joinvote', description='Join an active private vote lobby in this channel')
         async def join_vote(interaction: discord.Interaction):
@@ -631,10 +660,11 @@ class GAPIBot(discord.Client):
         @self.tree.command(name='vote', description='Start a voting session to play a game')
         @app_commands.describe(
             duration='Duration in seconds for voting session (default: 60)',
-            candidates='Number of game candidates to vote on (default: 5, max: 10 for public reaction vote)'
+            candidates='Number of game candidates to vote on (default: 5, max: 10 for public reaction vote)',
+            everyone='Include @everyone in the vote notification (default: False)'
         )
         async def start_vote(interaction: discord.Interaction, duration: int = 60,
-                             candidates: int = 5):
+                             candidates: int = 5, everyone: bool = False):
             """Start a public reaction vote for co-op/multiplayer games among linked users."""
             channel_id = interaction.channel_id
             channel = interaction.channel
@@ -657,13 +687,18 @@ class GAPIBot(discord.Client):
                 )
                 return
 
-            await interaction.response.send_message("🔍 Finding common games for a vote…")
+            mention_text = ""
+            if everyone:
+                mention_text = "@everyone - "
+
+            await interaction.response.send_message(f"🔍 {mention_text}Finding common games for a vote…")
             await self._start_public_vote_round(
                 channel=channel,
                 participants=participants,
                 duration=duration,
                 num_candidates=num_candidates,
                 restart_count=0,
+                everyone_mention=everyone,
             )
         
         @self.tree.command(name='pick', description='Pick a random game for mentioned users or all linked users')
@@ -964,6 +999,196 @@ class GAPIBot(discord.Client):
                     
             except Exception as e:
                 await interaction.response.send_message(f"❌ Error: {str(e)}")
+        
+        @self.tree.command(name='createpoll', description='Create a poll with custom options (everyone can vote)')
+        @app_commands.describe(
+            question='The question to ask',
+            option1='First option',
+            option2='Second option',
+            option3='Third option (optional)',
+            option4='Fourth option (optional)',
+            option5='Fifth option (optional)'
+        )
+        async def create_poll(
+            interaction: discord.Interaction,
+            question: str,
+            option1: str,
+            option2: str,
+            option3: Optional[str] = None,
+            option4: Optional[str] = None,
+            option5: Optional[str] = None,
+        ):
+            """Create an interactive poll that anyone can vote on using reactions."""
+            options = [option1, option2, option3, option4, option5]
+            options = [opt for opt in options if opt is not None]
+            
+            if len(options) < 2:
+                await interaction.response.send_message("❌ You need at least 2 options for a poll")
+                return
+            
+            if len(options) > 5:
+                await interaction.response.send_message("❌ Maximum 5 options per poll")
+                return
+            
+            # Emoji reactions for poll options
+            OPTION_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
+            NONE_EMOJI = '❌'
+            
+            poll_description = "\n".join(
+                [f"{OPTION_EMOJIS[i]} {options[i]}" for i in range(len(options))]
+            )
+            poll_description += f"\n{NONE_EMOJI} None of these"
+            poll_description += f"\n\n✅ React with ✅ to join this poll!"
+            
+            embed = discord.Embed(
+                title=f"📊 Poll: {question}",
+                description=poll_description,
+                color=discord.Color.blurple()
+            )
+            embed.set_footer(text=f"Created by {interaction.user.name}")
+            
+            poll_msg = await interaction.response.send_message(embed=embed)
+            
+            # Store poll data for tracking
+            self.active_polls[poll_msg.id] = {
+                'question': question,
+                'options': options,
+                'creator_id': interaction.user.id,
+                'channel_id': interaction.channel_id,
+            }
+            self.poll_participants[poll_msg.id] = {interaction.user.id}  # Creator joins automatically
+            
+            # Add reactions for each option
+            for i in range(len(options)):
+                await poll_msg.add_reaction(OPTION_EMOJIS[i])
+            
+            # Add None of these reaction
+            await poll_msg.add_reaction(NONE_EMOJI)
+            
+            # Add join reaction
+            await poll_msg.add_reaction('✅')
+            
+            await interaction.followup.send(f"✅ Poll created! Vote with {', '.join(OPTION_EMOJIS[:len(options)])} or {NONE_EMOJI}. React with ✅ to join!")
+        
+        @self.tree.command(name='createevent', description='Create a scheduled game event')
+        @app_commands.describe(
+            name='Name of the event',
+            game_name='Game to be played',
+            start_time='Start time in format HH:MM (24-hour format)',
+            duration_minutes='Duration in minutes (default: 120)',
+            description='Event description (optional)'
+        )
+        async def create_event(
+            interaction: discord.Interaction,
+            name: str,
+            game_name: str,
+            start_time: str,
+            duration_minutes: int = 120,
+            description: Optional[str] = None,
+        ):
+            """Create a scheduled Discord event for a game session."""
+            try:
+                # Parse start time
+                if ':' not in start_time:
+                    await interaction.response.send_message("❌ Invalid time format. Use HH:MM (24-hour format)")
+                    return
+                
+                hour, minute = map(int, start_time.split(':'))
+                if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                    await interaction.response.send_message("❌ Invalid time. Hours must be 0-23, minutes 0-59")
+                    return
+                
+                # Calculate start time for today or tomorrow
+                from datetime import datetime, timedelta, timezone
+                now = datetime.now(timezone.utc)
+                event_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                # If the time is in the past today, schedule for tomorrow
+                if event_time <= now:
+                    event_time += timedelta(days=1)
+                
+                # Create event description
+                event_desc = f"🎮 Game: {game_name}\n"
+                if description:
+                    event_desc += f"\n{description}\n"
+                event_desc += f"\nStarted by: {interaction.user.mention}"
+                
+                # Create the Discord event
+                guild = interaction.guild
+                if guild is None:
+                    await interaction.response.send_message("❌ This command must be used in a server")
+                    return
+                
+                # Discord.py event creation
+                event = await guild.create_scheduled_event(
+                    name=name,
+                    start_time=event_time,
+                    end_time=event_time + timedelta(minutes=duration_minutes),
+                    description=event_desc,
+                    entity_type=discord.ScheduledEventEntityType.external,
+                )
+                
+                await interaction.response.send_message(
+                    f"✅ Event created: **{name}**\n"
+                    f"🎮 Game: {game_name}\n"
+                    f"⏰ Start: {event_time.strftime('%H:%M UTC')}\n"
+                    f"⏱️ Duration: {duration_minutes} minutes\n"
+                    f"📅 Event ID: {event.id}"
+                )
+                
+            except ValueError:
+                await interaction.response.send_message("❌ Invalid input. Please check your time format (HH:MM)")
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Failed to create event: {str(e)}")
+        
+        @self.tree.command(name='pollstatus', description='Show active polls and votes in this channel')
+        async def poll_status(interaction: discord.Interaction):
+            """Show all active polls and current participants."""
+            channel_id = interaction.channel_id
+            active_in_channel = []
+            
+            for msg_id, poll_data in self.active_polls.items():
+                if poll_data.get('channel_id') == channel_id:
+                    participants = self.poll_participants.get(msg_id, set())
+                    active_in_channel.append({
+                        'msg_id': msg_id,
+                        'data': poll_data,
+                        'participants': participants,
+                    })
+            
+            if not active_in_channel:
+                await interaction.response.send_message("No active polls or votes in this channel.")
+                return
+            
+            embed = discord.Embed(
+                title=f"📊 Active Polls & Votes ({len(active_in_channel)})",
+                color=discord.Color.blurple()
+            )
+            
+            for item in active_in_channel:
+                msg_id = item['msg_id']
+                poll_data = item['data']
+                participants = item['participants']
+                
+                poll_type = poll_data.get('type', 'poll')
+                participant_list = f"{len(participants)} participant(s)"
+                
+                if poll_type == 'vote':
+                    poll_type_str = "🗳️ Vote"
+                elif poll_type == 'private_vote':
+                    poll_type_str = "🗳️ Private Vote"
+                else:
+                    poll_type_str = "📊 Poll"
+                
+                question = poll_data.get('question', 'Game Vote')
+                embed.add_field(
+                    name=f"{poll_type_str}: {question}",
+                    value=f"Message ID: {msg_id}\n{participant_list}",
+                    inline=False
+                )
+            
+            embed.set_footer(text="React with ✅ to join any active poll or vote!")
+            await interaction.response.send_message(embed=embed)
     
     async def process_vote(self, channel):
         """Process voting results and announce the winning game."""
@@ -983,9 +1208,17 @@ class GAPIBot(discord.Client):
         num_candidates = int(vote_data.get('num_candidates', 5))
         restart_count = int(vote_data.get('restart_count', 0))
         max_restarts = int(vote_data.get('max_restarts', 2))
+        everyone_mention = vote_data.get('everyone_mention', False)
 
         # Clean up active votes entry early to prevent double-processing
         del self.active_votes[channel_id]
+        
+        # Clean up poll tracking for this vote message
+        message_id = vote_msg.id if vote_msg else None
+        if message_id and message_id in self.active_polls:
+            del self.active_polls[message_id]
+        if message_id and message_id in self.poll_participants:
+            del self.poll_participants[message_id]
 
         if not session or not candidate_games:
             await channel.send("❌ Voting session data missing.")
@@ -1045,6 +1278,7 @@ class GAPIBot(discord.Client):
                     duration=duration,
                     num_candidates=num_candidates,
                     restart_count=restart_count + 1,
+                    everyone_mention=everyone_mention,
                 )
                 return
             await channel.send("❌ Vote ended with majority 'None of these' after retries.")
@@ -1091,6 +1325,113 @@ class GAPIBot(discord.Client):
             )
 
         await channel.send(embed=embed)
+
+    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
+        """Handle user joining polls/votes with ✅ reaction."""
+        if user.bot:
+            return
+        
+        # Check if this is a poll or vote message
+        message_id = reaction.message.id
+        
+        if message_id not in self.active_polls:
+            return
+        
+        if str(reaction.emoji) != '✅':
+            return
+        
+        poll_data = self.active_polls[message_id]
+        
+        # Handle regular polls and public votes
+        if poll_data.get('type') != 'private_vote':
+            if message_id not in self.poll_participants:
+                self.poll_participants[message_id] = set()
+            
+            self.poll_participants[message_id].add(user.id)
+            
+            # Send DM or confirmation
+            try:
+                channel = reaction.message.channel
+                await channel.send(f"✅ {user.mention} has joined! Participants: **{len(self.poll_participants[message_id])}**")
+            except Exception:
+                pass
+        
+        # Handle private vote joining
+        else:
+            channel_id = poll_data.get('channel_id')
+            lobby_id = poll_data.get('lobby_id')
+            
+            if channel_id not in self.private_vote_lobbies:
+                return
+            
+            lobby = self.private_vote_lobbies[channel_id]
+            if lobby.get('lobby_id') != lobby_id:
+                return
+            
+            linked_name = self._resolve_linked_user_name(user.id)
+            if not linked_name:
+                try:
+                    await user.send("❌ You must link your Steam account first with `/link` before joining private vote.")
+                except Exception:
+                    pass
+                return
+            
+            if user.id not in lobby.get('joined_ids', set()):
+                lobby['joined_ids'].add(user.id)
+                self.poll_participants[message_id].add(user.id)
+                
+                try:
+                    channel = reaction.message.channel
+                    await channel.send(
+                        f"✅ {user.mention} has joined private vote. "
+                        f"Current participants: **{len(lobby['joined_ids'])}**"
+                    )
+                except Exception:
+                    pass
+    
+    async def on_reaction_remove(self, reaction: discord.Reaction, user: discord.User):
+        """Handle user leaving polls/votes when removing ✅ reaction."""
+        if user.bot:
+            return
+        
+        message_id = reaction.message.id
+        
+        if message_id not in self.active_polls:
+            return
+        
+        if str(reaction.emoji) != '✅':
+            return
+        
+        poll_data = self.active_polls[message_id]
+        
+        if message_id in self.poll_participants:
+            self.poll_participants[message_id].discard(user.id)
+            
+            # Handle private vote removal
+            if poll_data.get('type') == 'private_vote':
+                channel_id = poll_data.get('channel_id')
+                lobby_id = poll_data.get('lobby_id')
+                
+                if channel_id in self.private_vote_lobbies:
+                    lobby = self.private_vote_lobbies[channel_id]
+                    if lobby.get('lobby_id') == lobby_id:
+                        lobby['joined_ids'].discard(user.id)
+                        
+                        # Send notification
+                        try:
+                            channel = reaction.message.channel
+                            participant_count = len(lobby.get('joined_ids', set()))
+                            await channel.send(f"👋 {user.mention} has left. Participants: **{participant_count}**")
+                        except Exception:
+                            pass
+            else:
+                # Send notification for regular polls/votes
+                try:
+                    channel = reaction.message.channel
+                    participant_count = len(self.poll_participants[message_id])
+                    await channel.send(f"👋 {user.mention} has left. Participants: **{participant_count}**")
+                except Exception:
+                    pass
 
 
 def run_bot(token: str, config: Dict):
