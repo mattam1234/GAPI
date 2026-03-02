@@ -4219,6 +4219,33 @@ def api_library_by_tag(tag: str):
 # Game Night Scheduler endpoints
 # ---------------------------------------------------------------------------
 
+def _resolve_schedule_game_image_url(game: Optional[Dict] = None,
+                                     game_appid: Optional[str] = None,
+                                     existing_url: Optional[str] = None) -> str:
+    """Resolve game image using same fallback strategy as game details UI.
+
+    Order:
+    1) explicit existing URL
+    2) game.image_url
+    3) game.header_image
+    4) game.capsule_image
+    5) Steam CDN header by appid
+    """
+    if existing_url:
+        return str(existing_url).strip()
+
+    game = game or {}
+    for key in ('image_url', 'header_image', 'capsule_image'):
+        value = str(game.get(key, '') or '').strip()
+        if value:
+            return value
+
+    appid = str(game_appid or game.get('appid') or game.get('app_id') or '').strip()
+    if appid.isdigit():
+        return f'https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg'
+
+    return ''
+
 @app.route('/api/schedule', methods=['GET'])
 def api_get_schedule():
     """Return all game night events sorted by date/time."""
@@ -4226,6 +4253,12 @@ def api_get_schedule():
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
         events = picker.schedule_service.get_events()
+    for event in events:
+        if not event.get('game_image_url'):
+            event['game_image_url'] = _resolve_schedule_game_image_url(
+                game_appid=event.get('game_appid'),
+                existing_url=event.get('game_image_url')
+            )
     return jsonify({'events': events, 'count': len(events)})
 
 
@@ -4271,6 +4304,20 @@ def api_create_event():
     game_name = str(data.get('game_name', '')).strip()
     game_appid = str(data.get('game_appid', '')).strip() or None
     game_image_url = str(data.get('game_image_url', '')).strip() or None
+    if not game_image_url:
+        with picker_lock:
+            selected_game = next(
+                (
+                    g for g in picker.games
+                    if str(g.get('appid') or g.get('app_id') or '').strip() == str(game_appid or '').strip()
+                ),
+                None
+            )
+        game_image_url = _resolve_schedule_game_image_url(
+            game=selected_game,
+            game_appid=game_appid,
+            existing_url=game_image_url
+        ) or None
     notes = str(data.get('notes', '')).strip()
     create_discord_event = data.get('create_discord_event', False)
     discord_guild_id = data.get('discord_guild_id')
@@ -4530,7 +4577,11 @@ def api_search_games():
     # Clean up game data for response
     clean_results = []
     for game in results:
-        image_url = game.get('image_url') or game.get('header_image') or ''
+        image_url = _resolve_schedule_game_image_url(
+            game=game,
+            game_appid=str(game.get('appid') or game.get('app_id', '')),
+            existing_url=game.get('image_url')
+        )
         clean_results.append({
             'name': game.get('name', ''),
             'appid': str(game.get('appid') or game.get('app_id', '')),
@@ -4666,7 +4717,10 @@ def api_create_discord_event_for_schedule(event_id: str):
         
         # Try to fetch and attach game image
         image_data_uri = None
-        game_image_url = event.get('game_image_url')
+        game_image_url = _resolve_schedule_game_image_url(
+            game_appid=event.get('game_appid'),
+            existing_url=event.get('game_image_url')
+        )
         if game_image_url:
             try:
                 img_resp = requests.get(game_image_url, timeout=5)

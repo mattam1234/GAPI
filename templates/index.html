@@ -4230,8 +4230,9 @@
             
             // Build game image or use fallback
             let gameImageHtml = '';
-            if (ev.game_image_url) {
-                gameImageHtml = `<img src="${ev.game_image_url}" alt="Game" style="max-width:100px; max-height:60px; border-radius:6px; margin-right:10px; object-fit:cover;">`;
+            const eventImageUrl = ev.game_image_url || (ev.game_appid ? `https://cdn.akamai.steamstatic.com/steam/apps/${ev.game_appid}/header.jpg` : '');
+            if (eventImageUrl) {
+                gameImageHtml = `<img src="${eventImageUrl}" alt="Game" style="max-width:100px; max-height:60px; border-radius:6px; margin-right:10px; object-fit:cover;">`;
             }
             
             // Discord event indicator
@@ -4371,7 +4372,8 @@
             console.log('🎮 Game selected:', {appid, name, imageUrl});
             document.getElementById('sch-game').value = name;
             document.getElementById('sch-game-appid').value = appid;
-            document.getElementById('sch-game-image-url').value = imageUrl;
+            const fallbackImageUrl = imageUrl || (appid ? `https://cdn.akamai.steamstatic.com/steam/apps/${appid}/header.jpg` : '');
+            document.getElementById('sch-game-image-url').value = fallbackImageUrl;
             document.getElementById('game-search-dropdown').style.display = 'none';
         }
 
