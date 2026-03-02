@@ -235,6 +235,65 @@ def add_security_headers(response):
     )
     return response
 
+
+# ---------------------------------------------------------------------------
+# API usage statistics — lightweight per-endpoint call counter + latency
+# ---------------------------------------------------------------------------
+
+_api_stats_lock = threading.Lock()
+# endpoint_name -> {'calls': int, 'errors': int, 'total_ms': float,
+#                   'min_ms': float, 'max_ms': float}
+_api_endpoint_stats: Dict[str, Dict] = {}
+# Thread-local storage for per-request start time
+_request_start = threading.local()
+
+_CLIENT_ERROR_MAX = 200  # ring-buffer cap
+
+
+@app.before_request
+def _record_request_start():
+    """Stamp start time on every request for latency tracking."""
+    import time as _time
+    _request_start.t = _time.monotonic()
+
+
+@app.after_request
+def _record_request_stats(response):
+    """Accumulate per-endpoint call counts and latency."""
+    import time as _time
+    try:
+        endpoint = request.endpoint or 'unknown'
+        # Skip non-API and built-in static routes
+        if endpoint in ('static', 'unknown') or not endpoint:
+            return response
+        elapsed_ms = (_time.monotonic() - getattr(_request_start, 't', _time.monotonic())) * 1000
+        is_error = response.status_code >= 400
+        with _api_stats_lock:
+            s = _api_endpoint_stats.setdefault(endpoint, {
+                'calls': 0, 'errors': 0,
+                'total_ms': 0.0, 'min_ms': None, 'max_ms': 0.0,
+            })
+            s['calls'] += 1
+            if is_error:
+                s['errors'] += 1
+            s['total_ms'] += elapsed_ms
+            if s['min_ms'] is None or elapsed_ms < s['min_ms']:
+                s['min_ms'] = elapsed_ms
+            if elapsed_ms > s['max_ms']:
+                s['max_ms'] = elapsed_ms
+    except Exception:
+        pass  # never let instrumentation break a request
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Client-side error ring-buffer
+# ---------------------------------------------------------------------------
+
+_client_errors_lock = threading.Lock()
+_client_errors: collections.deque = collections.deque(maxlen=_CLIENT_ERROR_MAX)
+
+
 # Global game picker instance
 picker: Optional[gapi.GamePicker] = None
 picker_lock = threading.Lock()
@@ -11066,6 +11125,188 @@ def api_swagger_ui():
 </body>
 </html>"""
     return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+# ---------------------------------------------------------------------------
+# API Usage Statistics  (Phase 9C)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/api-stats', methods=['GET'])
+@require_admin
+def api_admin_api_stats():
+    """Return per-endpoint call counts and latency statistics (admin only).
+
+    Response JSON:
+      ``stats``          – list of endpoint entries, sorted descending by call count.
+                           Each entry has ``endpoint``, ``calls``, ``errors``,
+                           ``avg_ms``, ``min_ms``, ``max_ms``, ``total_ms``.
+      ``endpoint_count`` – number of distinct tracked endpoints.
+    """
+    with _api_stats_lock:
+        rows = [
+            {
+                'endpoint': ep,
+                'calls': s['calls'],
+                'errors': s['errors'],
+                'avg_ms': round(s['total_ms'] / s['calls'], 2) if s['calls'] else 0.0,
+                'min_ms': round(s['min_ms'], 2) if s['min_ms'] is not None else 0.0,
+                'max_ms': round(s['max_ms'], 2),
+                'total_ms': round(s['total_ms'], 2),
+            }
+            for ep, s in _api_endpoint_stats.items()
+        ]
+    # Sort descending by call count for convenience
+    rows.sort(key=lambda r: r['calls'], reverse=True)
+    return jsonify({'stats': rows, 'endpoint_count': len(rows)})
+
+
+@app.route('/api/admin/api-stats/reset', methods=['POST'])
+@require_admin
+def api_admin_api_stats_reset():
+    """Reset all in-memory API usage counters (admin only)."""
+    with _api_stats_lock:
+        _api_endpoint_stats.clear()
+    return jsonify({'reset': True})
+
+
+# ---------------------------------------------------------------------------
+# Client-Side Error Reporting  (Phase 9C)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/errors/report', methods=['POST'])
+def api_errors_report():
+    """Accept a JavaScript error report from the browser.
+
+    Expected JSON body (all fields optional):
+      ``message``    – error message string
+      ``stack``      – stack trace string
+      ``url``        – page URL where the error occurred
+      ``line``       – line number (int)
+      ``col``        – column number (int)
+      ``user_agent`` – browser user-agent string
+
+    The report is stored in a fixed-size ring buffer (most recent
+    ``_CLIENT_ERROR_MAX`` entries) and logged at WARNING level.
+    """
+    data = request.get_json(silent=True, force=True) or {}
+    entry = {
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'message': str(data.get('message', ''))[:500],
+        'stack': str(data.get('stack', ''))[:2000],
+        'url': str(data.get('url', ''))[:500],
+        'line': data.get('line'),
+        'col': data.get('col'),
+        'user_agent': str(
+            data.get('user_agent') or request.headers.get('User-Agent', '')
+        )[:300],
+        'username': get_current_username(),
+    }
+    gui_logger.warning('Client-side error reported: %s at %s', entry['message'], entry['url'])
+    with _client_errors_lock:
+        _client_errors.append(entry)
+    return jsonify({'recorded': True}), 201
+
+
+@app.route('/api/admin/client-errors', methods=['GET'])
+@require_admin
+def api_admin_client_errors():
+    """Return recent client-side error reports (admin only).
+
+    Query params:
+      ``limit`` – max entries to return (default 50, max 200)
+    """
+    try:
+        limit = min(int(request.args.get('limit', 50)), _CLIENT_ERROR_MAX)
+    except (ValueError, TypeError):
+        limit = 50
+    with _client_errors_lock:
+        # Iterate the deque in reverse (newest first) and take only `limit`
+        # items — avoids copying the entire buffer when limit is small.
+        total = len(_client_errors)
+        recent = list(reversed(list(_client_errors)[-limit:] if limit < total else _client_errors))
+    return jsonify({'errors': recent, 'total_stored': total})
+
+
+@app.route('/api/admin/client-errors/clear', methods=['POST'])
+@require_admin
+def api_admin_client_errors_clear():
+    """Clear the client-side error ring buffer (admin only)."""
+    with _client_errors_lock:
+        _client_errors.clear()
+    return jsonify({'cleared': True})
+
+
+# ---------------------------------------------------------------------------
+# API Changelog  (Phase 9C)
+# ---------------------------------------------------------------------------
+
+_API_CHANGELOG = [
+    {
+        'version': 'v2.10.0',
+        'date': '2026-03-02',
+        'changes': [
+            'Added GET /api/admin/api-stats — per-endpoint call counts and latency',
+            'Added POST /api/admin/api-stats/reset — reset usage counters',
+            'Added POST /api/errors/report — client-side JS error ingestion',
+            'Added GET /api/admin/client-errors — view recent client errors',
+            'Added POST /api/admin/client-errors/clear — clear error buffer',
+            'Added GET /api/changelog — this endpoint',
+        ],
+    },
+    {
+        'version': 'v2.9.0',
+        'date': '2026-03-02',
+        'changes': [
+            'Added HTTP security headers (X-Content-Type-Options, X-Frame-Options, '
+            'Referrer-Policy, Permissions-Policy) to all responses',
+            'Added API rate limiting on POST /api/auth/login (20/min, 100/hr) '
+            'and POST /api/auth/register (10/hr) via Flask-Limiter',
+            'Added gzip/brotli response compression via Flask-Compress',
+            'Added GET /api/admin/security-info — security feature status',
+        ],
+    },
+    {
+        'version': 'v2.8.0',
+        'date': '2026-03-01',
+        'changes': [
+            'Added Discord bot admin management endpoints',
+            'Added GET /api/admin/discord/status',
+            'Added POST /api/admin/discord/restart',
+            'Added GET/POST /api/admin/discord/config',
+            'Added GET /api/admin/discord/users',
+            'Added DELETE /api/admin/discord/users/<discord_id>',
+        ],
+    },
+    {
+        'version': 'v2.7.0',
+        'date': '2026-02-15',
+        'changes': [
+            'Phase 9A/9B: Advanced Analytics Dashboard',
+            'Phase 9A/9B: Audit Logging & Activity Tracking',
+            'Phase 9A/9B: Batch Operations (tag, status, playlist, delete, export)',
+            'Phase 9A/9B: Advanced Search & Filtering with saved searches',
+            'Phase 9A/9B: Content Moderation (report, review, profanity filter)',
+        ],
+    },
+]
+
+
+@app.route('/api/changelog', methods=['GET'])
+def api_changelog():
+    """Return a structured API changelog.
+
+    Query params:
+      ``limit`` – max versions to return (default all)
+    """
+    try:
+        limit = int(request.args.get('limit', len(_API_CHANGELOG)))
+        limit = max(1, min(limit, len(_API_CHANGELOG)))
+    except (ValueError, TypeError):
+        limit = len(_API_CHANGELOG)
+    return jsonify({
+        'changelog': _API_CHANGELOG[:limit],
+        'total_versions': len(_API_CHANGELOG),
+    })
 
 
 def create_templates():
