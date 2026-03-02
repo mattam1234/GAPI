@@ -4300,6 +4300,7 @@
                 create_discord_event: createDiscord,
                 discord_guild_id: guildId || null,
             };
+            console.log('📤 Submitting schedule:', body);
             try {
                 let resp;
                 if (editId) {
@@ -4331,6 +4332,7 @@
                     });
                     if (!resp.ok) return;
                     const data = await resp.json();
+                    console.log('🔍 Game search results:', data.results);
                     const dropdown = document.getElementById('game-search-dropdown');
                     if (!data.results || data.results.length === 0) {
                         dropdown.innerHTML = '<div style="padding:10px; color:var(--text-secondary);">No games found</div>';
@@ -4366,6 +4368,7 @@
         }
 
         function selectGame(appid, name, imageUrl) {
+            console.log('🎮 Game selected:', {appid, name, imageUrl});
             document.getElementById('sch-game').value = name;
             document.getElementById('sch-game-appid').value = appid;
             document.getElementById('sch-game-image-url').value = imageUrl;

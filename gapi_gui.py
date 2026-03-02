@@ -4275,6 +4275,8 @@ def api_create_event():
     create_discord_event = data.get('create_discord_event', False)
     discord_guild_id = data.get('discord_guild_id')
     
+    gui_logger.info(f'Creating schedule event: title={title}, game_name={game_name}, game_appid={game_appid}, game_image_url={game_image_url}, create_discord={create_discord_event}')
+    
     with picker_lock:
         event = picker.schedule_service.add_event(
             title, date, time_str, attendees, game_name, notes,
@@ -4331,13 +4333,19 @@ def api_create_event():
                 # Try to add game image
                 if game_image_url:
                     try:
+                        gui_logger.info(f'Fetching game image from: {game_image_url}')
                         img_resp = requests.get(game_image_url, timeout=5)
                         if img_resp.status_code == 200 and len(img_resp.content) < 10 * 1024 * 1024:
                             content_type = img_resp.headers.get('content-type', 'image/jpeg')
                             img_base64 = base64.b64encode(img_resp.content).decode('utf-8')
                             payload['image'] = f"data:{content_type};base64,{img_base64}"
-                    except Exception:
-                        pass
+                            gui_logger.info(f'Successfully added game image to Discord event (size: {len(img_resp.content)} bytes)')
+                        else:
+                            gui_logger.warning(f'Image fetch failed or too large: status={img_resp.status_code}, size={len(img_resp.content)}')
+                    except Exception as img_err:
+                        gui_logger.error(f'Error fetching game image: {img_err}')
+                else:
+                    gui_logger.info('No game_image_url provided for Discord event')
                 
                 # Create Discord event
                 discord_api_url = f'https://discord.com/api/v10/guilds/{discord_guild_id}/scheduled-events'
@@ -4522,12 +4530,17 @@ def api_search_games():
     # Clean up game data for response
     clean_results = []
     for game in results:
+        image_url = game.get('image_url') or game.get('header_image') or ''
         clean_results.append({
             'name': game.get('name', ''),
             'appid': str(game.get('appid') or game.get('app_id', '')),
-            'image_url': game.get('image_url') or game.get('header_image') or '',
+            'image_url': image_url,
             'platform': game.get('platform', 'steam'),
         })
+    
+    gui_logger.debug(f'Game search for "{query}" returned {len(clean_results)} results')
+    if clean_results:
+        gui_logger.debug(f'First result: {clean_results[0]}')
     
     return jsonify({'results': clean_results, 'count': len(clean_results)})
 
