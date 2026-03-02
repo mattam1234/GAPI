@@ -4268,6 +4268,19 @@
             if (ev.discord_event_id) {
                 discordBadge = `<span style="margin-left:8px; padding:4px 8px; background:#5865F2; color:white; border-radius:4px; font-size:0.8em;">📢 Discord Event</span>`;
             }
+
+            let discordLinkedInfo = '';
+            if (ev.discord_event_id) {
+                const guildId = String(ev.discord_guild_id || '').trim();
+                const eventId = String(ev.discord_event_id || '').trim();
+                const discordEventUrl = guildId && eventId ? `https://discord.com/events/${guildId}/${eventId}` : '';
+                discordLinkedInfo = `
+                    <div style="margin-top:8px; font-size:0.82em; color:var(--text-secondary); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <span>🔗 Linked to Discord${guildId ? ` · Guild: ${guildId}` : ''}${eventId ? ` · Event: ${eventId}` : ''}</span>
+                        ${discordEventUrl ? `<a href="${discordEventUrl}" target="_blank" style="color:#5865F2; text-decoration:none;">Open Event ↗</a>` : ''}
+                    </div>
+                `;
+            }
             
             return `<div style="padding:15px 20px; border:1px solid var(--card-border); border-radius:10px; margin-bottom:10px; background:var(--card-bg);">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
@@ -4285,6 +4298,7 @@
                     👥 ${safeAttendees}
                     ${safeNotes ? `<span style="margin-left:12px;">📝 ${safeNotes}</span>` : ''}
                 </div>
+                ${discordLinkedInfo}
                 ${ev.game_appid ? `
                 <div style="margin-top:8px; padding:10px; background:var(--list-hover); border-radius:8px;">
                     <div id="schedule-game-desc-${ev.id}" style="font-size:0.9em; line-height:1.5; color:var(--text-primary);">
