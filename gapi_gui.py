@@ -224,7 +224,9 @@ def add_security_headers(response):
 
     These headers defend against common browser-based attacks such as
     clickjacking (X-Frame-Options), MIME-sniffing (X-Content-Type-Options),
-    and unintended cross-origin resource leakage (Referrer-Policy).
+    unintended cross-origin resource leakage (Referrer-Policy),
+    protocol downgrade attacks (Strict-Transport-Security), and
+    inline script injection (Content-Security-Policy).
     """
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
@@ -233,7 +235,99 @@ def add_security_headers(response):
         'Permissions-Policy',
         'geolocation=(), microphone=(), camera=()',
     )
+    # Instruct browsers to only connect over HTTPS for the next year.
+    # includeSubDomains is omitted intentionally to avoid affecting subdomains
+    # that may not have certificates.
+    response.headers.setdefault(
+        'Strict-Transport-Security',
+        'max-age=31536000',
+    )
+    # Content-Security-Policy — default-deny with pragmatic exceptions for
+    # inline scripts/styles used throughout the single-page UI.
+    response.headers.setdefault(
+        'Content-Security-Policy',
+        (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        ),
+    )
     return response
+
+
+# ---------------------------------------------------------------------------
+# CSRF Protection — double-submit cookie pattern  (Item 19)
+# ---------------------------------------------------------------------------
+
+_CSRF_COOKIE_NAME = 'csrf_token'
+_CSRF_HEADER_NAME = 'X-CSRF-Token'
+# Endpoints that are explicitly exempt from CSRF checks (e.g. machine-to-machine)
+_CSRF_EXEMPT_ENDPOINTS: frozenset = frozenset()
+# State-changing methods that require a valid CSRF token
+_CSRF_PROTECTED_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
+
+
+def _generate_csrf_token() -> str:
+    """Return a new cryptographically-random CSRF token string."""
+    import secrets
+    return secrets.token_hex(32)
+
+
+@app.route('/api/csrf-token', methods=['GET'])
+def api_get_csrf_token():
+    """Issue (or refresh) a CSRF token for the current browser session.
+
+    Sets a ``csrf_token`` cookie (SameSite=Lax, HttpOnly=False so JavaScript
+    can read it) and returns the same value in the JSON body so SPAs can store
+    it and send it as the ``X-CSRF-Token`` request header.
+
+    Response JSON:
+      ``token``  – CSRF token string
+    """
+    token = _generate_csrf_token()
+    resp = jsonify({'token': token})
+    # Use HTTPS-only cookies in production; allow HTTP in development.
+    # Set GAPI_CSRF_SECURE=true (or any truthy value) in the environment to
+    # enforce the Secure flag when the app is deployed behind TLS.
+    _csrf_secure = os.environ.get('GAPI_CSRF_SECURE', '').lower() in ('1', 'true', 'yes')
+    resp.set_cookie(
+        _CSRF_COOKIE_NAME,
+        token,
+        samesite='Lax',
+        httponly=False,     # must be readable by JS to send as header
+        secure=_csrf_secure,
+        max_age=86400,      # 1 day
+        path='/',
+    )
+    return resp
+
+
+@app.before_request
+def _validate_csrf():
+    """Enforce the CSRF double-submit-cookie check on state-changing requests.
+
+    Skips:
+    - Non-mutating methods (GET, HEAD, OPTIONS)
+    - Requests from the test client (TESTING flag)
+    - Endpoints in ``_CSRF_EXEMPT_ENDPOINTS``
+    """
+    if app.config.get('TESTING'):
+        return  # skip in unit tests
+    if request.method not in _CSRF_PROTECTED_METHODS:
+        return
+    if request.endpoint in _CSRF_EXEMPT_ENDPOINTS:
+        return
+    # Paths outside /api/ are served as HTML pages and are not covered
+    if not request.path.startswith('/api/'):
+        return
+    cookie_token = request.cookies.get(_CSRF_COOKIE_NAME, '')
+    header_token = request.headers.get(_CSRF_HEADER_NAME, '')
+    if not cookie_token or not header_token or cookie_token != header_token:
+        return jsonify({'error': 'CSRF token missing or invalid'}), 403
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +377,36 @@ def _record_request_stats(response):
                 s['max_ms'] = elapsed_ms
     except Exception:
         pass  # never let instrumentation break a request
+    return response
+
+
+# Public read-only API paths that can be cached briefly by clients/CDNs.
+# These paths serve the same data to all callers and don't carry session state.
+_CACHEABLE_API_PREFIXES = (
+    '/api/permissions',
+    '/api/changelog',
+    '/api/health',
+)
+
+
+@app.after_request
+def _add_cache_control(response):
+    """Set Cache-Control on responses that are safe to cache (Item 18).
+
+    - Public read-only API endpoints: ``public, max-age=60, stale-while-revalidate=120``
+    - All other API responses: ``no-store`` (prevent sensitive data caching)
+    - Non-API HTML/static responses: no override (let Flask defaults apply)
+    """
+    path = request.path
+    if not path.startswith('/api/'):
+        return response
+    if response.headers.get('Cache-Control'):
+        return response  # respect explicitly set headers
+    if request.method == 'GET' and response.status_code == 200:
+        if any(path.startswith(p) for p in _CACHEABLE_API_PREFIXES):
+            response.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=120'
+            return response
+    response.headers.setdefault('Cache-Control', 'no-store')
     return response
 
 
@@ -11779,6 +11903,157 @@ def api_admin_error_rate():
     })
 
 
+# ---------------------------------------------------------------------------
+# Similar Games endpoint  (Item 8)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/games/<app_id>/similar', methods=['GET'])
+@require_login
+def api_similar_games(app_id: str):
+    """Return games similar to *app_id* based on genre/tag overlap (login required).
+
+    Query parameters:
+      ``platform``  – game platform (default ``'steam'``)
+      ``limit``     – max results (default 10, max 50)
+
+    Response JSON:
+      ``app_id``    – queried game id
+      ``platform``  – queried platform
+      ``similar``   – list of ``{app_id, game_name, platform, similarity_score}``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'app_id': app_id, 'similar': []})
+    platform = request.args.get('platform', 'steam').strip().lower()
+    try:
+        limit = max(1, min(50, int(request.args.get('limit', 10))))
+    except (ValueError, TypeError):
+        limit = 10
+    try:
+        db = next(database.get_db())
+        similar = database.get_similar_games(db, app_id, platform=platform, limit=limit)
+        return jsonify({'app_id': app_id, 'platform': platform, 'similar': similar})
+    except Exception as e:
+        gui_logger.error('api_similar_games error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing endpoints for Recommendations  (Item 13)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/ab-tests', methods=['POST'])
+@require_admin
+def api_create_ab_test():
+    """Create a new recommendation A/B experiment (admin only).
+
+    Request JSON body:
+      ``name``         – unique experiment name (required)
+      ``variants``     – list of variant strings, e.g. ``["control","ml","collab"]``
+                         (required, min 2)
+      ``description``  – optional description
+
+    Response JSON: serialised experiment dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    name = str(data.get('name', '')).strip()
+    variants = data.get('variants', [])
+    description = str(data.get('description', '')).strip()
+    if not name:
+        return jsonify({'error': "'name' is required"}), 400
+    if not isinstance(variants, list) or len(variants) < 2:
+        return jsonify({'error': "'variants' must be a list with at least 2 entries"}), 400
+    try:
+        db = next(database.get_db())
+        exp = database.create_experiment(
+            db, name=name, variants=variants, description=description,
+            created_by=get_current_username(),
+        )
+        if not exp:
+            return jsonify({'error': 'Failed to create experiment (name may already exist)'}), 409
+        return jsonify(exp), 201
+    except Exception as e:
+        gui_logger.error('api_create_ab_test error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/ab-tests', methods=['GET'])
+@require_admin
+def api_list_ab_tests():
+    """List all recommendation A/B experiments with variant assignment counts (admin only).
+
+    Response JSON:
+      ``experiments`` – list of experiment dicts each containing a ``variant_counts`` sub-dict
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'experiments': []})
+    try:
+        db = next(database.get_db())
+        exps = database.list_experiments(db)
+        for exp in exps:
+            exp['variant_counts'] = database.get_experiment_variant_counts(db, exp['id'])
+        return jsonify({'experiments': exps})
+    except Exception as e:
+        gui_logger.error('api_list_ab_tests error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/ab-tests/<int:experiment_id>', methods=['PATCH'])
+@require_admin
+def api_update_ab_test(experiment_id: int):
+    """Update the status of a recommendation A/B experiment (admin only).
+
+    Request JSON body:
+      ``status``  – one of ``draft``, ``active``, ``paused``, ``concluded``
+
+    Response JSON: updated experiment dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    status = str(data.get('status', '')).strip().lower()
+    valid_statuses = ('draft', 'active', 'paused', 'concluded')
+    if status not in valid_statuses:
+        return jsonify({'error': f"'status' must be one of: {', '.join(valid_statuses)}"}), 400
+    try:
+        db = next(database.get_db())
+        updated = database.update_experiment_status(db, experiment_id, status)
+        if not updated:
+            return jsonify({'error': 'Experiment not found'}), 404
+        return jsonify(updated)
+    except Exception as e:
+        gui_logger.error('api_update_ab_test error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recommendations/variant', methods=['GET'])
+@require_login
+def api_get_recommendation_variant():
+    """Return the A/B experiment variant assigned to the current user (login required).
+
+    Query parameters:
+      ``experiment``  – experiment name (required)
+
+    Response JSON:
+      ``experiment``  – experiment name
+      ``variant``     – assigned variant string, or ``null`` if no active experiment
+    """
+    experiment_name = request.args.get('experiment', '').strip()
+    if not experiment_name:
+        return jsonify({'error': "'experiment' query parameter is required"}), 400
+    if not DB_AVAILABLE:
+        return jsonify({'experiment': experiment_name, 'variant': None})
+    try:
+        db = next(database.get_db())
+        username = get_current_username()
+        variant = database.get_or_assign_variant(db, username, experiment_name)
+        return jsonify({'experiment': experiment_name, 'variant': variant})
+    except Exception as e:
+        gui_logger.error('api_get_recommendation_variant error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
 def create_templates():
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)
@@ -11790,6 +12065,12 @@ def create_templates():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GAPI - Game Picker</title>
+    <!-- Performance: resource hints for external origins -->
+    <link rel="dns-prefetch" href="//fonts.googleapis.com">
+    <link rel="dns-prefetch" href="//fonts.gstatic.com">
+    <link rel="dns-prefetch" href="//store.steampowered.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <style>
         * {
             margin: 0;

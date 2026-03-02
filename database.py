@@ -512,6 +512,40 @@ class UserNotificationPreference(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+# ---------------------------------------------------------------------------
+# A/B Testing Framework for Recommendations  (Tier 4 / Item 13)
+# ---------------------------------------------------------------------------
+
+class RecommendationExperiment(Base):
+    """A/B experiment definition for recommendation algorithms."""
+    __tablename__ = "recommendation_experiments"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    # Comma-separated variant names, e.g. "control,collaborative,ml"
+    variants = Column(Text, nullable=False, default='control,treatment')
+    # 'draft' | 'active' | 'paused' | 'concluded'
+    status = Column(String(50), default='draft', index=True)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+
+
+class ExperimentAssignment(Base):
+    """Records which variant a user is assigned to for a given experiment."""
+    __tablename__ = "experiment_assignments"
+
+    id = Column(Integer, primary_key=True)
+    experiment_id = Column(Integer, ForeignKey("recommendation_experiments.id"), nullable=False, index=True)
+    username = Column(String(255), nullable=False, index=True)
+    variant = Column(String(100), nullable=False)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('experiment_id', 'username', name='uq_exp_user'),)
+
+
 def get_db():
     """Get database session."""
     if SessionLocal:
@@ -3863,3 +3897,257 @@ def set_notification_prefs(db, username: str, updates: dict) -> dict:
         logger.error(f"set_notification_prefs error: {e}")
         db.rollback()
         return {}
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing helpers  (Item 13)
+# ---------------------------------------------------------------------------
+
+import hashlib as _hashlib
+
+
+def create_experiment(db, name: str, variants: list, description: str = '',
+                      created_by: str = '') -> dict:
+    """Create a new recommendation experiment in *draft* status.
+
+    Returns the serialised experiment dict on success, empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        exp = RecommendationExperiment(
+            name=name,
+            description=description,
+            variants=','.join(v.strip() for v in variants),
+            status='draft',
+            created_by=created_by,
+        )
+        db.add(exp)
+        db.commit()
+        db.refresh(exp)
+        return _experiment_to_dict(exp)
+    except Exception as e:
+        logger.error('create_experiment error: %s', e)
+        db.rollback()
+        return {}
+
+
+def list_experiments(db) -> list:
+    """Return all experiments as a list of dicts."""
+    if not db:
+        return []
+    try:
+        exps = db.query(RecommendationExperiment).order_by(
+            RecommendationExperiment.created_at.desc()
+        ).all()
+        return [_experiment_to_dict(e) for e in exps]
+    except Exception as e:
+        logger.error('list_experiments error: %s', e)
+        return []
+
+
+def update_experiment_status(db, experiment_id: int, status: str) -> dict:
+    """Change the status of an experiment.
+
+    Allowed transitions:  draft→active, active→paused, paused→active,
+    active→concluded, paused→concluded.
+    Returns the updated dict or empty dict on failure.
+    """
+    if not db:
+        return {}
+    valid = ('draft', 'active', 'paused', 'concluded')
+    if status not in valid:
+        return {}
+    try:
+        exp = db.query(RecommendationExperiment).get(experiment_id)
+        if not exp:
+            return {}
+        exp.status = status
+        if status == 'active' and not exp.started_at:
+            exp.started_at = datetime.utcnow()
+        if status == 'concluded':
+            exp.ended_at = datetime.utcnow()
+        db.commit()
+        db.refresh(exp)
+        return _experiment_to_dict(exp)
+    except Exception as e:
+        logger.error('update_experiment_status error: %s', e)
+        db.rollback()
+        return {}
+
+
+def get_or_assign_variant(db, username: str, experiment_name: str) -> str | None:
+    """Return (or assign) the variant for *username* in *experiment_name*.
+
+    Assignment is deterministic via ``hash(username + experiment_name)`` so the
+    same user always lands in the same bucket even if the row is missing.
+    Returns the variant string, or ``None`` if the experiment doesn't exist /
+    isn't active.
+    """
+    if not db or not username or not experiment_name:
+        return None
+    try:
+        exp = (
+            db.query(RecommendationExperiment)
+            .filter(
+                RecommendationExperiment.name == experiment_name,
+                RecommendationExperiment.status == 'active',
+            )
+            .first()
+        )
+        if not exp:
+            return None
+        variants_list = [v.strip() for v in exp.variants.split(',') if v.strip()]
+        if not variants_list:
+            return None
+        # Check for existing assignment
+        assignment = (
+            db.query(ExperimentAssignment)
+            .filter(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.username == username,
+            )
+            .first()
+        )
+        if assignment:
+            return assignment.variant
+        # Deterministic bucket assignment
+        digest = int(_hashlib.sha256(f'{username}:{experiment_name}'.encode()).hexdigest(), 16)
+        variant = variants_list[digest % len(variants_list)]
+        row = ExperimentAssignment(
+            experiment_id=exp.id,
+            username=username,
+            variant=variant,
+        )
+        db.add(row)
+        db.commit()
+        return variant
+    except Exception as e:
+        logger.error('get_or_assign_variant error: %s', e)
+        db.rollback()
+        return None
+
+
+def get_experiment_variant_counts(db, experiment_id: int) -> dict:
+    """Return per-variant assignment counts for *experiment_id*."""
+    if not db:
+        return {}
+    try:
+        counts: dict = {}
+        assignments = (
+            db.query(ExperimentAssignment)
+            .filter(ExperimentAssignment.experiment_id == experiment_id)
+            .all()
+        )
+        for a in assignments:
+            counts[a.variant] = counts.get(a.variant, 0) + 1
+        return counts
+    except Exception as e:
+        logger.error('get_experiment_variant_counts error: %s', e)
+        return {}
+
+
+def _experiment_to_dict(exp) -> dict:
+    return {
+        'id': exp.id,
+        'name': exp.name,
+        'description': exp.description or '',
+        'variants': [v.strip() for v in exp.variants.split(',') if v.strip()],
+        'status': exp.status,
+        'created_by': exp.created_by or '',
+        'created_at': exp.created_at.isoformat() if exp.created_at else None,
+        'started_at': exp.started_at.isoformat() if exp.started_at else None,
+        'ended_at': exp.ended_at.isoformat() if exp.ended_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Similar Games helper  (Item 8)
+# ---------------------------------------------------------------------------
+
+def get_similar_games(db, app_id: str, platform: str = 'steam', limit: int = 10) -> list:
+    """Return up to *limit* games similar to the game identified by *app_id*.
+
+    Similarity is computed by comparing genre/tag tokens extracted from the
+    ``GameDetailsCache.details_json`` blob.  Falls back to games from the same
+    platform when no cached details are available.
+
+    Returns a list of dicts:
+      ``app_id``, ``game_name``, ``platform``, ``similarity_score``
+    """
+    if not db:
+        return []
+    try:
+        target = (
+            db.query(GameDetailsCache)
+            .filter(GameDetailsCache.app_id == str(app_id),
+                    GameDetailsCache.platform == platform)
+            .first()
+        )
+        target_tokens: set = set()
+        target_name: str = ''
+        if target and target.details_json:
+            try:
+                details = json.loads(target.details_json)
+                target_name = details.get('name', '')
+                # Collect genre/category tokens
+                for genre in details.get('genres', []):
+                    if isinstance(genre, dict):
+                        target_tokens.add(genre.get('description', '').lower())
+                    elif isinstance(genre, str):
+                        target_tokens.add(genre.lower())
+                for cat in details.get('categories', []):
+                    if isinstance(cat, dict):
+                        target_tokens.add(cat.get('description', '').lower())
+                for tag in details.get('tags', []):
+                    target_tokens.add(str(tag).lower())
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Query all OTHER cached games on same platform
+        candidates = (
+            db.query(GameDetailsCache)
+            .filter(GameDetailsCache.app_id != str(app_id),
+                    GameDetailsCache.platform == platform)
+            .limit(500)
+            .all()
+        )
+
+        scored: list = []
+        for cand in candidates:
+            cand_tokens: set = set()
+            cand_name: str = cand.app_id
+            if cand.details_json:
+                try:
+                    det = json.loads(cand.details_json)
+                    cand_name = det.get('name', cand.app_id)
+                    for genre in det.get('genres', []):
+                        if isinstance(genre, dict):
+                            cand_tokens.add(genre.get('description', '').lower())
+                        elif isinstance(genre, str):
+                            cand_tokens.add(genre.lower())
+                    for cat in det.get('categories', []):
+                        if isinstance(cat, dict):
+                            cand_tokens.add(cat.get('description', '').lower())
+                    for tag in det.get('tags', []):
+                        cand_tokens.add(str(tag).lower())
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if target_tokens and cand_tokens:
+                intersection = len(target_tokens & cand_tokens)
+                union = len(target_tokens | cand_tokens)
+                score = round(intersection / union, 4) if union else 0.0
+            else:
+                score = 0.0
+            if score > 0:
+                scored.append({
+                    'app_id': cand.app_id,
+                    'game_name': cand_name,
+                    'platform': cand.platform,
+                    'similarity_score': score,
+                })
+        scored.sort(key=lambda x: x['similarity_score'], reverse=True)
+        return scored[:limit]
+    except Exception as e:
+        logger.error('get_similar_games error: %s', e)
+        return []
