@@ -4216,9 +4216,35 @@
                     return;
                 }
                 listDiv.innerHTML = data.events.map(ev => renderEventCard(ev)).join('');
+                hydrateScheduleEventDetails(data.events);
             } catch (e) {
                 listDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
             }
+        }
+
+        function buildScheduleGameLinks(appId, gameName) {
+            const id = String(appId || '').trim();
+            const name = String(gameName || '').trim();
+            return {
+                steamUrl: id ? `https://store.steampowered.com/app/${id}/` : '',
+                steamdbUrl: id ? `https://steamdb.info/app/${id}/` : '',
+                keyshopUrl: name ? `https://www.allkeyshop.com/blog/catalogue/search/${encodeURIComponent(name)}/?results=50` : '',
+            };
+        }
+
+        function hydrateScheduleEventDetails(events) {
+            (events || []).forEach(async (ev) => {
+                if (!ev || !ev.game_appid) return;
+                const descEl = document.getElementById(`schedule-game-desc-${ev.id}`);
+                if (!descEl) return;
+                try {
+                    const details = await loadGameDetailsAsync(ev.game_appid);
+                    const description = (details?.description || '').trim();
+                    descEl.textContent = description || 'No description available for this game yet.';
+                } catch (err) {
+                    descEl.textContent = 'No description available for this game yet.';
+                }
+            });
         }
 
         function renderEventCard(ev) {
@@ -4227,6 +4253,8 @@
             const safeGame  = (ev.game_name||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             const safeNotes = (ev.notes||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             const safeAttendees = attendees.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const gameNameRaw = (ev.game_name || '').trim();
+            const links = buildScheduleGameLinks(ev.game_appid, gameNameRaw);
             
             // Build game image or use fallback
             let gameImageHtml = '';
@@ -4257,10 +4285,21 @@
                     👥 ${safeAttendees}
                     ${safeNotes ? `<span style="margin-left:12px;">📝 ${safeNotes}</span>` : ''}
                 </div>
+                ${ev.game_appid ? `
+                <div style="margin-top:8px; padding:10px; background:var(--list-hover); border-radius:8px;">
+                    <div id="schedule-game-desc-${ev.id}" style="font-size:0.9em; line-height:1.5; color:var(--text-primary);">
+                        Loading game description...
+                    </div>
+                    <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                        ${links.steamUrl ? `<a href="${links.steamUrl}" target="_blank" style="padding:5px 10px; background:#000; color:white; text-decoration:none; border-radius:6px; font-size:0.8em;">🔗 Steam Store</a>` : ''}
+                        ${links.steamdbUrl ? `<a href="${links.steamdbUrl}" target="_blank" style="padding:5px 10px; background:#213956; color:white; text-decoration:none; border-radius:6px; font-size:0.8em;">📊 SteamDB</a>` : ''}
+                        ${links.keyshopUrl ? `<a href="${links.keyshopUrl}" target="_blank" style="padding:5px 10px; background:#1F1F1F; color:#FFD700; text-decoration:none; border-radius:6px; font-size:0.8em;">💰 AllKeyShop</a>` : ''}
+                    </div>
+                </div>` : ''}
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
                     <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
                     ${!ev.discord_event_id && ev.game_appid ? `<button onclick="createDiscordEventForSchedule('${ev.id}', '${safeGame}')" style="padding:5px 14px; background:#5865F2; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">📢 Create Discord Event</button>` : ''}
-                    <button onclick="deleteScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
+                    <button onclick="deleteScheduleEvent('${ev.id}', ${ev.discord_event_id ? 'true' : 'false'}, '${(ev.discord_guild_id || '').replace(/'/g,"\\'")}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
                 </div>
             </div>`;
         }
@@ -4490,12 +4529,43 @@
             } catch (e) { alert('Error: ' + e.message); }
         }
 
-        async function deleteScheduleEvent(id) {
-            if (!confirm('Delete this event?')) return;
+        async function deleteScheduleEvent(id, hasDiscordEvent = false, discordGuildId = '') {
+            const confirmMessage = hasDiscordEvent
+                ? 'Delete this event and cancel the linked Discord scheduled event?'
+                : 'Delete this event?';
+            if (!confirm(confirmMessage)) return;
+
+            let guildId = (discordGuildId || '').trim();
+            if (hasDiscordEvent && !guildId) {
+                const entered = prompt('This event is linked to Discord but no Guild ID is stored. Enter Discord Server/Guild ID to cancel it:');
+                if (!entered || !entered.trim()) {
+                    alert('Guild ID is required to cancel the linked Discord event. Deletion cancelled.');
+                    return;
+                }
+                guildId = entered.trim();
+            }
+
             try {
-                const resp = await safeFetch(`/api/schedule/${id}`, {method:'DELETE'});
-                if (resp.ok) loadSchedule();
-                else { const d=await resp.json(); alert(d.error||'Failed to delete'); }
+                const resp = await safeFetch(`/api/schedule/${id}`, {
+                    method:'DELETE',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ guild_id: guildId || null })
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.discord_cancelled) {
+                        alert('Event deleted and Discord scheduled event cancelled.');
+                    }
+                    loadSchedule();
+                }
+                else {
+                    const d=await resp.json();
+                    if (d.requires_guild_id) {
+                        alert('Guild ID is required to cancel the linked Discord event. Please try delete again and provide the Guild ID.');
+                    } else {
+                        alert(d.error||'Failed to delete');
+                    }
+                }
             } catch (e) { alert('Error: ' + e.message); }
         }
 

@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple, Deque
 from functools import wraps
 from werkzeug.local import LocalProxy
-from urllib.parse import unquote
+from urllib.parse import unquote, quote_plus
 import gapi
 import multiuser
 try:
@@ -4246,6 +4246,74 @@ def _resolve_schedule_game_image_url(game: Optional[Dict] = None,
 
     return ''
 
+
+def _build_schedule_game_links(game_appid: Optional[str], game_name: str = '') -> Dict[str, str]:
+    """Build the same game links used in game details modal."""
+    appid = str(game_appid or '').strip()
+    safe_game_name = str(game_name or '').strip()
+    links: Dict[str, str] = {
+        'steam_url': '',
+        'steamdb_url': '',
+        'keyshop_url': '',
+    }
+    if appid:
+        links['steam_url'] = f'https://store.steampowered.com/app/{appid}/'
+        links['steamdb_url'] = f'https://steamdb.info/app/{appid}/'
+    if safe_game_name:
+        links['keyshop_url'] = (
+            'https://www.allkeyshop.com/blog/catalogue/search/'
+            f'{quote_plus(safe_game_name)}/?results=50'
+        )
+    return links
+
+
+def _get_schedule_game_short_description(game_appid: Optional[str]) -> str:
+    """Fetch game short description using the same source as game details API."""
+    appid = str(game_appid or '').strip()
+    if not appid.isdigit() or not picker:
+        return ''
+    try:
+        with picker_lock:
+            if picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
+                details = picker.steam_client.get_game_details(int(appid)) or {}
+                return str(details.get('short_description', '') or '').strip()
+    except Exception as exc:
+        gui_logger.debug(f'Could not fetch short description for app {appid}: {exc}')
+    return ''
+
+
+def _build_discord_schedule_description(game_name: str,
+                                        game_appid: Optional[str],
+                                        notes: str,
+                                        attendees: List[str]) -> str:
+    """Build Discord event description including game description and links."""
+    safe_game_name = str(game_name or '').strip() or 'TBA'
+    safe_notes = str(notes or '').strip()
+    safe_attendees = [str(a).strip() for a in (attendees or []) if str(a).strip()]
+    links = _build_schedule_game_links(game_appid, safe_game_name)
+    game_description = _get_schedule_game_short_description(game_appid)
+
+    lines: List[str] = [f'🎮 {safe_game_name}']
+    if safe_notes:
+        lines.extend(['', safe_notes])
+    if safe_attendees:
+        lines.extend(['', f"👥 {', '.join(safe_attendees)}"])
+    if game_description:
+        lines.extend(['', f'📖 {game_description[:280]}'])
+
+    link_lines = [
+        f"🔗 Steam: {links['steam_url']}" if links.get('steam_url') else '',
+        f"📊 SteamDB: {links['steamdb_url']}" if links.get('steamdb_url') else '',
+        f"💰 AllKeyShop: {links['keyshop_url']}" if links.get('keyshop_url') else '',
+    ]
+    link_lines = [line for line in link_lines if line]
+    if link_lines:
+        lines.extend(['', *link_lines])
+
+    lines.extend(['', '📅 Created by GAPI Game Night Scheduler'])
+    description = '\n'.join(lines)
+    return description[:1000]
+
 @app.route('/api/schedule', methods=['GET'])
 def api_get_schedule():
     """Return all game night events sorted by date/time."""
@@ -4329,7 +4397,8 @@ def api_create_event():
             title, date, time_str, attendees, game_name, notes,
             game_appid=game_appid,
             attendee_ids=attendee_ids,
-            game_image_url=game_image_url
+            game_image_url=game_image_url,
+            discord_guild_id=str(discord_guild_id).strip() if discord_guild_id else None
         )
     
     # Create Discord event if requested
@@ -4358,13 +4427,13 @@ def api_create_event():
                     event_datetime = event_datetime.replace(tzinfo=timezone.utc)
                 end_time = event_datetime + timedelta(hours=2)
                 
-                # Build description
-                description = f"🎮 {game_name or 'TBA'}\n"
-                if notes:
-                    description += f"\n{notes}\n"
-                if attendees:
-                    description += f"\n👥 {', '.join(attendees)}\n"
-                description += "\n📅 Created by GAPI Game Night Scheduler"
+                # Build description with same game description/links as UI details
+                description = _build_discord_schedule_description(
+                    game_name=game_name,
+                    game_appid=game_appid,
+                    notes=notes,
+                    attendees=attendees
+                )
                 
                 # Prepare payload
                 payload = {
@@ -4403,8 +4472,9 @@ def api_create_event():
                     discord_event = response.json()
                     discord_event_id = discord_event.get('id')
                     with picker_lock:
-                        picker.schedule_service.set_discord_event_id(event['id'], discord_event_id)
+                        picker.schedule_service.set_discord_event_info(event['id'], discord_event_id, str(discord_guild_id).strip())
                     event['discord_event_id'] = discord_event_id
+                    event['discord_guild_id'] = str(discord_guild_id).strip()
                     discord_result = {
                         'success': True,
                         'discord_event_id': discord_event_id,
@@ -4452,11 +4522,62 @@ def api_delete_event(event_id: str):
     """Delete a game night event."""
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    override_guild_id = str(data.get('guild_id', '')).strip()
+
+    with picker_lock:
+        event = picker.schedule_service._repo.find(event_id)
+
+    if not event:
+        return jsonify({'error': 'Event not found'}), 404
+
+    discord_event_id = str(event.get('discord_event_id') or '').strip()
+    discord_guild_id = str(event.get('discord_guild_id') or '').strip() or override_guild_id
+
+    # If linked Discord event exists, cancel it first
+    if discord_event_id:
+        if not discord_guild_id:
+            return jsonify({
+                'error': 'Discord guild ID is required to cancel linked Discord event',
+                'requires_guild_id': True
+            }), 400
+        try:
+            import os
+            import requests
+
+            config_path = os.environ.get('GAPI_DISCORD_CONFIG', 'config.json')
+            discord_token = None
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config_data = json.load(f)
+                    discord_token = config_data.get('discord_bot_token')
+
+            if not discord_token:
+                return jsonify({'error': 'Discord bot token not found in config.json'}), 500
+
+            discord_api_url = f'https://discord.com/api/v10/guilds/{discord_guild_id}/scheduled-events/{discord_event_id}'
+            headers = {'Authorization': f'Bot {discord_token}'}
+            response = requests.delete(discord_api_url, headers=headers, timeout=10)
+
+            # Discord returns 204 on success. 404 means already gone, which is effectively cancelled.
+            if response.status_code not in (204, 404):
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                error_msg = error_data.get('message', f'HTTP {response.status_code}')
+                gui_logger.error(f'Failed to cancel Discord event {discord_event_id}: {response.status_code} - {error_msg}')
+                return jsonify({
+                    'error': f'Failed to cancel Discord event: {error_msg}',
+                    'status_code': response.status_code,
+                    'details': error_data
+                }), 502
+        except Exception as exc:
+            gui_logger.error(f'Error cancelling Discord event {discord_event_id}: {exc}')
+            return jsonify({'error': f'Failed to cancel Discord event: {str(exc)}'}), 502
+
     with picker_lock:
         removed = picker.schedule_service.remove_event(event_id)
     if not removed:
         return jsonify({'error': 'Event not found'}), 404
-    return jsonify({'success': True, 'id': event_id})
+    return jsonify({'success': True, 'id': event_id, 'discord_cancelled': bool(discord_event_id)})
 
 
 # ---------------------------------------------------------------------------
@@ -4693,14 +4814,13 @@ def api_create_discord_event_for_schedule(event_id: str):
         # Calculate end time (2 hours by default)
         end_time = event_datetime + timedelta(hours=2)
         
-        # Build event description with game info
-        description = f"🎮 {event.get('game_name', 'TBA')}\n"
-        if event.get('notes'):
-            description += f"\n{event['notes']}\n"
-        if event.get('attendees'):
-            attendee_list = ', '.join(event['attendees'])
-            description += f"\n👥 {attendee_list}\n"
-        description += "\n📅 Created by GAPI Game Night Scheduler"
+        # Build event description with same game description/links as UI details
+        description = _build_discord_schedule_description(
+            game_name=event.get('game_name', 'TBA'),
+            game_appid=event.get('game_appid'),
+            notes=event.get('notes', ''),
+            attendees=event.get('attendees', [])
+        )
         
         # Prepare Discord API payload
         payload = {
@@ -4748,7 +4868,7 @@ def api_create_discord_event_for_schedule(event_id: str):
             
             # Update schedule event with Discord event ID
             with picker_lock:
-                picker.schedule_service.set_discord_event_id(event_id, discord_event_id)
+                picker.schedule_service.set_discord_event_info(event_id, discord_event_id, guild_id)
             
             return jsonify({
                 'success': True,

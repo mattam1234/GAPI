@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from ..repositories.schedule_repository import ScheduleRepository
 
 _EDITABLE_FIELDS = ('title', 'date', 'time', 'attendees', 'game_name', 'notes', 
-                     'game_appid', 'attendee_ids', 'discord_event_id', 'game_image_url')
+                     'game_appid', 'attendee_ids', 'discord_event_id', 'discord_guild_id', 'game_image_url')
 
 
 class ScheduleService:
@@ -26,7 +26,8 @@ class ScheduleService:
                   game_name: str = '', notes: str = '',
                   game_appid: Optional[str] = None,
                   attendee_ids: Optional[List[str]] = None,
-                  game_image_url: Optional[str] = None) -> Dict:
+                  game_image_url: Optional[str] = None,
+                  discord_guild_id: Optional[str] = None) -> Dict:
         """Create a new event and persist it.
 
         Args:
@@ -39,6 +40,7 @@ class ScheduleService:
             game_appid: Steam app ID or platform-specific game ID (optional).
             attendee_ids: List of attendee identifiers (Discord IDs, user names, etc).
             game_image_url: URL to game image (for Discord event).
+            discord_guild_id: Discord server (guild) ID for linked Discord event.
 
         Returns:
             The new event dict including the generated ``id`` and
@@ -57,6 +59,7 @@ class ScheduleService:
             'attendee_ids': attendee_ids or [],
             'game_image_url': game_image_url,
             'discord_event_id': None,  # Will be set when Discord event is created
+            'discord_guild_id': discord_guild_id,
             'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         self._repo.upsert(event_id, event)
@@ -96,11 +99,28 @@ class ScheduleService:
         Returns:
             Updated event dict, or ``None`` if event_id not found.
         """
+        return self.set_discord_event_info(event_id, discord_event_id, None)
+
+    def set_discord_event_info(self, event_id: str,
+                               discord_event_id: str,
+                               discord_guild_id: Optional[str]) -> Optional[Dict]:
+        """Set Discord event linkage metadata for a scheduled event.
+
+        Args:
+            event_id: The schedule event ID.
+            discord_event_id: The Discord scheduled event ID.
+            discord_guild_id: The Discord guild ID where event is created.
+
+        Returns:
+            Updated event dict, or ``None`` if event_id not found.
+        """
         event = self._repo.find(event_id)
         if event is None:
             return None
         event = dict(event)
         event['discord_event_id'] = discord_event_id
+        if discord_guild_id:
+            event['discord_guild_id'] = str(discord_guild_id).strip()
         event['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._repo.upsert(event_id, event)
         return event
