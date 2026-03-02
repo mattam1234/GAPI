@@ -4353,6 +4353,8 @@
                 notes: document.getElementById('sch-notes').value.trim(),
                 create_discord_event: createDiscord,
                 discord_guild_id: guildId || null,
+                timezone_name: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                timezone_offset_minutes: new Date().getTimezoneOffset(),
             };
             console.log('📤 Submitting schedule:', body);
             try {
@@ -4530,6 +4532,8 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         guild_id: guildId.trim(),
+                        timezone_name: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                        timezone_offset_minutes: new Date().getTimezoneOffset(),
                     })
                 });
                 if (!discordResp.ok) { 

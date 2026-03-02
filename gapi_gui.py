@@ -4315,16 +4315,36 @@ def _build_discord_schedule_description(game_name: str,
     return description[:1000]
 
 
-def _schedule_local_to_utc(date_str: str, time_str: str):
+def _schedule_local_to_utc(date_str: str,
+                           time_str: str,
+                           timezone_name: Optional[str] = None,
+                           timezone_offset_minutes: Optional[int] = None):
     """Interpret schedule date/time as local time, then convert to UTC.
 
     This prevents treating local input as already-UTC, which causes shifted
     times in Discord scheduled events.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
 
     dt = datetime.fromisoformat(f"{date_str}T{time_str}:00")
     if dt.tzinfo is None:
+        tz_name = str(timezone_name or '').strip()
+        if tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+                dt = dt.replace(tzinfo=ZoneInfo(tz_name))
+                return dt.astimezone(timezone.utc)
+            except Exception:
+                pass
+
+        if timezone_offset_minutes is not None:
+            try:
+                offset = int(timezone_offset_minutes)
+                dt = dt - timedelta(minutes=offset)
+                return dt.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                pass
+
         local_tz = datetime.now().astimezone().tzinfo or timezone.utc
         dt = dt.replace(tzinfo=local_tz)
     return dt.astimezone(timezone.utc)
@@ -4404,6 +4424,12 @@ def api_create_event():
     notes = str(data.get('notes', '')).strip()
     create_discord_event = data.get('create_discord_event', False)
     discord_guild_id = data.get('discord_guild_id')
+    timezone_name = str(data.get('timezone_name', '')).strip() or None
+    timezone_offset_minutes_raw = data.get('timezone_offset_minutes')
+    try:
+        timezone_offset_minutes = int(timezone_offset_minutes_raw) if timezone_offset_minutes_raw is not None else None
+    except (TypeError, ValueError):
+        timezone_offset_minutes = None
     
     gui_logger.info(f'Creating schedule event: title={title}, game_name={game_name}, game_appid={game_appid}, game_image_url={game_image_url}, create_discord={create_discord_event}')
     
@@ -4413,7 +4439,9 @@ def api_create_event():
             game_appid=game_appid,
             attendee_ids=attendee_ids,
             game_image_url=game_image_url,
-            discord_guild_id=str(discord_guild_id).strip() if discord_guild_id else None
+            discord_guild_id=str(discord_guild_id).strip() if discord_guild_id else None,
+            timezone_name=timezone_name,
+            timezone_offset_minutes=timezone_offset_minutes
         )
     
     # Create Discord event if requested
@@ -4437,8 +4465,17 @@ def api_create_event():
             
             if discord_token:
                 # Parse schedule local time, convert to UTC for Discord
-                event_datetime = _schedule_local_to_utc(date, time_str)
+                event_datetime = _schedule_local_to_utc(
+                    date,
+                    time_str,
+                    timezone_name=timezone_name,
+                    timezone_offset_minutes=timezone_offset_minutes
+                )
                 end_time = event_datetime + timedelta(hours=2)
+                gui_logger.info(
+                    f'Discord time conversion(auto): local={date} {time_str}, tz={timezone_name}, '
+                    f'offset_min={timezone_offset_minutes}, utc_start={event_datetime.isoformat()}'
+                )
                 
                 # Build description with same game description/links as UI details
                 description = _build_discord_schedule_description(
@@ -4781,6 +4818,12 @@ def api_create_discord_event_for_schedule(event_id: str):
     
     data = request.json or {}
     guild_id = str(data.get('guild_id', '')).strip()
+    timezone_name = str(data.get('timezone_name', '')).strip() or None
+    timezone_offset_minutes_raw = data.get('timezone_offset_minutes')
+    try:
+        timezone_offset_minutes = int(timezone_offset_minutes_raw) if timezone_offset_minutes_raw is not None else None
+    except (TypeError, ValueError):
+        timezone_offset_minutes = None
     
     if not guild_id:
         return jsonify({'error': 'guild_id is required'}), 400
@@ -4817,12 +4860,27 @@ def api_create_discord_event_for_schedule(event_id: str):
         try:
             date_part = event.get('date', '')
             time_part = event.get('time', '').replace('.', ':')  # Handle both formats
-            event_datetime = _schedule_local_to_utc(date_part, time_part)
+            event_datetime = _schedule_local_to_utc(
+                date_part,
+                time_part,
+                timezone_name=timezone_name or event.get('timezone_name'),
+                timezone_offset_minutes=(
+                    timezone_offset_minutes
+                    if timezone_offset_minutes is not None
+                    else event.get('timezone_offset_minutes')
+                )
+            )
         except (ValueError, AttributeError) as e:
             return jsonify({'error': f'Invalid event date/time format: {e}'}), 400
         
         # Calculate end time (2 hours by default)
         end_time = event_datetime + timedelta(hours=2)
+        gui_logger.info(
+            f'Discord time conversion(manual): local={date_part} {time_part}, '
+            f'tz={timezone_name or event.get("timezone_name")}, '
+            f'offset_min={timezone_offset_minutes if timezone_offset_minutes is not None else event.get("timezone_offset_minutes")}, '
+            f'utc_start={event_datetime.isoformat()}'
+        )
         
         # Build event description with same game description/links as UI details
         description = _build_discord_schedule_description(

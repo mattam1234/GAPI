@@ -6,7 +6,8 @@ from typing import Dict, List, Optional
 from ..repositories.schedule_repository import ScheduleRepository
 
 _EDITABLE_FIELDS = ('title', 'date', 'time', 'attendees', 'game_name', 'notes', 
-                     'game_appid', 'attendee_ids', 'discord_event_id', 'discord_guild_id', 'game_image_url')
+                     'game_appid', 'attendee_ids', 'discord_event_id', 'discord_guild_id', 'game_image_url',
+                     'timezone_name', 'timezone_offset_minutes')
 
 
 class ScheduleService:
@@ -27,7 +28,9 @@ class ScheduleService:
                   game_appid: Optional[str] = None,
                   attendee_ids: Optional[List[str]] = None,
                   game_image_url: Optional[str] = None,
-                  discord_guild_id: Optional[str] = None) -> Dict:
+                  discord_guild_id: Optional[str] = None,
+                  timezone_name: Optional[str] = None,
+                  timezone_offset_minutes: Optional[int] = None) -> Dict:
         """Create a new event and persist it.
 
         Args:
@@ -41,6 +44,8 @@ class ScheduleService:
             attendee_ids: List of attendee identifiers (Discord IDs, user names, etc).
             game_image_url: URL to game image (for Discord event).
             discord_guild_id: Discord server (guild) ID for linked Discord event.
+            timezone_name: Browser/client IANA timezone name (e.g. Europe/Berlin).
+            timezone_offset_minutes: Browser timezone offset in minutes (JS getTimezoneOffset).
 
         Returns:
             The new event dict including the generated ``id`` and
@@ -60,6 +65,8 @@ class ScheduleService:
             'game_image_url': game_image_url,
             'discord_event_id': None,  # Will be set when Discord event is created
             'discord_guild_id': discord_guild_id,
+            'timezone_name': timezone_name,
+            'timezone_offset_minutes': timezone_offset_minutes,
             'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         self._repo.upsert(event_id, event)
