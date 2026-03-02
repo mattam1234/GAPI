@@ -18,8 +18,11 @@ import csv
 import hashlib
 import io
 import tempfile
+import subprocess
+import signal
+import collections
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Deque
 from functools import wraps
 from werkzeug.local import LocalProxy
 from urllib.parse import unquote
@@ -298,6 +301,12 @@ def _invite_to_chat_room(inviter: str, target_username: str,
 
 # User authentication
 _demo_current_user: Optional[str] = None
+
+# Discord bot process management
+_discord_bot_process: Optional[subprocess.Popen] = None
+_discord_bot_lock = threading.Lock()
+# Bounded deque automatically drops oldest lines when the bot produces many lines
+_discord_bot_log_lines: Deque[str] = collections.deque(maxlen=200)
 
 
 def _resolve_current_user() -> Optional[str]:
@@ -9250,6 +9259,226 @@ def api_public_settings():
         'leaderboard_public': leaderboard_public == 'true',
         'plugins_enabled': plugins_enabled == 'true',
     })
+
+
+# ---------------------------------------------------------------------------
+# Discord Bot Management API  (admin only)
+# ---------------------------------------------------------------------------
+
+def _discord_bot_is_running() -> bool:
+    """Return True if the managed Discord bot process is alive."""
+    global _discord_bot_process
+    if _discord_bot_process is None:
+        return False
+    return _discord_bot_process.poll() is None
+
+
+def _capture_bot_output(proc: subprocess.Popen) -> None:
+    """Background thread: read stdout/stderr from bot and store recent lines."""
+    try:
+        for raw in proc.stdout:  # type: ignore[union-attr]
+            line = raw.rstrip('\n')
+            with _discord_bot_lock:
+                _discord_bot_log_lines.append(line)
+    except Exception:
+        pass
+
+
+@app.route('/api/admin/discord-bot/status', methods=['GET'])
+@require_admin
+def api_discord_bot_status():
+    """Return the current status of the Discord bot process (admin only).
+
+    Response JSON:
+      - ``running``: bool – whether the bot process is alive
+      - ``pid``: int|null – OS process ID when running
+      - ``log``: list[str] – recent log lines (up to 200)
+    """
+    with _discord_bot_lock:
+        running = _discord_bot_is_running()
+        pid = _discord_bot_process.pid if running else None
+        log = list(_discord_bot_log_lines)
+    return jsonify({'running': running, 'pid': pid, 'log': log})
+
+
+@app.route('/api/admin/discord-bot/start', methods=['POST'])
+@require_admin
+def api_discord_bot_start():
+    """Start the Discord bot process (admin only).
+
+    Expects JSON body with optional ``config_path`` (default: ``config.json``).
+    Returns ``{'started': True}`` on success or an error message.
+
+    The config path is passed to the bot subprocess via the ``GAPI_DISCORD_CONFIG``
+    environment variable, which discord_bot.py should read to locate its config file.
+    """
+    global _discord_bot_process, _discord_bot_log_lines
+    data = request.get_json(silent=True) or {}
+    config_path = data.get('config_path', 'config.json')
+    # Prevent path traversal: resolve against the application base directory and
+    # verify the result stays within that directory.
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    abs_config = os.path.normpath(os.path.join(base_dir, config_path))
+    if not abs_config.startswith(base_dir + os.sep) and abs_config != base_dir:
+        return jsonify({'error': 'Invalid config_path'}), 400
+
+    with _discord_bot_lock:
+        if _discord_bot_is_running():
+            return jsonify({'error': 'Discord bot is already running'}), 409
+
+        bot_script = os.path.join(base_dir, 'discord_bot.py')
+        if not os.path.exists(bot_script):
+            return jsonify({'error': 'discord_bot.py not found'}), 500
+
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, bot_script],
+                # GAPI_DISCORD_CONFIG tells discord_bot.py which config file to use
+                env={**os.environ, 'GAPI_DISCORD_CONFIG': abs_config},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            _discord_bot_process = proc
+            _discord_bot_log_lines.clear()
+        except OSError as exc:
+            return jsonify({'error': f'Failed to start bot: {exc}'}), 500
+
+    # Capture output in background thread
+    t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
+    t.start()
+
+    return jsonify({'started': True, 'pid': proc.pid})
+
+
+@app.route('/api/admin/discord-bot/stop', methods=['POST'])
+@require_admin
+def api_discord_bot_stop():
+    """Stop the Discord bot process (admin only).
+
+    Returns ``{'stopped': True}`` on success or an error if not running.
+    """
+    global _discord_bot_process
+    with _discord_bot_lock:
+        if not _discord_bot_is_running():
+            return jsonify({'error': 'Discord bot is not running'}), 409
+
+        proc = _discord_bot_process
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        except OSError:
+            pass
+        _discord_bot_process = None
+
+    return jsonify({'stopped': True})
+
+
+@app.route('/api/admin/discord-bot/stats', methods=['GET'])
+@require_admin
+def api_discord_bot_stats():
+    """Return Discord bot statistics from the config file (admin only).
+
+    Response JSON:
+      - ``running``: bool
+      - ``linked_users``: int – number of Discord→Steam mappings
+      - ``config_exists``: bool – whether discord_config.json is present
+    """
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+    linked_users = 0
+    config_exists = os.path.exists(config_file)
+    if config_exists:
+        try:
+            with open(config_file, 'r') as fh:
+                cfg = json.load(fh)
+                linked_users = len(cfg.get('user_mappings', {}))
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    with _discord_bot_lock:
+        running = _discord_bot_is_running()
+
+    return jsonify({
+        'running': running,
+        'linked_users': linked_users,
+        'config_exists': config_exists,
+    })
+
+
+@app.route('/api/admin/discord-bot/config', methods=['GET'])
+@require_admin
+def api_discord_bot_get_config():
+    """Return Discord bot configuration (admin only).
+
+    Sensitive values (token, API key) are partially masked.
+    Response JSON:
+      - ``discord_token_set``: bool
+      - ``steam_api_key_set``: bool
+      - ``config_exists``: bool
+    """
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    if not os.path.exists(config_path):
+        return jsonify({'config_exists': False, 'discord_token_set': False, 'steam_api_key_set': False})
+    try:
+        with open(config_path, 'r') as fh:
+            cfg = json.load(fh)
+    except (json.JSONDecodeError, IOError):
+        return jsonify({'error': 'Failed to read config.json'}), 500
+
+    token = cfg.get('discord_bot_token', '')
+    steam_key = cfg.get('steam_api_key', '')
+    return jsonify({
+        'config_exists': True,
+        'discord_token_set': bool(token),
+        'steam_api_key_set': bool(steam_key),
+    })
+
+
+@app.route('/api/admin/discord-bot/config', methods=['POST'])
+@require_admin
+def api_discord_bot_save_config():
+    """Save Discord bot token and/or Steam API key (admin only).
+
+    Request JSON (all fields optional):
+      - ``discord_bot_token``: str
+      - ``steam_api_key``: str
+
+    Only non-empty values overwrite the existing config.
+    """
+    data = request.get_json(silent=True) or {}
+    token = data.get('discord_bot_token', '').strip()
+    steam_key = data.get('steam_api_key', '').strip()
+
+    if not token and not steam_key:
+        return jsonify({'error': 'Provide at least discord_bot_token or steam_api_key'}), 400
+
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    cfg: Dict = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as fh:
+                cfg = json.load(fh)
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    if token:
+        cfg['discord_bot_token'] = token
+    if steam_key:
+        cfg['steam_api_key'] = steam_key
+
+    try:
+        gapi._atomic_write_json(config_path, cfg)
+    except IOError as exc:
+        return jsonify({'error': f'Failed to save config: {exc}'}), 500
+
+    return jsonify({'saved': True})
+
+
 # Localization / i18n endpoints
 # ---------------------------------------------------------------------------
 
