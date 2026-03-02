@@ -11469,6 +11469,316 @@ def _stream_file(path: str, chunk_size: int = 65536):
             yield chunk
 
 
+# ---------------------------------------------------------------------------
+# Fine-grained Permission endpoints  (Tier 2, item 5)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/permissions', methods=['GET'])
+def api_permissions_list():
+    """Return all defined permissions and the role-to-permission matrix (public).
+
+    Response JSON:
+      ``permissions``   – sorted list of all discrete permission strings
+      ``role_matrix``   – dict mapping role name → list of permissions
+    """
+    return jsonify({
+        'permissions': database.ALL_PERMISSIONS if DB_AVAILABLE else [],
+        'role_matrix': database.PERMISSIONS if DB_AVAILABLE else {},
+    })
+
+
+@app.route('/api/users/<username>/permissions', methods=['GET'])
+@require_login
+def api_get_user_permissions(username: str):
+    """Return the effective permissions for *username* (login required).
+
+    Response JSON mirrors ``database.get_user_permissions``:
+      ``effective``   – currently active permissions
+      ``from_roles``  – permissions derived from roles
+      ``granted``     – explicit per-user grants
+      ``denied``      – explicit per-user denials
+      ``is_admin``    – True when user has wildcard access
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        perms = database.get_user_permissions(db, username)
+        return jsonify(perms)
+    except Exception as e:
+        gui_logger.error('api_get_user_permissions error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<username>/permissions', methods=['POST'])
+@require_admin
+def api_set_user_permissions(username: str):
+    """Grant, deny, or remove a permission override for *username* (admin only).
+
+    Request JSON body:
+      ``permission``   – permission string (required)
+      ``action``       – ``'grant'`` | ``'deny'`` | ``'remove'`` (required)
+
+    Response JSON:
+      ``ok``           – True on success
+      ``permissions``  – updated effective permissions dict
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    permission = str(data.get('permission', '')).strip()
+    action = str(data.get('action', '')).strip().lower()
+    if not permission or action not in ('grant', 'deny', 'remove'):
+        return jsonify({'error': "Required fields: 'permission' and 'action' (grant/deny/remove)"}), 400
+    if permission not in database.ALL_PERMISSIONS:
+        return jsonify({'error': f"Unknown permission '{permission}'"}), 400
+    try:
+        db = next(database.get_db())
+        requesting_user = get_current_username()
+        if action == 'remove':
+            ok = database.remove_user_permission_override(db, username, permission)
+        else:
+            ok = database.set_user_permission_override(
+                db, username, permission,
+                granted=(action == 'grant'),
+                granted_by=requesting_user,
+            )
+        if not ok:
+            return jsonify({'error': 'Failed to update permission'}), 500
+        perms = database.get_user_permissions(db, username)
+        return jsonify({'ok': True, 'permissions': perms})
+    except Exception as e:
+        gui_logger.error('api_set_user_permissions error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/roles/bulk-assign', methods=['POST'])
+@require_admin
+def api_admin_bulk_assign_role():
+    """Assign a role to multiple users at once (admin only).
+
+    Request JSON body:
+      ``role``       – role name to assign (required)
+      ``usernames``  – list of usernames (required, max 200)
+
+    Response JSON:
+      ``assigned``   – list of usernames that were updated
+      ``skipped``    – list of usernames that already had the role / not found
+      ``errors``     – list of ``{username, error}`` for failures
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    role = str(data.get('role', '')).strip()
+    usernames = data.get('usernames', [])
+    if not role:
+        return jsonify({'error': "'role' is required"}), 400
+    if not isinstance(usernames, list) or len(usernames) == 0:
+        return jsonify({'error': "'usernames' must be a non-empty list"}), 400
+    if len(usernames) > 200:
+        return jsonify({'error': "'usernames' may not exceed 200 entries per request"}), 400
+    assigned, skipped, errors = [], [], []
+    try:
+        requesting_user = get_current_username()
+        for uname in usernames:
+            uname = str(uname).strip()
+            if not uname:
+                continue
+            ok, _ = user_manager.update_user_roles(uname, [role], requesting_user)
+            if ok:
+                assigned.append(uname)
+            else:
+                skipped.append(uname)
+    except Exception as e:
+        gui_logger.error('api_admin_bulk_assign_role error: %s', e)
+        errors.append({'error': str(e)})
+    return jsonify({'assigned': assigned, 'skipped': skipped, 'errors': errors})
+
+
+# ---------------------------------------------------------------------------
+# Notification Preferences  (Tier 2, item 6)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/notifications/preferences', methods=['GET'])
+@require_login
+def api_get_notification_prefs():
+    """Return the current user's notification preferences (login required).
+
+    Response JSON fields:
+      ``email_enabled``, ``push_enabled``, ``friend_requests``,
+      ``challenge_updates``, ``trade_offers``, ``team_events``,
+      ``system_announcements``, ``digest_frequency``, ``updated_at``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    username = get_current_username()
+    try:
+        db = next(database.get_db())
+        prefs = database.get_notification_prefs(db, username)
+        return jsonify(prefs)
+    except Exception as e:
+        gui_logger.error('api_get_notification_prefs error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notifications/preferences', methods=['PUT'])
+@require_login
+def api_set_notification_prefs():
+    """Update the current user's notification preferences (login required).
+
+    Accepted JSON body fields (all optional):
+      ``email_enabled`` (bool), ``push_enabled`` (bool),
+      ``friend_requests`` (bool), ``challenge_updates`` (bool),
+      ``trade_offers`` (bool), ``team_events`` (bool),
+      ``system_announcements`` (bool),
+      ``digest_frequency`` (str: ``'never'``|``'daily'``|``'weekly'``)
+
+    Response JSON: updated preference dict.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    username = get_current_username()
+    data = request.get_json(silent=True, force=True) or {}
+    try:
+        db = next(database.get_db())
+        updated = database.set_notification_prefs(db, username, data)
+        if not updated:
+            return jsonify({'error': 'Failed to save preferences'}), 500
+        return jsonify(updated)
+    except Exception as e:
+        gui_logger.error('api_set_notification_prefs error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notifications/history', methods=['GET'])
+@require_login
+def api_notification_history():
+    """Return paginated notification history for the current user (login required).
+
+    Query parameters:
+      ``limit``   – max results (default 50, max 200)
+      ``offset``  – skip N records (default 0)
+      ``unread``  – if ``'true'``, return only unread notifications
+
+    Response JSON:
+      ``notifications`` – list of notification objects
+      ``total``         – total count of notifications for this user
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'notifications': [], 'total': 0})
+    username = get_current_username()
+    try:
+        limit = max(1, min(200, int(request.args.get('limit', 50))))
+    except (ValueError, TypeError):
+        limit = 50
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (ValueError, TypeError):
+        offset = 0
+    unread_only = request.args.get('unread', '').lower() in ('true', '1', 'yes')
+    try:
+        db = next(database.get_db())
+        notifications = database.get_notifications(db, username, unread_only=unread_only)
+        total = len(notifications)
+        page = notifications[offset: offset + limit]
+        return jsonify({'notifications': page, 'total': total})
+    except Exception as e:
+        gui_logger.error('api_notification_history error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/notifications/broadcast', methods=['POST'])
+@require_admin
+def api_admin_broadcast_notification():
+    """Broadcast a notification to all users or a specific subset (admin only).
+
+    Request JSON body:
+      ``title``      – notification title (required)
+      ``message``    – notification body (required)
+      ``type``       – notification type: ``'info'``|``'warning'``|``'success'``|``'error'``
+                       (default ``'info'``)
+      ``usernames``  – optional list of target usernames; if omitted all users receive it
+
+    Response JSON:
+      ``sent``       – number of notifications created
+      ``skipped``    – number of users skipped (not found in DB)
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    title = str(data.get('title', '')).strip()
+    message = str(data.get('message', '')).strip()
+    notif_type = str(data.get('type', 'info')).strip()
+    if notif_type not in ('info', 'warning', 'success', 'error'):
+        notif_type = 'info'
+    if not title or not message:
+        return jsonify({'error': "'title' and 'message' are required"}), 400
+    target_usernames = data.get('usernames')
+    sent = skipped = 0
+    try:
+        db = next(database.get_db())
+        if target_usernames:
+            usernames = [str(u).strip() for u in target_usernames if str(u).strip()]
+        else:
+            all_users = database.get_all_users(db)
+            usernames = [u.username for u in all_users]
+        for uname in usernames:
+            ok = database.create_notification(db, uname, title, message, notif_type)
+            if ok:
+                sent += 1
+            else:
+                skipped += 1
+        return jsonify({'sent': sent, 'skipped': skipped})
+    except Exception as e:
+        gui_logger.error('api_admin_broadcast_notification error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Error Rate Dashboard  (Tier 3, item 12)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/errors/rate', methods=['GET'])
+@require_admin
+def api_admin_error_rate():
+    """Return client-side error counts bucketed by hour for the last 24 hours (admin only).
+
+    Response JSON:
+      ``buckets``      – list of ``{hour, count}`` objects, newest last (24 items)
+      ``total_24h``    – total errors in last 24h window
+      ``total_all``    – total in the ring buffer (may span > 24h)
+    """
+    from datetime import timedelta
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=24)
+    # Build 24 hour slots: 0 = oldest, 23 = most recent (current partial hour)
+    buckets = [{'hour': (now - timedelta(hours=23 - i)).strftime('%Y-%m-%dT%H:00Z'), 'count': 0}
+               for i in range(24)]
+    total_24h = 0
+    with _client_errors_lock:
+        errors_snapshot = list(_client_errors)
+        total_all = len(errors_snapshot)
+    for err in errors_snapshot:
+        ts_str = err.get('timestamp', '')
+        if not ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_str.replace('Z', ''))
+        except (ValueError, AttributeError):
+            continue
+        if ts < cutoff:
+            continue
+        total_24h += 1
+        diff_hours = int((now - ts).total_seconds() // 3600)
+        slot = 23 - min(diff_hours, 23)
+        buckets[slot]['count'] += 1
+    return jsonify({
+        'buckets': buckets,
+        'total_24h': total_24h,
+        'total_all': total_all,
+    })
+
+
 def create_templates():
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)

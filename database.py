@@ -448,6 +448,70 @@ class SavedSearch(Base):
     use_count = Column(Integer, default=0)
 
 
+# ---------------------------------------------------------------------------
+# Fine-grained Permission System  (Tier 2, item 5)
+# ---------------------------------------------------------------------------
+
+# Built-in permission set. ``'*'`` means "all permissions".
+PERMISSIONS: dict = {
+    'admin': ['*'],
+    'moderator': ['moderate_chat', 'flag_reviews', 'manage_users',
+                  'view_audit_logs', 'manage_reports'],
+    'creator': ['create_content', 'stream', 'analytics_read'],
+    'vip': ['early_access', 'cosmetics', 'analytics_read'],
+    'user': ['analytics_read'],
+}
+
+# Complete list of discrete permissions available in the system.
+ALL_PERMISSIONS: list = [
+    'analytics_read',
+    'create_content',
+    'cosmetics',
+    'early_access',
+    'flag_reviews',
+    'manage_reports',
+    'manage_users',
+    'moderate_chat',
+    'stream',
+    'view_audit_logs',
+]
+
+
+class UserPermission(Base):
+    """Per-user permission overrides (grants or explicit denials on top of role perms)."""
+    __tablename__ = "user_permissions"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    permission = Column(String(100), nullable=False, index=True)
+    granted = Column(Boolean, default=True)   # True = grant, False = explicit deny
+    granted_by = Column(String(255), nullable=True)
+    granted_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('username', 'permission', name='uq_user_permission'),)
+
+
+# ---------------------------------------------------------------------------
+# Notification Preferences  (Tier 2, item 6)
+# ---------------------------------------------------------------------------
+
+class UserNotificationPreference(Base):
+    """Per-user notification channel / category preferences."""
+    __tablename__ = "user_notification_preferences"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, unique=True, index=True)
+    email_enabled = Column(Boolean, default=False)
+    push_enabled = Column(Boolean, default=True)
+    friend_requests = Column(Boolean, default=True)
+    challenge_updates = Column(Boolean, default=True)
+    trade_offers = Column(Boolean, default=True)
+    team_events = Column(Boolean, default=True)
+    system_announcements = Column(Boolean, default=True)
+    digest_frequency = Column(String(20), default='never')   # 'never','daily','weekly'
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_db():
     """Get database session."""
     if SessionLocal:
@@ -3569,3 +3633,233 @@ def archive_old_picks(db, days: int = 365) -> dict:
         except Exception:
             pass
     return result
+
+
+# ---------------------------------------------------------------------------
+# Fine-grained Permission helpers  (Tier 2, item 5)
+# ---------------------------------------------------------------------------
+
+def get_user_permissions(db, username: str) -> dict:
+    """Return effective permissions for *username*.
+
+    Merges role-based permissions with per-user overrides.
+
+    Returns a dict:
+      ``effective``  – sorted list of permission strings the user currently has
+      ``from_roles`` – permissions derived from the user's roles
+      ``granted``    – explicit per-user grants (override adds)
+      ``denied``     – explicit per-user denials (override removes)
+      ``is_admin``   – True when the user has the wildcard ``'*'`` permission
+    """
+    result = {
+        'effective': [],
+        'from_roles': [],
+        'granted': [],
+        'denied': [],
+        'is_admin': False,
+    }
+    if not db:
+        return result
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return result
+
+        # Accumulate role-based perms
+        role_perms: set = set()
+        for role in (user.roles or []):
+            for perm in PERMISSIONS.get(role.name, []):
+                role_perms.add(perm)
+
+        if '*' in role_perms:
+            result['is_admin'] = True
+            result['from_roles'] = ALL_PERMISSIONS[:]
+            result['effective'] = ALL_PERMISSIONS[:]
+            return result
+
+        result['from_roles'] = sorted(role_perms)
+
+        # Apply per-user overrides
+        overrides = (
+            db.query(UserPermission)
+            .filter(UserPermission.username == username)
+            .all()
+        )
+        granted_extra: set = set()
+        denied: set = set()
+        for o in overrides:
+            if o.granted:
+                granted_extra.add(o.permission)
+            else:
+                denied.add(o.permission)
+
+        result['granted'] = sorted(granted_extra)
+        result['denied'] = sorted(denied)
+
+        effective = (role_perms | granted_extra) - denied
+        result['effective'] = sorted(effective)
+    except Exception as e:
+        logger.error(f"get_user_permissions error: {e}")
+    return result
+
+
+def has_permission(db, username: str, permission: str) -> bool:
+    """Return True if *username* has *permission*.
+
+    Admins (wildcard ``'*'``) automatically pass every permission check.
+    """
+    if not db:
+        return False
+    try:
+        perms = get_user_permissions(db, username)
+        if perms.get('is_admin'):
+            return True
+        return permission in perms.get('effective', [])
+    except Exception as e:
+        logger.error(f"has_permission error: {e}")
+        return False
+
+
+def set_user_permission_override(db, username: str, permission: str,
+                                  granted: bool, granted_by: str = '') -> bool:
+    """Grant or deny a single *permission* for *username*.
+
+    Creates or updates the ``UserPermission`` row.
+    Returns ``True`` on success.
+    """
+    if not db:
+        return False
+    try:
+        existing = (
+            db.query(UserPermission)
+            .filter(
+                UserPermission.username == username,
+                UserPermission.permission == permission,
+            )
+            .first()
+        )
+        if existing:
+            existing.granted = granted
+            existing.granted_by = granted_by
+            existing.granted_at = datetime.utcnow()
+        else:
+            row = UserPermission(
+                username=username,
+                permission=permission,
+                granted=granted,
+                granted_by=granted_by,
+            )
+            db.add(row)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"set_user_permission_override error: {e}")
+        db.rollback()
+        return False
+
+
+def remove_user_permission_override(db, username: str, permission: str) -> bool:
+    """Remove a per-user override for *permission*, reverting to role-based default."""
+    if not db:
+        return False
+    try:
+        row = (
+            db.query(UserPermission)
+            .filter(
+                UserPermission.username == username,
+                UserPermission.permission == permission,
+            )
+            .first()
+        )
+        if row:
+            db.delete(row)
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"remove_user_permission_override error: {e}")
+        db.rollback()
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Notification preference helpers  (Tier 2, item 6)
+# ---------------------------------------------------------------------------
+
+_NOTIF_PREF_BOOL_FIELDS = (
+    'email_enabled', 'push_enabled', 'friend_requests',
+    'challenge_updates', 'trade_offers', 'team_events', 'system_announcements',
+)
+_NOTIF_PREF_DIGEST_VALUES = ('never', 'daily', 'weekly')
+
+
+def _notif_pref_to_dict(pref) -> dict:
+    return {
+        'email_enabled': pref.email_enabled,
+        'push_enabled': pref.push_enabled,
+        'friend_requests': pref.friend_requests,
+        'challenge_updates': pref.challenge_updates,
+        'trade_offers': pref.trade_offers,
+        'team_events': pref.team_events,
+        'system_announcements': pref.system_announcements,
+        'digest_frequency': pref.digest_frequency,
+        'updated_at': pref.updated_at.isoformat() if pref.updated_at else None,
+    }
+
+
+def get_notification_prefs(db, username: str) -> dict:
+    """Return notification preferences for *username*.
+
+    Creates a default row if none exists yet.  Returns a dict of all fields or
+    an empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        pref = (
+            db.query(UserNotificationPreference)
+            .filter(UserNotificationPreference.username == username)
+            .first()
+        )
+        if not pref:
+            pref = UserNotificationPreference(username=username)
+            db.add(pref)
+            db.commit()
+            db.refresh(pref)
+        return _notif_pref_to_dict(pref)
+    except Exception as e:
+        logger.error(f"get_notification_prefs error: {e}")
+        return {}
+
+
+def set_notification_prefs(db, username: str, updates: dict) -> dict:
+    """Update notification preferences for *username*.
+
+    Only recognized fields are applied; unknown keys are ignored.
+    Returns the updated preference dict on success, or an empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        pref = (
+            db.query(UserNotificationPreference)
+            .filter(UserNotificationPreference.username == username)
+            .first()
+        )
+        if not pref:
+            pref = UserNotificationPreference(username=username)
+            db.add(pref)
+        for field in _NOTIF_PREF_BOOL_FIELDS:
+            if field in updates:
+                setattr(pref, field, bool(updates[field]))
+        if 'digest_frequency' in updates:
+            val = str(updates['digest_frequency']).lower()
+            if val in _NOTIF_PREF_DIGEST_VALUES:
+                pref.digest_frequency = val
+        pref.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(pref)
+        return _notif_pref_to_dict(pref)
+    except Exception as e:
+        logger.error(f"set_notification_prefs error: {e}")
+        db.rollback()
+        return {}
