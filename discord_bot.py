@@ -191,11 +191,18 @@ class GAPIBot(discord.Client):
             await channel.send("❌ No common games found among joined users.")
             return
 
-        filtered_games = self._filter_vote_candidates(
-            common_games,
-            genre=latest.get('genre'),
-            min_metacritic=latest.get('min_metacritic'),
-        )
+        # Run blocking filter operation in thread to avoid blocking event loop
+        try:
+            filtered_games = await asyncio.to_thread(
+                self._filter_vote_candidates,
+                common_games,
+                genre=latest.get('genre'),
+                min_metacritic=latest.get('min_metacritic'),
+            )
+        except Exception as e:
+            await channel.send(f"❌ Error filtering games: {str(e)}")
+            return
+            
         if not filtered_games:
             await channel.send("❌ No co-op/multiplayer games matched the selected filters.")
             return
@@ -297,7 +304,16 @@ class GAPIBot(discord.Client):
             await channel.send("❌ No common games found among linked users.")
             return False
 
-        common_games = self.multi_picker.filter_coop_games(common_games)
+        # Run blocking filter operation in thread to avoid blocking event loop
+        try:
+            common_games = await asyncio.to_thread(
+                self.multi_picker.filter_coop_games,
+                common_games
+            )
+        except Exception as e:
+            await channel.send(f"❌ Error filtering co-op games: {str(e)}")
+            return False
+            
         if not common_games:
             await channel.send("❌ No common co-op/multiplayer games found among linked users.")
             return False
@@ -314,20 +330,22 @@ class GAPIBot(discord.Client):
         NUMBER_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
         nota_emoji = '🚫'
         description_lines = [
-            f"React with your choice! Voting ends in **{duration} seconds**.",
-            "Co-op / multiplayer games only."
+            f"React with the number emoji to vote! Voting ends in **{duration} seconds**.",
+            "Co-op / multiplayer games only.",
+            ""
         ]
         for i, game in enumerate(candidate_games):
             description_lines.append(f"{NUMBER_EMOJIS[i]}  **{game.get('name', 'Unknown')}**")
         description_lines.append(f"{nota_emoji}  **None of these**")
-        description_lines.append(f"\n✅ React with ✅ to join this vote!")
+        description_lines.append(f"")
+        description_lines.append(f"✅ React with ✅ to join/track this vote (optional)")
 
         embed = discord.Embed(
             title="🗳️ Vote for a Game!" + (f" (Restart {restart_count})" if restart_count else ""),
             description="\n".join(description_lines),
             color=discord.Color.green(),
         )
-        embed.set_footer(text=f"Session ID: {session.session_id[:8]}")
+        embed.set_footer(text=f"Session ID: {session.session_id[:8]} | Vote with number emojis!")
         
         mention_prefix = "@everyone " if everyone_mention else ""
         vote_msg = await channel.send(mention_prefix, embed=embed)
@@ -742,8 +760,16 @@ class GAPIBot(discord.Client):
             
             await interaction.response.send_message(f"🎲 Finding a common game for {len(participants)} player(s)...")
             
-            # Pick a common game
-            game = self.multi_picker.pick_common_game(participants, coop_only=True)
+            # Pick a common game - run in thread to avoid blocking event loop
+            try:
+                game = await asyncio.to_thread(
+                    self.multi_picker.pick_common_game,
+                    participants,
+                    coop_only=True
+                )
+            except Exception as e:
+                await interaction.followup.send(f"❌ Error finding games: {str(e)}")
+                return
             
             if not game:
                 await interaction.followup.send(f"❌ No common co-op games found for the selected users.")
@@ -1238,9 +1264,11 @@ class GAPIBot(discord.Client):
         if vote_msg:
             try:
                 vote_msg = await channel.fetch_message(vote_msg.id)
-            except Exception:
-                pass
+            except Exception as e:
+                await channel.send(f"❌ Error fetching vote message: {str(e)}")
+                return
 
+            vote_count = 0
             for reaction in vote_msg.reactions:
                 emoji_str = str(reaction.emoji)
                 if emoji_str in emojis:
@@ -1252,16 +1280,25 @@ class GAPIBot(discord.Client):
                             # Cast vote on behalf of linked or any reacting user
                             voter_name = user.name
                             session.cast_vote(voter_name, app_id)
+                            vote_count += 1
                 elif emoji_str == nota_emoji:
                     async for user in reaction.users():
                         if not user.bot:
                             voter_name = user.name
                             session.cast_vote(voter_name, '__NOTA__')
+                            vote_count += 1
+                # Skip ✅ emoji - that's for joining, not voting
 
         # Close session and determine winner
         session.close()
         winner = session.get_winner()
         results = session.get_results()
+        
+        # Check if anyone actually voted
+        total_votes = sum(item.get('count', 0) for item in results.values())
+        if total_votes == 0:
+            await channel.send(f"❌ No votes were cast! Vote ended with no winner. (Processed {vote_count} reactions)")
+            return
 
         # Build results summary
         results_lines = ["**Vote Results:**"]
