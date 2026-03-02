@@ -3376,3 +3376,196 @@ class CosmeticCollection(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User")
+
+# ---------------------------------------------------------------------------
+# Database Optimization & Maintenance helpers  (Tier 3, item 10)
+# ---------------------------------------------------------------------------
+
+def get_table_stats(db) -> list:
+    """Return row counts and (where available) on-disk sizes for every table.
+
+    Returns a list of dicts sorted by row count descending:
+      ``table``     – table name
+      ``rows``      – approximate row count (exact for SQLite, estimate for Postgres)
+      ``size_bytes``– on-disk size in bytes (PostgreSQL only; ``None`` for SQLite)
+
+    If *db* is None or an error occurs, returns an empty list.
+    """
+    if not db or not engine:
+        return []
+    try:
+        from sqlalchemy import inspect as _inspect, text as _text
+        from sqlalchemy.sql import quoted_name
+        inspector = _inspect(engine)
+        table_names = inspector.get_table_names()
+        dialect = engine.dialect.name
+        stats = []
+        for tbl in table_names:
+            # tbl comes from the inspector so it is always a real table name;
+            # we still quote it to guard against unusual names.
+            safe_tbl = str(quoted_name(tbl, quote=True))
+            try:
+                count_row = db.execute(_text(f"SELECT COUNT(*) FROM {safe_tbl}")).fetchone()
+                row_count = int(count_row[0]) if count_row else 0
+            except Exception:
+                row_count = 0
+            size_bytes = None
+            if dialect == 'postgresql':
+                try:
+                    size_row = db.execute(
+                        _text("SELECT pg_total_relation_size(:tbl)"),
+                        {'tbl': tbl},
+                    ).fetchone()
+                    size_bytes = int(size_row[0]) if size_row else None
+                except Exception:
+                    pass
+            stats.append({'table': tbl, 'rows': row_count, 'size_bytes': size_bytes})
+        stats.sort(key=lambda r: r['rows'], reverse=True)
+        return stats
+    except Exception as e:
+        logger.error(f"get_table_stats error: {e}")
+        return []
+
+
+def get_db_size_bytes() -> int:
+    """Return total on-disk size of the database in bytes.
+
+    For SQLite, reads ``os.path.getsize`` on the database file.
+    For PostgreSQL, queries ``pg_database_size``.
+    Returns 0 on error or when the database is not available.
+    """
+    if not engine:
+        return 0
+    try:
+        dialect = engine.dialect.name
+        if dialect == 'sqlite':
+            db_url = str(engine.url)
+            # sqlite:////path/to/db.sqlite  →  /path/to/db.sqlite
+            path = db_url.replace('sqlite:///', '').replace('sqlite://', '')
+            if path and os.path.exists(path):
+                return os.path.getsize(path)
+            return 0
+        elif dialect == 'postgresql':
+            from sqlalchemy import text as _text
+            with engine.connect() as conn:
+                row = conn.execute(_text("SELECT pg_database_size(current_database())")).fetchone()
+                return int(row[0]) if row else 0
+        return 0
+    except Exception as e:
+        logger.error(f"get_db_size_bytes error: {e}")
+        return 0
+
+
+def apply_indexes(db, dry_run: bool = True) -> dict:
+    """Create recommended database indexes that do not yet exist.
+
+    Uses ``IndexAnalyzer.analyze_query_bottlenecks()`` from the *performance*
+    module to obtain the index DDL statements, then for each statement checks
+    whether the index already exists and, if *dry_run* is ``False``, executes
+    ``CREATE INDEX … IF NOT EXISTS …`` (or the equivalent).
+
+    Returns a dict:
+      ``applied``   – list of DDL statements executed
+      ``skipped``   – list of DDL statements where the index already existed
+      ``errors``    – list of ``{sql, error}`` dicts for any failed statements
+      ``dry_run``   – reflects the *dry_run* parameter
+    """
+    result = {'applied': [], 'skipped': [], 'errors': [], 'dry_run': dry_run}
+    if not db or not engine:
+        return result
+    try:
+        from performance import IndexAnalyzer
+        from sqlalchemy import inspect as _inspect, text as _text
+        suggestions = IndexAnalyzer.analyze_query_bottlenecks()
+        inspector = _inspect(engine)
+        # Build set of existing index names (lower-cased) per table
+        existing: dict = {}
+        for tbl in inspector.get_table_names():
+            for idx in inspector.get_indexes(tbl):
+                existing[idx['name'].lower()] = True
+        for ddl in suggestions:
+            # Extract the index name from "CREATE INDEX idx_xxx ON ..."
+            parts = ddl.split()
+            idx_name = ''
+            if len(parts) >= 3:
+                idx_name = parts[2].lower()
+            if idx_name and idx_name in existing:
+                result['skipped'].append(ddl)
+                continue
+            if dry_run:
+                result['applied'].append(ddl)
+            else:
+                try:
+                    # Convert to IF NOT EXISTS form for safety
+                    safe_ddl = ddl.replace(
+                        'CREATE INDEX ', 'CREATE INDEX IF NOT EXISTS ', 1
+                    ).replace(
+                        'CREATE UNIQUE INDEX ', 'CREATE UNIQUE INDEX IF NOT EXISTS ', 1
+                    )
+                    with engine.begin() as conn:
+                        conn.execute(_text(safe_ddl.rstrip(';')))
+                    result['applied'].append(ddl)
+                    logger.info(f"Created index: {idx_name}")
+                except Exception as e:
+                    result['errors'].append({'sql': ddl, 'error': str(e)})
+    except Exception as e:
+        logger.error(f"apply_indexes error: {e}")
+    return result
+
+
+def archive_old_picks(db, days: int = 365) -> dict:
+    """Delete pick/session records older than *days* days.
+
+    Removes rows from:
+      - ``picks``        – all rows whose ``created_at`` is before the cutoff date
+      - ``live_sessions``– rows whose ``created_at`` is before the cutoff date
+        **and** whose ``status`` is ``'completed'`` or ``'ended'``
+
+    Returns a dict:
+      ``deleted_picks``    – number of pick rows removed
+      ``deleted_sessions`` – number of live_session rows removed
+      ``cutoff_date``      – ISO 8601 timestamp used as cutoff
+      ``days``             – reflects the *days* parameter
+    """
+    result = {'deleted_picks': 0, 'deleted_sessions': 0,
+              'cutoff_date': '', 'days': days}
+    if not db or not engine:
+        return result
+    try:
+        from sqlalchemy import text as _text, inspect as _inspect
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        result['cutoff_date'] = cutoff.isoformat()
+        inspector = _inspect(engine)
+        table_names = set(inspector.get_table_names())
+        # Archive picks
+        if 'picks' in table_names:
+            r = db.execute(
+                _text("DELETE FROM picks WHERE created_at < :cutoff"),
+                {'cutoff': cutoff},
+            )
+            result['deleted_picks'] = r.rowcount
+            db.commit()
+        # Archive completed live_sessions
+        if 'live_sessions' in table_names:
+            r = db.execute(
+                _text(
+                    "DELETE FROM live_sessions "
+                    "WHERE created_at < :cutoff "
+                    "AND (status = 'completed' OR status = 'ended')"
+                ),
+                {'cutoff': cutoff},
+            )
+            result['deleted_sessions'] = r.rowcount
+            db.commit()
+        logger.info(
+            f"archive_old_picks: removed {result['deleted_picks']} picks, "
+            f"{result['deleted_sessions']} sessions (older than {days} days)"
+        )
+    except Exception as e:
+        logger.error(f"archive_old_picks error: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return result

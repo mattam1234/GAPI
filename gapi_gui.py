@@ -11309,6 +11309,166 @@ def api_changelog():
     })
 
 
+# ---------------------------------------------------------------------------
+# Database Optimization & Maintenance  (Tier 3, item 10)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/db/stats', methods=['GET'])
+@require_admin
+def api_admin_db_stats():
+    """Return per-table row counts and total database size (admin only).
+
+    Response JSON:
+      ``tables``     – list of ``{table, rows, size_bytes}`` sorted by row count
+      ``total_size_bytes`` – total on-disk DB size (0 if not measurable)
+      ``db_available``     – whether the DB module is loaded
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available', 'db_available': False}), 503
+    try:
+        db = next(database.get_db())
+        tables = database.get_table_stats(db)
+        total_size = database.get_db_size_bytes()
+        return jsonify({
+            'tables': tables,
+            'total_size_bytes': total_size,
+            'db_available': True,
+        })
+    except Exception as e:
+        gui_logger.error('api_admin_db_stats error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/apply-indexes', methods=['GET'])
+@require_admin
+def api_admin_db_apply_indexes_dryrun():
+    """Dry-run: list recommended indexes that are not yet present (admin only).
+
+    Response JSON mirrors ``POST /api/admin/db/apply-indexes`` with
+    ``dry_run: true``.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        result = database.apply_indexes(db, dry_run=True)
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_db_apply_indexes_dryrun error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/apply-indexes', methods=['POST'])
+@require_admin
+def api_admin_db_apply_indexes():
+    """Create all missing recommended indexes (admin only).
+
+    Response JSON:
+      ``applied``  – DDL statements executed
+      ``skipped``  – DDL statements where the index already existed
+      ``errors``   – ``[{sql, error}]`` for any failures
+      ``dry_run``  – always ``false``
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = next(database.get_db())
+        result = database.apply_indexes(db, dry_run=False)
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_db_apply_indexes error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/archive-old-picks', methods=['POST'])
+@require_admin
+def api_admin_db_archive_old_picks():
+    """Delete pick and completed live-session records older than N days (admin only).
+
+    Request JSON body (all optional):
+      ``days`` – retention period in days (default 365, min 1)
+
+    Response JSON:
+      ``deleted_picks``    – number of pick rows removed
+      ``deleted_sessions`` – number of live_session rows removed
+      ``cutoff_date``      – ISO 8601 cutoff timestamp
+      ``days``             – retention period used
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    try:
+        days = max(1, int(data.get('days', 365)))
+    except (ValueError, TypeError):
+        days = 365
+    try:
+        db = next(database.get_db())
+        result = database.archive_old_picks(db, days=days)
+        return jsonify(result)
+    except Exception as e:
+        gui_logger.error('api_admin_db_archive_old_picks error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/db/backup', methods=['GET'])
+@require_admin
+def api_admin_db_backup():
+    """Download a database backup (admin only).
+
+    For SQLite databases: streams the database file as an attachment.
+    For PostgreSQL or other engines: returns connection info and instructions
+    for using pg_dump (no file is streamed).
+
+    Response for non-SQLite:
+      ``message``  – human-readable instructions
+      ``dialect``  – database dialect name
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        import sqlalchemy as _sa
+        dialect = database.engine.dialect.name if database.engine else 'unknown'
+        if dialect == 'sqlite':
+            db_url = str(database.engine.url)
+            path = db_url.replace('sqlite:///', '').replace('sqlite://', '')
+            if not path or not os.path.exists(path):
+                return jsonify({'error': 'SQLite file not found', 'path': path}), 404
+            filename = os.path.basename(path) or 'gapi.db'
+            import datetime as _dt
+            stamp = _dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            download_name = f'gapi_backup_{stamp}.db'
+            return Response(
+                _stream_file(path),
+                mimetype='application/octet-stream',
+                headers={
+                    'Content-Disposition': f'attachment; filename="{download_name}"',
+                    'Content-Length': str(os.path.getsize(path)),
+                },
+            )
+        else:
+            return jsonify({
+                'message': (
+                    f'Automated backup download is only supported for SQLite. '
+                    f'For {dialect}, use the appropriate dump tool '
+                    f'(e.g., pg_dump for PostgreSQL) against your database server.'
+                ),
+                'dialect': dialect,
+            }), 200
+    except Exception as e:
+        gui_logger.error('api_admin_db_backup error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+def _stream_file(path: str, chunk_size: int = 65536):
+    """Generator that yields a file in chunks for streaming responses."""
+    with open(path, 'rb') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+
 def create_templates():
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(templates_dir, exist_ok=True)
