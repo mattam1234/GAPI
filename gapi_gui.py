@@ -56,6 +56,22 @@ try:
 except ImportError:
     PERFORMANCE_AVAILABLE = False
 
+try:
+    from flask_compress import Compress as _FlaskCompress
+    _COMPRESS_AVAILABLE = True
+except ImportError:
+    _FlaskCompress = None  # type: ignore[assignment,misc]
+    _COMPRESS_AVAILABLE = False
+
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    _LIMITER_AVAILABLE = True
+except ImportError:
+    Limiter = None  # type: ignore[assignment,misc]
+    get_remote_address = None  # type: ignore[assignment]
+    _LIMITER_AVAILABLE = False
+
 # DB-backed services — instantiated lazily after database import so the
 # module can still start without a database being present.
 try:
@@ -160,8 +176,64 @@ def ensure_db_available() -> bool:
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
+# ---------------------------------------------------------------------------
+# Response compression (gzip / brotli)
+# ---------------------------------------------------------------------------
+if _COMPRESS_AVAILABLE:
+    _compress = _FlaskCompress()
+    _compress.init_app(app)
+
+# ---------------------------------------------------------------------------
+# Rate limiting — protect auth endpoints from brute-force attacks.
+# Limits are intentionally generous for normal usage but prevent rapid
+# scripted abuse.  They can be tightened via RATELIMIT_DEFAULT env var.
+# ---------------------------------------------------------------------------
+if _LIMITER_AVAILABLE:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        app=app,
+        default_limits=[],  # no global limit — applied per-endpoint
+        # NOTE: "memory://" stores counters in-process only. This is
+        # sufficient for single-process deployments (Flask dev server).
+        # For multi-process deployments (e.g. gunicorn -w N) set
+        # RATELIMIT_STORAGE_URI=redis://... in the environment to share
+        # counters across workers.
+        storage_uri=os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
+    )
+else:
+    # Stub: @limiter.limit(...) becomes a no-op
+    class _NoOpLimiter:
+        def limit(self, *args, **kwargs):
+            def decorator(f):
+                return f
+            return decorator
+        def exempt(self, f):
+            return f
+    limiter = _NoOpLimiter()  # type: ignore[assignment]
+
 # Use the shared GAPI logger so level is controlled by config/setup_logging()
 gui_logger = logging.getLogger('gapi.gui')
+
+
+# ---------------------------------------------------------------------------
+# HTTP security headers — applied to every response
+# ---------------------------------------------------------------------------
+@app.after_request
+def add_security_headers(response):
+    """Attach security-related HTTP headers to every outgoing response.
+
+    These headers defend against common browser-based attacks such as
+    clickjacking (X-Frame-Options), MIME-sniffing (X-Content-Type-Options),
+    and unintended cross-origin resource leakage (Referrer-Policy).
+    """
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault(
+        'Permissions-Policy',
+        'geolocation=(), microphone=(), camera=()',
+    )
+    return response
 
 # Global game picker instance
 picker: Optional[gapi.GamePicker] = None
@@ -1475,6 +1547,7 @@ def api_auth_current():
 
 
 @app.route('/api/auth/register', methods=['POST'])
+@limiter.limit("10 per hour")
 def api_auth_register():
     """Register a new user"""
     data = request.json or {}
@@ -1559,6 +1632,7 @@ def api_setup_initial_admin():
 
 
 @app.route('/api/auth/login', methods=['POST'])
+@limiter.limit("20 per minute; 100 per hour")
 def api_auth_login():
     """Log in a user"""
     global picker, multi_picker
@@ -9594,6 +9668,23 @@ def api_discord_bot_remove_user(discord_id: str):
         return jsonify({'error': f'Failed to save config: {exc}'}), 500
 
     return jsonify({'removed': True})
+
+
+@app.route('/api/admin/security-info', methods=['GET'])
+@require_admin
+def api_admin_security_info():
+    """Return the active security feature flags (admin only).
+
+    Response JSON:
+      - ``compression_enabled``: bool – Flask-Compress loaded
+      - ``rate_limiting_enabled``: bool – Flask-Limiter loaded
+      - ``security_headers_enabled``: bool – always True (built-in hook)
+    """
+    return jsonify({
+        'compression_enabled': _COMPRESS_AVAILABLE,
+        'rate_limiting_enabled': _LIMITER_AVAILABLE,
+        'security_headers_enabled': True,
+    })
 
 
 # Localization / i18n endpoints
