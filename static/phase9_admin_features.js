@@ -211,7 +211,7 @@ async function performAdvancedSearch() {
             platforms: (document.getElementById('search-platforms')?.value || '').split(',').filter(p => p),
         };
 
-        const resp = await fetch('/api/search/advanced', {
+        const resp = await safeFetch('/api/search/advanced', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, filters }),
@@ -250,7 +250,7 @@ async function saveCurrentSearch() {
             max_year: document.getElementById('search-max-year')?.value,
         };
 
-        const resp = await fetch('/api/search/save', {
+        const resp = await safeFetch('/api/search/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, query, filters }),
@@ -311,7 +311,7 @@ async function loadTrendingSearches() {
 
 async function deleteSavedSearch(searchId) {
     try {
-        const resp = await fetch(`/api/search/saved/${searchId}`, { method: 'DELETE' });
+        const resp = await safeFetch(`/api/search/saved/${searchId}`, { method: 'DELETE' });
         if (!resp.ok) throw new Error('Delete failed');
         await loadSavedSearches();
     } catch (err) {
@@ -395,7 +395,7 @@ async function loadPendingReports(page = 1) {
 async function moderateReport(reportId, action) {
     try {
         const notes = prompt('Moderation notes (optional):');
-        const resp = await fetch('/api/admin/moderation/action', {
+        const resp = await safeFetch('/api/admin/moderation/action', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -417,7 +417,7 @@ async function moderateReport(reportId, action) {
 async function reportContent(type, reason) {
     try {
         const description = prompt('Tell us more (optional):');
-        const resp = await fetch('/api/moderation/report', {
+        const resp = await safeFetch('/api/moderation/report', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -461,7 +461,7 @@ async function batchTagGames() {
             return;
         }
 
-        const resp = await fetch('/api/batch/tag-games', {
+        const resp = await safeFetch('/api/batch/tag-games', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ game_ids: ids, tags: tags }),
@@ -486,7 +486,7 @@ async function batchChangeStatus() {
             return;
         }
 
-        const resp = await fetch('/api/batch/change-status', {
+        const resp = await safeFetch('/api/batch/change-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ game_ids: ids, status: status }),
@@ -510,7 +510,7 @@ async function batchExportGames() {
             return;
         }
 
-        const resp = await fetch('/api/batch/export', {
+        const resp = await safeFetch('/api/batch/export', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ game_ids: ids, format: 'csv' }),

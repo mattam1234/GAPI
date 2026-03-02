@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GAPI favicon">
+  <defs>
+    <linearGradient id="gapiGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#667eea"/>
+      <stop offset="100%" stop-color="#764ba2"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#gapiGrad)"/>
+  <path d="M40 20a14 14 0 1 0 0 24h8v-6h-9v4h-2a8 8 0 1 1 0-16h9v-6z" fill="#fff"/>
+</svg>

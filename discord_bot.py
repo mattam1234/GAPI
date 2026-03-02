@@ -8,10 +8,23 @@ import discord
 from discord import app_commands
 import json
 import os
+import sys
 import asyncio
 from typing import Dict, List, Set, Optional
 from datetime import datetime, timedelta
 import multiuser
+from dotenv import load_dotenv
+
+# Fix Windows console encoding for emoji support
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except (AttributeError, Exception):
+        # Fallback for older Python versions or if reconfigure fails
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 
 class GAPIBot(discord.Client):
@@ -19,8 +32,11 @@ class GAPIBot(discord.Client):
     
     def __init__(self, config: Dict, config_file: str = 'discord_config.json'):
         intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
+        # Note: message_content and members are privileged intents that require
+        # enabling in Discord Developer Portal. Since this bot uses slash commands,
+        # we don't need message_content. Members intent is optional.
+        # intents.message_content = True  # Not needed for slash commands
+        # intents.members = True  # Only needed if you want to list server members
         
         super().__init__(intents=intents)
         
@@ -603,6 +619,9 @@ def run_bot(token: str, config: Dict):
 if __name__ == "__main__":
     import sys
     
+    # Load .env file for environment variables
+    load_dotenv()
+    
     # Load configuration – honour GAPI_DISCORD_CONFIG env var set by admin panel
     config_path = os.environ.get('GAPI_DISCORD_CONFIG', 'config.json')
     if not os.path.exists(config_path):
@@ -612,16 +631,21 @@ if __name__ == "__main__":
     with open(config_path, 'r') as f:
         config = json.load(f)
     
-    steam_api_key = config.get('steam_api_key')
+    # Read Steam API key from environment (.env) first, then fall back to config.json
+    steam_api_key = os.getenv('STEAM_API_KEY') or config.get('steam_api_key')
     discord_token = config.get('discord_bot_token')
     
     if not steam_api_key:
-        print("❌ steam_api_key not found in config.json")
+        print("❌ steam_api_key not found in .env (STEAM_API_KEY) or config.json")
+        print("  Please set STEAM_API_KEY in your .env file or add to config.json")
         sys.exit(1)
     
     if not discord_token:
         print("❌ discord_bot_token not found in config.json")
         print("Please add your Discord bot token to config.json")
         sys.exit(1)
+    
+    # Update config with steam_api_key from environment (priority: .env > config.json)
+    config['steam_api_key'] = steam_api_key
     
     run_bot(discord_token, config)

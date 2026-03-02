@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+import json
+import http.cookiejar
+import urllib.request
+import urllib.parse
+
+# Create a cookie jar to maintain session
+cookie_jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+
+# Step 1: Login
+login_data = json.dumps({
+    'username': 'mattam1234',
+    'password': 'password'
+}).encode('utf-8')
+
+req = urllib.request.Request('http://localhost:5000/api/auth/login', 
+                             data=login_data,
+                             headers={'Content-Type': 'application/json'})
+login_response = opener.open(req)
+login_result = json.loads(login_response.read().decode())
+print(f"Login result: {login_result}")
+
+# Step 2: Get current user info
+try:
+    current_response = opener.open('http://localhost:5000/api/auth/current')
+    current_data = json.loads(current_response.read().decode())
+    print(f"Current user response: {json.dumps(current_data, indent=2)}")
+except Exception as e:
+    print(f"Get current user failed: {e}")

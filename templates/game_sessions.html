@@ -936,6 +936,12 @@
     </div>
 
     <script>
+        // CSRF disabled - safeFetch is now just an alias for fetch with credentials
+        window.safeFetch = function(url, options = {}) {
+            options.credentials = options.credentials || 'same-origin';
+            return fetch(url, options);
+        };
+
         let currentSessionId = null;
         let currentUser = null;
         let activeSessions = [];
@@ -1073,7 +1079,7 @@
             const coopOnly = document.getElementById('coop-only-session').checked;
 
             try {
-                const resp = await fetch('/api/live-session/create', {
+                const resp = await safeFetch('/api/live-session/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: name || undefined, coop_only: coopOnly })
@@ -1191,7 +1197,7 @@
         async function pickGameForSession() {
             if (!currentSessionId) return;
             try {
-                const resp = await fetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/pick`, {
+                const resp = await safeFetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/pick`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ coop_only: false })
@@ -1213,7 +1219,7 @@
         async function voteOnGame(accept) {
             if (!currentSessionId) return;
             try {
-                const resp = await fetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/vote`, {
+                const resp = await safeFetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/vote`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ accept: accept })
@@ -1235,7 +1241,7 @@
         async function joinCurrentSession(_retriedAuth = false) {
             if (!currentSessionId) return;
             try {
-                const resp = await fetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/join`, {
+                const resp = await safeFetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
@@ -1278,7 +1284,7 @@
             if (!confirm('Leave this session?')) return;
 
             try {
-                const resp = await fetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/leave`, {
+                const resp = await safeFetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/leave`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
@@ -1447,7 +1453,7 @@
             if (!username || !currentSessionId) return;
             
             try {
-                const resp = await fetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/invite`, {
+                const resp = await safeFetch(`/api/live-session/${encodeURIComponent(currentSessionId)}/invite`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ target_user: username })

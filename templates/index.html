@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GAPI - Game Picker</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+    <link rel="shortcut icon" href="/favicon.ico?v=2">
     <!-- Performance: resource hints for external origins -->
     <link rel="dns-prefetch" href="//fonts.googleapis.com">
     <link rel="dns-prefetch" href="//fonts.gstatic.com">
@@ -1734,7 +1736,7 @@
     </div>
 
     <!-- Admin Settings Tab -->
-    <div id="admin-tab" class="tab-content" style="display:none;">
+    <div id="admin-tab" class="tab-content">
         <h2>🛠️ Admin Settings</h2>
         <p style="color:var(--text-secondary); margin-bottom:20px;">Configure global application settings. Changes take effect immediately.</p>
 
@@ -1856,11 +1858,49 @@
                                style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
                     </label>
                     <label style="display:flex; flex-direction:column; gap:5px;">
+                        <span style="font-weight:600;">Discord Bot Client ID <small style="color:var(--text-secondary); font-weight:normal;">(for invite URL)</small></span>
+                        <input type="text" id="discord-bot-client-id-input" placeholder="Your bot's Application ID from Discord Developer Portal"
+                               style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px;">
                         <span style="font-weight:600;">Steam API Key</span>
                         <input type="password" id="discord-bot-steam-key-input" placeholder="Paste new Steam API key (leave blank to keep existing)"
                                style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
                     </label>
                     <button onclick="saveDiscordBotConfig()" style="padding:9px 22px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; align-self:flex-start;">💾 Save Config</button>
+                </div>
+            </details>
+
+            <!-- Diagnostics Panel -->
+            <details style="margin-bottom:14px;">
+                <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">🔍 Bot Diagnostics</summary>
+                <div style="margin-top:10px;">
+                    <div id="discord-bot-diagnostics" style="display:grid; gap:8px; font-size:0.9em;">
+                        <div style="display:flex; align-items:center; gap:10px; padding:8px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:6px;">
+                            <span style="min-width:160px; font-weight:600;">Steam API Key:</span>
+                            <span id="diag-steam-key-status">Loading...</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px; padding:8px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:6px;">
+                            <span style="min-width:160px; font-weight:600;">Discord Token:</span>
+                            <span id="diag-discord-token-status">Loading...</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px; padding:8px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:6px;">
+                            <span style="min-width:160px; font-weight:600;">Config Files:</span>
+                            <span id="diag-config-files">Loading...</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px; padding:8px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:6px;">
+                            <span style="min-width:160px; font-weight:600;">Python Version:</span>
+                            <span id="diag-python-version">Loading...</span>
+                        </div>
+                        <div id="bot-invite-url-container" style="display:none; padding:8px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:6px;">
+                            <div style="font-weight:600; margin-bottom:8px;">📎 Bot Invite URL:</div>
+                            <div style="display:flex; gap:8px;">
+                                <input type="text" id="bot-invite-url" readonly 
+                                       style="flex:1; padding:6px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); font-size:0.85em;">
+                                <button onclick="copyBotInviteUrl()" style="padding:6px 14px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </details>
 
@@ -2015,6 +2055,12 @@
             try { console.error('Unhandled promise rejection:', ev.reason); } catch(e){}
             try { alert('Unhandled promise rejection: ' + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason))); } catch(e){}
         });
+
+        // CSRF disabled - safeFetch is now just an alias for fetch with credentials
+        window.safeFetch = function(url, options = {}) {
+            options.credentials = options.credentials || 'same-origin';
+            return fetch(url, options);
+        };
 
         let currentGame = null;
         let activeVoteSession = null;
@@ -2571,10 +2617,10 @@
         async function setBacklogStatus(gameId, status) {
             try {
                 if (!status) {
-                    await fetch(`/api/backlog/${gameId}`, {method:'DELETE'});
+                    await safeFetch(`/api/backlog/${gameId}`, {method:'DELETE'});
                     if (currentGame) currentGame.backlog_status = null;
                 } else {
-                    await fetch(`/api/backlog/${gameId}`, {
+                    await safeFetch(`/api/backlog/${gameId}`, {
                         method: 'POST',
                         headers: {'Content-Type':'application/json'},
                         body: JSON.stringify({status})
@@ -2682,7 +2728,7 @@
         async function deleteReview(gameId) {
             if (!confirm('Delete this review?')) return;
             try {
-                const resp = await fetch(`/api/reviews/${gameId}`, {method: 'DELETE'});
+                const resp = await safeFetch(`/api/reviews/${gameId}`, {method: 'DELETE'});
                 if (resp.ok && currentGame) {
                     currentGame.review = null;
                     displayGame(currentGame);
@@ -3096,7 +3142,7 @@
         
         async function removeFavorite(appId) {
             try {
-                const response = await fetch(`/api/favorite/${appId}`, {method: 'DELETE'});
+                const response = await safeFetch(`/api/favorite/${appId}`, {method: 'DELETE'});
                 const data = await response.json();
                 
                 if (data.success) {
@@ -4101,9 +4147,9 @@
             try {
                 let resp;
                 if (editId) {
-                    resp = await fetch(`/api/schedule/${editId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                    resp = await safeFetch(`/api/schedule/${editId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
                 } else {
-                    resp = await fetch('/api/schedule', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                    resp = await safeFetch('/api/schedule', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
                 }
                 if (!resp.ok) { const d=await resp.json(); alert(d.error||'Failed to save event'); return; }
                 clearScheduleForm();
@@ -4114,7 +4160,7 @@
         async function deleteScheduleEvent(id) {
             if (!confirm('Delete this event?')) return;
             try {
-                const resp = await fetch(`/api/schedule/${id}`, {method:'DELETE'});
+                const resp = await safeFetch(`/api/schedule/${id}`, {method:'DELETE'});
                 if (resp.ok) loadSchedule();
                 else { const d=await resp.json(); alert(d.error||'Failed to delete'); }
             } catch (e) { alert('Error: ' + e.message); }
@@ -4428,8 +4474,9 @@
                     console.log('✅ User logged in:', data.username, 'role:', data.role);
                     document.getElementById('current-username').textContent = data.username;
                     
-                    // Store user role for UI controls
+                    // Store user role and username for UI controls
                     window.currentUserRole = data.role || 'user';
+                    window.currentUser = data.username;
                     
                     // Update UI based on auth state
                     setAuthenticatedUI(true, data.role || 'user', data.username);
@@ -4477,6 +4524,7 @@
                 const response = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
+                    credentials: 'same-origin',
                     body: JSON.stringify({username, password})
                 });
                 
@@ -4536,6 +4584,7 @@
                 const response = await fetch('/api/auth/register', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
+                    credentials: 'same-origin',
                     body: JSON.stringify({username, password})
                 });
                 
@@ -4572,7 +4621,7 @@
             }
             
             try {
-                await fetch('/api/auth/logout', {method: 'POST'});
+                await safeFetch('/api/auth/logout', {method: 'POST'});
                 document.getElementById('login-username').value = '';
                 document.getElementById('login-password').value = '';
                 toastr.success('Logged out');
@@ -4802,7 +4851,7 @@
             }
 
             try {
-                const response = await fetch('/api/library/sync', { method: 'POST' });
+                const response = await safeFetch('/api/library/sync', { method: 'POST' });
                 const data = await response.json();
 
                 if (response.ok) {
@@ -6373,7 +6422,7 @@
             }
             
             try {
-                const resp = await fetch('/api/chat/send', {
+                const resp = await safeFetch('/api/chat/send', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -6581,7 +6630,7 @@
             const coopOnly = document.getElementById('session-coop-only').checked;
             const name = (nameInput.value || '').trim();
             try {
-                const resp = await fetch('/api/live-session/create', {
+                const resp = await safeFetch('/api/live-session/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: name || undefined, coop_only: coopOnly }),
@@ -6992,12 +7041,12 @@
         }
 
         async function markNotifRead(id) {
-            await fetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids:[id]}) });
+            await safeFetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids:[id]}) });
             loadNotifications();
         }
 
         async function markAllNotificationsRead() {
-            await fetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+            await safeFetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
             loadNotifications();
         }
 
@@ -7336,7 +7385,7 @@
             const btn = document.getElementById('discord-bot-start-btn');
             if (btn) btn.disabled = true;
             try {
-                const resp = await fetch('/api/admin/discord-bot/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                const resp = await safeFetch('/api/admin/discord-bot/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
                 const data = await resp.json();
                 if (resp.ok) {
                     _discordBotShowMsg(`✅ Discord bot started (PID ${data.pid})`, 'success');
@@ -7355,7 +7404,7 @@
             const btn = document.getElementById('discord-bot-stop-btn');
             if (btn) btn.disabled = true;
             try {
-                const resp = await fetch('/api/admin/discord-bot/stop', { method: 'POST' });
+                const resp = await safeFetch('/api/admin/discord-bot/stop', { method: 'POST' });
                 const data = await resp.json();
                 if (resp.ok) {
                     _discordBotShowMsg('✅ Discord bot stopped', 'success');
@@ -7372,16 +7421,18 @@
 
         async function saveDiscordBotConfig() {
             const token = (document.getElementById('discord-bot-token-input') || {}).value || '';
+            const clientId = (document.getElementById('discord-bot-client-id-input') || {}).value || '';
             const steamKey = (document.getElementById('discord-bot-steam-key-input') || {}).value || '';
-            if (!token && !steamKey) {
+            if (!token && !clientId && !steamKey) {
                 _discordBotShowMsg('❌ Provide at least one value to save', 'error');
                 return;
             }
             try {
                 const body = {};
                 if (token) body.discord_bot_token = token;
+                if (clientId) body.discord_bot_client_id = clientId;
                 if (steamKey) body.steam_api_key = steamKey;
-                const resp = await fetch('/api/admin/discord-bot/config', {
+                const resp = await safeFetch('/api/admin/discord-bot/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
@@ -7390,10 +7441,13 @@
                 if (resp.ok) {
                     _discordBotShowMsg('✅ Config saved', 'success');
                     const tokenInput = document.getElementById('discord-bot-token-input');
+                    const clientIdInput = document.getElementById('discord-bot-client-id-input');
                     const steamInput = document.getElementById('discord-bot-steam-key-input');
                     if (tokenInput) tokenInput.value = '';
+                    if (clientIdInput) clientIdInput.value = '';
                     if (steamInput) steamInput.value = '';
                     loadDiscordBotConfig();
+                    loadDiscordBotDiagnostics();
                 } else {
                     _discordBotShowMsg('❌ ' + (data.error || 'Failed to save config'), 'error');
                 }
@@ -7406,7 +7460,7 @@
             const btn = document.getElementById('discord-bot-restart-btn');
             if (btn) btn.disabled = true;
             try {
-                const resp = await fetch('/api/admin/discord-bot/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                const resp = await safeFetch('/api/admin/discord-bot/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
                 const data = await resp.json();
                 if (resp.ok) {
                     _discordBotShowMsg(`✅ Discord bot restarted (PID ${data.pid})`, 'success');
@@ -7486,6 +7540,73 @@
             } catch (e) {
                 _discordBotShowMsg('❌ Error: ' + e.message, 'error');
             }
+        }
+
+        async function loadDiscordBotDiagnostics() {
+            try {
+                const resp = await fetch('/api/admin/discord-bot/diagnostics');
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                // Steam API Key Status
+                const steamKeyEl = document.getElementById('diag-steam-key-status');
+                if (steamKeyEl) {
+                    if (data.steam_api_key_set) {
+                        const source = data.steam_api_key_source === 'env' ? '.env file' : 'config.json';
+                        steamKeyEl.innerHTML = `<span style="color:#27ae60;">✅ Configured from ${source}</span>`;
+                    } else {
+                        steamKeyEl.innerHTML = '<span style="color:#e74c3c;">❌ Not configured</span>';
+                    }
+                }
+
+                // Discord Token Status
+                const tokenEl = document.getElementById('diag-discord-token-status');
+                if (tokenEl) {
+                    if (data.discord_token_set) {
+                        tokenEl.innerHTML = '<span style="color:#27ae60;">✅ Configured</span>';
+                    } else {
+                        tokenEl.innerHTML = '<span style="color:#e74c3c;">❌ Not configured</span>';
+                    }
+                }
+
+                // Config Files
+                const configEl = document.getElementById('diag-config-files');
+                if (configEl) {
+                    const config = data.config_file_exists ? '✅ config.json' : '❌ config.json';
+                    const discordConfig = data.discord_config_exists ? '✅ discord_config.json' : '❌ discord_config.json';
+                    configEl.innerHTML = `${config} | ${discordConfig}`;
+                }
+
+                // Python Version
+                const pythonEl = document.getElementById('diag-python-version');
+                if (pythonEl) {
+                    pythonEl.textContent = data.python_version || 'Unknown';
+                }
+
+                // Bot Invite URL
+                const inviteContainer = document.getElementById('bot-invite-url-container');
+                const inviteInput = document.getElementById('bot-invite-url');
+                if (data.bot_invite_url && inviteContainer && inviteInput) {
+                    inviteInput.value = data.bot_invite_url;
+                    inviteContainer.style.display = 'block';
+                } else if (inviteContainer) {
+                    inviteContainer.style.display = 'none';
+                }
+            } catch (e) {
+                console.error('Failed to load Discord bot diagnostics:', e);
+            }
+        }
+
+        function copyBotInviteUrl() {
+            const input = document.getElementById('bot-invite-url');
+            if (!input) return;
+            input.select();
+            input.setSelectionRange(0, 99999); // For mobile
+            navigator.clipboard.writeText(input.value).then(() => {
+                _discordBotShowMsg('✅ Bot invite URL copied to clipboard!', 'success');
+            }).catch(err => {
+                _discordBotShowMsg('❌ Failed to copy: ' + err.message, 'error');
+            });
         }
 
         // ==============================================================================================
@@ -7599,7 +7720,7 @@
             // Show/hide admin-tab div (it's outside the normal tab-content set)
             const adminDiv = document.getElementById('admin-tab');
             if (adminDiv) adminDiv.classList.toggle('active', tabName === 'admin');
-            if (tabName === 'admin') { loadAdminSettings(); loadDiscordBotStatus(); loadDiscordBotConfig(); }
+            if (tabName === 'admin') { loadAdminSettings(); loadDiscordBotStatus(); loadDiscordBotConfig(); loadDiscordBotDiagnostics(); }
             // Pause auto-refresh when leaving the admin tab
             if (tabName !== 'admin' && _discordBotAutoRefreshTimer) {
                 toggleDiscordBotAutoRefresh(false);
@@ -8346,7 +8467,7 @@
                 return;
             }
             try {
-                await fetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({game, rating: currentReviewRating, review})});
+                await safeFetch('/api/reviews', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({game, rating: currentReviewRating, review})});
                 showMessage('Review posted!', 'success');
                 document.getElementById('review-game-title').value = '';
                 document.getElementById('review-text').value = '';
@@ -8593,7 +8714,7 @@
 
         async function purchaseItem(itemId) {
             try {
-                const resp = await fetch('/api/shop/purchase', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({item_id: itemId})});
+                const resp = await safeFetch('/api/shop/purchase', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({item_id: itemId})});
                 const data = await resp.json();
                 if (data.success) {
                     showMessage('Purchase successful!', 'success');
@@ -8645,7 +8766,7 @@
             const title = document.getElementById('stream-title').value.trim();
             if (!title) return;
             try {
-                await fetch('/api/streaming/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title})});
+                await safeFetch('/api/streaming/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title})});
                 showMessage('Stream started!', 'success');
                 document.getElementById('stream-title').value = '';
                 await loadStreaming();
@@ -8702,7 +8823,7 @@
             }
             
             try {
-                await fetch('/api/trades/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username, offer})});
+                await safeFetch('/api/trades/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username, offer})});
                 showMessage('Trade offer sent!', 'success');
                 document.getElementById('trade-username').value = '';
                 document.getElementById('trade-offer').value = '';
@@ -8714,7 +8835,7 @@
 
         async function acceptTrade(tradeId) {
             try {
-                await fetch(`/api/trades/${tradeId}/accept`, {method: 'POST'});
+                await safeFetch(`/api/trades/${tradeId}/accept`, {method: 'POST'});
                 showMessage('Trade accepted!', 'success');
                 await loadTrades();
             } catch (err) {
@@ -8724,7 +8845,7 @@
 
         async function declineTrade(tradeId) {
             try {
-                await fetch(`/api/trades/${tradeId}/decline`, {method: 'POST'});
+                await safeFetch(`/api/trades/${tradeId}/decline`, {method: 'POST'});
                 await loadTrades();
             } catch (err) {
                 console.error('Error declining trade:', err);
@@ -8806,7 +8927,7 @@
             const name = document.getElementById('team-name-input').value.trim();
             if (!name) return;
             try {
-                await fetch('/api/teams/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})});
+                await safeFetch('/api/teams/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})});
                 showMessage('Team created!', 'success');
                 document.getElementById('team-name-input').value = '';
                 await loadTeams();
@@ -8817,7 +8938,7 @@
 
         async function joinTeam(teamId) {
             try {
-                await fetch(`/api/teams/${teamId}/join`, {method: 'POST'});
+                await safeFetch(`/api/teams/${teamId}/join`, {method: 'POST'});
                 showMessage('Joined team!', 'success');
                 await loadTeams();
             } catch (err) {
