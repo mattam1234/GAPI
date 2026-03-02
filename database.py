@@ -4539,7 +4539,7 @@ def add_group_member(db, group_id: int, username: str, added_by: str = '') -> di
     if not db:
         return {'ok': False, 'error': 'no db'}
     try:
-        grp = db.query(UserGroup).get(group_id)
+        grp = db.get(UserGroup, group_id)
         if not grp:
             return {'ok': False, 'error': 'Group not found'}
         existing = db.query(UserGroupMember).filter(

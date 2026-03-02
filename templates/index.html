@@ -13,6 +13,10 @@
     <!-- PWA: Web App Manifest + theme colour -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#667eea">
+    <!-- PWA: iOS / Android meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="mobile-web-app-capable" content="yes">
     <style>
         :root {
             /* Color scheme variables - light theme defaults */
@@ -9623,6 +9627,19 @@
 
     <!-- Load Phase 9 scripts -->
     <script src="{{ url_for('static', filename='phase9_admin_features.js') }}"></script>
+
+    <!-- PWA: Service worker registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js').then(function(reg) {
+                    console.log('ServiceWorker registered:', reg.scope);
+                }).catch(function(err) {
+                    console.log('ServiceWorker registration failed:', err);
+                });
+            });
+        }
+    </script>
 
 </body>
 </html>

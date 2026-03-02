@@ -1269,8 +1269,10 @@ def require_login(f):
     """Decorator to require user to be logged in"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        username = get_current_username()
-        if not username:
+        # `current_user` is the module-level variable; tests can patch it
+        # directly with @patch('gapi_gui.current_user', 'testuser').
+        # In production it is a LocalProxy that resolves from the session.
+        if not current_user:
             return jsonify({'error': 'Not logged in'}), 401
         return f(*args, **kwargs)
     return decorated_function
@@ -1280,10 +1282,14 @@ def require_admin(f):
     """Decorator to require admin privileges"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        username = get_current_username()
-        if not username:
+        _cu = current_user
+        if not _cu:
             return jsonify({'error': 'Not logged in'}), 401
-        if not user_manager.is_admin(username):
+        # Resolve to a plain string for the is_admin check.  When the
+        # module-level `current_user` is a patched string we use that
+        # directly; otherwise fall back to the session-based helper.
+        username = str(_cu) if isinstance(_cu, str) else get_current_username()
+        if not username or not user_manager.is_admin(username):
             return jsonify({'error': 'Admin privileges required'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -11924,6 +11930,9 @@ def api_admin_error_rate():
             continue
         try:
             ts = datetime.fromisoformat(ts_str.replace('Z', ''))
+            # Strip timezone info if present so arithmetic stays offset-naive.
+            if ts.tzinfo is not None:
+                ts = ts.replace(tzinfo=None)
         except (ValueError, AttributeError):
             continue
         if ts < cutoff:

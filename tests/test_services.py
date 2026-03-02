@@ -901,7 +901,7 @@ class _MockDB:
 
     # Chat helpers
     def send_chat_message(self, db, sender_username, message, room='general',
-                          recipient_username=None):
+                          recipient_username=None, command_only=False):
         if room not in self._messages:
             self._messages[room] = []
         msg = {'id': self._new_id(), 'sender': sender_username,
@@ -909,10 +909,12 @@ class _MockDB:
         self._messages[room].append(msg)
         return msg
 
-    def get_chat_messages(self, db, room='general', limit=50, since_id=0):
+    def get_chat_messages(self, db, room='general', limit=50, since_id=0, before_id=0):
         msgs = self._messages.get(room, [])
         if since_id:
             msgs = [m for m in msgs if m['id'] > since_id]
+        if before_id:
+            msgs = [m for m in msgs if m['id'] < before_id]
         return msgs[:limit]
 
     # Friend helpers
