@@ -1265,6 +1265,19 @@ def load_base_config(config_path: str = 'config.json') -> Dict:
     return config
 
 
+def _resolve_current_username_str() -> str:
+    """Return the effective current username as a plain string.
+
+    Reads the module-level ``current_user`` first (which tests can patch via
+    ``@patch('gapi_gui.current_user', 'testuser')``) and falls back to the
+    session-based :func:`get_current_username` when it is a proxy.
+    """
+    _cu = current_user
+    if isinstance(_cu, str):
+        return _cu
+    return get_current_username() or ''
+
+
 def require_login(f):
     """Decorator to require user to be logged in"""
     @wraps(f)
@@ -1282,17 +1295,39 @@ def require_admin(f):
     """Decorator to require admin privileges"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        _cu = current_user
-        if not _cu:
+        if not current_user:
             return jsonify({'error': 'Not logged in'}), 401
-        # Resolve to a plain string for the is_admin check.  When the
-        # module-level `current_user` is a patched string we use that
-        # directly; otherwise fall back to the session-based helper.
-        username = str(_cu) if isinstance(_cu, str) else get_current_username()
+        username = _resolve_current_username_str()
         if not username or not user_manager.is_admin(username):
             return jsonify({'error': 'Admin privileges required'}), 403
         return f(*args, **kwargs)
     return decorated_function
+
+
+def _audit(action: str, resource_type: str = None, resource_id: str = None,
+           description: str = None, old_value: dict = None, new_value: dict = None,
+           actor: str = None, status: str = 'success', error: str = None):
+    """Best-effort fire-and-forget audit log entry.
+
+    Silently ignored if ``_audit_service`` is not available or DB is down so
+    it never breaks the calling request handler.
+    """
+    if not _audit_service or not DB_AVAILABLE:
+        return
+    try:
+        db = next(database.get_db())
+        username = actor or get_current_username() or 'anonymous'
+        ip = request.remote_addr if has_request_context() else None
+        ua = (request.headers.get('User-Agent', '') if has_request_context() else None)
+        _audit_service.log_action(
+            db, username=username, action=action,
+            resource_type=resource_type, resource_id=resource_id,
+            description=description, old_value=old_value, new_value=new_value,
+            ip_address=ip, user_agent=ua,
+            status=status, error_message=error,
+        )
+    except Exception:
+        pass  # audit failures must never break the request
 
 
 PLATFORM_DEVICE_MAP = {
@@ -1873,10 +1908,14 @@ def api_auth_login():
     success, message = user_manager.login(username, password)
     
     if not success:
+        _audit('login', resource_type='auth', resource_id=username,
+               description='Login failed', actor=username, status='failure', error=message)
         return jsonify({'error': message}), 401
     
     session['username'] = username
     gui_logger.info('User logged in: %s', username)
+    _audit('login', resource_type='auth', resource_id=username,
+           description='Login successful', actor=username)
     
     # Initialize picker for this user
     user_ids = user_manager.get_user_ids(username)
@@ -1941,7 +1980,10 @@ def api_auth_logout():
     """Log out the current user"""
     global picker, multi_picker
 
-    gui_logger.info('User logged out: %s', session.get('username'))
+    _username = session.get('username')
+    gui_logger.info('User logged out: %s', _username)
+    _audit('logout', resource_type='auth', resource_id=_username,
+           description='User logged out', actor=_username)
     session.pop('username', None)
 
     with picker_lock:
@@ -7118,11 +7160,20 @@ def api_search_advanced():
         filters = data.get('filters', {})
         
         results = _search_service.search_games(db, query, filters, username)
-        
+        count = len(results)
+
+        # Record in search history (best-effort, never blocks the response)
+        if username and query:
+            try:
+                database.record_search(db, username, query, filters,
+                                       result_count=count)
+            except Exception:
+                pass
+
         return jsonify({
             'query': query,
             'results': results[:50],  # Limit to 50 results
-            'count': len(results),
+            'count': count,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -7213,6 +7264,54 @@ def api_trending_searches():
     finally:
         if db:
             db.close()
+
+
+@app.route('/api/search/history', methods=['GET'])
+@require_login
+def api_get_search_history():
+    """Return the current user's recent search history (Item 3).
+
+    Query parameters:
+      ``limit``  – max results (default 20, max 50)
+
+    Response JSON:
+      ``history``  – list of ``{id, query, filters, result_count, searched_at}``
+      ``count``    – number of results returned
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'history': [], 'count': 0})
+    try:
+        limit = max(1, min(50, int(request.args.get('limit', 20))))
+    except (ValueError, TypeError):
+        limit = 20
+    try:
+        username = get_current_username()
+        db = next(database.get_db())
+        history = database.get_search_history(db, username, limit=limit)
+        return jsonify({'history': history, 'count': len(history)})
+    except Exception as e:
+        gui_logger.error('api_get_search_history error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/search/history', methods=['DELETE'])
+@require_login
+def api_clear_search_history():
+    """Clear the current user's search history (Item 3).
+
+    Response JSON:
+      ``ok``  – True on success
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'ok': True})
+    try:
+        username = get_current_username()
+        db = next(database.get_db())
+        ok = database.clear_search_history(db, username)
+        return jsonify({'ok': ok})
+    except Exception as e:
+        gui_logger.error('api_clear_search_history error: %s', e)
+        return jsonify({'error': str(e)}), 500
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -11755,6 +11854,10 @@ def api_admin_bulk_assign_role():
                 assigned.append(uname)
             else:
                 skipped.append(uname)
+        if assigned:
+            _audit('bulk_role_assign', resource_type='user_role', resource_id=role,
+                   description=f'Bulk assigned role "{role}" to {len(assigned)} user(s)',
+                   new_value={'role': role, 'assigned': assigned, 'skipped': skipped})
     except Exception as e:
         gui_logger.error('api_admin_bulk_assign_role error: %s', e)
         errors.append({'error': str(e)})
@@ -12173,6 +12276,10 @@ def api_admin_suspend_user(username: str):
         )
         if not result:
             return jsonify({'error': f"User '{username}' not found"}), 404
+        action = 'suspend_user' if duration else 'ban_user'
+        _audit(action, resource_type='user', resource_id=username,
+               description=f'{"Temporary suspension" if duration else "Permanent ban"}: {reason}',
+               new_value={'reason': reason, 'duration_minutes': duration})
         return jsonify(result)
     except Exception as e:
         gui_logger.error('api_admin_suspend_user error: %s', e)
@@ -12194,6 +12301,8 @@ def api_admin_unsuspend_user(username: str):
         ok = database.unsuspend_user(db, username)
         if not ok:
             return jsonify({'error': f"User '{username}' not found or not suspended"}), 404
+        _audit('unsuspend_user', resource_type='user', resource_id=username,
+               description=f'Suspension/ban lifted for user "{username}"')
         return jsonify({'ok': True, 'username': username})
     except Exception as e:
         gui_logger.error('api_admin_unsuspend_user error: %s', e)
@@ -12250,6 +12359,8 @@ def api_create_user_group():
                                          created_by=get_current_username())
         if not grp:
             return jsonify({'error': 'Failed to create group (name may already exist)'}), 409
+        _audit('create_user_group', resource_type='user_group', resource_id=str(grp.get('id')),
+               description=f'Created user group "{name}"')
         return jsonify(grp), 201
     except Exception as e:
         gui_logger.error('api_create_user_group error: %s', e)
@@ -12286,6 +12397,8 @@ def api_delete_user_group(group_id: int):
         ok = database.delete_user_group(db, group_id)
         if not ok:
             return jsonify({'error': 'Group not found'}), 404
+        _audit('delete_user_group', resource_type='user_group', resource_id=str(group_id),
+               description=f'Deleted user group {group_id}')
         return jsonify({'ok': True})
     except Exception as e:
         gui_logger.error('api_delete_user_group error: %s', e)
@@ -12315,6 +12428,8 @@ def api_add_group_member(group_id: int):
         if not result.get('ok'):
             status = 409 if 'Already a member' in result.get('error', '') else 404
             return jsonify(result), status
+        _audit('add_group_member', resource_type='user_group', resource_id=str(group_id),
+               description=f'Added "{username}" to group {group_id}')
         return jsonify(result), 201
     except Exception as e:
         gui_logger.error('api_add_group_member error: %s', e)
@@ -12332,6 +12447,8 @@ def api_remove_group_member(group_id: int, username: str):
         ok = database.remove_group_member(db, group_id, username)
         if not ok:
             return jsonify({'error': 'Member not found in group'}), 404
+        _audit('remove_group_member', resource_type='user_group', resource_id=str(group_id),
+               description=f'Removed "{username}" from group {group_id}')
         return jsonify({'ok': True})
     except Exception as e:
         gui_logger.error('api_remove_group_member error: %s', e)

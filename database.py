@@ -454,6 +454,18 @@ class SavedSearch(Base):
     use_count = Column(Integer, default=0)
 
 
+class SearchHistory(Base):
+    """Per-user search history — last N searches for autocomplete & analytics."""
+    __tablename__ = "search_history"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    query = Column(String(500), nullable=False)
+    filters = Column(Text, nullable=True)   # JSON
+    result_count = Column(Integer, nullable=True)
+    searched_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 # ---------------------------------------------------------------------------
 # Fine-grained Permission System  (Tier 2, item 5)
 # ---------------------------------------------------------------------------
@@ -4598,3 +4610,91 @@ def _group_to_dict(grp, member_count: int = 0) -> dict:
         'created_at': grp.created_at.isoformat() if grp.created_at else None,
         'member_count': member_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Search History helpers  (Item 3 — Advanced Search)
+# ---------------------------------------------------------------------------
+
+# Maximum number of history entries kept per user.
+SEARCH_HISTORY_MAX: int = 50
+
+
+def record_search(db, username: str, query: str, filters: dict = None,
+                  result_count: int = None) -> bool:
+    """Persist a search to the user's history.
+
+    Silently returns ``False`` on any error so callers never need to handle
+    search-history failures.  Prunes older rows once the per-user cap is
+    exceeded.
+    """
+    if not db or not username or not query:
+        return False
+    try:
+        entry = SearchHistory(
+            username=username,
+            query=query[:500],
+            filters=json.dumps(filters) if filters else None,
+            result_count=result_count,
+        )
+        db.add(entry)
+        db.commit()
+        # Prune: keep only the most recent SEARCH_HISTORY_MAX rows per user
+        all_ids = (
+            db.query(SearchHistory.id)
+            .filter(SearchHistory.username == username)
+            .order_by(SearchHistory.searched_at.desc())
+            .all()
+        )
+        if len(all_ids) > SEARCH_HISTORY_MAX:
+            old_ids = [r.id for r in all_ids[SEARCH_HISTORY_MAX:]]
+            db.query(SearchHistory).filter(SearchHistory.id.in_(old_ids)).delete(
+                synchronize_session=False
+            )
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error('record_search error: %s', e)
+        db.rollback()
+        return False
+
+
+def get_search_history(db, username: str, limit: int = 20) -> list:
+    """Return the most recent searches for *username* (newest first)."""
+    if not db or not username:
+        return []
+    try:
+        rows = (
+            db.query(SearchHistory)
+            .filter(SearchHistory.username == username)
+            .order_by(SearchHistory.searched_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                'id': r.id,
+                'query': r.query,
+                'filters': json.loads(r.filters) if r.filters else None,
+                'result_count': r.result_count,
+                'searched_at': r.searched_at.isoformat() if r.searched_at else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error('get_search_history error: %s', e)
+        return []
+
+
+def clear_search_history(db, username: str) -> bool:
+    """Delete all search history for *username*."""
+    if not db or not username:
+        return False
+    try:
+        db.query(SearchHistory).filter(SearchHistory.username == username).delete()
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error('clear_search_history error: %s', e)
+        db.rollback()
+        return False
