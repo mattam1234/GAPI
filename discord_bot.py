@@ -603,8 +603,8 @@ def run_bot(token: str, config: Dict):
 if __name__ == "__main__":
     import sys
     
-    # Load configuration
-    config_path = 'config.json'
+    # Load configuration – honour GAPI_DISCORD_CONFIG env var set by admin panel
+    config_path = os.environ.get('GAPI_DISCORD_CONFIG', 'config.json')
     if not os.path.exists(config_path):
         print("❌ config.json not found!")
         sys.exit(1)

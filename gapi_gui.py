@@ -9319,7 +9319,10 @@ def api_discord_bot_start():
     # verify the result stays within that directory.
     base_dir = os.path.dirname(os.path.abspath(__file__))
     abs_config = os.path.normpath(os.path.join(base_dir, config_path))
-    if not abs_config.startswith(base_dir + os.sep) and abs_config != base_dir:
+    try:
+        if os.path.commonpath([base_dir, abs_config]) != base_dir:
+            return jsonify({'error': 'Invalid config_path'}), 400
+    except ValueError:
         return jsonify({'error': 'Invalid config_path'}), 400
 
     with _discord_bot_lock:
@@ -9477,6 +9480,120 @@ def api_discord_bot_save_config():
         return jsonify({'error': f'Failed to save config: {exc}'}), 500
 
     return jsonify({'saved': True})
+
+
+@app.route('/api/admin/discord-bot/restart', methods=['POST'])
+@require_admin
+def api_discord_bot_restart():
+    """Restart the Discord bot process (admin only).
+
+    Stops the running bot (if any), then starts a fresh subprocess.
+    Expects optional JSON body with ``config_path``.
+    Returns ``{'restarted': True, 'pid': <pid>}`` on success.
+    """
+    global _discord_bot_process, _discord_bot_log_lines
+    data = request.get_json(silent=True) or {}
+    config_path = data.get('config_path', 'config.json')
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    abs_config = os.path.normpath(os.path.join(base_dir, config_path))
+    try:
+        if os.path.commonpath([base_dir, abs_config]) != base_dir:
+            return jsonify({'error': 'Invalid config_path'}), 400
+    except ValueError:
+        return jsonify({'error': 'Invalid config_path'}), 400
+
+    with _discord_bot_lock:
+        # Terminate existing process if running
+        if _discord_bot_is_running():
+            proc = _discord_bot_process
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            except OSError:
+                pass
+            _discord_bot_process = None
+
+        bot_script = os.path.join(base_dir, 'discord_bot.py')
+        if not os.path.exists(bot_script):
+            return jsonify({'error': 'discord_bot.py not found'}), 500
+
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, bot_script],
+                env={**os.environ, 'GAPI_DISCORD_CONFIG': abs_config},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            _discord_bot_process = proc
+            _discord_bot_log_lines.clear()
+        except OSError as exc:
+            return jsonify({'error': f'Failed to start bot: {exc}'}), 500
+
+    t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
+    t.start()
+    return jsonify({'restarted': True, 'pid': proc.pid})
+
+
+@app.route('/api/admin/discord-bot/users', methods=['GET'])
+@require_admin
+def api_discord_bot_list_users():
+    """List all Discord→Steam user mappings stored in discord_config.json (admin only).
+
+    Response JSON:
+      - ``users``: list of ``{discord_id, steam_id}`` objects
+    """
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+    if not os.path.exists(config_file):
+        return jsonify({'users': []})
+    try:
+        with open(config_file, 'r') as fh:
+            cfg = json.load(fh)
+    except (json.JSONDecodeError, IOError):
+        return jsonify({'users': []})
+
+    mappings = cfg.get('user_mappings', {})
+    users = [{'discord_id': str(k), 'steam_id': v} for k, v in mappings.items()]
+    return jsonify({'users': users})
+
+
+@app.route('/api/admin/discord-bot/users/<discord_id>', methods=['DELETE'])
+@require_admin
+def api_discord_bot_remove_user(discord_id: str):
+    """Remove a Discord→Steam mapping from discord_config.json (admin only).
+
+    Path parameter:
+      - ``discord_id``: the Discord user ID string to remove
+
+    Returns ``{'removed': True}`` on success or ``{'error': ...}`` if not found.
+    """
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
+    if not os.path.exists(config_file):
+        return jsonify({'error': 'discord_config.json not found'}), 404
+    try:
+        with open(config_file, 'r') as fh:
+            cfg = json.load(fh)
+    except (json.JSONDecodeError, IOError):
+        return jsonify({'error': 'Failed to read discord_config.json'}), 500
+
+    mappings = cfg.get('user_mappings', {})
+    # Keys may be stored as strings; normalize for lookup
+    if discord_id not in mappings:
+        return jsonify({'error': 'User not found'}), 404
+
+    del mappings[discord_id]
+    cfg['user_mappings'] = mappings
+    try:
+        gapi._atomic_write_json(config_file, cfg)
+    except IOError as exc:
+        return jsonify({'error': f'Failed to save config: {exc}'}), 500
+
+    return jsonify({'removed': True})
 
 
 # Localization / i18n endpoints
