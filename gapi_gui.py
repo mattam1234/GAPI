@@ -4284,20 +4284,87 @@ def api_create_event():
         )
     
     # Create Discord event if requested
+    discord_result = None
     if create_discord_event and discord_guild_id:
         try:
-            # Import asyncio and discord bot integration
-            import asyncio
-            from discord_bot import GAPIBot
+            # Call the Discord event creation function directly
+            # We'll use the internal function since we're in the same app
+            from datetime import datetime, timedelta, timezone
+            import requests
+            import base64
             
-            # Get the bot instance (needs to be accessible from gapi_gui)
-            # For now, we'll defer this to a separate async task or endpoint
-            # The client can call a separate endpoint to create the Discord event
-            event['discord_event_pending'] = True
-            event['_discord_setup_notes'] = 'Call POST /api/schedule/{event_id}/create-discord-event to finalize'
+            # Get Discord bot token
+            discord_token = None
+            import os
+            config_path = os.environ.get('GAPI_DISCORD_CONFIG', 'config.json')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config_data = json.load(f)
+                    discord_token = config_data.get('discord_bot_token')
+            
+            if discord_token:
+                # Parse event time
+                event_datetime = datetime.fromisoformat(f"{date}T{time_str}:00")
+                if event_datetime.tzinfo is None:
+                    event_datetime = event_datetime.replace(tzinfo=timezone.utc)
+                end_time = event_datetime + timedelta(hours=2)
+                
+                # Build description
+                description = f"🎮 {game_name or 'TBA'}\n"
+                if notes:
+                    description += f"\n{notes}\n"
+                if attendees:
+                    description += f"\n👥 {', '.join(attendees)}\n"
+                description += "\n📅 Created by GAPI Game Night Scheduler"
+                
+                # Prepare payload
+                payload = {
+                    'name': title[:100],
+                    'privacy_level': 2,
+                    'scheduled_start_time': event_datetime.isoformat(),
+                    'scheduled_end_time': end_time.isoformat(),
+                    'entity_type': 3,
+                    'entity_metadata': {'location': game_name[:100] if game_name else 'Online'},
+                    'description': description[:1000]
+                }
+                
+                # Try to add game image
+                if game_image_url:
+                    try:
+                        img_resp = requests.get(game_image_url, timeout=5)
+                        if img_resp.status_code == 200 and len(img_resp.content) < 10 * 1024 * 1024:
+                            content_type = img_resp.headers.get('content-type', 'image/jpeg')
+                            img_base64 = base64.b64encode(img_resp.content).decode('utf-8')
+                            payload['image'] = f"data:{content_type};base64,{img_base64}"
+                    except Exception:
+                        pass
+                
+                # Create Discord event
+                discord_api_url = f'https://discord.com/api/v10/guilds/{discord_guild_id}/scheduled-events'
+                headers = {'Authorization': f'Bot {discord_token}', 'Content-Type': 'application/json'}
+                response = requests.post(discord_api_url, json=payload, headers=headers, timeout=10)
+                
+                if response.status_code in (200, 201):
+                    discord_event = response.json()
+                    discord_event_id = discord_event.get('id')
+                    with picker_lock:
+                        picker.schedule_service.set_discord_event_id(event['id'], discord_event_id)
+                    event['discord_event_id'] = discord_event_id
+                    discord_result = {
+                        'success': True,
+                        'discord_event_id': discord_event_id,
+                        'discord_event_url': f'https://discord.com/events/{discord_guild_id}/{discord_event_id}'
+                    }
+                else:
+                    gui_logger.error(f'Discord API error: {response.status_code}')
+                    discord_result = {'success': False, 'error': 'Discord API error'}
         except Exception as e:
-            gui_logger.warning(f'Could not set up Discord event: {e}')
-            event['discord_event_pending'] = False
+            gui_logger.error(f'Error creating Discord event: {e}')
+            discord_result = {'success': False, 'error': str(e)}
+    
+    # Include Discord result if it was attempted
+    if discord_result:
+        event['discord_result'] = discord_result
     
     return jsonify(event), 201
 
@@ -4508,15 +4575,14 @@ def api_create_discord_event_for_schedule(event_id: str):
     
     Expects JSON:
         {
-            "guild_id": 123456789,
-            "channel_id": 987654321
+            "guild_id": "123456789"
         }
     """
     if not picker:
         return jsonify({'error': 'Not initialized'}), 400
     
     data = request.json or {}
-    guild_id = data.get('guild_id')
+    guild_id = str(data.get('guild_id', '')).strip()
     
     if not guild_id:
         return jsonify({'error': 'guild_id is required'}), 400
@@ -4527,55 +4593,112 @@ def api_create_discord_event_for_schedule(event_id: str):
     if not event:
         return jsonify({'error': 'Event not found'}), 404
     
-    # Check if Discord bot is available
+    # Get Discord bot token from config
+    discord_token = None
     try:
-        import asyncio
+        import os
+        config_path = os.environ.get('GAPI_DISCORD_CONFIG', 'config.json')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config_data = json.load(f)
+                discord_token = config_data.get('discord_bot_token')
+    except Exception as e:
+        gui_logger.error(f'Could not load Discord token: {e}')
+        return jsonify({'error': 'Discord bot token not configured'}), 500
+    
+    if not discord_token:
+        return jsonify({'error': 'Discord bot token not found in config.json'}), 500
+    
+    try:
         from datetime import datetime, timedelta, timezone
+        import requests
+        from io import BytesIO
+        import base64
         
         # Parse date and time
         try:
             date_part = event.get('date', '')
             time_part = event.get('time', '').replace('.', ':')  # Handle both formats
-            event_datetime = datetime.fromisoformat(f"{date_part}T{time_part}:00+00:00")
-        except (ValueError, AttributeError):
-            return jsonify({'error': 'Invalid event date/time format'}), 400
+            event_datetime = datetime.fromisoformat(f"{date_part}T{time_part}:00")
+            # Ensure timezone-aware
+            if event_datetime.tzinfo is None:
+                event_datetime = event_datetime.replace(tzinfo=timezone.utc)
+        except (ValueError, AttributeError) as e:
+            return jsonify({'error': f'Invalid event date/time format: {e}'}), 400
         
         # Calculate end time (2 hours by default)
         end_time = event_datetime + timedelta(hours=2)
         
         # Build event description with game info
-        description = f"🎮 **{event.get('game_name', 'TBA')}**\n"
+        description = f"🎮 {event.get('game_name', 'TBA')}\n"
         if event.get('notes'):
             description += f"\n{event['notes']}\n"
         if event.get('attendees'):
-            description += f"\n👥 Attendees: {', '.join(event['attendees'])}\n"
+            attendee_list = ', '.join(event['attendees'])
+            description += f"\n👥 {attendee_list}\n"
+        description += "\n📅 Created by GAPI Game Night Scheduler"
         
-        # Prepare event data for Discord bot
-        discord_event_data = {
-            'guild_id': guild_id,
-            'name': event.get('title', 'Game Night'),
-            'start_time': event_datetime,
-            'end_time': end_time,
-            'description': description,
-            'image_url': event.get('game_image_url'),
+        # Prepare Discord API payload
+        payload = {
+            'name': event.get('title', 'Game Night')[:100],  # Discord max 100 chars
+            'privacy_level': 2,  # GUILD_ONLY
+            'scheduled_start_time': event_datetime.isoformat(),
+            'scheduled_end_time': end_time.isoformat(),
+            'entity_type': 3,  # EXTERNAL
+            'entity_metadata': {
+                'location': event.get('game_name', 'Online')[:100]
+            },
+            'description': description[:1000]  # Discord max 1000 chars
         }
         
-        # Store the data for the bot to process
-        # Since we can't directly call async from Flask, we save it and let the bot know
-        discord_event_data_copy = dict(discord_event_data)
+        # Try to fetch and attach game image
+        image_data_uri = None
+        game_image_url = event.get('game_image_url')
+        if game_image_url:
+            try:
+                img_resp = requests.get(game_image_url, timeout=5)
+                if img_resp.status_code == 200 and len(img_resp.content) < 10 * 1024 * 1024:  # Max 10MB
+                    # Convert to data URI for Discord API
+                    content_type = img_resp.headers.get('content-type', 'image/jpeg')
+                    img_base64 = base64.b64encode(img_resp.content).decode('utf-8')
+                    image_data_uri = f"data:{content_type};base64,{img_base64}"
+                    payload['image'] = image_data_uri
+            except Exception as img_err:
+                gui_logger.warning(f'Could not fetch game image: {img_err}')
         
-        # Try to get the bot instance if available (requires special setup)
-        # For now, return success with instructions
-        return jsonify({
-            'success': True,
-            'message': 'Discord event creation queued',
-            'event_id': event_id,
-            'discord_event_data': {
-                'name': discord_event_data['name'],
-                'start_time': event_datetime.isoformat(),
-                'end_time': end_time.isoformat(),
-            }
-        }), 202  # Accepted (async processing)
+        # Create Discord scheduled event via REST API
+        discord_api_url = f'https://discord.com/api/v10/guilds/{guild_id}/scheduled-events'
+        headers = {
+            'Authorization': f'Bot {discord_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.post(discord_api_url, json=payload, headers=headers, timeout=10)
+        
+        if response.status_code in (200, 201):
+            discord_event = response.json()
+            discord_event_id = discord_event.get('id')
+            
+            # Update schedule event with Discord event ID
+            with picker_lock:
+                picker.schedule_service.set_discord_event_id(event_id, discord_event_id)
+            
+            return jsonify({
+                'success': True,
+                'message': 'Discord scheduled event created successfully',
+                'event_id': event_id,
+                'discord_event_id': discord_event_id,
+                'discord_event_url': f'https://discord.com/events/{guild_id}/{discord_event_id}'
+            })
+        else:
+            error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+            error_msg = error_data.get('message', f'HTTP {response.status_code}')
+            gui_logger.error(f'Discord API error: {response.status_code} - {error_msg}')
+            return jsonify({
+                'error': f'Discord API error: {error_msg}',
+                'status_code': response.status_code,
+                'details': error_data
+            }), response.status_code
         
     except Exception as e:
         gui_logger.error(f'Error creating Discord event: {e}')
