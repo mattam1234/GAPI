@@ -2169,6 +2169,61 @@ def api_auth_get_ids():
     return jsonify(user_ids)
 
 
+@app.route('/api/auth/change-password', methods=['POST'])
+def api_auth_change_password():
+    """Change user's password"""
+    global current_user
+    
+    if not current_user:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    
+    username = get_current_username()
+    data = request.json or {}
+    
+    current_password = data.get('current_password', '').strip()
+    new_password = data.get('new_password', '').strip()
+    
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current password and new password are required'}), 400
+    
+    if len(new_password) < 6:
+        return jsonify({'error': 'New password must be at least 6 characters'}), 400
+    
+    try:
+        db = database.SessionLocal()
+        try:
+            # Verify current password
+            current_password_hash = user_manager.hash_password(current_password)
+            is_valid = database.verify_user_password(db, username, current_password_hash)
+            
+            if not is_valid:
+                return jsonify({'error': 'Current password is incorrect'}), 401
+            
+            # Update to new password
+            new_password_hash = user_manager.hash_password(new_password)
+            user = database.get_user_by_username(db, username)
+            
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            
+            user.password = new_password_hash
+            user.updated_at = datetime.utcnow()
+            db.commit()
+            
+            gui_logger.info(f"Password changed successfully for user: {username}")
+            return jsonify({'message': 'Password changed successfully'})
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        gui_logger.exception(f'Error changing password for {username}: {e}')
+        return jsonify({'error': 'Failed to change password'}), 500
+
+
 @app.route('/api/filters/platform-options', methods=['GET'])
 @require_login
 def api_filter_platform_options():

@@ -13,6 +13,7 @@ import random
 import argparse
 import datetime
 import tempfile
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
@@ -257,9 +258,20 @@ class SteamAPIClient(GamePlatformClient):
         self.timeout = timeout
         self._log = logging.getLogger('gapi.steam')
         self._protondb_cache: Dict = {}
+        # Rate limiting to prevent 429 errors
+        self._last_api_call_time = 0.0
+        self._min_delay_between_calls = 0.2  # 200ms between calls (5 per second max)
 
     def get_platform_name(self) -> str:
         return "steam"
+
+    def _wait_for_rate_limit(self):
+        """Enforce minimum delay between API calls to prevent rate limiting"""
+        current_time = time.time()
+        time_since_last_call = current_time - self._last_api_call_time
+        if time_since_last_call < self._min_delay_between_calls:
+            time.sleep(self._min_delay_between_calls - time_since_last_call)
+        self._last_api_call_time = time.time()
 
     def get_owned_games(self, user_id: str, include_appinfo: bool = True) -> List[Dict]:
         """Get list of games owned by a Steam user"""
@@ -303,19 +315,55 @@ class SteamAPIClient(GamePlatformClient):
         url = "https://store.steampowered.com/api/appdetails"
         params = {'appids': app_id_int}
 
-        try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
+        # Retry logic with exponential backoff for rate limiting
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second delay
+        
+        for attempt in range(max_retries):
+            try:
+                # Enforce rate limiting
+                self._wait_for_rate_limit()
+                
+                response = self.session.get(url, params=params, timeout=self.timeout)
+                
+                # Handle 429 Too Many Requests with exponential backoff
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        self._log.debug("Rate limited (429) for app %s, retrying in %.1fs...", game_id, retry_delay)
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        self._log.warning("Rate limited (429) for app %s after %d retries", game_id, max_retries)
+                        # Cache the failure to avoid repeated requests
+                        self.details_cache[app_id_int] = None
+                        return None
+                
+                response.raise_for_status()
+                data = response.json()
 
-            if str(app_id_int) in data and data[str(app_id_int)]['success']:
-                details = data[str(app_id_int)]['data']
-                self.details_cache[app_id_int] = details
-                return details
-            return None
-        except requests.RequestException as e:
-            self._log.warning("Could not fetch details for app %s: %s", game_id, e)
-            return None
+                if str(app_id_int) in data and data[str(app_id_int)]['success']:
+                    details = data[str(app_id_int)]['data']
+                    self.details_cache[app_id_int] = details
+                    return details
+                else:
+                    # Cache negative result
+                    self.details_cache[app_id_int] = None
+                return None
+                
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    self._log.debug("Request failed for app %s: %s, retrying...", game_id, e)
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    self._log.warning("Could not fetch details for app %s: %s", game_id, e)
+                    # Cache the failure
+                    self.details_cache[app_id_int] = None
+                    return None
+        
+        return None
 
     def get_protondb_rating(self, app_id: str) -> Optional[Dict]:
         """Fetch ProtonDB Linux compatibility tier for a Steam game.

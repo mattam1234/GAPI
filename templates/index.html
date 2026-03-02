@@ -1662,6 +1662,42 @@
                 </button>
             </div>
             
+            <!-- Change Password Section -->
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>🔒 Change Password</h3>
+                <p style="color: #666; margin-bottom: 15px;">Update your account password.</p>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Current Password</span>
+                        <input type="password" id="password-current" placeholder="Enter current password"
+                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">New Password</span>
+                        <input type="password" id="password-new" placeholder="Enter new password"
+                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-weight: 600;">Confirm New Password</span>
+                        <input type="password" id="password-confirm" placeholder="Confirm new password"
+                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </label>
+                </div>
+                
+                <div id="password-message" style="display: none; margin-bottom: 15px; padding: 10px; border-radius: 8px;"></div>
+                
+                <button onclick="changePassword()" style="padding: 12px 30px; background: #e74c3c; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    Change Password
+                </button>
+            </div>
+            
             <!-- Library Sync Settings -->
             <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
                 <h3>📚 Library Sync</h3>
@@ -4973,6 +5009,85 @@
                 messageDiv.style.color = '#721c24';
                 messageDiv.textContent = '❌ Error: ' + error.message;
                 toastr.error('Error saving settings: ' + error.message);
+            }
+        }
+        
+        async function changePassword() {
+            const currentPassword = document.getElementById('password-current').value;
+            const newPassword = document.getElementById('password-new').value;
+            const confirmPassword = document.getElementById('password-confirm').value;
+            const messageDiv = document.getElementById('password-message');
+            
+            // Clear previous messages
+            messageDiv.style.display = 'none';
+            
+            // Validate inputs
+            if (!currentPassword || !newPassword || !confirmPassword) {
+                messageDiv.style.display = 'block';
+                messageDiv.style.background = '#f8d7da';
+                messageDiv.style.color = '#721c24';
+                messageDiv.textContent = '❌ Please fill in all password fields';
+                toastr.error('Please fill in all password fields');
+                return;
+            }
+            
+            if (newPassword !== confirmPassword) {
+                messageDiv.style.display = 'block';
+                messageDiv.style.background = '#f8d7da';
+                messageDiv.style.color = '#721c24';
+                messageDiv.textContent = '❌ New passwords do not match';
+                toastr.error('New passwords do not match');
+                return;
+            }
+            
+            if (newPassword.length < 6) {
+                messageDiv.style.display = 'block';
+                messageDiv.style.background = '#f8d7da';
+                messageDiv.style.color = '#721c24';
+                messageDiv.textContent = '❌ New password must be at least 6 characters';
+                toastr.error('New password must be at least 6 characters');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/change-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        current_password: currentPassword,
+                        new_password: newPassword
+                    })
+                });
+                
+                const data = await response.json();
+                
+                messageDiv.style.display = 'block';
+                if (response.ok) {
+                    messageDiv.style.background = '#d4edda';
+                    messageDiv.style.color = '#155724';
+                    messageDiv.textContent = '✅ Password changed successfully!';
+                    toastr.success('Password changed successfully');
+                    
+                    // Clear the form
+                    document.getElementById('password-current').value = '';
+                    document.getElementById('password-new').value = '';
+                    document.getElementById('password-confirm').value = '';
+                    
+                    setTimeout(() => {
+                        messageDiv.style.display = 'none';
+                    }, 3000);
+                } else {
+                    messageDiv.style.background = '#f8d7da';
+                    messageDiv.style.color = '#721c24';
+                    messageDiv.textContent = '❌ ' + (data.error || 'Failed to change password');
+                    toastr.error(data.error || 'Failed to change password');
+                }
+            } catch (error) {
+                messageDiv.style.display = 'block';
+                messageDiv.style.background = '#f8d7da';
+                messageDiv.style.color = '#721c24';
+                messageDiv.textContent = '❌ Error: ' + error.message;
+                toastr.error('Error changing password: ' + error.message);
             }
         }
         

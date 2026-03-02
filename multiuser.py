@@ -521,8 +521,14 @@ class MultiUserPicker:
         """
         Filter games to only include co-op/multiplayer games
         Optionally filter by maximum player count
+        
+        Uses cache-first strategy to minimize API calls and respect rate limits
         """
         coop_games = []
+        
+        # Separate cached and uncached games for efficient processing
+        cached_games = []
+        uncached_games = []
         
         for game in games:
             app_id = gapi.extract_game_id(game)
@@ -531,7 +537,21 @@ class MultiUserPicker:
             if not app_id or platform not in self.clients:
                 continue
             
-            # Fetch detailed info to check for multiplayer
+            # Check if game details are already cached
+            client = self.clients[platform]
+            try:
+                app_id_int = int(app_id)
+                if app_id_int in client.details_cache:
+                    cached_games.append(game)
+                else:
+                    uncached_games.append(game)
+            except (ValueError, TypeError):
+                continue
+        
+        # Process cached games first (no API calls, instant)
+        for game in cached_games:
+            app_id = gapi.extract_game_id(game)
+            platform = game.get('platform', 'steam')
             details = self.clients[platform].get_game_details(str(app_id))
             
             if not details:
@@ -551,8 +571,39 @@ class MultiUserPicker:
             
             # If max_players specified, try to check if game supports that many
             if max_players and is_multiplayer:
-                # This is a simplified check - Steam API doesn't always provide exact player counts
-                # We'll include the game if it's multiplayer
+                game['is_coop'] = is_coop
+                game['is_multiplayer'] = is_multiplayer
+                coop_games.append(game)
+            elif is_coop or is_multiplayer:
+                game['is_coop'] = is_coop
+                game['is_multiplayer'] = is_multiplayer
+                coop_games.append(game)
+        
+        # Process uncached games with rate limiting (will trigger API calls)
+        for game in uncached_games:
+            app_id = gapi.extract_game_id(game)
+            platform = game.get('platform', 'steam')
+            
+            # Fetch detailed info to check for multiplayer (rate-limited)
+            details = self.clients[platform].get_game_details(str(app_id))
+            
+            if not details:
+                continue
+            
+            # Check categories for multiplayer/coop indicators
+            categories = details.get('categories', [])
+            is_multiplayer = False
+            is_coop = False
+            
+            for category in categories:
+                cat_desc = category.get('description', '').lower()
+                if 'multi-player' in cat_desc or 'multiplayer' in cat_desc:
+                    is_multiplayer = True
+                if 'co-op' in cat_desc or 'cooperative' in cat_desc:
+                    is_coop = True
+            
+            # If max_players specified, try to check if game supports that many
+            if max_players and is_multiplayer:
                 game['is_coop'] = is_coop
                 game['is_multiplayer'] = is_multiplayer
                 coop_games.append(game)
@@ -644,6 +695,7 @@ class MultiUserPicker:
                 return 'console'
             return 'pc' if p in {'pc', 'windows', 'linux', 'mac'} else 'other'
         
+        # Process games with cache-first strategy for efficiency
         for game in games:
             # Basic exclusions
             app_id = str(game.get('appid') or game.get('app_id') or game.get('game_id', ''))
@@ -671,9 +723,8 @@ class MultiUserPicker:
                     if avg_playtime < min_avg_playtime:
                         continue
             
-            # If details are needed, fetch them
+            # If details are needed, fetch them (with rate limiting)
             if needs_details:
-                platform = game.get('platform', 'steam')
                 if not app_id or platform not in self.clients:
                     continue
                 

@@ -651,7 +651,8 @@ def init_db():
             logger.info("Database tables initialized successfully")
             
             # Run migrations
-            _run_migrations()
+            # Disabled automatic migration - run manually if needed
+            # _run_migrations()
             return True
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
