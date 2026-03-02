@@ -297,7 +297,8 @@ class GAPIBot(discord.Client):
 
     async def _start_public_vote_round(self, channel: discord.abc.Messageable, participants: List[str],
                                        duration: int, num_candidates: int,
-                                       restart_count: int = 0, everyone_mention: bool = False) -> bool:
+                                       restart_count: int = 0, everyone_mention: bool = False,
+                                       genre: Optional[str] = None, min_metacritic: Optional[int] = None) -> bool:
         """Start one public reaction-vote round with a NOTA option."""
         common_games = self.multi_picker.find_common_games(participants)
         if not common_games:
@@ -307,8 +308,10 @@ class GAPIBot(discord.Client):
         # Run blocking filter operation in thread to avoid blocking event loop
         try:
             common_games = await asyncio.to_thread(
-                self.multi_picker.filter_coop_games,
-                common_games
+                self._filter_vote_candidates,
+                common_games,
+                genre=genre,
+                min_metacritic=min_metacritic
             )
         except Exception as e:
             await channel.send(f"❌ Error filtering co-op games: {str(e)}")
@@ -329,16 +332,21 @@ class GAPIBot(discord.Client):
 
         NUMBER_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
         nota_emoji = '🚫'
+        
+        filter_bits = ["Co-op / multiplayer games only"]
+        if genre:
+            filter_bits.append(f"genre={genre}")
+        if min_metacritic is not None:
+            filter_bits.append(f"metacritic>={min_metacritic}")
+        
         description_lines = [
             f"React with the number emoji to vote! Voting ends in **{duration} seconds**.",
-            "Co-op / multiplayer games only.",
+            f"Filters: {', '.join(filter_bits)}",
             ""
         ]
         for i, game in enumerate(candidate_games):
             description_lines.append(f"{NUMBER_EMOJIS[i]}  **{game.get('name', 'Unknown')}**")
         description_lines.append(f"{nota_emoji}  **None of these**")
-        description_lines.append(f"")
-        description_lines.append(f"✅ React with ✅ to join/track this vote (optional)")
 
         embed = discord.Embed(
             title="🗳️ Vote for a Game!" + (f" (Restart {restart_count})" if restart_count else ""),
@@ -353,14 +361,6 @@ class GAPIBot(discord.Client):
         for i in range(len(candidate_games)):
             await vote_msg.add_reaction(NUMBER_EMOJIS[i])
         await vote_msg.add_reaction(nota_emoji)
-        await vote_msg.add_reaction('✅')  # Join reaction
-
-        # Track for join reactions
-        self.active_polls[vote_msg.id] = {
-            'type': 'vote',
-            'channel_id': channel.id,
-        }
-        self.poll_participants[vote_msg.id] = set()
 
         self.active_votes[channel.id] = {
             'session': session,
@@ -374,6 +374,8 @@ class GAPIBot(discord.Client):
             'restart_count': restart_count,
             'max_restarts': 2,
             'everyone_mention': everyone_mention,
+            'genre': genre,
+            'min_metacritic': min_metacritic,
         }
 
         await asyncio.sleep(duration)
@@ -682,13 +684,17 @@ class GAPIBot(discord.Client):
         
         @self.tree.command(name='vote', description='Start a voting session to play a game')
         @app_commands.describe(
-            duration='Duration in seconds for voting session (default: 60)',
+            join_duration='Duration in seconds for joining phase (default: 30)',
+            vote_duration='Duration in seconds for voting session (default: 60)',
             candidates='Number of game candidates to vote on (default: 5, max: 10 for public reaction vote)',
-            everyone='Include @everyone in the vote notification (default: False)'
+            everyone='Include @everyone in the vote notification (default: False)',
+            genre='Optional genre filter (e.g. Action, RPG, Strategy)',
+            min_metacritic='Optional minimum Metacritic score (0-100)'
         )
-        async def start_vote(interaction: discord.Interaction, duration: int = 60,
-                             candidates: int = 5, everyone: bool = False):
-            """Start a public reaction vote for co-op/multiplayer games among linked users."""
+        async def start_vote(interaction: discord.Interaction, join_duration: int = 30,
+                             vote_duration: int = 60, candidates: int = 5, everyone: bool = False,
+                             genre: Optional[str] = None, min_metacritic: Optional[int] = None):
+            """Start a public reaction vote with a join phase, then voting among participants."""
             channel_id = interaction.channel_id
             channel = interaction.channel
             
@@ -702,26 +708,79 @@ class GAPIBot(discord.Client):
 
             num_candidates = max(2, min(candidates, 10))
 
-            # Gather participants from linked users
-            participants = [u['name'] for u in self.multi_picker.users]
-            if not participants:
+            # Check if there are any linked users
+            if not self.multi_picker.users:
                 await interaction.response.send_message(
                     "❌ No users have linked their Steam accounts. Use `/link` first."
                 )
                 return
 
-            mention_text = ""
-            if everyone:
-                mention_text = "@everyone - "
+            mention_text = "@everyone " if everyone else ""
 
-            await interaction.response.send_message(f"🔍 {mention_text}Finding common games for a vote…")
+            # Phase 1: Join phase
+            await interaction.response.send_message(f"🎮 {mention_text}**Game Vote Starting!**\n\nReact with ✅ to join the vote!\n⏱️ Join phase ends in **{join_duration} seconds**")
+            
+            # Get the message for adding reaction
+            join_msg = await interaction.original_response()
+            await join_msg.add_reaction('✅')
+            
+            # Track this as a join message
+            self.active_polls[join_msg.id] = {
+                'type': 'vote_join',
+                'channel_id': channel.id,
+            }
+            self.poll_participants[join_msg.id] = set()
+            
+            # Wait for join duration
+            await asyncio.sleep(join_duration)
+            
+            # Collect participants who joined
+            joined_user_ids = self.poll_participants.get(join_msg.id, set())
+            
+            # Clean up join tracking
+            if join_msg.id in self.active_polls:
+                del self.active_polls[join_msg.id]
+            if join_msg.id in self.poll_participants:
+                del self.poll_participants[join_msg.id]
+            
+            if not joined_user_ids:
+                await channel.send("❌ No one joined the vote! Vote cancelled.")
+                return
+            
+            # Map Discord IDs to MultiUserPicker user names
+            participants = []
+            for discord_user_id in joined_user_ids:
+                user_name = self._resolve_linked_user_name(discord_user_id)
+                if user_name:
+                    participants.append(user_name)
+            
+            if not participants:
+                await channel.send("❌ None of the participants have linked their Steam accounts! Use `/link` first.")
+                return
+            
+            # Validate and constrain filters
+            if min_metacritic is not None:
+                min_metacritic = max(0, min(min_metacritic, 100))
+            
+            filter_bits = []
+            if genre:
+                filter_bits.append(f"genre={genre.strip()}")
+            if min_metacritic is not None:
+                filter_bits.append(f"metacritic>={min_metacritic}")
+            
+            filter_msg = f" with filters: {', '.join(filter_bits)}" if filter_bits else ""
+            
+            # Phase 2: Start the actual vote
+            await channel.send(f"🔍 Found **{len(participants)}** participant(s)! Finding common games for the vote{filter_msg}…")
             await self._start_public_vote_round(
                 channel=channel,
                 participants=participants,
-                duration=duration,
+                duration=vote_duration,
                 num_candidates=num_candidates,
                 restart_count=0,
-                everyone_mention=everyone,
+                everyone_mention=False,  # Don't mention everyone again
+                genre=genre.strip() if genre else None,
+                min_metacritic=min_metacritic,
             )
         
         @self.tree.command(name='pick', description='Pick a random game for mentioned users or all linked users')
@@ -1326,6 +1385,8 @@ class GAPIBot(discord.Client):
                     num_candidates=num_candidates,
                     restart_count=restart_count + 1,
                     everyone_mention=everyone_mention,
+                    genre=vote_data.get('genre'),
+                    min_metacritic=vote_data.get('min_metacritic'),
                 )
                 return
             await channel.send("❌ Vote ended with majority 'None of these' after retries.")
