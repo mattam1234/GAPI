@@ -4314,6 +4314,21 @@ def _build_discord_schedule_description(game_name: str,
     description = '\n'.join(lines)
     return description[:1000]
 
+
+def _schedule_local_to_utc(date_str: str, time_str: str):
+    """Interpret schedule date/time as local time, then convert to UTC.
+
+    This prevents treating local input as already-UTC, which causes shifted
+    times in Discord scheduled events.
+    """
+    from datetime import datetime, timezone
+
+    dt = datetime.fromisoformat(f"{date_str}T{time_str}:00")
+    if dt.tzinfo is None:
+        local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+        dt = dt.replace(tzinfo=local_tz)
+    return dt.astimezone(timezone.utc)
+
 @app.route('/api/schedule', methods=['GET'])
 def api_get_schedule():
     """Return all game night events sorted by date/time."""
@@ -4421,10 +4436,8 @@ def api_create_event():
                     discord_token = config_data.get('discord_bot_token')
             
             if discord_token:
-                # Parse event time
-                event_datetime = datetime.fromisoformat(f"{date}T{time_str}:00")
-                if event_datetime.tzinfo is None:
-                    event_datetime = event_datetime.replace(tzinfo=timezone.utc)
+                # Parse schedule local time, convert to UTC for Discord
+                event_datetime = _schedule_local_to_utc(date, time_str)
                 end_time = event_datetime + timedelta(hours=2)
                 
                 # Build description with same game description/links as UI details
@@ -4795,7 +4808,7 @@ def api_create_discord_event_for_schedule(event_id: str):
         return jsonify({'error': 'Discord bot token not found in config.json'}), 500
     
     try:
-        from datetime import datetime, timedelta, timezone
+        from datetime import timedelta
         import requests
         from io import BytesIO
         import base64
@@ -4804,10 +4817,7 @@ def api_create_discord_event_for_schedule(event_id: str):
         try:
             date_part = event.get('date', '')
             time_part = event.get('time', '').replace('.', ':')  # Handle both formats
-            event_datetime = datetime.fromisoformat(f"{date_part}T{time_part}:00")
-            # Ensure timezone-aware
-            if event_datetime.tzinfo is None:
-                event_datetime = event_datetime.replace(tzinfo=timezone.utc)
+            event_datetime = _schedule_local_to_utc(date_part, time_part)
         except (ValueError, AttributeError) as e:
             return jsonify({'error': f'Invalid event date/time format: {e}'}), 400
         
