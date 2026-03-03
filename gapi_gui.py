@@ -5387,7 +5387,7 @@ def api_sync_achievements():
             continue
         game_name = name_map.get(app_id, app_id)
         try:
-            player_achievements = steam_client.get_player_achievements(steam_id, app_id)
+            player_achievements = steam_client.get_player_achievements_detailed(steam_id, app_id)
             if not player_achievements:
                 skipped.append(app_id)
                 continue

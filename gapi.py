@@ -435,7 +435,7 @@ class SteamAPIClient(GamePlatformClient):
             self._log.debug("Achievement fetch failed for app %s: %s", app_id, e)
         return None
 
-    def get_player_achievements(self, steam_id: str, app_id) -> List[Dict]:
+    def get_player_achievements_detailed(self, steam_id: str, app_id) -> List[Dict]:
         """Return the full per-achievement list for *steam_id* + *app_id*.
 
         Each entry is a dict with at least:

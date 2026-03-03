@@ -14,6 +14,7 @@ from typing import Dict, List, Set, Optional
 from datetime import datetime, timedelta
 import multiuser
 from dotenv import load_dotenv
+import database
 
 # Fix Windows console encoding for emoji support
 if sys.platform == 'win32':
@@ -55,7 +56,7 @@ class GAPIBot(discord.Client):
         self.active_polls: Dict[int, Dict] = {}  # message_id -> poll_data
         self.poll_participants: Dict[int, Set[int]] = {}  # message_id -> set of user_ids who joined
         
-        # Discord user to Steam ID mapping
+        # Discord user to Steam ID mapping (loaded from database)
         self.user_mappings: Dict[int, str] = {}  # discord_user_id -> steam_id
         self.load_user_mappings()
         
@@ -63,23 +64,93 @@ class GAPIBot(discord.Client):
         self.setup_commands()
     
     def load_user_mappings(self):
-        """Load Discord user to Steam ID mappings"""
-        if os.path.exists(self.config_file):
+        """Load Discord user to Steam ID mappings from database"""
+        try:
+            if not database.SessionLocal:
+                print("⚠️  Database not available, falling back to JSON")
+                # Fallback to JSON file
+                if os.path.exists(self.config_file):
+                    try:
+                        with open(self.config_file, 'r') as f:
+                            data = json.load(f)
+                            self.user_mappings = {int(k): v for k, v in data.get('user_mappings', {}).items()}
+                    except (json.JSONDecodeError, IOError):
+                        self.user_mappings = {}
+                return
+            
+            # Load from PostgreSQL database
+            db = database.SessionLocal()
             try:
-                with open(self.config_file, 'r') as f:
-                    data = json.load(f)
-                    self.user_mappings = {int(k): v for k, v in data.get('user_mappings', {}).items()}
-            except (json.JSONDecodeError, IOError):
+                users = db.query(database.User).filter(database.User.discord_id.isnot(None)).all()
                 self.user_mappings = {}
+                for user in users:
+                    if user.discord_id and user.steam_id:
+                        try:
+                            self.user_mappings[int(user.discord_id)] = user.steam_id
+                        except ValueError:
+                            print(f"⚠️  Invalid discord_id for user {user.username}: {user.discord_id}")
+                print(f"✅ Loaded {len(self.user_mappings)} Discord user mappings from database")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"⚠️  Error loading user mappings from database: {e}")
+            print("   Falling back to JSON file")
+            # Fallback to JSON
+            if os.path.exists(self.config_file):
+                try:
+                    with open(self.config_file, 'r') as f:
+                        data = json.load(f)
+                        self.user_mappings = {int(k): v for k, v in data.get('user_mappings', {}).items()}
+                except (json.JSONDecodeError, IOError):
+                    self.user_mappings = {}
     
     def save_user_mappings(self):
-        """Save Discord user to Steam ID mappings"""
+        """Save Discord user to Steam ID mappings to database"""
         try:
+            if not database.SessionLocal:
+                print("⚠️  Database not available, saving to JSON")
+                # Fallback to JSON file
+                data = {'user_mappings': {str(k): v for k, v in self.user_mappings.items()}}
+                with open(self.config_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                return
+            
+            # Save to PostgreSQL database
+            db = database.SessionLocal()
+            try:
+                for discord_id, steam_id in self.user_mappings.items():
+                    # Check if user exists with this steam_id
+                    user = db.query(database.User).filter(
+                        database.User.steam_id == steam_id
+                    ).first()
+                    
+                    if user:
+                        # Update existing user with Discord ID
+                        user.discord_id = str(discord_id)
+                    else:
+                        # Check if user exists with this discord_id
+                        user = db.query(database.User).filter(
+                            database.User.discord_id == str(discord_id)
+                        ).first()
+                        if user:
+                            # Update steam_id
+                            user.steam_id = steam_id
+                
+                db.commit()
+                print(f"✅ Saved {len(self.user_mappings)} Discord user mappings to database")
+            except Exception as e:
+                db.rollback()
+                print(f"❌ Error saving to database: {e}")
+                raise
+            finally:
+                db.close()
+                
+            # Also save to JSON as backup
             data = {'user_mappings': {str(k): v for k, v in self.user_mappings.items()}}
             with open(self.config_file, 'w') as f:
                 json.dump(data, f, indent=2)
-        except IOError as e:
-            print(f"Error saving user mappings: {e}")
+        except Exception as e:
+            print(f"❌ Error saving user mappings: {e}")
 
     def _resolve_linked_user_name(self, discord_user_id: int) -> Optional[str]:
         """Resolve a Discord user ID to a MultiUserPicker user name."""

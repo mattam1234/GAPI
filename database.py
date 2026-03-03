@@ -85,6 +85,7 @@ class User(Base):
     username = Column(String(255), unique=True, index=True)
     password = Column(String(64), nullable=False)  # SHA256 hash
     steam_id = Column(String(20), nullable=True)
+    discord_id = Column(String(50), nullable=True, index=True)  # Discord user ID
     epic_id = Column(String(255), nullable=True)
     gog_id = Column(String(255), nullable=True)
     # Profile card fields

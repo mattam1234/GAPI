@@ -53,7 +53,7 @@ class TestGetPlayerAchievements(unittest.TestCase):
 
     def test_returns_empty_on_bad_app_id(self):
         client = self._client()
-        result = client.get_player_achievements('12345', 'not_an_int')
+        result = client.get_player_achievements_detailed('12345', 'not_an_int')
         self.assertEqual(result, [])
 
     def test_returns_empty_on_http_error(self):
@@ -61,7 +61,7 @@ class TestGetPlayerAchievements(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.status_code = 403
         with patch.object(client.session, 'get', return_value=mock_resp):
-            result = client.get_player_achievements('12345', '620')
+            result = client.get_player_achievements_detailed('12345', '620')
         self.assertEqual(result, [])
 
     def test_parses_achievements_correctly(self):
@@ -78,7 +78,7 @@ class TestGetPlayerAchievements(unittest.TestCase):
         mock_resp.status_code = 200
         mock_resp.json.return_value = payload
         with patch.object(client.session, 'get', return_value=mock_resp):
-            result = client.get_player_achievements('12345', '620')
+            result = client.get_player_achievements_detailed('12345', '620')
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]['apiname'], 'ACH1')
         self.assertEqual(result[0]['achieved'], 1)
@@ -89,7 +89,7 @@ class TestGetPlayerAchievements(unittest.TestCase):
         mock_resp.status_code = 200
         mock_resp.json.return_value = {'playerstats': {}}
         with patch.object(client.session, 'get', return_value=mock_resp):
-            result = client.get_player_achievements('12345', '620')
+            result = client.get_player_achievements_detailed('12345', '620')
         self.assertEqual(result, [])
 
     def test_network_error_returns_empty(self):
@@ -97,7 +97,7 @@ class TestGetPlayerAchievements(unittest.TestCase):
         client = self._client()
         with patch.object(client.session, 'get',
                           side_effect=_requests.RequestException("timeout")):
-            result = client.get_player_achievements('12345', '620')
+            result = client.get_player_achievements_detailed('12345', '620')
         self.assertEqual(result, [])
 
 

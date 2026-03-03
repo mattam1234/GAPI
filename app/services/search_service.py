@@ -4,7 +4,7 @@ Advanced search service with filtering, trending, and saved searches.
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_, or_, desc, desc as sql_desc
-from database import User_Library, SavedSearch, AuditLog
+from database import GameLibraryCache, SavedSearch, AuditLog
 
 
 class SearchService:
