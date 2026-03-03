@@ -31,7 +31,7 @@ if sys.platform == 'win32':
 class GAPIBot(discord.Client):
     """Discord bot for GAPI game picking"""
     
-    def __init__(self, config: Dict, config_file: str = 'discord_config.json'):
+    def __init__(self, config: Dict):
         intents = discord.Intents.default()
         # Note: message_content and members are privileged intents that require
         # enabling in Discord Developer Portal. Since this bot uses slash commands,
@@ -45,7 +45,6 @@ class GAPIBot(discord.Client):
         
         self.config = config
         self.steam_api_key = config.get('steam_api_key')
-        self.config_file = config_file
         self.multi_picker = multiuser.MultiUserPicker(config)
         
         # Active voting sessions
@@ -64,20 +63,14 @@ class GAPIBot(discord.Client):
         self.setup_commands()
     
     def load_user_mappings(self):
-        """Load Discord user to Steam ID mappings from database"""
+        """Load Discord user to Steam ID mappings from PostgreSQL database"""
+        if not database.SessionLocal:
+            print("❌ Database not available - cannot load Discord user mappings")
+            print("   Ensure PostgreSQL is configured and accessible via .env DATABASE_URL")
+            self.user_mappings = {}
+            return
+        
         try:
-            if not database.SessionLocal:
-                print("⚠️  Database not available, falling back to JSON")
-                # Fallback to JSON file
-                if os.path.exists(self.config_file):
-                    try:
-                        with open(self.config_file, 'r') as f:
-                            data = json.load(f)
-                            self.user_mappings = {int(k): v for k, v in data.get('user_mappings', {}).items()}
-                    except (json.JSONDecodeError, IOError):
-                        self.user_mappings = {}
-                return
-            
             # Load from PostgreSQL database
             db = database.SessionLocal()
             try:
@@ -93,29 +86,17 @@ class GAPIBot(discord.Client):
             finally:
                 db.close()
         except Exception as e:
-            print(f"⚠️  Error loading user mappings from database: {e}")
-            print("   Falling back to JSON file")
-            # Fallback to JSON
-            if os.path.exists(self.config_file):
-                try:
-                    with open(self.config_file, 'r') as f:
-                        data = json.load(f)
-                        self.user_mappings = {int(k): v for k, v in data.get('user_mappings', {}).items()}
-                except (json.JSONDecodeError, IOError):
-                    self.user_mappings = {}
+            print(f"❌ Error loading user mappings from database: {e}")
+            self.user_mappings = {}
     
     def save_user_mappings(self):
-        """Save Discord user to Steam ID mappings to database"""
+        """Save Discord user to Steam ID mappings to PostgreSQL database"""
+        if not database.SessionLocal:
+            print("❌ Database not available - cannot save Discord user mappings")
+            return
+        
         try:
-            if not database.SessionLocal:
-                print("⚠️  Database not available, saving to JSON")
-                # Fallback to JSON file
-                data = {'user_mappings': {str(k): v for k, v in self.user_mappings.items()}}
-                with open(self.config_file, 'w') as f:
-                    json.dump(data, f, indent=2)
-                return
-            
-            # Save to PostgreSQL database
+            # Save to PostgreSQL database only
             db = database.SessionLocal()
             try:
                 for discord_id, steam_id in self.user_mappings.items():
@@ -141,14 +122,8 @@ class GAPIBot(discord.Client):
             except Exception as e:
                 db.rollback()
                 print(f"❌ Error saving to database: {e}")
-                raise
             finally:
                 db.close()
-                
-            # Also save to JSON as backup
-            data = {'user_mappings': {str(k): v for k, v in self.user_mappings.items()}}
-            with open(self.config_file, 'w') as f:
-                json.dump(data, f, indent=2)
         except Exception as e:
             print(f"❌ Error saving user mappings: {e}")
 
