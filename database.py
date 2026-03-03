@@ -46,7 +46,12 @@ DATABASE_URL = _load_database_url()
 Base = declarative_base()
 
 try:
-    engine = create_engine(DATABASE_URL, echo=False)
+    # Configure PostgreSQL connection with UTF-8 encoding for Unicode support
+    connect_args = {}
+    if DATABASE_URL.startswith('postgresql'):
+        connect_args = {'client_encoding': 'utf8'}
+    
+    engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 except Exception as e:
     logger.warning(f"PostgreSQL not available, will use mock database: {e}")
@@ -1022,17 +1027,29 @@ def cache_user_library(db, username: str, games: list):
         # Add new cache entries
         count = 0
         for game in games:
-            cache_entry = GameLibraryCache(
-                user_id=user.id,
-                app_id=str(game.get('app_id', game.get('appid', ''))),
-                game_name=game.get('name', 'Unknown'),
-                platform=game.get('platform', 'steam'),
-                playtime_hours=float(game.get('playtime_hours', game.get('playtime_forever', 0)) / 60 
-                                   if 'playtime_forever' in game else game.get('playtime_hours', 0)),
-                last_played=game.get('last_played')
-            )
-            db.add(cache_entry)
-            count += 1
+            try:
+                # Ensure game name is properly encoded as UTF-8
+                game_name = game.get('name', 'Unknown')
+                if isinstance(game_name, bytes):
+                    game_name = game_name.decode('utf-8', errors='replace')
+                elif isinstance(game_name, str):
+                    # Ensure it's valid UTF-8 by encoding and decoding
+                    game_name = game_name.encode('utf-8', errors='replace').decode('utf-8')
+                
+                cache_entry = GameLibraryCache(
+                    user_id=user.id,
+                    app_id=str(game.get('app_id', game.get('appid', ''))),
+                    game_name=game_name,
+                    platform=game.get('platform', 'steam'),
+                    playtime_hours=float(game.get('playtime_hours', game.get('playtime_forever', 0)) / 60 
+                                       if 'playtime_forever' in game else game.get('playtime_hours', 0)),
+                    last_played=game.get('last_played')
+                )
+                db.add(cache_entry)
+                count += 1
+            except Exception as game_error:
+                logger.warning(f"Skipping game due to encoding error: {game.get('name', 'Unknown')}: {game_error}")
+                continue
         
         db.commit()
         logger.info(f"Cached {count} games for user {username}")
