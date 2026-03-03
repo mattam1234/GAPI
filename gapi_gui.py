@@ -10791,7 +10791,7 @@ def api_discord_bot_list_users():
     """List all Discord→Steam user mappings stored in discord_config.json (admin only).
 
     Response JSON:
-      - ``users``: list of ``{discord_id, steam_id}`` objects
+      - ``users``: list of ``{discord_id, steam_id, username}`` objects
     """
     config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
     if not os.path.exists(config_file):
@@ -10803,8 +10803,32 @@ def api_discord_bot_list_users():
         return jsonify({'users': []})
 
     mappings = cfg.get('user_mappings', {})
-    users = [{'discord_id': str(k), 'steam_id': v} for k, v in mappings.items()]
-    return jsonify({'users': users})
+    
+    # Load multiuser picker to get usernames by discord_id
+    users_list = []
+    try:
+        picker_cfg = load_base_config()
+        picker = multiuser.MultiUserPicker(picker_cfg)
+        
+        for discord_id, steam_id in mappings.items():
+            username = None
+            # Find username by discord_id in multiuser system
+            for user in picker.users:
+                if user.get('discord_id') == str(discord_id):
+                    username = user.get('name')
+                    break
+            
+            users_list.append({
+                'discord_id': str(discord_id),
+                'steam_id': steam_id,
+                'username': username or f'discord_{discord_id}'
+            })
+    except Exception:
+        # Fallback to basic mapping if multiuser lookup fails
+        users_list = [{'discord_id': str(k), 'steam_id': v, 'username': f'discord_{k}'} 
+                      for k, v in mappings.items()]
+    
+    return jsonify({'users': users_list})
 
 
 @app.route('/api/admin/discord-bot/users', methods=['POST'])

@@ -8019,10 +8019,11 @@
                     return;
                 }
                 let html = '<table style="width:100%; border-collapse:collapse; font-size:0.88em;">';
-                html += '<thead><tr><th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--card-border);">Discord ID</th><th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--card-border);">Steam ID</th><th style="padding:6px 8px; border-bottom:1px solid var(--card-border);"></th></tr></thead><tbody>';
+                html += '<thead><tr><th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--card-border);">Username</th><th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--card-border);">Discord ID</th><th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--card-border);">Steam ID</th><th style="padding:6px 8px; border-bottom:1px solid var(--card-border);"></th></tr></thead><tbody>';
                 users.forEach(u => {
                     html += `<tr>
-                        <td style="padding:6px 8px;">${u.discord_id}</td>
+                        <td style="padding:6px 8px; font-weight:600;">${u.username || 'N/A'}</td>
+                        <td style="padding:6px 8px; color:var(--text-secondary);">${u.discord_id}</td>
                         <td style="padding:6px 8px;">${u.steam_id}</td>
                         <td style="padding:6px 8px; text-align:right;">
                             <button onclick="discordBotRemoveUser('${u.discord_id}')" style="padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">🗑 Remove</button>
