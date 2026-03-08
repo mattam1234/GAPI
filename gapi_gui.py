@@ -1311,7 +1311,13 @@ def _resolve_current_username_str() -> str:
     ``@patch('gapi_gui.current_user', 'testuser')``) and falls back to the
     session-based :func:`get_current_username` when it is a proxy.
     """
-    # Always use get_current_username() to get the resolved string
+    from werkzeug.local import LocalProxy as _LocalProxy
+    # If current_user has been replaced with a plain value (e.g. in tests),
+    # use it directly rather than going through the session-based resolver.
+    if not isinstance(current_user, _LocalProxy):
+        val = current_user
+        if val and str(val) not in ('', 'None'):
+            return str(val)
     username = get_current_username()
     return username if username else ''
 

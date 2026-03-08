@@ -42,3 +42,4 @@ epicstore-api>=0.1.7          # Epic Games Store library sync
 howlongtobeatpy>=1.0.0        # How Long to Beat completion-time estimates
 pypresence>=4.3.0             # Discord Rich Presence (shows picked game in Discord)
 graphene>=3.0.0               # GraphQL API (POST /api/graphql)
+numpy>=1.24.0                 # Machine-learning recommendation engine (MLRecommendationEngine)
