@@ -2111,4 +2111,130 @@ def _build_paths() -> Dict[str, Any]:  # noqa: C901 – intentionally long
         }
     }
 
+    # -----------------------------------------------------------------------
+    # Email notification management (Phase 10)
+    # -----------------------------------------------------------------------
+    paths["/api/admin/email/status"] = {
+        "get": {
+            "tags": ["admin", "email"],
+            "summary": "Return SMTP email configuration status (admin only)",
+            "security": [{"sessionAuth": []}],
+            "responses": {
+                "200": _json_resp("Email status", {
+                    "type": "object",
+                    "properties": {
+                        "configured": {"type": "boolean"},
+                        "sender":     {"type": "string"},
+                        "host":       {"type": "string"},
+                        "port":       {"type": "integer"},
+                        "use_tls":    {"type": "boolean"},
+                        "use_ssl":    {"type": "boolean"},
+                    },
+                }),
+                "401": _error(401), "403": _error(403),
+            },
+        }
+    }
+    paths["/api/admin/email/test"] = {
+        "post": {
+            "tags": ["admin", "email"],
+            "summary": "Send a test email to verify SMTP configuration (admin only)",
+            "security": [{"sessionAuth": []}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "required": ["to"],
+                    "properties": {"to": {"type": "string", "format": "email"}},
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Test result", {
+                    "type": "object",
+                    "properties": {
+                        "success": {"type": "boolean"},
+                        "to":      {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                }),
+                "400": _error(), "401": _error(401), "403": _error(403),
+                "503": _error(503),
+            },
+        }
+    }
+    paths["/api/admin/notifications/send-digests"] = {
+        "post": {
+            "tags": ["admin", "notifications", "email"],
+            "summary": "Trigger digest email delivery to opted-in users (admin only)",
+            "security": [{"sessionAuth": []}],
+            "requestBody": {
+                "required": False,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {
+                        "period":  {"type": "string", "enum": ["daily", "weekly"],
+                                    "default": "daily"},
+                        "dry_run": {"type": "boolean", "default": False},
+                    },
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Digest result", {
+                    "type": "object",
+                    "properties": {
+                        "sent":    {"type": "integer"},
+                        "skipped": {"type": "integer"},
+                        "failed":  {"type": "integer"},
+                        "dry_run": {"type": "boolean"},
+                    },
+                }),
+                "401": _error(401), "403": _error(403), "503": _error(503),
+            },
+        }
+    }
+    paths["/api/users/{username}/email"] = {
+        "get": {
+            "tags": ["users", "email"],
+            "summary": "Retrieve the stored email address for a user (own account or admin)",
+            "security": [{"sessionAuth": []}],
+            "parameters": [{"name": "username", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "responses": {
+                "200": _json_resp("Email address", {
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string"},
+                        "email":    {"type": "string", "nullable": True},
+                    },
+                }),
+                "401": _error(401), "403": _error(403), "503": _error(503),
+            },
+        },
+        "put": {
+            "tags": ["users", "email"],
+            "summary": "Set or update email address for a user (own account or admin)",
+            "security": [{"sessionAuth": []}],
+            "parameters": [{"name": "username", "in": "path", "required": True,
+                             "schema": {"type": "string"}}],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "type": "object",
+                    "properties": {"email": {"type": "string", "format": "email"}},
+                }}},
+            },
+            "responses": {
+                "200": _json_resp("Update result", {
+                    "type": "object",
+                    "properties": {
+                        "success": {"type": "boolean"},
+                        "email":   {"type": "string"},
+                    },
+                }),
+                "400": _error(), "401": _error(401), "403": _error(403),
+                "404": _error(404), "503": _error(503),
+            },
+        },
+    }
+
     return paths
