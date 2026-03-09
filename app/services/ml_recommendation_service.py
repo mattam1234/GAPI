@@ -121,6 +121,7 @@ class MLRecommendationEngine:
             return []
 
         if not _HAS_NUMPY:
+            self._built = True
             return self._heuristic_fallback(count)
 
         self._build_matrices()

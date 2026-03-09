@@ -5,7 +5,7 @@ import re
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import desc, or_
-from database import UserReport, ModerationLog, ProfanityFilter, Chat_Message
+from database import UserReport, ModerationLog, ProfanityFilter, ChatMessage
 
 
 class ModerationService:
