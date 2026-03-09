@@ -88,6 +88,7 @@ class User(Base):
     discord_id = Column(String(50), nullable=True, index=True)  # Discord user ID
     epic_id = Column(String(255), nullable=True)
     gog_id = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=True)                  # email for notifications
     # Profile card fields
     display_name = Column(String(255), nullable=True)       # shown instead of username
     bio = Column(String(500), nullable=True)                # short status / bio
@@ -720,6 +721,53 @@ def user_exists(db, username: str) -> bool:
         ``True`` when the user exists, ``False`` otherwise or on error.
     """
     return get_user_by_username(db, username) is not None
+
+
+def get_user_email(db, username: str) -> str:
+    """Return the email address stored for *username*, or an empty string.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Username to look up.
+
+    Returns:
+        The user's email address, or ``''`` when not set or on error.
+    """
+    if not db or not username:
+        return ''
+    try:
+        user = get_user_by_username(db, username)
+        if user and getattr(user, 'email', None):
+            return user.email
+        return ''
+    except Exception:
+        return ''
+
+
+def set_user_email(db, username: str, email: str) -> bool:
+    """Set (or update) the email address for *username*.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Target username.
+        email:    New email address.  Pass ``''`` or ``None`` to clear it.
+
+    Returns:
+        ``True`` on success, ``False`` on error.
+    """
+    if not db or not username:
+        return False
+    try:
+        user = get_user_by_username(db, username)
+        if not user:
+            return False
+        user.email = email.strip() if email else None
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error('set_user_email error: %s', e)
+        db.rollback()
+        return False
 
 
 def ensure_role(db, role_name: str) -> Role:

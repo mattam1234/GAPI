@@ -4,6 +4,49 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.9.0] - 2026-03-09
+
+### Added
+- **Email Notification Service** (`app/services/email_service.py`)
+  - New `EmailService` class sends transactional email via SMTP (standard
+    library `smtplib`; no extra dependencies required)
+  - Configuration via environment variables: `SMTP_HOST`, `SMTP_PORT`,
+    `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS`, `SMTP_USE_SSL`
+  - Graceful degradation: all sends return `False` and log a debug message
+    when `SMTP_HOST` is not set, so the app continues to work without email
+  - `EmailService.from_env()` — class-level factory reads config from env
+  - `send_email(to, subject, body, html_body=None)` — single email with
+    optional HTML alternative part (`multipart/alternative`)
+  - `send_notification_email(to, username, notification)` — sends a single
+    in-app notification as a formatted email
+  - `send_digest_email(to, username, notifications, period)` — bundles
+    multiple unread notifications into one daily/weekly digest email
+  - `send_test_email(to)` — smoke-test for SMTP configuration
+  - `is_configured()` — returns `True` when `SMTP_HOST` is set
+  - 55 new unit tests in `tests/test_email_service.py`
+
+- **Email management API endpoints**
+  - `GET  /api/admin/email/status` — show SMTP configuration status (admin)
+  - `POST /api/admin/email/test` — send a test email to verify SMTP (admin)
+  - `POST /api/admin/notifications/send-digests` — manually trigger digest
+    delivery for all opted-in users; supports `dry_run=true` and
+    `period=daily|weekly` (admin)
+  - `GET  /api/users/<username>/email` — retrieve stored email address
+    (own account or admin)
+  - `PUT  /api/users/<username>/email` — store/update email address
+    (own account or admin)
+
+- **User `email` column** (`database.py`)
+  - New nullable `email` column on the `users` table
+  - `database.get_user_email(db, username)` — returns address or `''`
+  - `database.set_user_email(db, username, email)` — stores/clears address
+  - `POST /api/auth/register` now accepts an optional `email` field
+    (validated for `@` presence; stored immediately if provided)
+
+- **SMTP configuration documentation** (`.env.example`)
+  - New `SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM /
+    SMTP_USE_TLS / SMTP_USE_SSL` section with inline usage notes
+
 ## [2.8.0] - 2026-02-28
 
 ### Added
