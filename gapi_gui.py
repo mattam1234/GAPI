@@ -123,6 +123,14 @@ except Exception as _e:
     _search_service = None
     _moderation_service = None
 
+# Phase 10: Email notification service
+try:
+    from app.services.email_service import EmailService as _EmailService
+    _email_service = _EmailService.from_env()
+except Exception as _e:
+    print(f'Warning: EmailService failed to load: {_e}')
+    _email_service = None
+
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
     _discord_presence = _DiscordPresence()
@@ -1322,6 +1330,22 @@ def _resolve_current_username_str() -> str:
     return username if username else ''
 
 
+def _is_valid_email_address(address: str) -> bool:
+    """Return ``True`` if *address* is a plausible email address.
+
+    Uses :func:`email.utils.parseaddr` for extraction, then checks for a
+    non-empty local part, exactly one ``@``, and a domain with a dot.
+    """
+    import email.utils as _eu
+    if not address or not isinstance(address, str):
+        return False
+    _, addr = _eu.parseaddr(address.strip())
+    if not addr or addr.count('@') != 1:
+        return False
+    local, domain = addr.split('@', 1)
+    return bool(local) and '.' in domain and not domain.startswith('.')
+
+
 def require_login(f):
     """Decorator to require user to be logged in"""
     @wraps(f)
@@ -1857,15 +1881,27 @@ def api_auth_register():
     data = request.json or {}
     username = data.get('username', '').strip()
     password = data.get('password', '').strip()
+    email    = data.get('email', '').strip()
     gui_logger.info('Register endpoint called for username=%s', username)
     
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
-    
+
+    if email and not _is_valid_email_address(email):
+        return jsonify({'error': 'Invalid email address'}), 400
+
     success, message = user_manager.register(username, password)
     if not success:
         return jsonify({'error': message}), 400
     gui_logger.info('Register result for username=%s: %s', username, 'success' if success else 'failure')
+
+    # Store optional email address if provided
+    if email and DB_AVAILABLE:
+        try:
+            db = next(database.get_db())
+            database.set_user_email(db, username, email)
+        except Exception as _e:
+            gui_logger.warning('Could not store email for %s: %s', username, _e)
 
     return jsonify({'message': message})
 
@@ -13056,6 +13092,198 @@ def api_admin_error_rate():
         'total_24h': total_24h,
         'total_all': total_all,
     })
+
+
+# ---------------------------------------------------------------------------
+# Email notification management  (Tier 2, item 6 — email notifications)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/email/status', methods=['GET'])
+@require_admin
+def api_admin_email_status():
+    """Return the current email service configuration status (admin only).
+
+    Response JSON:
+      ``configured``  – ``true`` if ``SMTP_HOST`` is set
+      ``sender``      – configured sender address (empty when unconfigured)
+      ``host``        – SMTP host (empty when unconfigured)
+      ``port``        – SMTP port (0 when unconfigured)
+      ``use_tls``     – whether STARTTLS is enabled
+      ``use_ssl``     – whether SMTPS is enabled
+    """
+    if _email_service is None:
+        return jsonify({'configured': False, 'error': 'EmailService not loaded'})
+    return jsonify(_email_service.config_info())
+
+
+@app.route('/api/admin/email/test', methods=['POST'])
+@require_admin
+def api_admin_email_test():
+    """Send a test email to verify SMTP configuration (admin only).
+
+    Request JSON:
+      ``to``  – recipient email address (required)
+
+    Response JSON:
+      ``success``   – ``true`` when the test email was delivered
+      ``to``        – address the email was sent to
+      ``message``   – human-readable status message
+    """
+    if _email_service is None:
+        return jsonify({'success': False, 'message': 'EmailService not loaded'}), 503
+    if not _email_service.is_configured():
+        return jsonify({
+            'success': False,
+            'message': 'SMTP is not configured. Set SMTP_HOST in your environment.',
+        }), 503
+    data = request.get_json(silent=True, force=True) or {}
+    to_address = str(data.get('to', '')).strip()
+    if not _is_valid_email_address(to_address):
+        return jsonify({'success': False, 'message': 'Invalid or missing "to" address'}), 400
+    ok = _email_service.send_test_email(to_address)
+    return jsonify({
+        'success': ok,
+        'to': to_address,
+        'message': 'Test email sent successfully.' if ok else 'Failed to send test email.',
+    })
+
+
+@app.route('/api/admin/notifications/send-digests', methods=['POST'])
+@require_admin
+def api_admin_send_digests():
+    """Manually trigger digest email delivery for opted-in users (admin only).
+
+    Sends a digest of each user's unread notifications to the email
+    address stored in their profile, provided they have ``email_enabled``
+    and ``digest_frequency`` set to ``'daily'`` or ``'weekly'``.
+
+    Request JSON (optional):
+      ``period``   – ``'daily'`` or ``'weekly'`` (default ``'daily'``)
+      ``dry_run``  – ``true`` to simulate without sending (default ``false``)
+
+    Response JSON:
+      ``sent``      – number of digest emails successfully dispatched
+      ``skipped``   – number of users skipped (no email / not opted-in)
+      ``failed``    – number of send failures
+      ``dry_run``   – echoes the dry_run flag
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    if _email_service is None:
+        return jsonify({'error': 'EmailService not loaded'}), 503
+    if not _email_service.is_configured():
+        return jsonify({'error': 'SMTP not configured'}), 503
+
+    data = request.get_json(silent=True, force=True) or {}
+    period  = str(data.get('period', 'daily')).lower()
+    if period not in ('daily', 'weekly'):
+        period = 'daily'
+    dry_run = bool(data.get('dry_run', False))
+
+    sent = skipped = failed = 0
+    try:
+        db = next(database.get_db())
+        users = database.get_all_users(db)
+        for user in users:
+            username = user.username if hasattr(user, 'username') else str(user)
+            # Check notification preferences
+            prefs = database.get_notification_prefs(db, username)
+            if not prefs.get('email_enabled'):
+                skipped += 1
+                continue
+            freq = prefs.get('digest_frequency', 'never')
+            if freq not in ('daily', 'weekly'):
+                skipped += 1
+                continue
+            # Only send if digest frequency matches requested period
+            if freq != period:
+                skipped += 1
+                continue
+            # Get email address
+            email_addr = database.get_user_email(db, username)
+            if not _is_valid_email_address(email_addr):
+                skipped += 1
+                continue
+            # Get unread notifications
+            notifications = database.get_notifications(db, username, unread_only=True)
+            if not notifications:
+                skipped += 1
+                continue
+            if dry_run:
+                sent += 1
+                continue
+            ok = _email_service.send_digest_email(
+                email_addr, username, notifications, period=period
+            )
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+        return jsonify({
+            'sent': sent,
+            'skipped': skipped,
+            'failed': failed,
+            'dry_run': dry_run,
+        })
+    except Exception as e:
+        gui_logger.error('api_admin_send_digests error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/users/<username>/email', methods=['PUT'])
+@require_login
+def api_set_user_email(username: str):
+    """Update the email address for *username* (own account or admin).
+
+    Request JSON:
+      ``email``  – new email address (use ``""`` to clear)
+
+    Response JSON:
+      ``success``  – ``true`` on success
+      ``email``    – the stored email address
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    current_user = get_current_username()
+    if current_user != username and not user_manager.is_admin(current_user):
+        return jsonify({'error': 'Forbidden'}), 403
+    data = request.get_json(silent=True, force=True) or {}
+    email = str(data.get('email', '')).strip()
+    # Validate format when a non-empty email is provided
+    if email and not _is_valid_email_address(email):
+        return jsonify({'error': 'Invalid email address'}), 400
+    try:
+        db = next(database.get_db())
+        ok = database.set_user_email(db, username, email)
+        if not ok:
+            return jsonify({'error': 'User not found'}), 404
+        return jsonify({'success': True, 'email': email})
+    except Exception as e:
+        gui_logger.error('api_set_user_email error: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/users/<username>/email', methods=['GET'])
+@require_login
+def api_get_user_email(username: str):
+    """Retrieve the email address for *username* (own account or admin).
+
+    Response JSON:
+      ``username``  – the queried username
+      ``email``     – email address (may be ``null`` when not set)
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    current_user = get_current_username()
+    if current_user != username and not user_manager.is_admin(current_user):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        db = next(database.get_db())
+        email = database.get_user_email(db, username)
+        return jsonify({'username': username, 'email': email or None})
+    except Exception as e:
+        gui_logger.error('api_get_user_email error: %s', e)
+        return jsonify({'error': str(e)}), 500
 
 
 # ---------------------------------------------------------------------------
