@@ -131,6 +131,14 @@ except Exception as _e:
     print(f'Warning: EmailService failed to load: {_e}')
     _email_service = None
 
+# Phase 11: Web Push notification service
+try:
+    from app.services.push_notification_service import PushNotificationService as _PushNotificationService
+    _push_service = _PushNotificationService.from_env()
+except Exception as _e:
+    print(f'Warning: PushNotificationService failed to load: {_e}')
+    _push_service = None
+
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
     _discord_presence = _DiscordPresence()
@@ -1739,6 +1747,40 @@ self.addEventListener('fetch', (event) => {
           return new Response('', { status: 503 });
         });
       })
+  );
+});
+
+// ── Push: receive a Web Push notification ─────────────────────────────────
+self.addEventListener('push', (event) => {
+  let data = { title: 'GAPI', body: 'You have a new notification.', url: '/', icon: '/static/icon-192.png', badge: '/static/badge-72.png' };
+  if (event.data) {
+    try { Object.assign(data, JSON.parse(event.data.text())); } catch (_) {}
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body:  data.body,
+      icon:  data.icon  || '/static/icon-192.png',
+      badge: data.badge || '/static/badge-72.png',
+      data:  { url: data.url || '/' },
+    })
+  );
+});
+
+// ── Notification click: focus or open the target URL ─────────────────────
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url === targetUrl && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
   );
 });
 """
@@ -13284,6 +13326,176 @@ def api_get_user_email(username: str):
     except Exception as e:
         gui_logger.error('api_get_user_email error: %s', e)
         return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Web Push Notifications  (Phase 11)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/push/vapid-public-key', methods=['GET'])
+def api_push_vapid_public_key():
+    """Return the server VAPID public key needed to subscribe for push.
+
+    Response JSON:
+      ``public_key``   – base64url-encoded VAPID EC public key (65-byte
+                         uncompressed point); pass this to
+                         ``PushManager.subscribe({ applicationServerKey })``
+                         in the browser.
+      ``configured``   – ``true`` when VAPID keys are set up on the server.
+    """
+    if _push_service:
+        return jsonify({
+            'public_key': _push_service.get_public_key(),
+            'configured': _push_service.is_configured(),
+        })
+    return jsonify({'public_key': '', 'configured': False})
+
+
+@app.route('/api/push/subscribe', methods=['POST'])
+@require_login
+def api_push_subscribe():
+    """Register (or refresh) a browser push subscription for the current user.
+
+    Request JSON (the ``PushSubscription.toJSON()`` object from the browser):
+
+    .. code-block:: json
+
+        {
+            "endpoint": "https://fcm.googleapis.com/...",
+            "keys": {
+                "p256dh": "<base64url>",
+                "auth":   "<base64url>"
+            }
+        }
+
+    Response JSON:
+      ``subscribed``   – ``true`` on success.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    username = get_current_username()
+    data = request.get_json(silent=True, force=True) or {}
+    endpoint = str(data.get('endpoint', '')).strip()
+    keys = data.get('keys') or {}
+    p256dh = str(keys.get('p256dh', '')).strip()
+    auth = str(keys.get('auth', '')).strip()
+    if not endpoint or not p256dh or not auth:
+        return jsonify({'error': "'endpoint', 'keys.p256dh', and 'keys.auth' are required"}), 400
+    user_agent = request.headers.get('User-Agent', '')[:500]
+    try:
+        db = next(database.get_db())
+        ok = database.add_push_subscription(
+            db, username, endpoint, p256dh, auth, user_agent=user_agent
+        )
+    except Exception as e:
+        gui_logger.error('api_push_subscribe error: %s', e)
+        return jsonify({'error': 'Internal server error'}), 500
+    if ok:
+        return jsonify({'subscribed': True}), 201
+    return jsonify({'error': 'Failed to save subscription'}), 500
+
+
+@app.route('/api/push/unsubscribe', methods=['DELETE'])
+@require_login
+def api_push_unsubscribe():
+    """Remove a push subscription for the current user.
+
+    Request JSON:
+      ``endpoint``  – push endpoint URL to unsubscribe (required).
+
+    Response JSON:
+      ``unsubscribed``  – ``true`` when the record was deleted.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    username = get_current_username()
+    data = request.get_json(silent=True, force=True) or {}
+    endpoint = str(data.get('endpoint', '')).strip()
+    if not endpoint:
+        return jsonify({'error': "'endpoint' is required"}), 400
+    try:
+        db = next(database.get_db())
+        removed = database.remove_push_subscription(db, username, endpoint)
+    except Exception as e:
+        gui_logger.error('api_push_unsubscribe error: %s', e)
+        return jsonify({'error': 'Internal server error'}), 500
+    if removed:
+        return jsonify({'unsubscribed': True})
+    return jsonify({'error': 'Subscription not found'}), 404
+
+
+@app.route('/api/push/subscriptions', methods=['GET'])
+@require_login
+def api_push_subscriptions():
+    """List push subscriptions for the current user.
+
+    Response JSON:
+      ``subscriptions``  – list of subscription objects (``id``, ``endpoint``,
+                           ``user_agent``, ``created_at``).
+      ``count``          – number of active subscriptions.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'subscriptions': [], 'count': 0})
+    username = get_current_username()
+    try:
+        db = next(database.get_db())
+        subs = database.get_user_push_subscriptions(db, username)
+    except Exception as e:
+        gui_logger.error('api_push_subscriptions error: %s', e)
+        return jsonify({'error': 'Internal server error'}), 500
+    # Omit p256dh / auth from the public listing (sensitive key material)
+    safe = [
+        {
+            'id': s['id'],
+            'endpoint': s['endpoint'],
+            'user_agent': s['user_agent'],
+            'created_at': s['created_at'],
+        }
+        for s in subs
+    ]
+    return jsonify({'subscriptions': safe, 'count': len(safe)})
+
+
+@app.route('/api/admin/push/broadcast', methods=['POST'])
+@require_admin
+def api_admin_push_broadcast():
+    """Send a push notification to all opted-in subscribers (admin only).
+
+    Request JSON:
+      ``title``     – notification title (required).
+      ``body``      – notification body text (required).
+      ``url``       – URL to open when the notification is clicked
+                      (default ``'/'``).
+      ``dry_run``   – when ``true`` count subscriptions but do not send
+                      (default ``false``).
+
+    Response JSON:
+      ``total``     – subscriptions considered.
+      ``sent``      – successfully delivered.
+      ``failed``    – delivery failures.
+      ``skipped``   – subscriptions skipped (dry_run).
+      ``dry_run``   – whether dry_run was active.
+    """
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.get_json(silent=True, force=True) or {}
+    title = str(data.get('title', '')).strip()
+    body = str(data.get('body', '')).strip()
+    url = str(data.get('url', '/')).strip() or '/'
+    dry_run = str(data.get('dry_run', 'false')).lower() in ('true', '1', 'yes')
+    if not title or not body:
+        return jsonify({'error': "'title' and 'body' are required"}), 400
+    if not _push_service:
+        return jsonify({'error': 'Push notification service not available'}), 503
+    try:
+        db = next(database.get_db())
+        result = _push_service.broadcast(
+            db, title, body, url=url, db_module=database, dry_run=dry_run
+        )
+    except Exception as e:
+        gui_logger.error('api_admin_push_broadcast error: %s', e)
+        return jsonify({'error': 'Internal server error'}), 500
+    return jsonify(result)
 
 
 # ---------------------------------------------------------------------------
