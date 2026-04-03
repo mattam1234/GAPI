@@ -539,6 +539,27 @@ class UserNotificationPreference(Base):
 
 
 # ---------------------------------------------------------------------------
+# Web Push Subscriptions  (Phase 11 — Browser Push Notifications)
+# ---------------------------------------------------------------------------
+
+class PushSubscription(Base):
+    """Browser push-notification subscription registered by a user.
+
+    Stores the W3C Push API subscription object components so the server can
+    deliver push notifications independently of any open browser tab.
+    """
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    endpoint = Column(Text, nullable=False, unique=True)
+    p256dh = Column(Text, nullable=False)   # client public-key (base64url)
+    auth = Column(Text, nullable=False)      # auth secret (base64url)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
 # User Reputation / Trust Score  (Item 7 — Content Moderation)
 # ---------------------------------------------------------------------------
 
@@ -4765,3 +4786,146 @@ def clear_search_history(db, username: str) -> bool:
         logger.error('clear_search_history error: %s', e)
         db.rollback()
         return False
+
+
+# ---------------------------------------------------------------------------
+# Web Push Subscription helpers  (Phase 11)
+# ---------------------------------------------------------------------------
+
+def add_push_subscription(db, username: str, endpoint: str,
+                          p256dh: str, auth: str,
+                          user_agent: str = '') -> bool:
+    """Register (or update) a browser push subscription for *username*.
+
+    If a subscription with the same *endpoint* already exists its keys are
+    updated in-place so stale subscriptions are refreshed automatically.
+
+    Returns ``True`` on success, ``False`` on error.
+    """
+    if not db or not username or not endpoint or not p256dh or not auth:
+        return False
+    try:
+        existing = (
+            db.query(PushSubscription)
+            .filter(PushSubscription.endpoint == endpoint)
+            .first()
+        )
+        if existing:
+            existing.username = username
+            existing.p256dh = p256dh
+            existing.auth = auth
+            existing.user_agent = user_agent or ''
+        else:
+            sub = PushSubscription(
+                username=username,
+                endpoint=endpoint,
+                p256dh=p256dh,
+                auth=auth,
+                user_agent=user_agent or '',
+            )
+            db.add(sub)
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error('add_push_subscription error: %s', e)
+        db.rollback()
+        return False
+
+
+def remove_push_subscription(db, username: str, endpoint: str) -> bool:
+    """Remove a push subscription identified by *endpoint* for *username*.
+
+    Returns ``True`` if the row was deleted, ``False`` otherwise.
+    """
+    if not db or not username or not endpoint:
+        return False
+    try:
+        deleted = (
+            db.query(PushSubscription)
+            .filter(
+                PushSubscription.username == username,
+                PushSubscription.endpoint == endpoint,
+            )
+            .delete()
+        )
+        db.commit()
+        return deleted > 0
+    except Exception as e:
+        logger.error('remove_push_subscription error: %s', e)
+        db.rollback()
+        return False
+
+
+def get_user_push_subscriptions(db, username: str) -> list:
+    """Return all push subscriptions for *username*.
+
+    Each entry is a dict with ``id``, ``endpoint``, ``p256dh``, ``auth``,
+    ``user_agent``, ``created_at``.
+    """
+    if not db or not username:
+        return []
+    try:
+        rows = (
+            db.query(PushSubscription)
+            .filter(PushSubscription.username == username)
+            .order_by(PushSubscription.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                'id': r.id,
+                'endpoint': r.endpoint,
+                'p256dh': r.p256dh,
+                'auth': r.auth,
+                'user_agent': r.user_agent or '',
+                'created_at': r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error('get_user_push_subscriptions error: %s', e)
+        return []
+
+
+def get_all_push_subscriptions(db, push_enabled_only: bool = True) -> list:
+    """Return push subscriptions for all users.
+
+    When *push_enabled_only* is ``True`` (the default) only subscriptions
+    belonging to users whose ``push_enabled`` notification preference is set
+    are returned.
+
+    Each entry is a dict with ``username``, ``endpoint``, ``p256dh``,
+    ``auth``.
+    """
+    if not db:
+        return []
+    try:
+        query = db.query(PushSubscription)
+        if push_enabled_only:
+            # Inner join on UserNotificationPreference where push_enabled is True
+            query = (
+                query
+                .join(
+                    UserNotificationPreference,
+                    UserNotificationPreference.username == PushSubscription.username,
+                    isouter=True,
+                )
+                .filter(
+                    # Include rows where push_enabled IS NULL (default True) or True
+                    (UserNotificationPreference.push_enabled == True)  # noqa: E712
+                    | (UserNotificationPreference.username == None)  # noqa: E711
+                )
+            )
+        rows = query.all()
+        return [
+            {
+                'username': r.username,
+                'endpoint': r.endpoint,
+                'p256dh': r.p256dh,
+                'auth': r.auth,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error('get_all_push_subscriptions error: %s', e)
+        return []

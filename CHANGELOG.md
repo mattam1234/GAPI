@@ -4,6 +4,58 @@ All notable changes to GAPI will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [3.0.0] - 2026-04-03
+
+### Added
+- **Web Push Notification Service** (`app/services/push_notification_service.py`) — Phase 11
+  - New `PushNotificationService` class sends browser-native push notifications
+    using VAPID authentication (W3C Web Push Protocol)
+  - Configuration via environment variables: `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`,
+    `VAPID_CLAIMS_EMAIL`
+  - Graceful degradation: all sends return `False`/empty when `VAPID_PRIVATE_KEY` is
+    not set or `pywebpush` is not installed, so the app continues to work without push
+  - `PushNotificationService.from_env()` — factory method reads VAPID config from env
+  - `PushNotificationService.generate_vapid_keys()` — static helper to generate a
+    fresh VAPID EC key-pair (PEM private key + base64url public key)
+  - `send_push(subscription_info, title, body, url, icon, badge)` — deliver a single
+    notification to one browser subscription
+  - `send_to_user(db, username, title, body, url, db_module)` — send to all
+    subscriptions of one user; returns `(sent, failed)` counts
+  - `broadcast(db, title, body, url, db_module, dry_run)` — fan-out to all
+    opted-in subscribers; supports `dry_run=True` for safe testing
+  - Automatic handling of expired/unregistered subscriptions (HTTP 404/410)
+  - 66 new unit and integration tests in `tests/test_push_notifications.py`
+
+- **Push subscription database model** (`database.py`)
+  - New `PushSubscription` ORM model — stores `endpoint`, `p256dh`, `auth`,
+    `user_agent`, and `created_at` per user
+  - `add_push_subscription(db, username, endpoint, p256dh, auth, user_agent)`
+    — upsert: refreshes keys if the endpoint already exists
+  - `remove_push_subscription(db, username, endpoint)` — remove by endpoint
+  - `get_user_push_subscriptions(db, username)` — list subscriptions for a user
+  - `get_all_push_subscriptions(db, push_enabled_only)` — list all subscriptions;
+    when `push_enabled_only=True` (default) only includes users whose
+    `push_enabled` notification preference is set
+
+- **Push notification API endpoints** (`gapi_gui.py`)
+  - `GET  /api/push/vapid-public-key` — return server VAPID public key for the
+    browser `PushManager.subscribe({ applicationServerKey })` call (public)
+  - `POST /api/push/subscribe` — register or refresh a push subscription for the
+    current user (login required); accepts the browser `PushSubscription.toJSON()` body
+  - `DELETE /api/push/unsubscribe` — remove a push subscription (login required)
+  - `GET  /api/push/subscriptions` — list current user's subscriptions; sensitive
+    key material (`p256dh`, `auth`) is intentionally omitted from the response
+  - `POST /api/admin/push/broadcast` — fan-out push to all opted-in users
+    (admin only); supports `dry_run`, custom `url`
+
+- **Service Worker push handlers** (`/sw.js`)
+  - `push` event listener — parses JSON payload and calls `showNotification()`
+    with `title`, `body`, `icon`, and `badge`
+  - `notificationclick` event listener — focuses an existing window at the
+    target URL or opens a new tab when clicked
+
+- **`pywebpush>=2.3.0`** added to `requirements.txt` as the VAPID/push dependency
+
 ## [2.9.0] - 2026-03-09
 
 ### Added
