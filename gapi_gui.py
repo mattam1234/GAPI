@@ -13389,7 +13389,7 @@ def api_push_subscribe():
         )
     except Exception as e:
         gui_logger.error('api_push_subscribe error: %s', e)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
     if ok:
         return jsonify({'subscribed': True}), 201
     return jsonify({'error': 'Failed to save subscription'}), 500
@@ -13418,7 +13418,7 @@ def api_push_unsubscribe():
         removed = database.remove_push_subscription(db, username, endpoint)
     except Exception as e:
         gui_logger.error('api_push_unsubscribe error: %s', e)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
     if removed:
         return jsonify({'unsubscribed': True})
     return jsonify({'error': 'Subscription not found'}), 404
@@ -13442,7 +13442,7 @@ def api_push_subscriptions():
         subs = database.get_user_push_subscriptions(db, username)
     except Exception as e:
         gui_logger.error('api_push_subscriptions error: %s', e)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
     # Omit p256dh / auth from the public listing (sensitive key material)
     safe = [
         {
@@ -13494,7 +13494,7 @@ def api_admin_push_broadcast():
         )
     except Exception as e:
         gui_logger.error('api_admin_push_broadcast error: %s', e)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
     return jsonify(result)
 
 
