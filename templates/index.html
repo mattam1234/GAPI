@@ -12,9 +12,10 @@
     <link rel="dns-prefetch" href="//store.steampowered.com">
     <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- PWA: Web App Manifest + theme colour -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#667eea">
+    <meta name="theme-color" content="#4f46e5">
     <!-- PWA: iOS / Android meta tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -22,43 +23,54 @@
     <style>
         :root {
             /* Color scheme variables - light theme defaults */
-            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --card-bg: white;
-            --card-border: #e0e0e0;
-            --text-primary: #333;
-            --text-secondary: #666;
-            --list-hover: rgba(102, 126, 234, 0.08);
-            --input-bg: white;
-            --input-border: #ddd;
-            --tab-inactive-bg: rgba(255,255,255,0.2);
-            --tab-inactive-color: white;
-            --tab-hover-bg: rgba(255,255,255,0.3);
+            --bg-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            --card-bg: #ffffff;
+            --card-border: #e5e7eb;
+            --text-primary: #111827;
+            --text-secondary: #6b7280;
+            --list-hover: rgba(79, 70, 229, 0.06);
+            --input-bg: #f9fafb;
+            --input-border: #d1d5db;
+            --tab-inactive-bg: rgba(255,255,255,0.15);
+            --tab-inactive-color: rgba(255,255,255,0.85);
+            --tab-hover-bg: rgba(255,255,255,0.25);
             --tab-active-bg: white;
-            --tab-active-color: #667eea;
+            --tab-active-color: #4f46e5;
             --header-color: white;
-            --status-bar-bg: rgba(255,255,255,0.2);
+            --status-bar-bg: rgba(255,255,255,0.18);
             --status-bar-color: white;
-            --accent: #667eea;
+            --accent: #4f46e5;
+            --accent-light: #e0e7ff;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --skeleton-base: #e5e7eb;
+            --skeleton-highlight: #f3f4f6;
         }
 
         html[data-theme="dark"] {
-            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
-            --card-bg: #111827;
-            --card-border: #374151;
-            --text-primary: #e5e7eb;
-            --text-secondary: #9ca3af;
-            --list-hover: rgba(99, 102, 241, 0.20);
-            --input-bg: #1f2937;
-            --input-border: #4b5563;
-            --tab-inactive-bg: rgba(255,255,255,0.08);
-            --tab-inactive-color: #d1d5db;
-            --tab-hover-bg: rgba(255,255,255,0.14);
-            --tab-active-bg: #111827;
-            --tab-active-color: #a5b4fc;
-            --header-color: #e5e7eb;
-            --status-bar-bg: rgba(17,24,39,0.65);
-            --status-bar-color: #d1d5db;
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            --card-bg: #1e1b4b;
+            --card-border: #312e81;
+            --text-primary: #e0e7ff;
+            --text-secondary: #a5b4fc;
+            --list-hover: rgba(99, 102, 241, 0.12);
+            --input-bg: #1e1b4b;
+            --input-border: #4338ca;
+            --tab-inactive-bg: rgba(255,255,255,0.06);
+            --tab-inactive-color: #a5b4fc;
+            --tab-hover-bg: rgba(255,255,255,0.12);
+            --tab-active-bg: #312e81;
+            --tab-active-color: #c7d2fe;
+            --header-color: #e0e7ff;
+            --status-bar-bg: rgba(30,27,75,0.7);
+            --status-bar-color: #c7d2fe;
             --accent: #818cf8;
+            --accent-light: #1e1b4b;
+            --skeleton-base: #312e81;
+            --skeleton-highlight: #3730a3;
         }
         
         * {
@@ -68,8 +80,8 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg-gradient, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg-gradient, linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%));
             min-height: 100vh;
             padding: 20px;
         }
@@ -82,57 +94,67 @@
         header {
             text-align: center;
             color: var(--header-color, white);
-            margin-bottom: 30px;
+            margin-bottom: 28px;
         }
 
         h1 {
-            font-size: 3em;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            font-size: 2.6em;
+            font-weight: 800;
+            margin-bottom: 6px;
+            letter-spacing: -0.02em;
+            text-shadow: 0 2px 12px rgba(0,0,0,0.2);
         }
 
         .subtitle {
-            font-size: 1.2em;
-            opacity: 0.9;
+            font-size: 1.05em;
+            opacity: 0.85;
+            font-weight: 500;
         }
 
         .status-bar {
-            background: var(--status-bar-bg, rgba(255,255,255,0.2));
+            background: var(--status-bar-bg, rgba(255,255,255,0.18));
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
             padding: 10px 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
+            border-radius: 50px;
+            margin-bottom: 18px;
             color: var(--status-bar-color, white);
             text-align: center;
             font-weight: 500;
+            font-size: 0.92em;
+            border: 1px solid rgba(255,255,255,0.12);
         }
 
         .tabs {
             display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
+            gap: 6px;
+            margin-bottom: 18px;
             flex-wrap: wrap;
         }
 
         .tab {
-            background: var(--tab-inactive-bg, rgba(255,255,255,0.2));
+            background: var(--tab-inactive-bg, rgba(255,255,255,0.15));
             color: var(--tab-inactive-color, white);
-            border: none;
-            padding: 15px 30px;
-            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 10px 20px;
+            border-radius: 50px;
             cursor: pointer;
-            font-size: 1em;
+            font-size: 0.88em;
             font-weight: 600;
-            transition: all 0.3s;
+            transition: all 0.2s;
+            letter-spacing: 0.01em;
         }
 
         .tab:hover {
-            background: var(--tab-hover-bg, rgba(255,255,255,0.3));
-            transform: translateY(-2px);
+            background: var(--tab-hover-bg, rgba(255,255,255,0.25));
+            transform: translateY(-1px);
         }
 
         .tab.active {
             background: var(--tab-active-bg, white);
-            color: var(--tab-active-color, #667eea);
+            color: var(--tab-active-color, #4f46e5);
+            border-color: transparent;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         }
         
         /* Hide auth-required tabs by default until user logs in */
@@ -144,10 +166,11 @@
         .tab-content {
             display: none;
             background: var(--card-bg, white);
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            color: var(--text-primary, #333);
+            border-radius: 16px;
+            padding: 28px;
+            box-shadow: var(--shadow-lg, 0 10px 40px rgba(0,0,0,0.12));
+            color: var(--text-primary, #111827);
+            border: 1px solid var(--card-border);
         }
 
         .tab-content.active {
@@ -156,20 +179,24 @@
 
         .filters {
             background: var(--list-hover);
-            padding: 20px;
-            border-radius: 10px;
+            padding: 20px 22px;
+            border-radius: var(--radius, 12px);
             margin-bottom: 20px;
+            border: 1px solid var(--card-border);
         }
 
         .filter-group {
-            margin-bottom: 15px;
+            margin-bottom: 16px;
         }
 
         .filter-label {
-            font-weight: 600;
+            font-weight: 700;
             color: var(--text-primary);
             margin-bottom: 10px;
             display: block;
+            font-size: 0.88em;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
         }
 
         .radio-group {
@@ -185,9 +212,10 @@
         }
 
         .radio-option input[type="radio"] {
-            width: 18px;
-            height: 18px;
+            width: 17px;
+            height: 17px;
             cursor: pointer;
+            accent-color: var(--accent, #4f46e5);
         }
 
         .radio-option label {
@@ -199,40 +227,44 @@
             width: 100%;
             max-width: 500px;
             padding: 10px 15px;
-            border: 2px solid var(--input-border);
-            border-radius: 8px;
+            border: 1.5px solid var(--input-border);
+            border-radius: var(--radius-sm, 8px);
             font-size: 1em;
+            font-family: inherit;
             background: var(--input-bg);
             color: var(--text-primary);
         }
 
         .genre-input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--accent, #4f46e5);
+            box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
         }
         
         .pick-button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
             color: white;
             border: none;
-            padding: 20px 40px;
+            padding: 18px 44px;
             border-radius: 50px;
-            font-size: 1.3em;
-            font-weight: bold;
+            font-size: 1.15em;
+            font-weight: 700;
+            font-family: inherit;
             cursor: pointer;
             display: block;
-            margin: 30px auto;
-            transition: all 0.3s;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            margin: 28px auto;
+            transition: all 0.25s;
+            box-shadow: 0 4px 14px rgba(79,70,229,0.4);
+            letter-spacing: 0.01em;
         }
         
         .pick-button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 22px rgba(79,70,229,0.5);
         }
         
         .pick-button:active {
-            transform: translateY(-1px);
+            transform: translateY(0px);
         }
 
         .game-display {
@@ -353,29 +385,31 @@
         }
 
         .btn-link {
-            background: #667eea;
+            background: var(--accent, #4f46e5);
             color: white;
         }
 
         .btn-link:hover {
-            background: #5568d3;
+            background: #4338ca;
         }
 
         .list-container {
             max-height: 500px;
+        .list-container {
+            max-height: 500px;
             overflow-y: auto;
             border: 1px solid var(--card-border);
-            border-radius: 8px;
+            border-radius: var(--radius, 12px);
             margin-top: 15px;
         }
 
         .list-item {
-            padding: 15px;
+            padding: 13px 16px;
             border-bottom: 1px solid var(--card-border);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            transition: background 0.2s;
+            transition: background 0.15s;
             color: var(--text-primary);
         }
 
@@ -428,69 +462,76 @@
 
         .search-input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--accent, #4f46e5);
+            box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
         }
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
             margin: 20px 0;
         }
 
         .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
             color: white;
-            padding: 20px;
-            border-radius: 10px;
+            padding: 22px 20px;
+            border-radius: var(--radius, 12px);
             text-align: center;
+            box-shadow: 0 4px 12px rgba(79,70,229,0.3);
         }
 
         .stat-value {
-            font-size: 2.5em;
-            font-weight: bold;
-            margin: 10px 0;
+            font-size: 2.4em;
+            font-weight: 800;
+            margin: 8px 0;
+            letter-spacing: -0.02em;
         }
 
         .stat-label {
-            opacity: 0.9;
-            font-size: 0.9em;
+            opacity: 0.88;
+            font-size: 0.85em;
+            font-weight: 500;
         }
 
         .top-games {
-            margin-top: 30px;
+            margin-top: 28px;
         }
 
         .top-games h3 {
-            margin-bottom: 15px;
+            margin-bottom: 14px;
             color: var(--text-primary);
+            font-weight: 700;
         }
 
         /* Charts row */
         .charts-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 24px;
-            margin-top: 30px;
+            gap: 20px;
+            margin-top: 28px;
         }
         @media (max-width: 700px) {
             .charts-row { grid-template-columns: 1fr; }
         }
         .chart-card {
             background: var(--list-hover);
-            border-radius: 10px;
+            border-radius: var(--radius, 12px);
             padding: 20px;
+            border: 1px solid var(--card-border);
         }
         .chart-card h3 {
             margin-bottom: 14px;
             color: var(--text-primary);
-            font-size: 1em;
+            font-size: 0.95em;
+            font-weight: 700;
         }
 
         /* Tag pills */
         .tag-pill {
             display: inline-block;
-            background: #667eea;
+            background: var(--accent, #4f46e5);
             color: #fff;
             border-radius: 12px;
             padding: 2px 10px;
@@ -509,19 +550,70 @@
             text-align: center;
             padding: 40px;
             color: var(--text-secondary);
+            font-size: 0.95em;
         }
 
         .error {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 15px;
-            border-radius: 8px;
+            background: #fef2f2;
+            color: #991b1b;
+            padding: 14px 18px;
+            border-radius: var(--radius-sm, 8px);
             margin: 10px 0;
+            border: 1px solid #fecaca;
+            font-size: 0.92em;
         }
 
         .favorite-icon {
-            color: #ffc107;
+            color: #f59e0b;
             margin-right: 8px;
+        }
+
+        /* ── Skeleton Loading ─────────────────────────────────────────── */
+        @keyframes skeleton-shimmer {
+            0%   { background-position: -600px 0; }
+            100% { background-position: 600px 0; }
+        }
+        .skeleton {
+            background: linear-gradient(
+                90deg,
+                var(--skeleton-base, #e5e7eb) 25%,
+                var(--skeleton-highlight, #f3f4f6) 50%,
+                var(--skeleton-base, #e5e7eb) 75%
+            );
+            background-size: 1200px 100%;
+            animation: skeleton-shimmer 1.4s infinite linear;
+            border-radius: 6px;
+        }
+        .skeleton-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--card-border);
+        }
+        .skeleton-item:last-child { border-bottom: none; }
+        .skeleton-thumb {
+            width: 108px;
+            height: 60px;
+            border-radius: 8px;
+            flex-shrink: 0;
+        }
+        .skeleton-text-block {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .skeleton-text-line {
+            height: 14px;
+            border-radius: 4px;
+        }
+        .skeleton-text-line.wide  { width: 65%; }
+        .skeleton-text-line.mid   { width: 40%; }
+        .skeleton-text-line.short { width: 25%; }
+        .skeleton-stat-card {
+            height: 110px;
+            border-radius: var(--radius, 12px);
         }
 
         /* ---- Global loading overlay ---- */
@@ -759,46 +851,54 @@
     </div>
 
     <!-- Login/Register Modal -->
-    <div id="auth-modal" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 9999;">
-        <div style="background: var(--card-bg); padding: 40px; border-radius: 15px; width: 90%; max-width: 400px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
-            <h2 style="text-align: center; margin-bottom: 30px; color: var(--text-primary);">🎮 GAPI Game Picker</h2>
+    <div id="auth-modal" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: var(--card-bg); padding: 40px 36px; border-radius: 20px; width: 92%; max-width: 400px; box-shadow: 0 24px 60px rgba(0,0,0,0.35); border: 1px solid var(--card-border);">
+            <div style="text-align:center; margin-bottom: 28px;">
+                <div style="font-size:2.4em; margin-bottom:8px;">🎮</div>
+                <h2 style="font-size:1.5em; font-weight:800; color: var(--text-primary); letter-spacing:-0.02em;">GAPI Game Picker</h2>
+                <p style="color:var(--text-secondary); font-size:0.88em; margin-top:4px;">Sign in to access your library</p>
+            </div>
             
             <!-- Login Form -->
             <div id="login-form-div">
                 <form id="login-form">
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
-                        <input type="text" id="login-username" placeholder="Enter username" required autocomplete="username"
-                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    <div style="margin-bottom: 14px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Username</label>
+                        <input type="text" id="login-username" placeholder="Enter your username" required autocomplete="username"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
-                    <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Password</label>
-                        <input type="password" id="login-password" placeholder="Enter password" required autocomplete="current-password"
-                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    <div style="margin-bottom: 22px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Password</label>
+                        <input type="password" id="login-password" placeholder="Enter your password" required autocomplete="current-password"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
-                    <div id="login-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
-                    <button type="submit" style="width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1em;">Login</button>
+                    <div id="login-error" style="color: #dc2626; margin-bottom: 14px; display: none; font-size:0.88em; background:#fef2f2; padding:10px 14px; border-radius:8px; border:1px solid #fecaca;"></div>
+                    <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#4f46e5,#7c3aed); color: white; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Sign In</button>
                 </form>
-                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Don't have an account? <a href="javascript:void(0)" id="show-register-link" onclick="try{ switchAuthForm(false); }catch(e){ console.error('switchAuthForm error (register):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Register</a></p>
+                <p style="text-align: center; margin-top: 18px; color: var(--text-secondary); font-size:0.88em;">Don't have an account? <a href="javascript:void(0)" id="show-register-link" onclick="try{ switchAuthForm(false); }catch(e){ console.error('switchAuthForm error (register):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #4f46e5; text-decoration: none; font-weight: 700;">Create account</a></p>
             </div>
             
             <!-- Register Form -->
             <div id="register-form-div" style="display: none;">
                 <form id="register-form">
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Username</label>
-                        <input type="text" id="register-username" placeholder="Choose username (min 3 chars)" required minlength="3" autocomplete="username"
-                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    <div style="margin-bottom: 14px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Username</label>
+                        <input type="text" id="register-username" placeholder="Choose a username (min 3 chars)" required minlength="3" autocomplete="username"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
-                    <div style="margin-bottom: 20px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: var(--text-primary);">Password</label>
-                        <input type="password" id="register-password" placeholder="Choose password (min 6 chars)" required minlength="6" autocomplete="new-password"
-                               style="width: 100%; padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+                    <div style="margin-bottom: 22px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Password</label>
+                        <input type="password" id="register-password" placeholder="Choose a password (min 6 chars)" required minlength="6" autocomplete="new-password"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
-                    <div id="register-error" style="color: #e74c3c; margin-bottom: 15px; display: none;"></div>
-                    <button type="submit" style="width: 100%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 1em;">Register</button>
+                    <div id="register-error" style="color: #dc2626; margin-bottom: 14px; display: none; font-size:0.88em; background:#fef2f2; padding:10px 14px; border-radius:8px; border:1px solid #fecaca;"></div>
+                    <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#059669,#047857); color: white; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Create Account</button>
                 </form>
-                <p style="text-align: center; margin-top: 15px; color: var(--text-secondary);">Already have an account? <a href="javascript:void(0)" id="show-login-link" onclick="try{ switchAuthForm(true); }catch(e){ console.error('switchAuthForm error (login):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #667eea; text-decoration: none; font-weight: 600;">Login</a></p>
+                <p style="text-align: center; margin-top: 18px; color: var(--text-secondary); font-size:0.88em;">Already have an account? <a href="javascript:void(0)" id="show-login-link" onclick="try{ switchAuthForm(true); }catch(e){ console.error('switchAuthForm error (login):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #4f46e5; text-decoration: none; font-weight: 700;">Sign in</a></p>
             </div>
         </div>
     </div>
@@ -814,15 +914,16 @@
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                 <div>
                     <h1>🎮 GAPI</h1>
-                    <p class="subtitle">Pick your next Steam game to play!</p>
+                    <p class="subtitle">Pick your next game to play!</p>
                 </div>
                 <div id="user-info" style="display: none; text-align: right;">
-                    <p style="color: #ffffff; margin-bottom: 10px;">Logged in as: <strong id="current-username" style="color: #76ff6f;"></strong></p>
-                    <button onclick="handleLogout()" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Logout</button>
+                    <p style="color: rgba(255,255,255,0.85); margin-bottom: 10px; font-size:0.88em; font-weight:500;">Signed in as <strong id="current-username" style="color: #a5f3fc; font-weight:700;"></strong></p>
+                    <button onclick="handleLogout()" style="padding: 8px 18px; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.25); border-radius: 50px; cursor: pointer; font-weight: 600; font-family:inherit; font-size:0.88em; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">Sign out</button>
                 </div>
             </div>
-            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode" data-tooltip="Switch between light and dark themes">🌙 Dark Mode</button>
+            <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode" data-tooltip="Switch between light and dark themes" style="margin-top:12px; padding:7px 16px; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.2); color:white; border-radius:50px; cursor:pointer; font-size:0.85em; font-weight:600; font-family:inherit; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">🌙 Dark Mode</button>
         </header>
+
 
         <div class="status-bar" id="status">Loading...</div>
 
@@ -2194,6 +2295,61 @@
         })();
 
         // Initialize
+        /**
+         * Generates skeleton loading HTML for list-type containers.
+         * @param {number} count - Number of skeleton rows to render.
+         * @returns {string} HTML string.
+         */
+        function renderSkeletonList(count = 6) {
+            let html = '';
+            for (let i = 0; i < count; i++) {
+                html += `
+                <div class="skeleton-item">
+                    <div class="skeleton skeleton-thumb"></div>
+                    <div class="skeleton-text-block">
+                        <div class="skeleton skeleton-text-line wide"></div>
+                        <div class="skeleton skeleton-text-line mid"></div>
+                    </div>
+                    <div class="skeleton skeleton-text-line short" style="flex-shrink:0;"></div>
+                </div>`;
+            }
+            return html;
+        }
+
+        /**
+         * Generates skeleton loading HTML for the stats grid.
+         * @returns {string} HTML string.
+         */
+        function renderStatSkeleton() {
+            return `<div class="stats-grid">
+                ${[1,2,3,4].map(() => `<div class="skeleton skeleton-stat-card"></div>`).join('')}
+            </div>`;
+        }
+
+        /**
+         * Clears all user-specific DOM data. Called on logout to ensure
+         * no stale data from the previous user is visible.
+         */
+        function clearUserData() {
+            const listIds = [
+                'library-list', 'favorites-list', 'ignored-games-list',
+                'backlog-list', 'playlists-list', 'achievements-list',
+                'friends-list', 'recommendations-list'
+            ];
+            listIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = '';
+            });
+            // Clear stats panel
+            const statsContent = document.getElementById('stats-content');
+            if (statsContent) statsContent.innerHTML = '';
+            // Clear game details cache so no cross-user data leaks
+            clearGameDetailsCache();
+            // Reset status bar
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = 'Please sign in';
+        }
+
         async function init() {
             showSpinner('Loading your game library…');
             try {
@@ -2922,7 +3078,7 @@
         
         async function loadLibrary() {
             const listDiv = document.getElementById('library-list');
-            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            listDiv.innerHTML = renderSkeletonList(8);
             
             try {
                 const response = await fetch('/api/library');
@@ -3017,7 +3173,7 @@
             }
             
             const listDiv = document.getElementById('library-list');
-            listDiv.innerHTML = '<div class="loading">Searching...</div>';
+            listDiv.innerHTML = renderSkeletonList(5);
             
             try {
                 const response = await fetch(`/api/library?search=${encodeURIComponent(searchText.trim())}`);
@@ -3201,7 +3357,7 @@
         
         async function loadFavorites() {
             const listDiv = document.getElementById('favorites-list');
-            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            listDiv.innerHTML = renderSkeletonList(4);
             
             try {
                 const response = await fetch('/api/favorites');
@@ -3292,7 +3448,7 @@
         async function loadStats() {
             const statsDiv = document.getElementById('stats-content');
             if (!statsDiv) return;
-            statsDiv.innerHTML = '<div class="loading">Loading...</div>';
+            statsDiv.innerHTML = renderStatSkeleton();
 
             try {
                 const response = await fetch('/api/stats');
@@ -3600,7 +3756,7 @@
         // User Management Functions
         async function loadUsers() {
             const listDiv = document.getElementById('users-list');
-            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            listDiv.innerHTML = renderSkeletonList(5);
             
             try {
                 let availableRoles = [];
@@ -4760,6 +4916,7 @@
         async function loadBacklog() {
             const list = document.getElementById('backlog-list');
             const statusFilter = document.getElementById('backlog-filter').value;
+            list.innerHTML = renderSkeletonList(5);
             const url = '/api/backlog' + (statusFilter ? `?status=${statusFilter}` : '');
             try {
                 const resp = await fetch(url);
@@ -5045,7 +5202,7 @@
         }
         
         async function handleLogout() {
-            if (!confirm('Are you sure you want to logout?')) {
+            if (!confirm('Are you sure you want to sign out?')) {
                 return;
             }
             
@@ -5053,10 +5210,14 @@
                 await safeFetch('/api/auth/logout', {method: 'POST'});
                 document.getElementById('login-username').value = '';
                 document.getElementById('login-password').value = '';
-                toastr.success('Logged out');
+                // Clear all user-specific data from the DOM so a subsequent
+                // login shows fresh data for the new user and not stale data
+                // from the previously logged-in user.
+                clearUserData();
+                toastr.success('Signed out successfully');
                 checkAuthStatus();
             } catch (error) {
-                toastr.error('Error logging out: ' + error.message);
+                toastr.error('Error signing out: ' + error.message);
             }
         }
         
@@ -5455,7 +5616,7 @@
         
         async function loadIgnoredGames() {
             const listDiv = document.getElementById('ignored-games-list');
-            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            listDiv.innerHTML = renderSkeletonList(4);
             
             try {
                 const response = await fetch('/api/ignored-games');
@@ -5551,7 +5712,7 @@
         
         async function loadUserAchievements() {
             const listDiv = document.getElementById('achievements-list');
-            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            listDiv.innerHTML = renderSkeletonList(4);
             
             try {
                 const response = await fetch('/api/achievements');
@@ -5720,7 +5881,7 @@
 
         async function loadFriends() {
             const listDiv = document.getElementById('friends-list');
-            listDiv.innerHTML = '<div class="loading">Loading friends…</div>';
+            listDiv.innerHTML = renderSkeletonList(4);
             try {
                 const response = await fetch('/api/friends');
                 if (response.status === 503) {
@@ -5801,7 +5962,7 @@
             currentPlaylistGameName = gameName;
             
             const playlistList = document.getElementById('playlist-list');
-            playlistList.innerHTML = '<div class="loading">Loading playlists…</div>';
+            playlistList.innerHTML = renderSkeletonList(3);
             
             try {
                 const response = await fetch('/api/playlists');
@@ -5933,7 +6094,7 @@
                 const budget = document.getElementById('rec-budget').value;
                 const includeNew = document.getElementById('rec-new-releases').checked;
             
-            listDiv.innerHTML = '<div class="loading">Generating recommendations…</div>';
+            listDiv.innerHTML = renderSkeletonList(parseInt(count) || 5);
             try {
                     let url = `/api/recommendations?count=${count}`;
                     if (platform) {
