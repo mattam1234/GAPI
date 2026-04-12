@@ -383,13 +383,13 @@
         }
 
         .btn-favorite {
-            background: #fef3c7;
-            color: #92400e;
-            border: 1px solid #fde68a;
+            background: rgba(245,158,11,0.12);
+            color: #f59e0b;
+            border: 1px solid rgba(245,158,11,0.3);
         }
 
         .btn-favorite:hover {
-            background: #fde68a;
+            background: rgba(245,158,11,0.2);
         }
 
         .btn-link {
@@ -562,12 +562,12 @@
         }
 
         .error {
-            background: #fef2f2;
-            color: #991b1b;
+            background: rgba(239,68,68,0.08);
+            color: #ef4444;
             padding: 14px 18px;
             border-radius: var(--radius-sm, 8px);
             margin: 10px 0;
-            border: 1px solid #fecaca;
+            border: 1px solid rgba(239,68,68,0.2);
             font-size: 0.92em;
         }
 
@@ -751,7 +751,7 @@
             background: linear-gradient(135deg, #4f46e5, #7c3aed);
             color: white;
         }
-        .user-card-badge.admin { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        .user-card-badge.admin { background: linear-gradient(135deg, #ef4444, #dc2626); }
         .user-card-actions {
             display: flex;
             gap: 8px;
@@ -882,7 +882,7 @@
                                style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 12px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
                                onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
-                    <div id="login-error" style="color: #dc2626; margin-bottom: 14px; display: none; font-size:0.88em; background:#fef2f2; padding:10px 14px; border-radius:8px; border:1px solid #fecaca;"></div>
+                    <div id="login-error" style="color: #ef4444; margin-bottom: 14px; display: none; font-size:0.88em; background:rgba(239,68,68,0.08); padding:10px 14px; border-radius:8px; border:1px solid rgba(239,68,68,0.2);"></div>
                     <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#4f46e5,#7c3aed); color: white; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Sign In</button>
                 </form>
                 <p style="text-align: center; margin-top: 18px; color: var(--text-secondary); font-size:0.88em;">Don't have an account? <a href="javascript:void(0)" id="show-register-link" onclick="try{ switchAuthForm(false); }catch(e){ console.error('switchAuthForm error (register):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #4f46e5; text-decoration: none; font-weight: 700;">Create account</a></p>
@@ -903,7 +903,7 @@
                                style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 12px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
                                onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
-                    <div id="register-error" style="color: #dc2626; margin-bottom: 14px; display: none; font-size:0.88em; background:#fef2f2; padding:10px 14px; border-radius:8px; border:1px solid #fecaca;"></div>
+                    <div id="register-error" style="color: #ef4444; margin-bottom: 14px; display: none; font-size:0.88em; background:rgba(239,68,68,0.08); padding:10px 14px; border-radius:8px; border:1px solid rgba(239,68,68,0.2);"></div>
                     <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#059669,#047857); color: white; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Create Account</button>
                 </form>
                 <p style="text-align: center; margin-top: 18px; color: var(--text-secondary); font-size:0.88em;">Already have an account? <a href="javascript:void(0)" id="show-login-link" onclick="try{ switchAuthForm(true); }catch(e){ console.error('switchAuthForm error (login):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #4f46e5; text-decoration: none; font-weight: 700;">Sign in</a></p>
@@ -952,7 +952,7 @@
             <button id="leaderboard-tab-btn" class="tab auth-required" onclick="switchTab('leaderboard', event)" data-tooltip="View top players and rankings">🏆 Leaderboard</button>
             <button id="chat-tab-btn" class="tab auth-required" onclick="switchTab('chat', event)" data-tooltip="Chat with other users">💬 Chat</button>
             <button id="sessions-tab-btn" class="tab auth-required" onclick="switchTab('sessions', event)" data-tooltip="Join multiplayer sessions">🎯 Sessions</button>
-            <button id="notifications-tab-btn" class="tab" onclick="switchTab('notifications', event)">🔔 Alerts <span id="notif-badge" style="display:none;background:#e74c3c;color:white;border-radius:50%;padding:1px 6px;font-size:0.75em;margin-left:4px;"></span></button>
+            <button id="notifications-tab-btn" class="tab" onclick="switchTab('notifications', event)">🔔 Alerts <span id="notif-badge" style="display:none;background:#ef4444;color:white;border-radius:50%;padding:1px 6px;font-size:0.75em;margin-left:4px;"></span></button>
             <button class="tab" onclick="switchTab('plugins', event)">🧩 Plugins</button>
             <button class="tab" onclick="switchTab('settings', event)">⚙️ Settings</button>
             <button id="admin-tab-btn" class="tab" style="display:none;" onclick="switchTab('admin', event)">🛠️ Admin</button>
@@ -1318,7 +1318,7 @@
                     <button onclick="refreshVoteStatus()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer; font-family: inherit;">
                         🔄 Refresh Results
                     </button>
-                    <button onclick="closeVote()" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    <button onclick="closeVote()" style="padding: 10px 20px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer;">
                         🏁 Close Vote &amp; Reveal Winner
                     </button>
                 </div>
@@ -1597,26 +1597,26 @@
             </div>
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
                 <input id="chat-search" type="text" placeholder="🔍 Search messages..." maxlength="100" oninput="filterChatMessages()" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); flex:0 1 200px;" />
-                <button id="chat-show-pinned-btn" onclick="togglePinnedMessages()" style="padding:8px 16px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">📌 Pinned (<span id="pinned-count">0</span>)</button>
+                <button id="chat-show-pinned-btn" onclick="togglePinnedMessages()" style="padding:8px 16px; background:#ef4444; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">📌 Pinned (<span id="pinned-count">0</span>)</button>
             </div>
-            <div id="pinned-messages-container" style="display:none; margin-bottom:12px; padding:12px; background:rgba(231,76,60,0.1); border:2px solid #e74c3c; border-radius:8px;">
-                <h3 style="margin-top:0; margin-bottom:8px; color:#e74c3c;">📌 Pinned Messages</h3>
+            <div id="pinned-messages-container" style="display:none; margin-bottom:12px; padding:12px; background:rgba(231,76,60,0.1); border:2px solid #ef4444; border-radius:8px;">
+                <h3 style="margin-top:0; margin-bottom:8px; color:#ef4444;">📌 Pinned Messages</h3>
                 <div id="pinned-messages-list"></div>
-                <button onclick="togglePinnedMessages()" style="margin-top:8px; padding:6px 12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">Hide Pinned</button>
+                <button onclick="togglePinnedMessages()" style="margin-top:8px; padding:6px 12px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">Hide Pinned</button>
             </div>
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
                 <span style="font-size:0.9em; color:var(--text-secondary);">Session Quick Actions:</span>
                 <button onclick="sendPickerCommand('/picker start')" style="padding:6px 12px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">▶️ Start Session</button>
-                <button onclick="sendPickerCommand('/picker join')" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤝 Join Session</button>
-                <button onclick="sendPickerCommand('/picker pick')" style="padding:6px 12px; background:#9b59b6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎲 Pick Game</button>
+                <button onclick="sendPickerCommand('/picker join')" style="padding:6px 12px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤝 Join Session</button>
+                <button onclick="sendPickerCommand('/picker pick')" style="padding:6px 12px; background:#7c3aed; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎲 Pick Game</button>
                 <button onclick="openSessionsTab()" style="padding:6px 12px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Open Sessions Tab</button>
-                <button onclick="showUserProfiles()" style="padding:6px 12px; background:#8e44ad; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👥 User Profiles</button>
-                <button onclick="showNotifications()" style="padding:6px 12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Notifications</button>
+                <button onclick="showUserProfiles()" style="padding:6px 12px; background:#7c3aed; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👥 User Profiles</button>
+                <button onclick="showNotifications()" style="padding:6px 12px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Notifications</button>
                 <button onclick="showChallenges()" style="padding:6px 12px; background:#f59e0b; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">🎯 Challenges</button>
-                <button onclick="showFriendsModal()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👫 Friends</button>
-                <button onclick="showLibraryCompare()" style="padding:6px 12px; background:#1abc9c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📚 Compare Libraries</button>
-                <button onclick="showAIRecommend()" style="padding:6px 12px; background:#8e44ad; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤖 AI</button>
-                <button onclick="showAdvancedNotif()" style="padding:6px 12px; background:#16a085; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Settings</button>
+                <button onclick="showFriendsModal()" style="padding:6px 12px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👫 Friends</button>
+                <button onclick="showLibraryCompare()" style="padding:6px 12px; background:#10b981; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📚 Compare Libraries</button>
+                <button onclick="showAIRecommend()" style="padding:6px 12px; background:#7c3aed; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤖 AI</button>
+                <button onclick="showAdvancedNotif()" style="padding:6px 12px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Settings</button>
             </div>
             <div style="display:flex; gap:12px; flex:1;">
                 <!-- Chat column -->
@@ -1763,7 +1763,7 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Steam ID</span>
                         <input type="text" id="settings-steam-id" placeholder="Your Steam ID (e.g., 76561198123639801)"
-                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                               style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;">
                     </label>
                 </div>
                 
@@ -1771,7 +1771,7 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Epic Games ID</span>
                         <input type="text" id="settings-epic-id" placeholder="Your Epic Games ID (optional)"
-                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                               style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;">
                     </label>
                 </div>
                 
@@ -1779,7 +1779,7 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">GOG ID</span>
                         <input type="text" id="settings-gog-id" placeholder="Your GOG ID (optional)"
-                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                               style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;">
                     </label>
                 </div>
 
@@ -1787,7 +1787,7 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Discord ID</span>
                         <input type="text" id="settings-discord-id" placeholder="Your Discord user ID (optional)"
-                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                               style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;">
                         <small style="color: var(--text-secondary);">Used for Discord bot account linking.</small>
                     </label>
                 </div>
@@ -1808,7 +1808,7 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Current Password</span>
                         <input type="password" id="password-current" placeholder="Enter current password"
-                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                               style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;">
                     </label>
                 </div>
                 
@@ -1816,7 +1816,7 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">New Password</span>
                         <input type="password" id="password-new" placeholder="Enter new password"
-                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                               style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;">
                     </label>
                 </div>
                 
@@ -1824,13 +1824,13 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Confirm New Password</span>
                         <input type="password" id="password-confirm" placeholder="Confirm new password"
-                               style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                               style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;">
                     </label>
                 </div>
                 
                 <div id="password-message" style="display: none; margin-bottom: 15px; padding: 10px; border-radius: 8px;"></div>
                 
-                <button onclick="changePassword()" style="padding: 12px 30px; background: #e74c3c; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                <button onclick="changePassword()" style="padding: 12px 30px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
                     Change Password
                 </button>
             </div>
@@ -1868,7 +1868,7 @@
                 </div>
                 
                 <!-- Admin-only sync interval settings -->
-                <div id="sync-interval-settings" style="display: none; border-top: 1px solid #ddd; padding-top: 20px; margin-top: 20px;">
+                <div id="sync-interval-settings" style="display: none; border-top: 1px solid var(--input-border); padding-top: 20px; margin-top: 20px;">
                     <h4 style="margin-top: 0;">⚙️ Auto-Sync Interval (Admin Only)</h4>
                     <p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 15px;">
                         Background sync automatically updates all users' libraries at the specified interval.
@@ -1880,7 +1880,7 @@
                             <div style="display: flex; gap: 10px; align-items: center;">
                                 <input type="number" id="sync-interval-input" min="1" max="168" step="0.5" 
                                        placeholder="6" value="6"
-                                       style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 150px;">
+                                       style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; width: 150px;">
                                 <span style="color: var(--text-secondary); font-size: 0.9em;">hours (1-168)</span>
                             </div>
                         </label>
@@ -1904,14 +1904,14 @@
                 <div style="display: grid; gap: 12px; margin-bottom: 15px;">
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Select Migration</span>
-                        <select id="migration-select" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;"></select>
+                        <select id="migration-select" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px;"></select>
                     </label>
                     <div id="migration-description" style="color: var(--text-secondary); font-size: 0.95em;"></div>
                 </div>
 
                 <label style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
                     <span style="font-weight: 600;">SQL (preview and edit)</span>
-                    <textarea id="migration-sql" rows="8" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-family: monospace;"></textarea>
+                    <textarea id="migration-sql" rows="8" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 8px; font-family: monospace;"></textarea>
                 </label>
 
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
@@ -2006,7 +2006,7 @@
 
             <!-- Status row -->
             <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px;">
-                <span id="discord-bot-status-dot" style="display:inline-block; width:14px; height:14px; border-radius:50%; background:#ccc; flex-shrink:0;"></span>
+                <span id="discord-bot-status-dot" style="display:inline-block; width:14px; height:14px; border-radius:50%; background:var(--input-border); flex-shrink:0;"></span>
                 <span id="discord-bot-status-text" style="font-weight:600;">Unknown</span>
                 <span id="discord-bot-pid" style="color:var(--text-secondary); font-size:0.85em;"></span>
                 <button onclick="loadDiscordBotStatus()" style="margin-left:auto; padding:6px 14px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">🔄 Refresh</button>
@@ -2023,7 +2023,7 @@
             <!-- Start / Stop buttons -->
             <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
                 <button id="discord-bot-start-btn" onclick="discordBotStart()" style="padding:9px 22px; background:linear-gradient(135deg,#059669,#047857); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">▶ Start Bot</button>
-                <button id="discord-bot-stop-btn" onclick="discordBotStop()" style="padding:9px 22px; background:linear-gradient(135deg,#e74c3c,#c0392b); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">⏹ Stop Bot</button>
+                <button id="discord-bot-stop-btn" onclick="discordBotStop()" style="padding:9px 22px; background:linear-gradient(135deg,#ef4444,#dc2626); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">⏹ Stop Bot</button>
                 <button id="discord-bot-restart-btn" onclick="discordBotRestart()" style="padding:9px 22px; background:linear-gradient(135deg,#f59e0b,#d97706); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">🔁 Restart Bot</button>
                 <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-left:auto; font-size:0.88em; color:var(--text-secondary);">
                     <input type="checkbox" id="discord-bot-autorefresh" onchange="toggleDiscordBotAutoRefresh(this.checked)"> Auto-refresh log
@@ -2146,11 +2146,11 @@
             <div style="display:grid; gap:12px; margin-top:15px;">
                 <label style="display:flex; flex-direction:column; gap:6px;">
                     <span style="font-weight:600;">Admin Username</span>
-                    <input id="setup-admin-username" type="text" value="admin" style="padding:10px; border:1px solid #ddd; border-radius:8px;">
+                    <input id="setup-admin-username" type="text" value="admin" style="padding:10px; border:1px solid var(--input-border); border-radius:8px;">
                 </label>
                 <label style="display:flex; flex-direction:column; gap:6px;">
                     <span style="font-weight:600;">Admin Password</span>
-                    <input id="setup-admin-password" type="password" style="padding:10px; border:1px solid #ddd; border-radius:8px;">
+                    <input id="setup-admin-password" type="password" style="padding:10px; border:1px solid var(--input-border); border-radius:8px;">
                 </label>
             </div>
             <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
@@ -2706,7 +2706,7 @@
                        <span style="color:var(--text-secondary); margin-left:6px;">(${safeRating}/10)</span>
                        ${safeNotes ? `<p style="margin-top:4px; color:var(--text-secondary);">${safeNotes}</p>` : ''}
                        <button onclick="editReview('${game.game_id}')" style="margin-top:6px; padding:4px 10px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">✏️ Edit</button>
-                       <button onclick="deleteReview('${game.game_id}')" style="margin-top:6px; margin-left:4px; padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">🗑️ Delete</button>
+                       <button onclick="deleteReview('${game.game_id}')" style="margin-top:6px; margin-left:4px; padding:4px 10px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">🗑️ Delete</button>
                    </div>`
                 : `<button onclick="editReview('${game.game_id}')" style="margin-top:8px; padding:6px 14px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">
                        ✏️ Write a Review
@@ -2779,7 +2779,7 @@
                     </div>
                     <div style="margin-top:10px; display:flex; gap:8px;">
                         <button onclick="saveReview('${game.game_id}')" style="padding:6px 16px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-family:inherit;">💾 Save</button>
-                        <button onclick="document.getElementById('review-editor').style.display='none'" style="padding:6px 14px; background:#aaa; color:white; border:none; border-radius:6px; cursor:pointer;">Cancel</button>
+                        <button onclick="document.getElementById('review-editor').style.display='none'" style="padding:6px 14px; background:var(--list-hover); color:var(--text-primary); border:1px solid var(--card-border); border-radius:6px; cursor:pointer;">Cancel</button>
                     </div>
                 </div>
                 <div class="action-buttons" style="margin-top:12px;">
@@ -2833,7 +2833,7 @@
             const playersInfo = game.owners ? game.owners.join(', ') : selectedUsers.join(', ');
             const multiplayerBadges = `
                 ${game.is_coop ? '<span style="display:inline-block; background:#10b981; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em; margin-right:5px;">✅ Co-op</span>' : ''}
-                ${game.is_multiplayer ? '<span style="display:inline-block; background:#3498db; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em;">✅ Multiplayer</span>' : ''}
+                ${game.is_multiplayer ? '<span style="display:inline-block; background:#3b82f6; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em;">✅ Multiplayer</span>' : ''}
             `;
             
             const safeGameName = escapeHtml(game.name || 'Unknown Game');
@@ -3048,7 +3048,7 @@
                         const tier = details.protondb.tier || 'unknown';
                         const tierColors = {
                             platinum: '#ace0fb', gold: '#ffd700', silver: '#c0c0c0',
-                            bronze: '#cd7f32', borked: '#e74c3c', pending: '#95a5a6'
+                            bronze: '#cd7f32', borked: '#ef4444', pending: '#95a5a6'
                         };
                         const bg = tierColors[tier] || '#aaa';
                         const total = details.protondb.total || 0;
@@ -3314,7 +3314,7 @@
                         const tier = details.protondb.tier || 'unknown';
                         const tierColors = {
                             platinum: '#ace0fb', gold: '#ffd700', silver: '#c0c0c0',
-                            bronze: '#cd7f32', borked: '#e74c3c', pending: '#95a5a6'
+                            bronze: '#cd7f32', borked: '#ef4444', pending: '#95a5a6'
                         };
                         const bg = tierColors[tier] || '#aaa';
                         const total = details.protondb.total || 0;
@@ -3544,7 +3544,7 @@
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
                 `;
                 
-                const colors = ['#4f46e5', '#7c3aed', '#f59e0b', '#e74c3c', '#10b981'];
+                const colors = ['#4f46e5', '#7c3aed', '#f59e0b', '#ef4444', '#10b981'];
                 
                 data.users.forEach((user, idx) => {
                     if (user.error) {
@@ -3842,7 +3842,7 @@
                                         </button>
                                     `}
                                     <button onclick="deleteUser('${user.username}')" 
-                                            style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                            style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
                                             title="Delete User">
                                         🗑️
                                     </button>
@@ -3949,7 +3949,7 @@
                 top: 20px;
                 right: 20px;
                 padding: 15px 25px;
-                background: ${type === 'success' ? '#10b981' : type === 'error' ? '#e74c3c' : '#4f46e5'};
+                background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#4f46e5'};
                 color: white;
                 border-radius: 8px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.15);
@@ -4330,7 +4330,7 @@
                 if (data.vote_counts) {
                     html += '<div style="width:100%; margin-bottom: 10px;">';
                     Object.entries(data.vote_counts).forEach(([appId, info]) => {
-                        html += `<div style="margin: 4px 0; color: #444;">App ${appId}: <strong>${info.count}</strong> vote(s)`;
+                        html += `<div style="margin: 4px 0; color: var(--text-primary);">App ${appId}: <strong>${info.count}</strong> vote(s)`;
                         if (info.voters && info.voters.length) html += ` (${info.voters.join(', ')})`;
                         html += '</div>';
                     });
@@ -4482,7 +4482,7 @@
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
                     <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
                     ${!ev.discord_event_id && ev.game_appid ? `<button onclick="createDiscordEventForSchedule('${ev.id}', '${safeGame}')" style="padding:5px 14px; background:#5865F2; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">📢 Create Discord Event</button>` : ''}
-                    <button onclick="deleteScheduleEvent('${ev.id}', ${ev.discord_event_id ? 'true' : 'false'}, '${(ev.discord_guild_id || '').replace(/'/g,"\\'")}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
+                    <button onclick="deleteScheduleEvent('${ev.id}', ${ev.discord_event_id ? 'true' : 'false'}, '${(ev.discord_guild_id || '').replace(/'/g,"\\'")}')" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
                 </div>
             </div>`;
         }
@@ -4816,7 +4816,7 @@
                         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
                             <button onclick="viewPlaylist('${p.name}')" style="padding:5px 14px; background:var(--list-hover); border:1px solid var(--card-border); border-radius:8px; cursor:pointer; color:var(--text-primary);">👁 View</button>
                             <button onclick="pickFromPlaylist('${p.name}')" style="padding:5px 14px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer;">🎲 Pick</button>
-                            <button onclick="deletePlaylist('${p.name}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer;">🗑️ Delete</button>
+                            <button onclick="deletePlaylist('${p.name}')" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:8px; cursor:pointer;">🗑️ Delete</button>
                         </div>
                         <div id="playlist-games-${CSS.escape(p.name)}" style="margin-top:10px; display:none;"></div>
                     </div>`).join('');
@@ -4861,7 +4861,7 @@
                 const games = data.games || [];
                 if (!games.length) { div.innerHTML = '<em style="color:var(--text-secondary)">No games yet. Add from Library tab.</em>'; return; }
                 div.innerHTML = '<ul style="margin:0; padding-left:18px;">' +
-                    games.map(g => `<li>${g.name || g.game_id} <button onclick="removeFromPlaylist('${name}','${g.game_id}')" style="border:none; background:none; cursor:pointer; color:#e74c3c; font-size:0.8em;">✕</button></li>`).join('') +
+                    games.map(g => `<li>${g.name || g.game_id} <button onclick="removeFromPlaylist('${name}','${g.game_id}')" style="border:none; background:none; cursor:pointer; color:#ef4444; font-size:0.8em;">✕</button></li>`).join('') +
                     '</ul>';
             } catch (e) { div.innerHTML = `<em>Error: ${e.message}</em>`; }
         }
@@ -4941,7 +4941,7 @@
                     return;
                 }
                 
-                const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#e74c3c'};
+                const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#ef4444'};
                 const BATCH_SIZE = 10; // Render 10 items at a time for backlog
                 let allHtml = '';
                 
@@ -5648,7 +5648,7 @@
                                     <small style="color: var(--text-secondary);">Reason:</small><br>
                                     <span>${game.reason || '(none)'}</span>
                                 </div>
-                                <button onclick="removeIgnoredGame(${game.app_id})" style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em;">Remove</button>
+                                <button onclick="removeIgnoredGame(${game.app_id})" style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em;">Remove</button>
                             </div>
                         `;
                     });
@@ -6236,7 +6236,7 @@
                         <div style="display:flex; align-items:center; gap:10px; padding:10px; background:var(--list-hover); border-radius:8px; margin-bottom:8px;">
                             <strong>${r.display_name}</strong><span style="color:var(--text-secondary);">(@${r.username})</span>
                             <button onclick="respondFriendRequest('${r.username}', true)" style="padding:5px 14px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">✅ Accept</button>
-                            <button onclick="respondFriendRequest('${r.username}', false)" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">❌ Decline</button>
+                            <button onclick="respondFriendRequest('${r.username}', false)" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">❌ Decline</button>
                         </div>`).join('');
                 } else {
                     reqSection.style.display = 'none';
@@ -6256,7 +6256,7 @@
                 grid.innerHTML = cards.map(card =>
                     buildUserCard(card, [
                         { label: '👤 View Card', onclick: `showUserCardModal('${card.username}')`, bg: 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: 'white' },
-                        { label: '❌ Remove', onclick: `removeAppFriend('${card.username}')`, bg: '#fdecea', color: '#c0392b' },
+                        { label: '❌ Remove', onclick: `removeAppFriend('${card.username}')`, bg: 'rgba(239,68,68,0.1)', color: '#ef4444' },
                     ])
                 ).join('');
             } catch (err) {
@@ -6765,10 +6765,10 @@
                 const msgElement = document.getElementById(`msg-${messageId}`);
                 if (msgElement) {
                     const msgText = msgElement.innerText.substring(0, 100) || 'Message';
-                    html += `<div style="padding:10px; background:rgba(255,255,255,0.05); border-radius:6px; margin-bottom:8px; cursor:pointer; border-left:3px solid #e74c3c;" onclick="scrollToMessage(${messageId})">
+                    html += `<div style="padding:10px; background:rgba(255,255,255,0.05); border-radius:6px; margin-bottom:8px; cursor:pointer; border-left:3px solid #ef4444;" onclick="scrollToMessage(${messageId})">
                         <div style="font-size:0.85em; color:var(--text-primary);max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${msgText}</div>
                         <div style="font-size:0.75em; color:var(--text-secondary); margin-top:4px;">
-                            <button onclick="event.stopPropagation(); removePinMessage(${messageId})" style="background:none; border:none; color:#e74c3c; cursor:pointer; text-decoration:underline; padding:0;">Unpin</button>
+                            <button onclick="event.stopPropagation(); removePinMessage(${messageId})" style="background:none; border:none; color:#ef4444; cursor:pointer; text-decoration:underline; padding:0;">Unpin</button>
                         </div>
                     </div>`;
                 }
@@ -7375,10 +7375,10 @@
                             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
                                 <button onclick="openLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#4f46e5; color:white; cursor:pointer;">Open</button>
                                 ${joined
-                                    ? `<button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#e74c3c; color:white; cursor:pointer;">Leave</button>`
+                                    ? `<button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#ef4444; color:white; cursor:pointer;">Leave</button>`
                                     : `<button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit;">Join</button>`}
                                 ${isHost
-                                    ? `<button onclick="pickLiveSessionGame('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#9b59b6; color:white; cursor:pointer;">Pick</button>`
+                                    ? `<button onclick="pickLiveSessionGame('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#7c3aed; color:white; cursor:pointer;">Pick</button>`
                                     : ''}
                             </div>
                         </div>
@@ -7597,11 +7597,11 @@
                     <div style="font-size:0.9em; color:var(--text-secondary);">Players: ${participants.join(', ') || 'None'}</div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         ${joined
-                            ? `<button onclick="leaveLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#e74c3c; color:white; cursor:pointer;">Leave</button>`
+                            ? `<button onclick="leaveLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#ef4444; color:white; cursor:pointer;">Leave</button>`
                             : `<button onclick="joinLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit;">Join</button>`}
                         ${isHost
-                            ? `<button onclick="pickLiveSessionGame('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#9b59b6; color:white; cursor:pointer;">Pick Game</button>
-                               <button onclick="openInviteUsersModal('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#3498db; color:white; cursor:pointer;">Invite Users</button>`
+                            ? `<button onclick="pickLiveSessionGame('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#7c3aed; color:white; cursor:pointer;">Pick Game</button>
+                               <button onclick="openInviteUsersModal('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#3b82f6; color:white; cursor:pointer;">Invite Users</button>`
                             : ''}
                     </div>
                     ${renderPickedGameCard(session.picked_game)}
@@ -7611,7 +7611,7 @@
                         ${canVote
                             ? `<div style="display:flex; gap:8px;">
                                    <button onclick="voteLiveSession(true)" style="padding:8px 12px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit; font-weight:600;">✅ Accept</button>
-                                   <button onclick="voteLiveSession(false)" style="padding:8px 12px; border:none; border-radius:7px; background:#e74c3c; color:white; cursor:pointer; font-weight:600;">❌ Reject</button>
+                                   <button onclick="voteLiveSession(false)" style="padding:8px 12px; border:none; border-radius:7px; background:#ef4444; color:white; cursor:pointer; font-weight:600;">❌ Reject</button>
                                </div>`
                             : `<div style="font-size:0.85em; color:var(--text-secondary);">${session.status === 'awaiting_vote' ? 'Join this session to vote.' : 'Vote starts after a game is picked.'}</div>`}
                     </div>
@@ -7809,7 +7809,7 @@
                             <span style="font-size:0.82em; color:var(--text-secondary);">v${p.version}</span>
                             <div id="plugin-toggle-admin-${p.id}" style="display:none;">
                                 <button onclick="togglePlugin(${p.id}, ${!p.enabled})"
-                                        style="padding:5px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; background:${p.enabled ? '#e74c3c' : '#10b981'}; color:white;">
+                                        style="padding:5px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; background:${p.enabled ? '#ef4444' : '#10b981'}; color:white;">
                                     ${p.enabled ? '⏸ Disable' : '▶ Enable'}
                                 </button>
                             </div>
@@ -8029,7 +8029,7 @@
                 const dot = document.getElementById('discord-bot-status-dot');
                 const text = document.getElementById('discord-bot-status-text');
                 const pidEl = document.getElementById('discord-bot-pid');
-                if (dot) dot.style.background = status.running ? '#10b981' : '#e74c3c';
+                if (dot) dot.style.background = status.running ? '#10b981' : '#ef4444';
                 if (text) text.textContent = status.running ? 'Running' : 'Stopped';
                 if (pidEl) pidEl.textContent = status.pid ? `PID: ${status.pid}` : '';
 
@@ -8183,7 +8183,7 @@
             try {
                 const resp = await fetch('/api/admin/discord-bot/users');
                 if (!resp.ok) {
-                    container.innerHTML = '<p style="color:#e74c3c;">Failed to load users.</p>';
+                    container.innerHTML = '<p style="color:#ef4444;">Failed to load users.</p>';
                     return;
                 }
                 const data = await resp.json();
@@ -8200,14 +8200,14 @@
                         <td style="padding:6px 8px; color:var(--text-secondary);">${u.discord_id}</td>
                         <td style="padding:6px 8px;">${u.steam_id}</td>
                         <td style="padding:6px 8px; text-align:right;">
-                            <button onclick="discordBotRemoveUser('${u.discord_id}')" style="padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">🗑 Remove</button>
+                            <button onclick="discordBotRemoveUser('${u.discord_id}')" style="padding:4px 10px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">🗑 Remove</button>
                         </td>
                     </tr>`;
                 });
                 html += '</tbody></table>';
                 container.innerHTML = html;
             } catch (e) {
-                container.innerHTML = `<p style="color:#e74c3c;">Error: ${e.message}</p>`;
+                container.innerHTML = `<p style="color:#ef4444;">Error: ${e.message}</p>`;
             }
         }
 
@@ -8276,7 +8276,7 @@
                         const source = data.steam_api_key_source === 'env' ? '.env file' : 'config.json';
                         steamKeyEl.innerHTML = `<span style="color:#10b981;">✅ Configured from ${source}</span>`;
                     } else {
-                        steamKeyEl.innerHTML = '<span style="color:#e74c3c;">❌ Not configured</span>';
+                        steamKeyEl.innerHTML = '<span style="color:#ef4444;">❌ Not configured</span>';
                     }
                 }
 
@@ -8286,7 +8286,7 @@
                     if (data.discord_token_set) {
                         tokenEl.innerHTML = '<span style="color:#10b981;">✅ Configured</span>';
                     } else {
-                        tokenEl.innerHTML = '<span style="color:#e74c3c;">❌ Not configured</span>';
+                        tokenEl.innerHTML = '<span style="color:#ef4444;">❌ Not configured</span>';
                     }
                 }
 
@@ -8525,7 +8525,7 @@
                             <p style="margin:0 0 8px 0; font-size:0.85em; color:var(--text-secondary);">Member since ${new Date(user.created_at || Date.now()).toLocaleDateString()}</p>
                             <div style="display:flex; gap:4px; justify-content:center; flex-wrap:wrap;">
                                 <span style="background:rgba(102, 126, 234, 0.2); color:var(--accent); padding:4px 8px; border-radius:4px; font-size:0.8em;">📜 ${user.stats?.sessions || 0} sessions</span>
-                                <span style="background:rgba(52, 152, 219, 0.2); color:#3498db; padding:4px 8px; border-radius:4px; font-size:0.8em;">🎲 ${user.stats?.picks || 0} picks</span>
+                                <span style="background:rgba(59,130,246,0.15); color:#3b82f6; padding:4px 8px; border-radius:4px; font-size:0.8em;">🎲 ${user.stats?.picks || 0} picks</span>
                             </div>
                         </div>
                     `;
@@ -8567,7 +8567,7 @@
                             </div>
                             <div>
                                 <div style="font-size:0.85em; color:var(--text-secondary);">Total Picks</div>
-                                <div style="font-size:1.8em; font-weight:bold; color:#3498db;">${user.stats?.picks || 0}</div>
+                                <div style="font-size:1.8em; font-weight:bold; color:#3b82f6;">${user.stats?.picks || 0}</div>
                             </div>
                             <div>
                                 <div style="font-size:0.85em; color:var(--text-secondary);">Votes Cast</div>
@@ -8776,7 +8776,7 @@
             friendsDiv.innerHTML = friends.length ? friends.map(f => `
                 <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
                     <span style="color:var(--text-primary);">👤 ${f.username}</span>
-                    <button onclick="removeFriend('${f.username}')" style="padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">Remove</button>
+                    <button onclick="removeFriend('${f.username}')" style="padding:4px 10px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">Remove</button>
                 </div>
             `).join('') : '<p style="color:var(--text-secondary);">No friends yet</p>';
             
@@ -9000,7 +9000,7 @@
                             <p style="margin:0 0 8px 0; font-size:0.85em; color:var(--text-secondary);">Players: ${s.player_count} | Your Vote: ${s.your_vote ? '✓' : '✗'}</p>
                             <div style="display:flex; gap:8px; font-size:0.85em;">
                                 ${s.your_vote ? `<span style="background:rgba(16,185,129,0.12); color:#10b981; padding:4px 8px; border-radius:4px;">✓ You voted correctly</span>` : ''}
-                                ${s.you_picked ? `<span style="background:rgba(52,152,219,0.2); color:#3498db; padding:4px 8px; border-radius:4px;">🎲 You picked</span>` : ''}
+                                ${s.you_picked ? `<span style="background:rgba(59,130,246,0.15); color:#3b82f6; padding:4px 8px; border-radius:4px;">🎲 You picked</span>` : ''}
                             </div>
                         </div>
                     `;
@@ -9266,7 +9266,7 @@
                         <div style="display:flex; flex-direction:column; gap:8px;">
                             <div style="display:flex; justify-content:space-between;"><span>Action</span><span style="font-weight:bold; color:#4f46e5;">45%</span></div>
                             <div style="display:flex; justify-content:space-between;"><span>RPG</span><span style="font-weight:bold; color:#7c3aed;">30%</span></div>
-                            <div style="display:flex; justify-content:space-between;"><span>Puzzle</span><span style="font-weight:bold; color:#3498db;">25%</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Puzzle</span><span style="font-weight:bold; color:#3b82f6;">25%</span></div>
                         </div>
                     </div>
                 `;
@@ -9518,12 +9518,12 @@
                 let html = '';
                 trades.forEach(t => {
                     html += `
-                        <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border-left:3px solid #1abc9c;">
+                        <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border-left:3px solid #10b981;">
                             <h5 style="margin:0 0 6px 0; color:var(--text-primary);">From: ${t.from_user}</h5>
                             <p style="margin:0 0 8px 0; font-size:0.9em; color:var(--text-secondary);">${t.offer}</p>
                             <div style="display:flex; gap:8px;">
                                 <button onclick="acceptTrade('${t.id}')" style="padding:6px 10px; background:#10b981; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">✓ Accept</button>
-                                <button onclick="declineTrade('${t.id}')" style="padding:6px 10px; background:#e74c3c; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">✕ Decline</button>
+                                <button onclick="declineTrade('${t.id}')" style="padding:6px 10px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">✕ Decline</button>
                             </div>
                         </div>
                     `;
@@ -9724,7 +9724,7 @@
                 let html = '';
                 (data.flagged_picks || []).forEach(pick => {
                     html += `
-                        <div style="background:rgba(231,76,60,0.1); padding:8px; border-radius:6px; border-left:3px solid #e74c3c;">
+                        <div style="background:rgba(231,76,60,0.1); padding:8px; border-radius:6px; border-left:3px solid #ef4444;">
                             <p style="margin:0; color:var(--text-primary); font-size:0.9em;">⚠️ Session: ${pick.session} | Variance: ${pick.variance}% | Pick: ${pick.pick}</p>
                         </div>
                     `;
@@ -9771,7 +9771,7 @@
             </div>
             <div style="display:flex; gap:10px; justify-content:flex-end;">
                 <button onclick="closeInviteUsersModal()" style="padding:8px 16px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); cursor:pointer;">Cancel</button>
-                <button onclick="inviteLiveSessionUsers()" style="padding:8px 16px; border:none; border-radius:6px; background:#3498db; color:white; cursor:pointer; font-weight:600;">Send Invites</button>
+                <button onclick="inviteLiveSessionUsers()" style="padding:8px 16px; border:none; border-radius:6px; background:#3b82f6; color:white; cursor:pointer; font-weight:600;">Send Invites</button>
             </div>
         </div>
     </div>
@@ -9883,7 +9883,7 @@
             </div>
             <div style="margin-bottom:15px; display:flex; gap:8px;">
                 <input id="add-friend-input" type="text" placeholder="Enter username to add..." style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                <button onclick="addFriendFromInput()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Add</button>
+                <button onclick="addFriendFromInput()" style="padding:10px 20px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Add</button>
             </div>
             <div style="margin-bottom:15px;">
                 <h4 style="margin:0 0 10px 0; color:var(--text-primary);">😊 Friends</h4>
@@ -10052,9 +10052,9 @@
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Games Picked</p>
                     <p style="margin:0; font-size:1.8em; color:var(--accent); font-weight:bold;" id="stat-picks">0</p>
                 </div>
-                <div style="background:rgba(52,152,219,0.1); padding:12px; border-radius:8px; text-align:center;">
+                <div style="background:rgba(59,130,246,0.08); padding:12px; border-radius:12px; text-align:center;">
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Votes Cast</p>
-                    <p style="margin:0; font-size:1.8em; color:#3498db; font-weight:bold;" id="stat-votes">0</p>
+                    <p style="margin:0; font-size:1.8em; color:#3b82f6; font-weight:bold;" id="stat-votes">0</p>
                 </div>
                 <div style="background:rgba(16,185,129,0.08); padding:12px; border-radius:8px; text-align:center;">
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Accuracy</p>
@@ -10135,7 +10135,7 @@
                 <h4 style="margin:0 0 10px 0; color:var(--text-primary);">🎬 Start Stream</h4>
                 <div style="display:flex; gap:10px;">
                     <input id="stream-title" type="text" placeholder="Stream title..." style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                    <button onclick="startStream()" style="padding:10px 20px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔴 Go Live</button>
+                    <button onclick="startStream()" style="padding:10px 20px; background:#ef4444; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔴 Go Live</button>
                 </div>
             </div>
             <div>
@@ -10228,8 +10228,8 @@
                 <div style="background:rgba(16,185,129,0.08); padding:12px; border-radius:8px; border-left:3px solid #10b981;">
                     <p style="margin:0; color:var(--text-primary); font-weight:600;">✅ Your Integrity: <span style="color:#10b981;">99.2%</span></p>
                 </div>
-                <div style="background:rgba(52,73,94,0.1); padding:12px; border-radius:8px; border-left:3px solid #34495e;">
-                    <p style="margin:0; color:var(--text-primary); font-weight:600;">📊 Accuracy Variance: <span style="color:#3498db;">±2.1%</span></p>
+                <div style="background:var(--list-hover); padding:12px; border-radius:8px; border-left:3px solid var(--input-border);">
+                    <p style="margin:0; color:var(--text-primary); font-weight:600;">📊 Accuracy Variance: <span style="color:#3b82f6;">±2.1%</span></p>
                 </div>
                 <div style="background:rgba(99,102,241,0.06); padding:12px; border-radius:8px; border-left:3px solid var(--text-secondary);">
                     <p style="margin:0; color:var(--text-primary); font-weight:600;">⏱️ Avg Response Time: <span style="color:var(--text-secondary);">145ms</span></p>
@@ -10296,7 +10296,7 @@
                 </div>
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
                     <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Total Picks</p>
-                    <p id="analytics-total-picks" style="color:#e74c3c; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                    <p id="analytics-total-picks" style="color:#ef4444; font-size:1.8em; font-weight:bold; margin:0;">0</p>
                 </div>
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
                     <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Avg Picks/User</p>
