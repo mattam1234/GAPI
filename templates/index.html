@@ -1011,23 +1011,23 @@
                     <div id="advanced-filters" style="display:none; margin-top:10px; gap:12px; flex-wrap:wrap;">
                         <label style="font-weight:600;">Min Metacritic:
                             <input type="number" id="adv-min-score" min="0" max="100" placeholder="e.g. 75"
-                                   style="width:70px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                                   style="width:70px; margin-left:5px; padding:5px 8px; border-radius:8px; border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
                         </label>
                         <label style="font-weight:600;">Release Year ≥
                             <input type="number" id="adv-min-year" min="1980" max="2099" placeholder="e.g. 2015"
-                                   style="width:80px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                                   style="width:80px; margin-left:5px; padding:5px 8px; border-radius:8px; border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
                         </label>
                         <label style="font-weight:600;">Release Year ≤
                             <input type="number" id="adv-max-year" min="1980" max="2099" placeholder="e.g. 2023"
-                                   style="width:80px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                                   style="width:80px; margin-left:5px; padding:5px 8px; border-radius:8px; border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
                         </label>
                         <label style="font-weight:600;">Max Price $:
                             <input type="number" id="adv-max-price" min="0" max="100" step="0.01" placeholder="e.g. 20"
-                                   style="width:70px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                                   style="width:70px; margin-left:5px; padding:5px 8px; border-radius:8px; border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
                         </label>
                         <label style="font-weight:600;">Exclude App IDs:
                             <input type="text" id="adv-exclude-ids" placeholder="730,570"
-                                   style="width:120px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid #ccc;">
+                                   style="width:120px; margin-left:5px; padding:5px 8px; border-radius:8px; border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
                         </label>
                         <label style="font-weight:600;">Multiplayer Only:
                             <input type="checkbox" id="adv-multiplayer" style="margin-left:5px; width:18px; height:18px;">
@@ -1097,7 +1097,7 @@
             <h2>📊 Library Statistics</h2>
             
             <!-- User Selection for Comparison -->
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>👥 Compare Users (Optional)</h3>
                 <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 0.95em;">Select multiple users to compare statistics side-by-side</p>
                 
@@ -1106,10 +1106,10 @@
                 </div>
                 
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button id="compare-btn" style="display: none; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                    <button id="compare-btn" style="display: none; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: 600;">
                         📊 Compare Selected Users
                     </button>
-                    <button id="clear-compare-btn" style="display: none; padding: 10px 20px; background: #e0e0e0; color: #333; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                    <button id="clear-compare-btn" style="display: none; padding: 10px 20px; background: var(--list-hover); color: var(--text-primary); border: 1.5px solid var(--card-border); border-radius: 50px; cursor: pointer; font-weight: 600;">
                         Clear Comparison
                     </button>
                 </div>
@@ -1117,10 +1117,10 @@
             
             <!-- View Mode Toggle -->
             <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                <button id="view-single-btn" style="padding: 10px 16px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                <button id="view-single-btn" style="padding: 10px 16px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: 600;">
                     📈 Single User View
                 </button>
-                <button id="view-compare-btn" style="padding: 10px 16px; background: transparent; color: var(--text-secondary); border: 2px solid var(--text-secondary); border-radius: 5px; cursor: pointer; font-weight: 600; display: none;">
+                <button id="view-compare-btn" style="padding: 10px 16px; background: transparent; color: var(--text-secondary); border: 1.5px solid var(--card-border); border-radius: 50px; cursor: pointer; font-weight: 600; font-family: inherit; display: none;">
                     🔀 Comparison View
                 </button>
             </div>
@@ -1150,7 +1150,7 @@
             <h2>🎮 Multi-User Game Picker</h2>
 
             <!-- User Selection -->
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Select Players</h3>
                 <div id="user-checkboxes" style="margin-top: 15px;">
                     <div class="loading">Loading users...</div>
@@ -1165,7 +1165,7 @@
             </div>
 
             <!-- Game Filters -->
-            <div style="background: #fff9e6; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #f39c12;">
+            <div style="background: rgba(245,158,11,0.06); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border-left: 4px solid #f59e0b; border-top: 1px solid var(--card-border); border-right: 1px solid var(--card-border); border-bottom: 1px solid var(--card-border);">
                 <h3 style="margin-top: 0;">🔍 Game Filters (Optional)</h3>
                 
                 <!-- Row 1: Playtime and Metacritic -->
@@ -1173,22 +1173,22 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Min Playtime (hours)</span>
                         <input type="number" id="min-playtime" placeholder="0" min="0" step="1"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Max Playtime (hours)</span>
                         <input type="number" id="max-playtime" placeholder="Unlimited" min="0" step="1"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Min Metacritic Score</span>
                         <input type="number" id="min-metacritic" placeholder="0" min="0" max="100" step="1"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Min Avg Playtime per Player (hours)</span>
                         <input type="number" id="min-avg-playtime" placeholder="0" min="0" step="1"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                 </div>
 
@@ -1197,17 +1197,17 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Min Release Year</span>
                         <input type="number" id="min-release-year" placeholder="1980" min="1980" max="2100" step="1"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Max Release Year</span>
                         <input type="number" id="max-release-year" placeholder="2100" min="1980" max="2100" step="1"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Max Price ($)</span>
                         <input type="number" id="max-game-price" placeholder="Unlimited" min="0" max="500" step="0.01"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                 </div>
 
@@ -1216,12 +1216,12 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Include Genres (comma-separated)</span>
                         <input type="text" id="include-genres" placeholder="e.g., Action, RPG, Strategy"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Exclude Genres (comma-separated)</span>
                         <input type="text" id="exclude-genres" placeholder="e.g., Horror, Puzzle"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                 </div>
 
@@ -1230,25 +1230,25 @@
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Include Tags (comma-separated)</span>
                         <input type="text" id="include-tags" placeholder="e.g., Roguelike, Indie, Competitive"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Exclude Game IDs (comma-separated)</span>
                         <input type="text" id="exclude-game-ids" placeholder="e.g., 570, 620, 440"
-                               style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                               style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                     </label>
                 </div>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Platform</span>
-                        <select id="multi-platform-filter" style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                        <select id="multi-platform-filter" style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                             <option value="">Any platform</option>
                         </select>
                     </label>
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Device</span>
-                        <select id="multi-device-filter" style="padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                        <select id="multi-device-filter" style="padding: 8px 10px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                             <option value="">Any device</option>
                         </select>
                     </label>
@@ -1275,47 +1275,47 @@
                 <button onclick="startVote()" style="padding: 15px 40px; background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
                     🗳️ Start Vote
                 </button>
-                <button onclick="clearMultiUserFilters()" style="padding: 15px 25px; background: #95a5a6; color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1em;">
+                <button onclick="clearMultiUserFilters()" style="padding: 15px 25px; background: var(--list-hover); color: var(--text-primary); border: 1.5px solid var(--card-border); border-radius: 50px; cursor: pointer; font-size: 1em;">
                     Clear Filters
                 </button>
             </div>
 
             <!-- Vote options (hidden until "Start Vote" is clicked) -->
-            <div id="vote-options" style="display: none; margin-bottom: 20px; background: #f0f0f0; padding: 15px; border-radius: 10px; gap: 15px; flex-wrap: wrap; align-items: center;">
+            <div id="vote-options" style="display: none; margin-bottom: 20px; background: var(--list-hover); padding: 15px; border-radius: var(--radius, 12px); gap: 15px; flex-wrap: wrap; align-items: center;">
                 <label style="font-weight: 600;">Candidates:
                     <input type="number" id="vote-candidates" value="5" min="2" max="10"
-                           style="width: 60px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                           style="width: 60px; margin-left: 5px; padding: 5px 8px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                 </label>
                 <label style="font-weight: 600;">Duration (seconds):
                     <input type="number" id="vote-duration" value="60" min="10" max="600"
-                           style="width: 80px; margin-left: 5px; padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                           style="width: 80px; margin-left: 5px; padding: 5px 8px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                 </label>
-                <button onclick="createVoteSession()" style="padding: 10px 25px; background: #27ae60; color: white; border: none; border-radius: 20px; cursor: pointer; font-weight: bold;">
+                <button onclick="createVoteSession()" style="padding: 10px 25px; background: #10b981; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: bold;">
                     ✅ Create Vote
                 </button>
-                <button onclick="cancelVoteOptions()" style="padding: 10px 20px; background: #aaa; color: white; border: none; border-radius: 20px; cursor: pointer;">
+                <button onclick="cancelVoteOptions()" style="padding: 10px 20px; background: var(--list-hover); color: var(--text-primary); border: 1.5px solid var(--card-border); border-radius: 50px; cursor: pointer;">
                     Cancel
                 </button>
             </div>
 
             <!-- Multi-User Game Result -->
-            <div id="multiuser-result" style="display: none; background: #f8f9fa; padding: 25px; border-radius: 10px;">
+            <div id="multiuser-result" style="display: none; background: var(--card-bg); padding: 25px; border-radius: var(--radius, 12px); border: 1px solid var(--card-border);">
                 <!-- Result will be displayed here -->
             </div>
 
             <!-- Active Voting Section -->
-            <div id="voting-section" style="display: none; background: #fff8e1; padding: 25px; border-radius: 10px; margin-top: 20px; border: 2px solid #fda085;">
+            <div id="voting-section" style="display: none; background: rgba(245,158,11,0.06); padding: 25px; border-radius: var(--radius, 12px); margin-top: 20px; border: 1.5px solid #f59e0b;">
                 <h3>🗳️ Active Vote</h3>
-                <div id="voting-timer" style="font-size: 1.1em; color: #e67e22; margin-bottom: 10px;"></div>
+                <div id="voting-timer" style="font-size: 1.1em; color: #f59e0b; margin-bottom: 10px;"></div>
                 <div id="voting-candidates" style="margin-top: 10px;">
                     <!-- Candidate cards injected here -->
                 </div>
                 <div id="voting-voter-name" style="margin-top: 15px; display: flex; gap: 10px; align-items: center;">
                     <input type="text" id="voter-name-input" placeholder="Your name (to cast vote)"
-                           style="padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 1em; flex: 1; max-width: 250px;">
+                           style="padding: 8px 12px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--input-bg); color: var(--text-primary); font-family: inherit; font-size: 1em; flex: 1; max-width: 250px;">
                 </div>
                 <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
-                    <button onclick="refreshVoteStatus()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    <button onclick="refreshVoteStatus()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer; font-family: inherit;">
                         🔄 Refresh Results
                     </button>
                     <button onclick="closeVote()" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 8px; cursor: pointer;">
@@ -1325,7 +1325,7 @@
             </div>
 
             <!-- Vote Winner Result -->
-            <div id="vote-winner" style="display: none; background: #e8f8e8; padding: 25px; border-radius: 10px; margin-top: 20px; border: 2px solid #2ecc71;">
+            <div id="vote-winner" style="display: none; background: rgba(16,185,129,0.07); padding: 25px; border-radius: var(--radius, 12px); margin-top: 20px; border: 1.5px solid #10b981;">
                 <!-- Winner announced here -->
             </div>
 
@@ -1335,7 +1335,7 @@
                 <div id="common-games-list" class="list-container">
                     <div class="loading">Select users and click "Show Common Games" to see shared games</div>
                 </div>
-                <button onclick="showCommonGames()" style="margin-top: 10px; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                <button onclick="showCommonGames()" style="margin-top: 10px; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer; font-family: inherit;">
                     🔍 Show Common Games
                 </button>
             </div>
@@ -1452,10 +1452,10 @@
             <div style="background: var(--card-bg); padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Add a game to ignore</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; margin-top: 10px;">
-                    <input type="number" id="ignore-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <input type="text" id="ignore-game-name" placeholder="Game name" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <input type="text" id="ignore-reason" placeholder="Reason (optional)" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <button onclick="addIgnoredGame()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer;">Add</button>
+                    <input type="number" id="ignore-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                    <input type="text" id="ignore-game-name" placeholder="Game name" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                    <input type="text" id="ignore-reason" placeholder="Reason (optional)" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                    <button onclick="addIgnoredGame()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer;">Add</button>
                 </div>
             </div>
             
@@ -1472,16 +1472,16 @@
             <div style="background: var(--card-bg); padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Start a new achievement hunt</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 10px; margin-top: 10px;">
-                    <input type="number" id="hunt-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <input type="text" id="hunt-game-name" placeholder="Game name" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <select id="hunt-difficulty" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
+                    <input type="number" id="hunt-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                    <input type="text" id="hunt-game-name" placeholder="Game name" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                    <select id="hunt-difficulty" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
                         <option value="easy">Easy</option>
                         <option value="medium" selected>Medium</option>
                         <option value="hard">Hard</option>
                         <option value="extreme">Extreme</option>
                     </select>
-                    <input type="number" id="hunt-targets" placeholder="Target count" min="0" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <button onclick="startAchievementHunt()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer;">Start Hunt</button>
+                    <input type="number" id="hunt-targets" placeholder="Target count" min="0" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                    <button onclick="startAchievementHunt()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer;">Start Hunt</button>
                 </div>
             </div>
             
@@ -1508,7 +1508,7 @@
                 </div>
                 <!-- Pending received requests -->
                 <div id="friend-requests-section" style="display:none; margin-bottom:16px;">
-                    <h4 style="margin:0 0 8px; color:#e67e22;">📨 Pending Requests</h4>
+                    <h4 style="margin:0 0 8px; color:#f59e0b;">📨 Pending Requests</h4>
                     <div id="friend-requests-list"></div>
                 </div>
                 <!-- Friend cards grid -->
@@ -1606,13 +1606,13 @@
             </div>
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
                 <span style="font-size:0.9em; color:var(--text-secondary);">Session Quick Actions:</span>
-                <button onclick="sendPickerCommand('/picker start')" style="padding:6px 12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">▶️ Start Session</button>
+                <button onclick="sendPickerCommand('/picker start')" style="padding:6px 12px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">▶️ Start Session</button>
                 <button onclick="sendPickerCommand('/picker join')" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤝 Join Session</button>
                 <button onclick="sendPickerCommand('/picker pick')" style="padding:6px 12px; background:#9b59b6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎲 Pick Game</button>
                 <button onclick="openSessionsTab()" style="padding:6px 12px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Open Sessions Tab</button>
                 <button onclick="showUserProfiles()" style="padding:6px 12px; background:#8e44ad; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👥 User Profiles</button>
                 <button onclick="showNotifications()" style="padding:6px 12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🔔 Notifications</button>
-                <button onclick="showChallenges()" style="padding:6px 12px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Challenges</button>
+                <button onclick="showChallenges()" style="padding:6px 12px; background:#f59e0b; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">🎯 Challenges</button>
                 <button onclick="showFriendsModal()" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">👫 Friends</button>
                 <button onclick="showLibraryCompare()" style="padding:6px 12px; background:#1abc9c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📚 Compare Libraries</button>
                 <button onclick="showAIRecommend()" style="padding:6px 12px; background:#8e44ad; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">🤖 AI</button>
@@ -1686,7 +1686,7 @@
                     <input type="checkbox" id="notif-unread-only" onchange="loadNotifications()">
                     <span style="color:var(--text-primary); font-weight:600;">Unread only</span>
                 </label>
-                <button onclick="markAllNotificationsRead()" style="padding:8px 20px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">✅ Mark all read</button>
+                <button onclick="markAllNotificationsRead()" style="padding:8px 20px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">✅ Mark all read</button>
                 <button onclick="loadNotifications()" style="padding:8px 20px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">🔄 Refresh</button>
             </div>
             <div id="admin-send-notification" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:16px; margin-bottom:20px;">
@@ -1701,7 +1701,7 @@
                         <option value="warning">⚠️ Warning</option>
                         <option value="error">❌ Error</option>
                     </select>
-                    <button onclick="sendAdminNotification()" style="padding:10px 24px; background:#e67e22; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">📢 Send</button>
+                    <button onclick="sendAdminNotification()" style="padding:10px 24px; background:#f59e0b; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">📢 Send</button>
                 </div>
             </div>
             <div id="notifications-list"><div class="loading">Click Refresh to load notifications…</div></div>
@@ -1718,7 +1718,7 @@
                     <input id="plugin-description" type="text" placeholder="Short description" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
                     <input id="plugin-version" type="text" placeholder="Version (e.g. 1.0.0)" value="1.0.0" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
                     <input id="plugin-author" type="text" placeholder="Author" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
-                    <button onclick="registerPlugin()" style="padding:10px 24px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Register</button>
+                    <button onclick="registerPlugin()" style="padding:10px 24px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">➕ Register</button>
                 </div>
             </div>
             <button onclick="loadPlugins()" style="padding:10px 28px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit; margin-bottom:16px;">🔄 Refresh</button>
@@ -1752,10 +1752,10 @@
                     </label>
                 </div>
                 <div id="profile-card-message" style="display:none; margin-top:12px; padding:10px; border-radius:8px;"></div>
-                <button onclick="saveProfileCard()" style="margin-top:14px; padding:11px 28px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">💾 Save Profile Card</button>
+                <button onclick="saveProfileCard()" style="margin-top:14px; padding:11px 28px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">💾 Save Profile Card</button>
             </div>
             
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Platform IDs (Optional)</h3>
                 <p style="color: #666; margin-bottom: 15px;">Add your platform IDs to fetch your games. You can add them later if you don't have them yet.</p>
                 
@@ -1794,13 +1794,13 @@
                 
                 <div id="settings-message" style="display: none; margin-bottom: 15px; padding: 10px; border-radius: 8px;"></div>
                 
-                <button onclick="saveSettings()" style="padding: 12px 30px; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                <button onclick="saveSettings()" style="padding: 12px 30px; background: #10b981; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: 600; font-family: inherit;">
                     Save Settings
                 </button>
             </div>
             
             <!-- Change Password Section -->
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>🔒 Change Password</h3>
                 <p style="color: #666; margin-bottom: 15px;">Update your account password.</p>
                 
@@ -1836,7 +1836,7 @@
             </div>
             
             <!-- Library Sync Settings -->
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>📚 Library Sync</h3>
                 <p style="color: #666; margin-bottom: 15px;">Manage your game library synchronization with Steam API.</p>
                 
@@ -1890,14 +1890,14 @@
                     </div>
                     
                     <button onclick="updateSyncInterval()" 
-                            style="padding: 10px 24px; background: #f39c12; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                            style="padding: 10px 24px; background: #f59e0b; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: 600;">
                         💾 Save Sync Interval
                     </button>
                 </div>
             </div>
 
             <!-- Admin-only migrations -->
-            <div id="admin-migrations" style="display: none; background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div id="admin-migrations" style="display: none; background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>🛠️ Database Migrations (Admin Only)</h3>
                 <p style="color: #666; margin-bottom: 15px;">Preview, edit, and run per-entity migrations while the app is running.</p>
 
@@ -1915,10 +1915,10 @@
                 </label>
 
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button onclick="loadMigrations()" style="padding: 10px 24px; background: #4f46e5; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    <button onclick="loadMigrations()" style="padding: 10px 24px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer; font-family: inherit; font-weight: 600;">
                         🔄 Reload Migrations
                     </button>
-                    <button onclick="runMigration()" style="padding: 10px 24px; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    <button onclick="runMigration()" style="padding: 10px 24px; background: #10b981; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: 600; font-family: inherit;">
                         ▶️ Run Migration
                     </button>
                 </div>
@@ -2022,9 +2022,9 @@
 
             <!-- Start / Stop buttons -->
             <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
-                <button id="discord-bot-start-btn" onclick="discordBotStart()" style="padding:9px 22px; background:linear-gradient(135deg,#27ae60,#2ecc71); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">▶ Start Bot</button>
+                <button id="discord-bot-start-btn" onclick="discordBotStart()" style="padding:9px 22px; background:linear-gradient(135deg,#059669,#047857); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">▶ Start Bot</button>
                 <button id="discord-bot-stop-btn" onclick="discordBotStop()" style="padding:9px 22px; background:linear-gradient(135deg,#e74c3c,#c0392b); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">⏹ Stop Bot</button>
-                <button id="discord-bot-restart-btn" onclick="discordBotRestart()" style="padding:9px 22px; background:linear-gradient(135deg,#f39c12,#e67e22); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔁 Restart Bot</button>
+                <button id="discord-bot-restart-btn" onclick="discordBotRestart()" style="padding:9px 22px; background:linear-gradient(135deg,#f59e0b,#d97706); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">🔁 Restart Bot</button>
                 <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-left:auto; font-size:0.88em; color:var(--text-secondary);">
                     <input type="checkbox" id="discord-bot-autorefresh" onchange="toggleDiscordBotAutoRefresh(this.checked)"> Auto-refresh log
                 </label>
@@ -2051,7 +2051,7 @@
                             <input type="text" id="discord-link-username" placeholder="Display name"
                                    style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
                         </label>
-                        <button onclick="discordBotAddUser()" style="padding:9px 14px; background:linear-gradient(135deg,#27ae60,#2ecc71); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Link</button>
+                        <button onclick="discordBotAddUser()" style="padding:9px 14px; background:linear-gradient(135deg,#059669,#047857); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">Link</button>
                     </div>
                 </div>
                 <div id="discord-bot-users-list" style="margin-top:10px;">
@@ -2154,7 +2154,7 @@
                 </label>
             </div>
             <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
-                <button onclick="runInitialSetup()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Create Admin</button>
+                <button onclick="runInitialSetup()" style="padding:10px 20px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">Create Admin</button>
             </div>
         </div>
     </div>
@@ -2705,8 +2705,8 @@
                        <span style="font-size:1.1em; margin-left:6px;">${'★'.repeat(safeRating)}${'☆'.repeat(10-safeRating)}</span>
                        <span style="color:var(--text-secondary); margin-left:6px;">(${safeRating}/10)</span>
                        ${safeNotes ? `<p style="margin-top:4px; color:var(--text-secondary);">${safeNotes}</p>` : ''}
-                       <button onclick="editReview('${game.game_id}')" style="margin-top:6px; padding:4px 10px; background:#4f46e5; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
-                       <button onclick="deleteReview('${game.game_id}')" style="margin-top:6px; margin-left:4px; padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
+                       <button onclick="editReview('${game.game_id}')" style="margin-top:6px; padding:4px 10px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">✏️ Edit</button>
+                       <button onclick="deleteReview('${game.game_id}')" style="margin-top:6px; margin-left:4px; padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">🗑️ Delete</button>
                    </div>`
                 : `<button onclick="editReview('${game.game_id}')" style="margin-top:8px; padding:6px 14px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">
                        ✏️ Write a Review
@@ -2752,7 +2752,7 @@
                         <input type="text" id="new-tag-input" placeholder="Add tag…"
                                style="padding:3px 8px; border:1px solid var(--input-border); border-radius:12px; font-size:0.85em; background:var(--input-bg); color:var(--text-primary); width:110px;"
                                onkeydown="if(event.key==='Enter') addTag('${game.game_id}')">
-                        <button onclick="addTag('${game.game_id}')" style="padding:3px 10px; background:#27ae60; color:white; border:none; border-radius:12px; font-size:0.8em; cursor:pointer; margin-left:3px;">+</button>
+                        <button onclick="addTag('${game.game_id}')" style="padding:3px 10px; background:#10b981; color:white; border:none; border-radius:12px; font-size:0.8em; cursor:pointer; font-family:inherit; margin-left:3px;">+</button>
                     </span>
                 </div>
                 <!-- Backlog status -->
@@ -2764,21 +2764,21 @@
                     </select>
                 </div>
                 <!-- Inline review editor (hidden by default) -->
-                <div id="review-editor" style="display:none; margin-top:12px; padding:14px; background:#fff8e1; border-radius:8px; border:1px solid #f6d365;">
+                <div id="review-editor" style="display:none; margin-top:12px; padding:14px; background:rgba(245,158,11,0.06); border-radius:8px; border:1px solid rgba(245,158,11,0.3);">
                     <strong>Write a Review</strong>
                     <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                         <label>Rating (1-10):
                             <input type="number" id="review-rating" min="1" max="10" value="${safeRating || 7}"
-                                   style="width:55px; margin-left:5px; padding:5px; border-radius:5px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                                   style="width:55px; margin-left:5px; padding:5px 8px; border-radius:8px; border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
                         </label>
                         <label style="flex:1; min-width:200px;">Notes:
                             <input type="text" id="review-notes" value="${safeNotes}"
                                    placeholder="Optional personal notes…"
-                                   style="width:100%; margin-left:5px; padding:5px; border-radius:5px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
+                                   style="width:100%; margin-left:5px; padding:5px 8px; border-radius:8px; border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
                         </label>
                     </div>
                     <div style="margin-top:10px; display:flex; gap:8px;">
-                        <button onclick="saveReview('${game.game_id}')" style="padding:6px 16px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer;">💾 Save</button>
+                        <button onclick="saveReview('${game.game_id}')" style="padding:6px 16px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-family:inherit;">💾 Save</button>
                         <button onclick="document.getElementById('review-editor').style.display='none'" style="padding:6px 14px; background:#aaa; color:white; border:none; border-radius:6px; cursor:pointer;">Cancel</button>
                     </div>
                 </div>
@@ -2832,7 +2832,7 @@
             // Multi-user specific info
             const playersInfo = game.owners ? game.owners.join(', ') : selectedUsers.join(', ');
             const multiplayerBadges = `
-                ${game.is_coop ? '<span style="display:inline-block; background:#27ae60; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em; margin-right:5px;">✅ Co-op</span>' : ''}
+                ${game.is_coop ? '<span style="display:inline-block; background:#10b981; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em; margin-right:5px;">✅ Co-op</span>' : ''}
                 ${game.is_multiplayer ? '<span style="display:inline-block; background:#3498db; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em;">✅ Multiplayer</span>' : ''}
             `;
             
@@ -2847,7 +2847,7 @@
                         <div class="game-hero-subtitle">Multi-User Pick • App ID: ${game.app_id}</div>
                     </div>
                 </div>
-                <div style="background: #e8f4f8; padding: 12px; border-radius: 8px; margin: 12px 0;">
+                <div style="background: rgba(79,70,229,0.06); padding: 12px; border-radius: 8px; margin: 12px 0;">
                     <strong>👥 Players:</strong> ${playersInfo}
                     <div style="margin-top: 8px;">${multiplayerBadges}</div>
                 </div>
@@ -3549,7 +3549,7 @@
                 data.users.forEach((user, idx) => {
                     if (user.error) {
                         html += `
-                            <div class="stat-card" style="background: #fff5f5; border: 2px solid #ffcccc;">
+                            <div class="stat-card" style="background: rgba(239,68,68,0.07); border: 1.5px solid rgba(239,68,68,0.3);">
                                 <div class="stat-label">${user.username}</div>
                                 <div class="error" style="margin-top: 10px;">Error: ${user.error}</div>
                             </div>
@@ -3587,13 +3587,13 @@
                                     <div style="color: var(--text-secondary); font-size: 0.9em;">Least Games</div>
                                     <div style="font-size: 1.8em; font-weight: 700; color: #7c3aed;">${data.comparison_metrics.least_games}</div>
                                 </div>
-                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #f39c12;">
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
                                     <div style="color: var(--text-secondary); font-size: 0.9em;">Average Games</div>
-                                    <div style="font-size: 1.8em; font-weight: 700; color: #f39c12;">${data.comparison_metrics.avg_games}</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #f59e0b;">${data.comparison_metrics.avg_games}</div>
                                 </div>
-                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #27ae60;">
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #10b981;">
                                     <div style="color: var(--text-secondary); font-size: 0.9em;">Total Unique Games</div>
-                                    <div style="font-size: 1.8em; font-weight: 700; color: #27ae60;">${data.comparison_metrics.total_unique_games}</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #10b981;">${data.comparison_metrics.total_unique_games}</div>
                                 </div>
                             </div>
                         </div>
@@ -3824,13 +3824,13 @@
                                 </div>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                     <button onclick="editUserRoles('${user.username}')" 
-                                            style="padding: 6px 12px; background: #2d9cdb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                            style="padding: 6px 12px; background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
                                             title="Edit Roles">
                                         🧩 Roles
                                     </button>
                                     ${!isAdmin ? `
                                         <button onclick="toggleUserRole('${user.username}', 'admin')" 
-                                                style="padding: 6px 12px; background: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                                style="padding: 6px 12px; background: #f59e0b; color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 0.85em; font-weight: 600; font-family: inherit;"
                                                 title="Make Admin">
                                             👑 Admin
                                         </button>
@@ -4322,7 +4322,7 @@
                 const winnerDiv = document.getElementById('vote-winner');
                 const winner = data.winner;
                 let html = `
-                    <h3 style="color: #27ae60;">🏆 Winner: ${winner.name}</h3>
+                    <h3 style="color: #10b981;">🏆 Winner: ${winner.name}</h3>
                     <p style="margin-top: 8px; color: #555;">Total votes: <strong>${data.total_votes}</strong></p>
                     <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">`;
 
@@ -5910,7 +5910,7 @@
                 let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${data.friends.length} friend${data.friends.length !== 1 ? 's' : ''}</p>`;
                 data.friends.forEach(friend => {
                     const stateLabel = PERSONA_STATE[friend.personastate] || 'Offline';
-                    const stateColor = friend.personastate > 0 ? '#27ae60' : '#7f8c8d';
+                    const stateColor = friend.personastate > 0 ? '#10b981' : '#7f8c8d';
                     const avatar = friend.avatarfull
                         ? `<img src="${friend.avatarfull}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;margin-right:12px;" loading="lazy">`
                         : `<span style="width:40px;height:40px;border-radius:6px;background:var(--card-border);display:inline-block;margin-right:12px;"></span>`;
@@ -6235,7 +6235,7 @@
                     reqList.innerHTML = data.received.map(r => `
                         <div style="display:flex; align-items:center; gap:10px; padding:10px; background:var(--list-hover); border-radius:8px; margin-bottom:8px;">
                             <strong>${r.display_name}</strong><span style="color:var(--text-secondary);">(@${r.username})</span>
-                            <button onclick="respondFriendRequest('${r.username}', true)" style="padding:5px 14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✅ Accept</button>
+                            <button onclick="respondFriendRequest('${r.username}', true)" style="padding:5px 14px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">✅ Accept</button>
                             <button onclick="respondFriendRequest('${r.username}', false)" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">❌ Decline</button>
                         </div>`).join('');
                 } else {
@@ -7168,7 +7168,7 @@
                         }
                         
                         // Always show friend invite button
-                        html += `<button onclick="sendFriendRequest('${user}')" title="Send friend request" style="padding:2px 6px; background:#e67e22; color:white; border:none; border-radius:3px; cursor:pointer; font-size:0.7em;">👥 Friend</button>`;
+                        html += `<button onclick="sendFriendRequest('${user}')" title="Send friend request" style="padding:2px 6px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.7em; font-family:inherit;">👥 Friend</button>`;
                         
                         html += `</div></div>`;
                     }
@@ -7376,7 +7376,7 @@
                                 <button onclick="openLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#4f46e5; color:white; cursor:pointer;">Open</button>
                                 ${joined
                                     ? `<button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#e74c3c; color:white; cursor:pointer;">Leave</button>`
-                                    : `<button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#27ae60; color:white; cursor:pointer;">Join</button>`}
+                                    : `<button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit;">Join</button>`}
                                 ${isHost
                                     ? `<button onclick="pickLiveSessionGame('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#9b59b6; color:white; cursor:pointer;">Pick</button>`
                                     : ''}
@@ -7598,7 +7598,7 @@
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         ${joined
                             ? `<button onclick="leaveLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#e74c3c; color:white; cursor:pointer;">Leave</button>`
-                            : `<button onclick="joinLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#27ae60; color:white; cursor:pointer;">Join</button>`}
+                            : `<button onclick="joinLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit;">Join</button>`}
                         ${isHost
                             ? `<button onclick="pickLiveSessionGame('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#9b59b6; color:white; cursor:pointer;">Pick Game</button>
                                <button onclick="openInviteUsersModal('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#3498db; color:white; cursor:pointer;">Invite Users</button>`
@@ -7610,7 +7610,7 @@
                         <div style="font-size:0.85em; color:var(--text-secondary); margin-bottom:8px;">Need ${required} votes · ✅ ${yesCount} · ❌ ${noCount}</div>
                         ${canVote
                             ? `<div style="display:flex; gap:8px;">
-                                   <button onclick="voteLiveSession(true)" style="padding:8px 12px; border:none; border-radius:7px; background:#27ae60; color:white; cursor:pointer; font-weight:600;">✅ Accept</button>
+                                   <button onclick="voteLiveSession(true)" style="padding:8px 12px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit; font-weight:600;">✅ Accept</button>
                                    <button onclick="voteLiveSession(false)" style="padding:8px 12px; border:none; border-radius:7px; background:#e74c3c; color:white; cursor:pointer; font-weight:600;">❌ Reject</button>
                                </div>`
                             : `<div style="font-size:0.85em; color:var(--text-secondary);">${session.status === 'awaiting_vote' ? 'Join this session to vote.' : 'Vote starts after a game is picked.'}</div>`}
@@ -7809,7 +7809,7 @@
                             <span style="font-size:0.82em; color:var(--text-secondary);">v${p.version}</span>
                             <div id="plugin-toggle-admin-${p.id}" style="display:none;">
                                 <button onclick="togglePlugin(${p.id}, ${!p.enabled})"
-                                        style="padding:5px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; background:${p.enabled ? '#e74c3c' : '#27ae60'}; color:white;">
+                                        style="padding:5px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; background:${p.enabled ? '#e74c3c' : '#10b981'}; color:white;">
                                     ${p.enabled ? '⏸ Disable' : '▶ Enable'}
                                 </button>
                             </div>
@@ -8029,7 +8029,7 @@
                 const dot = document.getElementById('discord-bot-status-dot');
                 const text = document.getElementById('discord-bot-status-text');
                 const pidEl = document.getElementById('discord-bot-pid');
-                if (dot) dot.style.background = status.running ? '#27ae60' : '#e74c3c';
+                if (dot) dot.style.background = status.running ? '#10b981' : '#e74c3c';
                 if (text) text.textContent = status.running ? 'Running' : 'Stopped';
                 if (pidEl) pidEl.textContent = status.pid ? `PID: ${status.pid}` : '';
 
@@ -8200,7 +8200,7 @@
                         <td style="padding:6px 8px; color:var(--text-secondary);">${u.discord_id}</td>
                         <td style="padding:6px 8px;">${u.steam_id}</td>
                         <td style="padding:6px 8px; text-align:right;">
-                            <button onclick="discordBotRemoveUser('${u.discord_id}')" style="padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">🗑 Remove</button>
+                            <button onclick="discordBotRemoveUser('${u.discord_id}')" style="padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">🗑 Remove</button>
                         </td>
                     </tr>`;
                 });
@@ -8274,7 +8274,7 @@
                 if (steamKeyEl) {
                     if (data.steam_api_key_set) {
                         const source = data.steam_api_key_source === 'env' ? '.env file' : 'config.json';
-                        steamKeyEl.innerHTML = `<span style="color:#27ae60;">✅ Configured from ${source}</span>`;
+                        steamKeyEl.innerHTML = `<span style="color:#10b981;">✅ Configured from ${source}</span>`;
                     } else {
                         steamKeyEl.innerHTML = '<span style="color:#e74c3c;">❌ Not configured</span>';
                     }
@@ -8284,7 +8284,7 @@
                 const tokenEl = document.getElementById('diag-discord-token-status');
                 if (tokenEl) {
                     if (data.discord_token_set) {
-                        tokenEl.innerHTML = '<span style="color:#27ae60;">✅ Configured</span>';
+                        tokenEl.innerHTML = '<span style="color:#10b981;">✅ Configured</span>';
                     } else {
                         tokenEl.innerHTML = '<span style="color:#e74c3c;">❌ Not configured</span>';
                     }
@@ -8571,11 +8571,11 @@
                             </div>
                             <div>
                                 <div style="font-size:0.85em; color:var(--text-secondary);">Votes Cast</div>
-                                <div style="font-size:1.8em; font-weight:bold; color:#27ae60;">${user.stats?.votes || 0}</div>
+                                <div style="font-size:1.8em; font-weight:bold; color:#10b981;">${user.stats?.votes || 0}</div>
                             </div>
                             <div>
                                 <div style="font-size:0.85em; color:var(--text-secondary);">Accuracy</div>
-                                <div style="font-size:1.8em; font-weight:bold; color:#f39c12;">${user.stats?.accuracy || 0}%</div>
+                                <div style="font-size:1.8em; font-weight:bold; color:#f59e0b;">${user.stats?.accuracy || 0}%</div>
                             </div>
                         </div>
                     </div>
@@ -8725,7 +8725,7 @@
                 const completed = progress >= 100;
                 
                 html += `
-                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border:1px solid ${completed ? '#27ae60' : 'var(--input-border)'};">
+                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border:1px solid ${completed ? '#10b981' : 'var(--input-border)'};">
                         <h4 style="margin:0 0 8px 0; color:var(--text-primary);">${ch.icon} ${ch.name}</h4>
                         <p style="margin:0 0 8px 0; font-size:0.9em; color:var(--text-secondary);">${ch.description}</p>
                         <div style="background:rgba(0,0,0,0.3); border-radius:4px; height:8px; margin-bottom:6px;">
@@ -8999,7 +8999,7 @@
                             <p style="margin:0 0 8px 0; font-size:0.9em;"><strong style="color:var(--accent);">🎲 Winning Pick:</strong> <span style="color:var(--text-primary);">${s.winning_pick}</span></p>
                             <p style="margin:0 0 8px 0; font-size:0.85em; color:var(--text-secondary);">Players: ${s.player_count} | Your Vote: ${s.your_vote ? '✓' : '✗'}</p>
                             <div style="display:flex; gap:8px; font-size:0.85em;">
-                                ${s.your_vote ? `<span style="background:rgba(39,174,96,0.2); color:#27ae60; padding:4px 8px; border-radius:4px;">✓ You voted correctly</span>` : ''}
+                                ${s.your_vote ? `<span style="background:rgba(39,174,96,0.2); color:#10b981; padding:4px 8px; border-radius:4px;">✓ You voted correctly</span>` : ''}
                                 ${s.you_picked ? `<span style="background:rgba(52,152,219,0.2); color:#3498db; padding:4px 8px; border-radius:4px;">🎲 You picked</span>` : ''}
                             </div>
                         </div>
@@ -9100,7 +9100,7 @@
                             <div>
                                 <span style="font-size:1.3em; min-width:40px;">${medal}</span>
                                 <span style="color:var(--text-primary); font-weight:600; margin-left:8px;">${entry.username}</span>
-                                ${seasonalBadge ? `<span style="margin-left:8px; font-size:0.85em; background:rgba(243,156,18,0.2); color:#f39c12; padding:2px 6px; border-radius:4px;">${seasonalBadge}</span>` : ''}
+                                ${seasonalBadge ? `<span style="margin-left:8px; font-size:0.85em; background:rgba(243,156,18,0.2); color:#f59e0b; padding:2px 6px; border-radius:4px;">${seasonalBadge}</span>` : ''}
                             </div>
                             <span style="color:var(--accent); font-weight:bold;">${entry.value}</span>
                         </div>
@@ -9210,7 +9210,7 @@
                 let html = '';
                 reviews.forEach(r => {
                     html += `
-                        <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border-left:3px solid #f39c12;">
+                        <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border-left:3px solid #f59e0b;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <h5 style="margin:0 0 4px 0; color:var(--text-primary);">${r.game_name}</h5>
                                 <span style="font-size:0.9em;">${'⭐'.repeat(r.rating)}</span>
@@ -9522,7 +9522,7 @@
                             <h5 style="margin:0 0 6px 0; color:var(--text-primary);">From: ${t.from_user}</h5>
                             <p style="margin:0 0 8px 0; font-size:0.9em; color:var(--text-secondary);">${t.offer}</p>
                             <div style="display:flex; gap:8px;">
-                                <button onclick="acceptTrade('${t.id}')" style="padding:6px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">✓ Accept</button>
+                                <button onclick="acceptTrade('${t.id}')" style="padding:6px 10px; background:#10b981; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em; font-family:inherit;">✓ Accept</button>
                                 <button onclick="declineTrade('${t.id}')" style="padding:6px 10px; background:#e74c3c; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">✕ Decline</button>
                             </div>
                         </div>
@@ -10058,11 +10058,11 @@
                 </div>
                 <div style="background:rgba(39,174,96,0.1); padding:12px; border-radius:8px; text-align:center;">
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Accuracy</p>
-                    <p style="margin:0; font-size:1.8em; color:#27ae60; font-weight:bold;" id="stat-accuracy">0%</p>
+                    <p style="margin:0; font-size:1.8em; color:#10b981; font-weight:bold;" id="stat-accuracy">0%</p>
                 </div>
                 <div style="background:rgba(243,156,18,0.1); padding:12px; border-radius:8px; text-align:center;">
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Streak</p>
-                    <p style="margin:0; font-size:1.8em; color:#f39c12; font-weight:bold;" id="stat-streak">0 🔥</p>
+                    <p style="margin:0; font-size:1.8em; color:#f59e0b; font-weight:bold;" id="stat-streak">0 🔥</p>
                 </div>
             </div>
             <div id="analytics-charts" style="display:grid; grid-template-columns:1fr 1fr; gap:15px;"></div>
@@ -10157,7 +10157,7 @@
                 <div style="display:grid; gap:10px;">
                     <input id="trade-username" type="text" placeholder="Player username..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
                     <textarea id="trade-offer" placeholder="What you're offering..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); min-height:80px; box-sizing:border-box;"></textarea>
-                    <button onclick="createTradeOffer()" style="padding:10px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📦 Send Offer</button>
+                    <button onclick="createTradeOffer()" style="padding:10px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">📦 Send Offer</button>
                 </div>
             </div>
             <div>
@@ -10206,7 +10206,7 @@
             <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:8px; text-align:center; margin-bottom:20px;">
                 <h4 style="margin:0 0 10px 0; color:var(--text-primary);" id="current-rank">🥈 Silver II</h4>
                 <div style="width:100%; background:rgba(0,0,0,0.3); border-radius:6px; height:10px; margin-bottom:10px;">
-                    <div style="background:linear-gradient(90deg, #c0392b, #e67e22); height:100%; width:65%; border-radius:6px;"></div>
+                    <div style="background:linear-gradient(90deg, #dc2626, #f59e0b); height:100%; width:65%; border-radius:6px;"></div>
                 </div>
                 <p style="margin:0; color:var(--text-secondary); font-size:0.9em;">2,450 / 3,000 RP to next rank</p>
             </div>
@@ -10225,8 +10225,8 @@
                 <button onclick="closeAntiCheat()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
             </div>
             <div style="display:grid; gap:12px;">
-                <div style="background:rgba(39,174,96,0.1); padding:12px; border-radius:8px; border-left:3px solid #27ae60;">
-                    <p style="margin:0; color:var(--text-primary); font-weight:600;">✅ Your Integrity: <span style="color:#27ae60;">99.2%</span></p>
+                <div style="background:rgba(16,185,129,0.08); padding:12px; border-radius:8px; border-left:3px solid #10b981;">
+                    <p style="margin:0; color:var(--text-primary); font-weight:600;">✅ Your Integrity: <span style="color:#10b981;">99.2%</span></p>
                 </div>
                 <div style="background:rgba(52,73,94,0.1); padding:12px; border-radius:8px; border-left:3px solid #34495e;">
                     <p style="margin:0; color:var(--text-primary); font-weight:600;">📊 Accuracy Variance: <span style="color:#3498db;">±2.1%</span></p>
@@ -10292,7 +10292,7 @@
                 </div>
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
                     <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Active (7d)</p>
-                    <p id="analytics-active-7d" style="color:#27ae60; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                    <p id="analytics-active-7d" style="color:#10b981; font-size:1.8em; font-weight:bold; margin:0;">0</p>
                 </div>
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
                     <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Total Picks</p>
@@ -10300,7 +10300,7 @@
                 </div>
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
                     <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Avg Picks/User</p>
-                    <p id="analytics-avg-picks" style="color:#f39c12; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                    <p id="analytics-avg-picks" style="color:#f59e0b; font-size:1.8em; font-weight:bold; margin:0;">0</p>
                 </div>
             </div>
 
@@ -10391,7 +10391,7 @@
 
                 <div style="display:flex; gap:10px;">
                     <button onclick="performAdvancedSearch()" style="flex:1; padding:10px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔎 Search</button>
-                    <button onclick="saveCurrentSearch()" style="flex:1; padding:10px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💾 Save</button>
+                    <button onclick="saveCurrentSearch()" style="flex:1; padding:10px; background:#f59e0b; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:bold;">💾 Save</button>
                 </div>
             </div>
 
@@ -10462,7 +10462,7 @@
             </div>
 
             <div style="margin-top:15px;">
-                <button onclick="batchExportGames()" style="width:100%; padding:10px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; margin-bottom:10px;">📥 Export as CSV</button>
+                <button onclick="batchExportGames()" style="width:100%; padding:10px; background:#f59e0b; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:bold; margin-bottom:10px;">📥 Export as CSV</button>
             </div>
         </div>
     </div>
