@@ -306,7 +306,7 @@
             width: 100%;
             max-width: 640px;
             height: auto;
-            border-radius: 10px;
+            border-radius: 12px;
             display: block;
             box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
         }
@@ -358,7 +358,7 @@
         .game-description-card {
             margin-top: 10px;
             padding: 14px;
-            border-radius: 10px;
+            border-radius: 12px;
             background: var(--list-hover);
             color: var(--text-primary);
             line-height: 1.7;
@@ -776,7 +776,7 @@
         .game-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
-            border-radius: 10px;
+            border-radius: 12px;
             overflow: hidden;
             cursor: pointer;
             transition: transform 0.15s, box-shadow 0.15s;
@@ -873,17 +873,17 @@
                     <div style="margin-bottom: 14px;">
                         <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Username</label>
                         <input type="text" id="login-username" placeholder="Enter your username" required autocomplete="username"
-                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 12px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
                                onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
                     <div style="margin-bottom: 22px;">
                         <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Password</label>
                         <input type="password" id="login-password" placeholder="Enter your password" required autocomplete="current-password"
-                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 12px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
                                onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
                     <div id="login-error" style="color: #dc2626; margin-bottom: 14px; display: none; font-size:0.88em; background:#fef2f2; padding:10px 14px; border-radius:8px; border:1px solid #fecaca;"></div>
-                    <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#4f46e5,#7c3aed); color: white; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Sign In</button>
+                    <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#4f46e5,#7c3aed); color: white; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Sign In</button>
                 </form>
                 <p style="text-align: center; margin-top: 18px; color: var(--text-secondary); font-size:0.88em;">Don't have an account? <a href="javascript:void(0)" id="show-register-link" onclick="try{ switchAuthForm(false); }catch(e){ console.error('switchAuthForm error (register):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #4f46e5; text-decoration: none; font-weight: 700;">Create account</a></p>
             </div>
@@ -894,17 +894,17 @@
                     <div style="margin-bottom: 14px;">
                         <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Username</label>
                         <input type="text" id="register-username" placeholder="Choose a username (min 3 chars)" required minlength="3" autocomplete="username"
-                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 12px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
                                onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
                     <div style="margin-bottom: 22px;">
                         <label style="display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-primary); font-size:0.88em; letter-spacing:0.02em; text-transform:uppercase;">Password</label>
                         <input type="password" id="register-password" placeholder="Choose a password (min 6 chars)" required minlength="6" autocomplete="new-password"
-                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
+                               style="width: 100%; padding: 11px 14px; border: 1.5px solid var(--input-border); border-radius: 12px; background: var(--input-bg); color: var(--text-primary); font-family:inherit; font-size:0.95em; transition:border-color 0.2s, box-shadow 0.2s;"
                                onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 3px rgba(79,70,229,0.1)'" onblur="this.style.borderColor='';this.style.boxShadow=''">
                     </div>
                     <div id="register-error" style="color: #dc2626; margin-bottom: 14px; display: none; font-size:0.88em; background:#fef2f2; padding:10px 14px; border-radius:8px; border:1px solid #fecaca;"></div>
-                    <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#059669,#047857); color: white; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Create Account</button>
+                    <button type="submit" style="width: 100%; padding: 13px; background: linear-gradient(135deg,#059669,#047857); color: white; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 1em; font-family:inherit; transition:opacity 0.2s; letter-spacing:0.01em;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Create Account</button>
                 </form>
                 <p style="text-align: center; margin-top: 18px; color: var(--text-secondary); font-size:0.88em;">Already have an account? <a href="javascript:void(0)" id="show-login-link" onclick="try{ switchAuthForm(true); }catch(e){ console.error('switchAuthForm error (login):', e); alert('JS error: '+(e && e.message)); } return false;" style="color: #4f46e5; text-decoration: none; font-weight: 700;">Sign in</a></p>
             </div>
@@ -1346,7 +1346,7 @@
             <h2>📅 Game Night Scheduler</h2>
 
             <!-- Create / Edit Form -->
-            <div id="schedule-form-panel" style="background:var(--list-hover); padding:20px; border-radius:10px; margin-bottom:20px;">
+            <div id="schedule-form-panel" style="background:var(--list-hover); padding:20px; border-radius:12px; margin-bottom:20px;">
                 <h3 id="schedule-form-title">➕ New Event</h3>
                 <input type="hidden" id="schedule-edit-id" value="">
                 <input type="hidden" id="sch-game-appid" value="">
@@ -1449,7 +1449,7 @@
             <h2>No-Play List</h2>
             <p style="color: var(--text-secondary); margin-bottom: 20px;">Games you don't want to play</p>
             
-            <div style="background: var(--card-bg); padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid var(--card-border);">
+            <div style="background: var(--card-bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Add a game to ignore</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; margin-top: 10px;">
                     <input type="number" id="ignore-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
@@ -1459,7 +1459,7 @@
                 </div>
             </div>
             
-            <div id="ignored-games-list" style="background: var(--card-bg); padding: 20px; border-radius: 10px; border: 1px solid var(--card-border);">
+            <div id="ignored-games-list" style="background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--card-border);">
                 <div class="loading">Loading ignored games...</div>
             </div>
         </div>
@@ -1469,7 +1469,7 @@
             <h2>Achievements</h2>
             <p style="color: var(--text-secondary); margin-bottom: 20px;">Track your achievement hunting progress</p>
             
-            <div style="background: var(--card-bg); padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid var(--card-border);">
+            <div style="background: var(--card-bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Start a new achievement hunt</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 10px; margin-top: 10px;">
                     <input type="number" id="hunt-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1.5px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
@@ -1485,7 +1485,7 @@
                 </div>
             </div>
             
-            <div id="achievements-list" style="background: var(--card-bg); padding: 20px; border-radius: 10px; border: 1px solid var(--card-border);">
+            <div id="achievements-list" style="background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--card-border);">
                 <div class="loading">Loading achievements...</div>
             </div>
         </div>
@@ -1621,7 +1621,7 @@
             <div style="display:flex; gap:12px; flex:1;">
                 <!-- Chat column -->
                 <div style="flex:1; display:flex; flex-direction:column;">
-                    <div id="chat-messages" style="height:350px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px; margin-bottom:0; display:flex; flex-direction:column; gap:8px;">
+                    <div id="chat-messages" style="height:350px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:12px; margin-bottom:0; display:flex; flex-direction:column; gap:8px;">
                         <div class="loading">Loading messages…</div>
                     </div>
                     <div id="typing-indicator" style="display:none; padding:6px 12px; font-size:0.85em; color:var(--text-secondary); font-style:italic;"></div>
@@ -1641,7 +1641,7 @@
                 </div>
                 
                 <!-- Online users sidebar -->
-                <div id="chat-sidebar" style="width:250px; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px; display:flex; flex-direction:column;">
+                <div id="chat-sidebar" style="width:250px; background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:12px; display:flex; flex-direction:column;">
                     <h4 style="margin:0 0 12px 0; color:var(--text-primary); font-size:0.95em; display:flex; align-items:center; gap:6px;">
                         👥 Online Users
                         <button onclick="loadOnlineUsers()" style="margin-left:auto; padding:4px 8px; background:var(--input-border); border:none; border-radius:4px; cursor:pointer; font-size:0.8em; color:var(--text-primary);">🔄</button>
@@ -1667,11 +1667,11 @@
                 <button onclick="loadLiveSessions()" style="padding:9px 16px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
             </div>
             <div style="display:grid; grid-template-columns: minmax(300px, 1fr) minmax(380px, 1.2fr); gap:14px; align-items:start;">
-                <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px;">
+                <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:12px;">
                     <h3 style="margin:0 0 10px;">Active Sessions</h3>
                     <div id="sessions-list"><div class="loading">Loading sessions…</div></div>
                 </div>
-                <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:12px;">
+                <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:12px;">
                     <h3 style="margin:0 0 10px;">Session Details</h3>
                     <div id="session-details"><div style="color:var(--text-secondary);">Select or join a session to view details.</div></div>
                 </div>
@@ -1689,7 +1689,7 @@
                 <button onclick="markAllNotificationsRead()" style="padding:8px 20px; background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">✅ Mark all read</button>
                 <button onclick="loadNotifications()" style="padding:8px 20px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">🔄 Refresh</button>
             </div>
-            <div id="admin-send-notification" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:16px; margin-bottom:20px;">
+            <div id="admin-send-notification" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:16px; margin-bottom:20px;">
                 <h4 style="margin-top:0;">📢 Send Alert (Admin)</h4>
                 <div style="display:grid; gap:10px;">
                     <input id="notif-target-user" type="text" placeholder="Target username" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
@@ -1711,7 +1711,7 @@
         <div id="plugins-tab" class="tab-content">
             <h2>🧩 Plugins &amp; Addons</h2>
             <p style="color: var(--text-secondary); margin-bottom: 20px;">Extend GAPI with community plugins. Admins can register new plugins.</p>
-            <div id="admin-register-plugin" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:16px; margin-bottom:20px;">
+            <div id="admin-register-plugin" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:16px; margin-bottom:20px;">
                 <h4 style="margin-top:0;">➕ Register Plugin (Admin)</h4>
                 <div style="display:grid; gap:10px;">
                     <input id="plugin-name" type="text" placeholder="Plugin name (unique)" style="padding:8px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary);">
@@ -1730,7 +1730,7 @@
             <h2>⚙️ Account Settings</h2>
 
             <!-- My Profile Card -->
-            <div style="background: var(--input-bg); border: 1px solid var(--input-border); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <div style="background: var(--input-bg); border: 1px solid var(--input-border); padding: 20px; border-radius: 12px; margin-bottom: 20px;">
                 <h3 style="margin-top:0;">🃏 My Profile Card</h3>
                 <p style="color: var(--text-secondary); margin-bottom: 15px; font-size:0.9em;">This information is shown on your user card visible to your GAPI friends.</p>
                 <div id="my-profile-card-preview" style="margin-bottom:16px;"></div>
@@ -1757,7 +1757,7 @@
             
             <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Platform IDs (Optional)</h3>
-                <p style="color: #666; margin-bottom: 15px;">Add your platform IDs to fetch your games. You can add them later if you don't have them yet.</p>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">Add your platform IDs to fetch your games. You can add them later if you don't have them yet.</p>
                 
                 <div style="margin-bottom: 15px;">
                     <label style="display: flex; flex-direction: column; gap: 5px;">
@@ -1788,7 +1788,7 @@
                         <span style="font-weight: 600;">Discord ID</span>
                         <input type="text" id="settings-discord-id" placeholder="Your Discord user ID (optional)"
                                style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
-                        <small style="color: #666;">Used for Discord bot account linking.</small>
+                        <small style="color: var(--text-secondary);">Used for Discord bot account linking.</small>
                     </label>
                 </div>
                 
@@ -1802,7 +1802,7 @@
             <!-- Change Password Section -->
             <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>🔒 Change Password</h3>
-                <p style="color: #666; margin-bottom: 15px;">Update your account password.</p>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">Update your account password.</p>
                 
                 <div style="margin-bottom: 15px;">
                     <label style="display: flex; flex-direction: column; gap: 5px;">
@@ -1838,20 +1838,20 @@
             <!-- Library Sync Settings -->
             <div style="background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>📚 Library Sync</h3>
-                <p style="color: #666; margin-bottom: 15px;">Manage your game library synchronization with Steam API.</p>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">Manage your game library synchronization with Steam API.</p>
                 
-                <div id="sync-status-display" style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <div id="sync-status-display" style="background: var(--card-bg); padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid var(--card-border);">
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                         <div>
-                            <small style="color: #666;">Last Sync</small>
+                            <small style="color: var(--text-secondary);">Last Sync</small>
                             <div id="last-sync-time" style="font-weight: 600;">Never</div>
                         </div>
                         <div>
-                            <small style="color: #666;">Games Cached</small>
+                            <small style="color: var(--text-secondary);">Games Cached</small>
                             <div id="games-cached-count" style="font-weight: 600;">0</div>
                         </div>
                         <div>
-                            <small style="color: #666;">Cache Age</small>
+                            <small style="color: var(--text-secondary);">Cache Age</small>
                             <div id="cache-age-display" style="font-weight: 600;">—</div>
                         </div>
                     </div>
@@ -1862,7 +1862,7 @@
                             style="padding: 12px 30px; background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
                         🔄 Sync Library Now
                     </button>
-                    <small style="color: #666; display: block; margin-top: 8px;">
+                    <small style="color: var(--text-secondary); display: block; margin-top: 8px;">
                         Fetch your latest games from Steam API
                     </small>
                 </div>
@@ -1870,7 +1870,7 @@
                 <!-- Admin-only sync interval settings -->
                 <div id="sync-interval-settings" style="display: none; border-top: 1px solid #ddd; padding-top: 20px; margin-top: 20px;">
                     <h4 style="margin-top: 0;">⚙️ Auto-Sync Interval (Admin Only)</h4>
-                    <p style="color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                    <p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 15px;">
                         Background sync automatically updates all users' libraries at the specified interval.
                     </p>
                     
@@ -1881,10 +1881,10 @@
                                 <input type="number" id="sync-interval-input" min="1" max="168" step="0.5" 
                                        placeholder="6" value="6"
                                        style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 150px;">
-                                <span style="color: #666; font-size: 0.9em;">hours (1-168)</span>
+                                <span style="color: var(--text-secondary); font-size: 0.9em;">hours (1-168)</span>
                             </div>
                         </label>
-                        <small style="color: #666; display: block; margin-top: 5px;">
+                        <small style="color: var(--text-secondary); display: block; margin-top: 5px;">
                             Recommended: 6 hours. Lower values may hit Steam API rate limits.
                         </small>
                     </div>
@@ -1899,14 +1899,14 @@
             <!-- Admin-only migrations -->
             <div id="admin-migrations" style="display: none; background: var(--card-bg); padding: 20px; border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>🛠️ Database Migrations (Admin Only)</h3>
-                <p style="color: #666; margin-bottom: 15px;">Preview, edit, and run per-entity migrations while the app is running.</p>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">Preview, edit, and run per-entity migrations while the app is running.</p>
 
                 <div style="display: grid; gap: 12px; margin-bottom: 15px;">
                     <label style="display: flex; flex-direction: column; gap: 5px;">
                         <span style="font-weight: 600;">Select Migration</span>
                         <select id="migration-select" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px;"></select>
                     </label>
-                    <div id="migration-description" style="color: #666; font-size: 0.95em;"></div>
+                    <div id="migration-description" style="color: var(--text-secondary); font-size: 0.95em;"></div>
                 </div>
 
                 <label style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
@@ -1932,7 +1932,7 @@
         <p style="color:var(--text-secondary); margin-bottom:20px;">Configure global application settings. Changes take effect immediately.</p>
 
         <!-- Announcement Banner -->
-        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-bottom:20px;">
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:20px; margin-bottom:20px;">
             <h3 style="margin-top:0;">📢 Announcement Banner</h3>
             <p style="color:var(--text-secondary); font-size:0.9em; margin-bottom:12px;">Displayed at the top of the app for all logged-in users. Leave blank to hide.</p>
             <textarea id="admin-announcement" rows="3" maxlength="500"
@@ -1941,7 +1941,7 @@
         </div>
 
         <!-- Feature Toggles -->
-        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-bottom:20px;">
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:20px; margin-bottom:20px;">
             <h3 style="margin-top:0;">🔧 Feature Toggles</h3>
             <div style="display:grid; gap:14px;">
                 <label style="display:flex; align-items:center; gap:12px; cursor:pointer;">
@@ -1976,7 +1976,7 @@
         </div>
 
         <!-- Numeric/Text Settings -->
-        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-bottom:20px;">
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:20px; margin-bottom:20px;">
             <h3 style="margin-top:0;">⚙️ General Settings</h3>
             <div style="display:grid; gap:14px;">
                 <label style="display:flex; flex-direction:column; gap:5px;">
@@ -2000,7 +2000,7 @@
         <button onclick="saveAdminSettings()" style="padding:12px 32px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit; font-size:1em;">💾 Save Settings</button>
 
         <!-- Discord Bot Management -->
-        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-top:24px;">
+        <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:12px; padding:20px; margin-top:24px;">
             <h3 style="margin-top:0;">🤖 Discord Bot Management</h3>
             <p style="color:var(--text-secondary); font-size:0.9em; margin-bottom:16px;">Start, stop and monitor the GAPI Discord bot directly from the admin panel.</p>
 
@@ -3157,7 +3157,7 @@
                         `<div style="padding:6px 0; font-size:0.9em; color:var(--text-secondary);">&nbsp;&nbsp;• ${g.platform}: ${g.playtime_hours}h played</div>`
                     ).join('');
                     html += `
-                        <div style="padding:12px; background:var(--list-hover); border-radius:10px; margin-bottom:10px;">
+                        <div style="padding:12px; background:var(--list-hover); border-radius:12px; margin-bottom:10px;">
                             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                                 <strong>${group.name}</strong>
                                 <span>${platformBadges}</span>
@@ -3797,7 +3797,7 @@
                     data.users.forEach(user => {
                         const isAdmin = user.role === 'admin';
                         const roleList = user.roles && user.roles.length ? user.roles : [user.role];
-                        const roleBadges = roleList.map(r => `<span style=\"display:inline-block; margin:2px 6px 0 0; padding:2px 8px; background:#eef1ff; color:#445; border-radius:10px; font-size:0.75em; font-weight:600;\">${r}</span>`).join(' ');
+                        const roleBadges = roleList.map(r => `<span style=\"display:inline-block; margin:2px 6px 0 0; padding:2px 8px; background:var(--list-hover); color:var(--text-primary); border-radius:10px; font-size:0.75em; font-weight:600;\">${r}</span>`).join(' ');
                         const roleColor = isAdmin ? '#f59e0b' : '#4f46e5';
                         const roleIcon = isAdmin ? '👑' : '👤';
                         
@@ -3812,15 +3812,15 @@
                                 </div>
                                 <div>
                                     <small style="color: var(--text-secondary);">Steam ID:</small><br>
-                                    <span style="font-family: monospace; font-size: 0.9em;">${user.steam_id || '<span style="color: #999;">Not set</span>'}</span>
+                                    <span style="font-family: monospace; font-size: 0.9em;">${user.steam_id || '<span style="color: var(--text-secondary);">Not set</span>'}</span>
                                 </div>
                                 <div>
                                     <small style="color: var(--text-secondary);">Epic ID:</small><br>
-                                    <span style="font-family: monospace; font-size: 0.9em;">${user.epic_id || '<span style="color: #999;">Not set</span>'}</span>
+                                    <span style="font-family: monospace; font-size: 0.9em;">${user.epic_id || '<span style="color: var(--text-secondary);">Not set</span>'}</span>
                                 </div>
                                 <div>
                                     <small style="color: var(--text-secondary);">GOG ID:</small><br>
-                                    <span style="font-family: monospace; font-size: 0.9em;">${user.gog_id || '<span style="color: #999;">Not set</span>'}</span>
+                                    <span style="font-family: monospace; font-size: 0.9em;">${user.gog_id || '<span style="color: var(--text-secondary);">Not set</span>'}</span>
                                 </div>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                     <button onclick="editUserRoles('${user.username}')" 
@@ -4126,7 +4126,7 @@
                             <div class="list-item">
                                 <div>
                                     <strong>${game.name}</strong><br>
-                                    <small style="color: #666;">Owned by: ${game.owners ? game.owners.join(', ') : 'All selected users'}</small>
+                                    <small style="color: var(--text-secondary);">Owned by: ${game.owners ? game.owners.join(', ') : 'All selected users'}</small>
                                 </div>
                                 <div>${game.playtime_hours}h</div>
                             </div>
@@ -4246,13 +4246,13 @@
                 const voters = session.vote_counts[candidate.app_id]
                     ? session.vote_counts[candidate.app_id].voters.join(', ') : '';
                 html += `
-                    <div style="background: white; border-radius: 10px; padding: 15px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
+                    <div style="background: var(--card-bg); border-radius: 12px; padding: 15px; text-align: center; box-shadow: var(--shadow-md); border: 1px solid var(--card-border);">
                         <div style="font-weight: bold; margin-bottom: 8px;">${candidate.name}</div>
-                        <div style="color: #666; font-size: 0.9em; margin-bottom: 10px;">${candidate.playtime_hours}h played</div>
+                        <div style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 10px;">${candidate.playtime_hours}h played</div>
                         <div id="vote-count-${candidate.app_id}" style="font-size: 1.4em; font-weight: bold; color: #4f46e5; margin-bottom: 6px;">${voteCount} vote${voteCount !== 1 ? 's' : ''}</div>
-                        ${voters ? `<div style="font-size: 0.8em; color: #888; margin-bottom: 8px;">${voters}</div>` : ''}
+                        ${voters ? `<div style="font-size: 0.8em; color: var(--text-secondary); margin-bottom: 8px;">${voters}</div>` : ''}
                         <button onclick="castVote('${candidate.app_id}')"
-                                style="padding: 8px 18px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; border: none; border-radius: 20px; cursor: pointer; font-size: 0.95em;">
+                                style="padding: 8px 18px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 0.95em; font-family:inherit;">
                             👍 Vote
                         </button>
                     </div>`;
@@ -4323,7 +4323,7 @@
                 const winner = data.winner;
                 let html = `
                     <h3 style="color: #10b981;">🏆 Winner: ${winner.name}</h3>
-                    <p style="margin-top: 8px; color: #555;">Total votes: <strong>${data.total_votes}</strong></p>
+                    <p style="margin-top: 8px; color: var(--text-secondary);">Total votes: <strong>${data.total_votes}</strong></p>
                     <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">`;
 
                 // Show per-game tallies
@@ -4451,7 +4451,7 @@
                 `;
             }
             
-            return `<div style="padding:15px 20px; border:1px solid var(--card-border); border-radius:10px; margin-bottom:10px; background:var(--card-bg);">
+            return `<div style="padding:15px 20px; border:1px solid var(--card-border); border-radius:12px; margin-bottom:10px; background:var(--card-bg);">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                     <div style="display:flex; align-items:center; flex:1; min-width:0;">
                         ${gameImageHtml}
@@ -5519,8 +5519,8 @@
                 
                 messageDiv.style.display = 'block';
                 if (response.ok) {
-                    messageDiv.style.background = '#d4edda';
-                    messageDiv.style.color = '#155724';
+                    messageDiv.style.background = 'rgba(16,185,129,0.12)';
+                    messageDiv.style.color = '#10b981';
                     messageDiv.textContent = '✅ Settings saved! Games are loading...';
                     toastr.success('Settings saved — games are loading');
                     setTimeout(() => {
@@ -5530,15 +5530,15 @@
                         refreshPlatformFilters();
                     }, 2000);
                 } else {
-                    messageDiv.style.background = '#f8d7da';
-                    messageDiv.style.color = '#721c24';
+                    messageDiv.style.background = 'rgba(239,68,68,0.1)';
+                    messageDiv.style.color = '#ef4444';
                     messageDiv.textContent = '❌ ' + (data.error || 'Failed to save settings');
                     toastr.error(data.error || 'Failed to save settings');
                 }
             } catch (error) {
                 messageDiv.style.display = 'block';
-                messageDiv.style.background = '#f8d7da';
-                messageDiv.style.color = '#721c24';
+                messageDiv.style.background = 'rgba(239,68,68,0.1)';
+                messageDiv.style.color = '#ef4444';
                 messageDiv.textContent = '❌ Error: ' + error.message;
                 toastr.error('Error saving settings: ' + error.message);
             }
@@ -5556,8 +5556,8 @@
             // Validate inputs
             if (!currentPassword || !newPassword || !confirmPassword) {
                 messageDiv.style.display = 'block';
-                messageDiv.style.background = '#f8d7da';
-                messageDiv.style.color = '#721c24';
+                messageDiv.style.background = 'rgba(239,68,68,0.1)';
+                messageDiv.style.color = '#ef4444';
                 messageDiv.textContent = '❌ Please fill in all password fields';
                 toastr.error('Please fill in all password fields');
                 return;
@@ -5565,8 +5565,8 @@
             
             if (newPassword !== confirmPassword) {
                 messageDiv.style.display = 'block';
-                messageDiv.style.background = '#f8d7da';
-                messageDiv.style.color = '#721c24';
+                messageDiv.style.background = 'rgba(239,68,68,0.1)';
+                messageDiv.style.color = '#ef4444';
                 messageDiv.textContent = '❌ New passwords do not match';
                 toastr.error('New passwords do not match');
                 return;
@@ -5574,8 +5574,8 @@
             
             if (newPassword.length < 6) {
                 messageDiv.style.display = 'block';
-                messageDiv.style.background = '#f8d7da';
-                messageDiv.style.color = '#721c24';
+                messageDiv.style.background = 'rgba(239,68,68,0.1)';
+                messageDiv.style.color = '#ef4444';
                 messageDiv.textContent = '❌ New password must be at least 6 characters';
                 toastr.error('New password must be at least 6 characters');
                 return;
@@ -5595,8 +5595,8 @@
                 
                 messageDiv.style.display = 'block';
                 if (response.ok) {
-                    messageDiv.style.background = '#d4edda';
-                    messageDiv.style.color = '#155724';
+                    messageDiv.style.background = 'rgba(16,185,129,0.12)';
+                    messageDiv.style.color = '#10b981';
                     messageDiv.textContent = '✅ Password changed successfully!';
                     toastr.success('Password changed successfully');
                     
@@ -5609,15 +5609,15 @@
                         messageDiv.style.display = 'none';
                     }, 3000);
                 } else {
-                    messageDiv.style.background = '#f8d7da';
-                    messageDiv.style.color = '#721c24';
+                    messageDiv.style.background = 'rgba(239,68,68,0.1)';
+                    messageDiv.style.color = '#ef4444';
                     messageDiv.textContent = '❌ ' + (data.error || 'Failed to change password');
                     toastr.error(data.error || 'Failed to change password');
                 }
             } catch (error) {
                 messageDiv.style.display = 'block';
-                messageDiv.style.background = '#f8d7da';
-                messageDiv.style.color = '#721c24';
+                messageDiv.style.background = 'rgba(239,68,68,0.1)';
+                messageDiv.style.color = '#ef4444';
                 messageDiv.textContent = '❌ Error: ' + error.message;
                 toastr.error('Error changing password: ' + error.message);
             }
@@ -5910,7 +5910,7 @@
                 let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${data.friends.length} friend${data.friends.length !== 1 ? 's' : ''}</p>`;
                 data.friends.forEach(friend => {
                     const stateLabel = PERSONA_STATE[friend.personastate] || 'Offline';
-                    const stateColor = friend.personastate > 0 ? '#10b981' : '#7f8c8d';
+                    const stateColor = friend.personastate > 0 ? '#10b981' : 'var(--text-secondary)';
                     const avatar = friend.avatarfull
                         ? `<img src="${friend.avatarfull}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;margin-right:12px;" loading="lazy">`
                         : `<span style="width:40px;height:40px;border-radius:6px;background:var(--card-border);display:inline-block;margin-right:12px;"></span>`;
@@ -5928,7 +5928,7 @@
                             + '</div>';
                     }
                     html += `
-                        <div class="list-item" style="display:flex; align-items:flex-start; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:10px; cursor:default;">
+                        <div class="list-item" style="display:flex; align-items:flex-start; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:12px; cursor:default;">
                             ${avatar}
                             <div style="flex:1;">
                                 <div>
@@ -6138,7 +6138,7 @@
                     const safeName = game.name.replace(/'/g, "\\'");
                     const scoreStars = '⭐'.repeat(Math.min(Math.round(game.recommendation_score), 5));
                     html += `
-                        <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:10px;"
+                        <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:12px;"
                              onclick="showGameDetails(${game.appid}, '${safeName}', ${game.playtime_hours || 0}, '')">
                             <div style="display:flex; gap:12px; align-items:flex-start; flex:1; min-width:0;">
                                 ${renderGameListThumb(game.appid, game.name)}
@@ -6405,21 +6405,21 @@
                 const data = await resp.json();
                 if (resp.ok) {
                     msgEl.style.display = 'block';
-                    msgEl.style.background = '#d4edda';
-                    msgEl.style.color = '#155724';
+                    msgEl.style.background = 'rgba(16,185,129,0.12)';
+                    msgEl.style.color = '#10b981';
                     msgEl.textContent = '✅ Profile card saved!';
                     loadMyProfileCard();
                     setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
                 } else {
                     msgEl.style.display = 'block';
-                    msgEl.style.background = '#f8d7da';
-                    msgEl.style.color = '#721c24';
+                    msgEl.style.background = 'rgba(239,68,68,0.1)';
+                    msgEl.style.color = '#ef4444';
                     msgEl.textContent = data.error || 'Failed to save';
                 }
             } catch (err) {
                 msgEl.style.display = 'block';
-                msgEl.style.background = '#f8d7da';
-                msgEl.style.color = '#721c24';
+                msgEl.style.background = 'rgba(239,68,68,0.1)';
+                msgEl.style.color = '#ef4444';
                 msgEl.textContent = 'Error: ' + err.message;
             }
         }
@@ -7562,7 +7562,7 @@
             const steamUrl = appId ? `https://store.steampowered.com/app/${appId}/` : null;
             const steamDbUrl = appId ? `https://steamdb.info/app/${appId}/` : null;
             return `
-                <div style="border:1px solid var(--input-border); border-radius:10px; padding:12px; background:var(--list-hover);">
+                <div style="border:1px solid var(--input-border); border-radius:12px; padding:12px; background:var(--list-hover);">
                     <div style="font-size:1.08em; font-weight:700; color:var(--text-primary);">🎮 ${name}</div>
                     <div style="font-size:0.9em; color:var(--text-secondary); margin-top:4px;">Playtime: ${playtimeHours}h</div>
                     ${owners ? `<div style="font-size:0.85em; color:var(--text-secondary); margin-top:4px;">Owners: ${owners}</div>` : ''}
@@ -7708,9 +7708,9 @@
                     return;
                 }
                 const typeIcon = { info:'ℹ️', success:'✅', warning:'⚠️', error:'❌', friend_request:'👥' };
-                const typeBg   = { info:'#e8f4fd', success:'#d4edda', warning:'#fff3cd', error:'#f8d7da', friend_request:'#e8f4fd' };
+                const typeBg   = { info:'rgba(79,70,229,0.06)', success:'rgba(16,185,129,0.12)', warning:'rgba(245,158,11,0.1)', error:'rgba(239,68,68,0.1)', friend_request:'rgba(79,70,229,0.06)' };
                 listDiv.innerHTML = data.notifications.map(n => `
-                    <div style="padding:14px; border-radius:10px; margin-bottom:10px; background:${n.is_read ? 'var(--list-hover)' : typeBg[n.type] || '#e8f4fd'};
+                    <div style="padding:14px; border-radius:12px; margin-bottom:10px; background:${n.is_read ? 'var(--list-hover)' : typeBg[n.type] || 'rgba(79,70,229,0.06)'};
                                 border-left:4px solid ${n.is_read ? 'var(--card-border)' : '#4f46e5'}; opacity:${n.is_read ? '0.75' : '1'};">
                         <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                             <span style="font-size:1.1em;">${typeIcon[n.type] || 'ℹ️'}</span>
@@ -7799,12 +7799,12 @@
                     return;
                 }
                 listDiv.innerHTML = plugins.map(p => `
-                    <div class="list-item" style="padding:16px; margin-bottom:10px; background:var(--list-hover); border-radius:10px;">
+                    <div class="list-item" style="padding:16px; margin-bottom:10px; background:var(--list-hover); border-radius:12px;">
                         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                             <span style="font-size:1.4em;">🧩</span>
                             <div style="flex:1;">
                                 <strong style="font-size:1.05em;">${p.name}</strong>
-                                <span style="margin-left:8px; font-size:0.8em; padding:2px 8px; border-radius:10px; background:${p.enabled ? '#d4edda' : '#f8d7da'}; color:${p.enabled ? '#155724' : '#721c24'};">${p.enabled ? '✅ enabled' : '❌ disabled'}</span>
+                                <span style="margin-left:8px; font-size:0.8em; padding:2px 8px; border-radius:10px; background:${p.enabled ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)'}; color:${p.enabled ? '#10b981' : '#ef4444'};">${p.enabled ? '✅ enabled' : '❌ disabled'}</span>
                             </div>
                             <span style="font-size:0.82em; color:var(--text-secondary);">v${p.version}</span>
                             <div id="plugin-toggle-admin-${p.id}" style="display:none;">
@@ -7977,8 +7977,8 @@
                 const data = await resp.json();
                 if (resp.ok) {
                     msgEl.style.display = 'block';
-                    msgEl.style.background = '#d4edda';
-                    msgEl.style.color = '#155724';
+                    msgEl.style.background = 'rgba(16,185,129,0.12)';
+                    msgEl.style.color = '#10b981';
                     msgEl.textContent = '✅ Settings saved successfully!';
                     setTimeout(() => { msgEl.style.display = 'none'; }, 3000);
                     // Refresh announcement banner
@@ -7992,14 +7992,14 @@
                     }
                 } else {
                     msgEl.style.display = 'block';
-                    msgEl.style.background = '#f8d7da';
-                    msgEl.style.color = '#721c24';
+                    msgEl.style.background = 'rgba(239,68,68,0.1)';
+                    msgEl.style.color = '#ef4444';
                     msgEl.textContent = data.error || 'Failed to save settings';
                 }
             } catch (err) {
                 msgEl.style.display = 'block';
-                msgEl.style.background = '#f8d7da';
-                msgEl.style.color = '#721c24';
+                msgEl.style.background = 'rgba(239,68,68,0.1)';
+                msgEl.style.color = '#ef4444';
                 msgEl.textContent = 'Error: ' + err.message;
             }
         }
@@ -8012,8 +8012,8 @@
             const el = document.getElementById('discord-bot-message');
             if (!el) return;
             el.style.display = 'block';
-            el.style.background = type === 'error' ? '#f8d7da' : '#d4edda';
-            el.style.color = type === 'error' ? '#721c24' : '#155724';
+            el.style.background = type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.12)';
+            el.style.color = type === 'error' ? '#ef4444' : '#10b981';
             el.textContent = msg;
             setTimeout(() => { el.style.display = 'none'; }, 4000);
         }
@@ -8999,7 +8999,7 @@
                             <p style="margin:0 0 8px 0; font-size:0.9em;"><strong style="color:var(--accent);">🎲 Winning Pick:</strong> <span style="color:var(--text-primary);">${s.winning_pick}</span></p>
                             <p style="margin:0 0 8px 0; font-size:0.85em; color:var(--text-secondary);">Players: ${s.player_count} | Your Vote: ${s.your_vote ? '✓' : '✗'}</p>
                             <div style="display:flex; gap:8px; font-size:0.85em;">
-                                ${s.your_vote ? `<span style="background:rgba(39,174,96,0.2); color:#10b981; padding:4px 8px; border-radius:4px;">✓ You voted correctly</span>` : ''}
+                                ${s.your_vote ? `<span style="background:rgba(16,185,129,0.12); color:#10b981; padding:4px 8px; border-radius:4px;">✓ You voted correctly</span>` : ''}
                                 ${s.you_picked ? `<span style="background:rgba(52,152,219,0.2); color:#3498db; padding:4px 8px; border-radius:4px;">🎲 You picked</span>` : ''}
                             </div>
                         </div>
@@ -10056,7 +10056,7 @@
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Votes Cast</p>
                     <p style="margin:0; font-size:1.8em; color:#3498db; font-weight:bold;" id="stat-votes">0</p>
                 </div>
-                <div style="background:rgba(39,174,96,0.1); padding:12px; border-radius:8px; text-align:center;">
+                <div style="background:rgba(16,185,129,0.08); padding:12px; border-radius:8px; text-align:center;">
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Accuracy</p>
                     <p style="margin:0; font-size:1.8em; color:#10b981; font-weight:bold;" id="stat-accuracy">0%</p>
                 </div>
@@ -10231,8 +10231,8 @@
                 <div style="background:rgba(52,73,94,0.1); padding:12px; border-radius:8px; border-left:3px solid #34495e;">
                     <p style="margin:0; color:var(--text-primary); font-weight:600;">📊 Accuracy Variance: <span style="color:#3498db;">±2.1%</span></p>
                 </div>
-                <div style="background:rgba(149,165,166,0.1); padding:12px; border-radius:8px; border-left:3px solid #95a5a6;">
-                    <p style="margin:0; color:var(--text-primary); font-weight:600;">⏱️ Avg Response Time: <span style="color:#95a5a6;">145ms</span></p>
+                <div style="background:rgba(99,102,241,0.06); padding:12px; border-radius:8px; border-left:3px solid var(--text-secondary);">
+                    <p style="margin:0; color:var(--text-primary); font-weight:600;">⏱️ Avg Response Time: <span style="color:var(--text-secondary);">145ms</span></p>
                 </div>
             </div>
             <div style="margin-top:20px;">
