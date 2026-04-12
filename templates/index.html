@@ -269,28 +269,33 @@
 
         .game-display {
             background: var(--list-hover);
-            padding: 25px;
-            border-radius: 10px;
+            padding: 24px;
+            border-radius: var(--radius, 12px);
             margin-top: 20px;
             min-height: 200px;
+            border: 1px solid var(--card-border);
         }
 
         .game-title {
-            font-size: 2em;
+            font-size: 1.8em;
+            font-weight: 800;
             color: var(--text-primary);
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
         }
 
         .game-info {
             color: var(--text-secondary);
             margin: 10px 0;
             line-height: 1.6;
+            font-size: 0.94em;
         }
 
         .game-description {
-            margin: 15px 0;
+            margin: 14px 0;
             color: var(--text-secondary);
             line-height: 1.8;
+            font-size: 0.94em;
         }
 
         .game-preview {
@@ -369,19 +374,22 @@
         .btn {
             padding: 10px 20px;
             border: none;
-            border-radius: 8px;
+            border-radius: 50px;
             cursor: pointer;
             font-weight: 600;
-            transition: all 0.3s;
+            font-family: inherit;
+            font-size: 0.9em;
+            transition: all 0.2s;
         }
 
         .btn-favorite {
-            background: #ffc107;
-            color: #333;
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
         }
 
         .btn-favorite:hover {
-            background: #ffb300;
+            background: #fde68a;
         }
 
         .btn-link {
@@ -393,8 +401,6 @@
             background: #4338ca;
         }
 
-        .list-container {
-            max-height: 500px;
         .list-container {
             max-height: 500px;
             overflow-y: auto;
@@ -451,13 +457,15 @@
 
         .search-input {
             width: 100%;
-            padding: 12px 15px;
-            border: 2px solid var(--input-border);
-            border-radius: 8px;
-            font-size: 1em;
+            padding: 11px 16px;
+            border: 1.5px solid var(--input-border);
+            border-radius: 50px;
+            font-size: 0.95em;
+            font-family: inherit;
             margin-bottom: 15px;
             background: var(--input-bg);
             color: var(--text-primary);
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         .search-input:focus {
@@ -683,7 +691,7 @@
             width: 54px;
             height: 54px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -740,7 +748,7 @@
             border-radius: 12px;
             font-size: 0.75em;
             font-weight: 600;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
             color: white;
         }
         .user-card-badge.admin { background: linear-gradient(135deg, #e74c3c, #c0392b); }
@@ -807,7 +815,7 @@
         /* ── Site Announcement Banner ─────────────────────────────────── */
         #site-announcement {
             display: none;
-            background: linear-gradient(90deg, #667eea, #764ba2);
+            background: linear-gradient(90deg, #4f46e5, #7c3aed);
             color: white;
             padding: 10px 20px;
             text-align: center;
@@ -1049,18 +1057,21 @@
 
         <!-- Library Tab -->
         <div id="library-tab" class="tab-content">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
-                <input type="text" id="library-search" class="search-input" placeholder="Search your library..." oninput="searchLibraryDebounced()" style="margin-bottom:0; flex:1; min-width:180px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+                <input type="text" id="library-search" class="search-input" placeholder="🔍 Search your library..." oninput="searchLibraryDebounced()" style="margin-bottom:0; flex:1; min-width:180px;">
                 <div style="display:flex; gap:8px; align-items:center;">
                     <button id="library-view-list-btn" onclick="setLibraryView('list')" title="List view"
-                            style="padding:8px 12px; border:1px solid var(--input-border); border-radius:8px; cursor:pointer; background:linear-gradient(135deg,#667eea,#764ba2); color:white; font-size:1em;">☰</button>
+                            style="padding:8px 12px; border:1.5px solid var(--input-border); border-radius:50px; cursor:pointer; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; font-size:1em; font-family:inherit; transition:opacity 0.15s;">☰</button>
                     <button id="library-view-grid-btn" onclick="setLibraryView('grid')" title="Grid view"
-                            style="padding:8px 12px; border:1px solid var(--input-border); border-radius:8px; cursor:pointer; background:var(--card-bg); color:var(--text-primary); font-size:1em;">⊞</button>
-                    <a href="/api/export/library" download="gapi_library.csv" style="padding:9px 18px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.9em; white-space:nowrap;">⬇️ Export CSV</a>
+                            style="padding:8px 12px; border:1.5px solid var(--input-border); border-radius:50px; cursor:pointer; background:var(--card-bg); color:var(--text-primary); font-size:1em; font-family:inherit; transition:background 0.15s;">⊞</button>
+                    <a href="/api/export/library" download="gapi_library.csv" style="padding:9px 18px; background:linear-gradient(135deg,#059669,#047857); color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:0.88em; white-space:nowrap; font-family:inherit;">⬇️ Export CSV</a>
                 </div>
             </div>
             <div id="library-list" class="list-container">
-                <div class="loading">Loading library...</div>
+                <!-- Skeleton loading shown on initial page load before JS runs -->
+                <div class="skeleton-item"><div class="skeleton skeleton-thumb"></div><div class="skeleton-text-block"><div class="skeleton skeleton-text-line wide"></div><div class="skeleton skeleton-text-line mid"></div></div></div>
+                <div class="skeleton-item"><div class="skeleton skeleton-thumb"></div><div class="skeleton-text-block"><div class="skeleton skeleton-text-line wide"></div><div class="skeleton skeleton-text-line mid"></div></div></div>
+                <div class="skeleton-item"><div class="skeleton skeleton-thumb"></div><div class="skeleton-text-block"><div class="skeleton skeleton-text-line wide"></div><div class="skeleton skeleton-text-line mid"></div></div></div>
             </div>
             <!-- Cross-platform duplicates section -->
             <div id="duplicates-section" style="margin-top:24px; display:none;">
@@ -1095,7 +1106,7 @@
                 </div>
                 
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button id="compare-btn" style="display: none; padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                    <button id="compare-btn" style="display: none; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
                         📊 Compare Selected Users
                     </button>
                     <button id="clear-compare-btn" style="display: none; padding: 10px 20px; background: #e0e0e0; color: #333; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
@@ -1106,7 +1117,7 @@
             
             <!-- View Mode Toggle -->
             <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                <button id="view-single-btn" style="padding: 10px 16px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                <button id="view-single-btn" style="padding: 10px 16px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
                     📈 Single User View
                 </button>
                 <button id="view-compare-btn" style="padding: 10px 16px; background: transparent; color: var(--text-secondary); border: 2px solid var(--text-secondary); border-radius: 5px; cursor: pointer; font-weight: 600; display: none;">
@@ -1258,7 +1269,7 @@
 
             <!-- Action Buttons -->
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
-                <button onclick="pickMultiUserGame()" style="padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
+                <button onclick="pickMultiUserGame()" style="padding: 15px 40px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
                     🎲 Pick Common Game
                 </button>
                 <button onclick="startVote()" style="padding: 15px 40px; background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); color: white; border: none; border-radius: 50px; cursor: pointer; font-size: 1.2em; font-weight: bold;">
@@ -1304,7 +1315,7 @@
                            style="padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 1em; flex: 1; max-width: 250px;">
                 </div>
                 <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
-                    <button onclick="refreshVoteStatus()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    <button onclick="refreshVoteStatus()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 8px; cursor: pointer;">
                         🔄 Refresh Results
                     </button>
                     <button onclick="closeVote()" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 8px; cursor: pointer;">
@@ -1324,7 +1335,7 @@
                 <div id="common-games-list" class="list-container">
                     <div class="loading">Select users and click "Show Common Games" to see shared games</div>
                 </div>
-                <button onclick="showCommonGames()" style="margin-top: 10px; padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                <button onclick="showCommonGames()" style="margin-top: 10px; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 8px; cursor: pointer;">
                     🔍 Show Common Games
                 </button>
             </div>
@@ -1390,7 +1401,7 @@
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
-                    <button onclick="submitScheduleForm()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">💾 Save Event</button>
+                    <button onclick="submitScheduleForm()" style="padding:10px 28px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">💾 Save Event</button>
                     <button onclick="clearScheduleForm()" style="padding:10px 18px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer;">✕ Clear</button>
                 </div>
             </div>
@@ -1407,7 +1418,7 @@
             <h2>📋 Game Playlists</h2>
             <div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
                 <input type="text" id="new-playlist-name" class="search-input" placeholder="New playlist name…" style="max-width:260px; margin-bottom:0;">
-                <button onclick="createPlaylist()" style="padding:10px 22px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Create Playlist</button>
+                <button onclick="createPlaylist()" style="padding:10px 22px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">➕ Create Playlist</button>
             </div>
             <div id="playlists-container">
                 <div class="loading">Loading playlists…</div>
@@ -1444,7 +1455,7 @@
                     <input type="number" id="ignore-app-id" placeholder="Steam App ID" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
                     <input type="text" id="ignore-game-name" placeholder="Game name" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
                     <input type="text" id="ignore-reason" placeholder="Reason (optional)" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <button onclick="addIgnoredGame()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">Add</button>
+                    <button onclick="addIgnoredGame()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer;">Add</button>
                 </div>
             </div>
             
@@ -1470,7 +1481,7 @@
                         <option value="extreme">Extreme</option>
                     </select>
                     <input type="number" id="hunt-targets" placeholder="Target count" min="0" style="padding: 10px; border: 1px solid var(--input-border); border-radius: 5px; background: var(--input-bg); color: var(--text-primary);">
-                    <button onclick="startAchievementHunt()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">Start Hunt</button>
+                    <button onclick="startAchievementHunt()" style="padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer;">Start Hunt</button>
                 </div>
             </div>
             
@@ -1492,7 +1503,7 @@
                     <input id="friend-request-input" type="text" placeholder="Enter username to add…"
                            style="flex:1; min-width:180px; padding:9px 12px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);"
                            onkeydown="if(event.key==='Enter') sendFriendRequest()">
-                    <button onclick="sendFriendRequest()" style="padding:9px 22px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Add Friend</button>
+                    <button onclick="sendFriendRequest()" style="padding:9px 22px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">➕ Add Friend</button>
                     <button onclick="loadAppFriends()" style="padding:9px 18px; background:var(--card-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄</button>
                 </div>
                 <!-- Pending received requests -->
@@ -1512,7 +1523,7 @@
             <div>
                 <h3 style="margin-bottom:8px;">🎮 Steam Friends Activity</h3>
                 <p style="color:var(--text-secondary); margin-bottom:12px; font-size:0.9em;">Requires a public Steam profile and a configured Steam ID.</p>
-                <button onclick="loadFriends()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:16px;">🔄 Refresh Steam</button>
+                <button onclick="loadFriends()" style="padding:10px 28px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit; margin-bottom:16px;">🔄 Refresh Steam</button>
                 <div id="friends-list">
                     <div class="loading">Click Refresh to load your Steam friends…</div>
                 </div>
@@ -1548,7 +1559,7 @@
                         <input type="checkbox" id="rec-new-releases">
                         <span style="font-weight:600; color:var(--text-primary);">New Releases</span>
                     </label>
-                <button onclick="loadRecommendations()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
+                <button onclick="loadRecommendations()" style="padding:10px 28px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">🔄 Refresh</button>
             </div>
             <div id="recommendations-list">
                 <div class="loading">Click Refresh to generate recommendations…</div>
@@ -1566,7 +1577,7 @@
                     <option value="games">🎮 Games Owned</option>
                     <option value="achievements">🏅 Achievements</option>
                 </select>
-                <button onclick="loadLeaderboard()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
+                <button onclick="loadLeaderboard()" style="padding:10px 28px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">🔄 Refresh</button>
             </div>
             <div id="leaderboard-list"><div class="loading">Select a metric and click Refresh…</div></div>
         </div>
@@ -1582,7 +1593,7 @@
                     <option value="gaming">🎮 gaming</option>
                     <option value="off-topic">🎲 off-topic</option>
                 </select>
-                <button onclick="openCreateRoomModal()" style="padding:8px 16px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">+ Create Room</button>
+                <button onclick="openCreateRoomModal()" style="padding:8px 16px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">+ Create Room</button>
             </div>
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
                 <input id="chat-search" type="text" placeholder="🔍 Search messages..." maxlength="100" oninput="filterChatMessages()" style="padding:8px 12px; border-radius:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); flex:0 1 200px;" />
@@ -1614,7 +1625,7 @@
                         <div class="loading">Loading messages…</div>
                     </div>
                     <div id="typing-indicator" style="display:none; padding:6px 12px; font-size:0.85em; color:var(--text-secondary); font-style:italic;"></div>
-                    <div id="reply-preview" style="display:none; margin-top:8px; padding:8px 12px; background:var(--input-bg); border:1px solid var(--input-border); border-radius:8px; border-left:3px solid #667eea; gap:8px; align-items:center;"></div>
+                    <div id="reply-preview" style="display:none; margin-top:8px; padding:8px 12px; background:var(--input-bg); border:1px solid var(--input-border); border-radius:8px; border-left:3px solid #4f46e5; gap:8px; align-items:center;"></div>
                     <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
                         <span title="Formatting: **bold** *italic* `code` ~~strike~~ URLs auto-link" style="font-size:0.75em; color:var(--text-secondary); cursor:help;">ℹ️ Markdown supported</span>
                     </div>
@@ -1624,7 +1635,7 @@
                                oninput="handleTypingInput()"
                                onkeydown="if(event.key==='Enter'&&!editingMessageId)sendChatMessage()"
                                style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
-                        <button id="chat-send-btn" onclick="sendChatMessage()" style="padding:10px 24px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Send</button>
+                        <button id="chat-send-btn" onclick="sendChatMessage()" style="padding:10px 24px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">Send</button>
                         <button id="chat-cancel-edit-btn" onclick="cancelEditMessage()" style="display:none; padding:10px 20px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">Cancel</button>
                     </div>
                 </div>
@@ -1652,7 +1663,7 @@
                     <input id="session-coop-only" type="checkbox">
                     <span>Co-op only</span>
                 </label>
-                <button onclick="createLiveSession()" style="padding:9px 16px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Create Session</button>
+                <button onclick="createLiveSession()" style="padding:9px 16px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">➕ Create Session</button>
                 <button onclick="loadLiveSessions()" style="padding:9px 16px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
             </div>
             <div style="display:grid; grid-template-columns: minmax(300px, 1fr) minmax(380px, 1.2fr); gap:14px; align-items:start;">
@@ -1676,7 +1687,7 @@
                     <span style="color:var(--text-primary); font-weight:600;">Unread only</span>
                 </label>
                 <button onclick="markAllNotificationsRead()" style="padding:8px 20px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">✅ Mark all read</button>
-                <button onclick="loadNotifications()" style="padding:8px 20px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">🔄 Refresh</button>
+                <button onclick="loadNotifications()" style="padding:8px 20px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">🔄 Refresh</button>
             </div>
             <div id="admin-send-notification" style="display:none; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:16px; margin-bottom:20px;">
                 <h4 style="margin-top:0;">📢 Send Alert (Admin)</h4>
@@ -1710,7 +1721,7 @@
                     <button onclick="registerPlugin()" style="padding:10px 24px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">➕ Register</button>
                 </div>
             </div>
-            <button onclick="loadPlugins()" style="padding:10px 28px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:16px;">🔄 Refresh</button>
+            <button onclick="loadPlugins()" style="padding:10px 28px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit; margin-bottom:16px;">🔄 Refresh</button>
             <div id="plugins-list"><div class="loading">Click Refresh to load plugins…</div></div>
         </div>
 
@@ -1848,7 +1859,7 @@
                 
                 <div style="margin-bottom: 15px;">
                     <button onclick="triggerLibrarySync()" id="sync-library-btn" 
-                            style="padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                            style="padding: 12px 30px; background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
                         🔄 Sync Library Now
                     </button>
                     <small style="color: #666; display: block; margin-top: 8px;">
@@ -1904,7 +1915,7 @@
                 </label>
 
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button onclick="loadMigrations()" style="padding: 10px 24px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    <button onclick="loadMigrations()" style="padding: 10px 24px; background: #4f46e5; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
                         🔄 Reload Migrations
                     </button>
                     <button onclick="runMigration()" style="padding: 10px 24px; background: #27ae60; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
@@ -1986,7 +1997,7 @@
         </div>
 
         <div id="admin-settings-message" style="display:none; padding:10px; border-radius:8px; margin-bottom:14px;"></div>
-        <button onclick="saveAdminSettings()" style="padding:12px 32px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:1em;">💾 Save Settings</button>
+        <button onclick="saveAdminSettings()" style="padding:12px 32px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit; font-size:1em;">💾 Save Settings</button>
 
         <!-- Discord Bot Management -->
         <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; padding:20px; margin-top:24px;">
@@ -2068,7 +2079,7 @@
                         <input type="password" id="discord-bot-steam-key-input" placeholder="Paste new Steam API key (leave blank to keep existing)"
                                style="padding:9px; border:1px solid var(--input-border); border-radius:8px; background:var(--input-bg); color:var(--text-primary);">
                     </label>
-                    <button onclick="saveDiscordBotConfig()" style="padding:9px 22px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; align-self:flex-start;">💾 Save Config</button>
+                    <button onclick="saveDiscordBotConfig()" style="padding:9px 22px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit; align-self:flex-start;">💾 Save Config</button>
                 </div>
             </details>
 
@@ -2098,7 +2109,7 @@
                             <div style="display:flex; gap:8px;">
                                 <input type="text" id="bot-invite-url" readonly 
                                        style="flex:1; padding:6px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); font-size:0.85em;">
-                                <button onclick="copyBotInviteUrl()" style="padding:6px 14px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy</button>
+                                <button onclick="copyBotInviteUrl()" style="padding:6px 14px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">📋 Copy</button>
                             </div>
                         </div>
                     </div>
@@ -2212,7 +2223,7 @@
                 <label style="display:block; margin-bottom:8px; font-weight:600; font-size:0.95em;">Or create new playlist:</label>
                 <div style="display:flex; gap:10px;">
                     <input type="text" id="new-playlist-input" class="search-input" placeholder="New playlist name…" style="margin-bottom:0; flex:1;">
-                    <button onclick="createNewPlaylistFromModal()" style="padding:8px 16px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600;">Create</button>
+                    <button onclick="createNewPlaylistFromModal()" style="padding:8px 16px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">Create</button>
                 </div>
             </div>
             <div style="display:flex; gap:10px; margin-top:20px; justify-content:flex-end;">
@@ -2333,8 +2344,10 @@
         function clearUserData() {
             const listIds = [
                 'library-list', 'favorites-list', 'ignored-games-list',
-                'backlog-list', 'playlists-list', 'achievements-list',
-                'friends-list', 'recommendations-list'
+                'backlog-list', 'playlists-list', 'playlists-container',
+                'achievements-list', 'friends-list', 'recommendations-list',
+                'schedule-list', 'notifications-list', 'leaderboard-list',
+                'users-list', 'common-games-list'
             ];
             listIds.forEach(id => {
                 const el = document.getElementById(id);
@@ -2692,10 +2705,10 @@
                        <span style="font-size:1.1em; margin-left:6px;">${'★'.repeat(safeRating)}${'☆'.repeat(10-safeRating)}</span>
                        <span style="color:var(--text-secondary); margin-left:6px;">(${safeRating}/10)</span>
                        ${safeNotes ? `<p style="margin-top:4px; color:var(--text-secondary);">${safeNotes}</p>` : ''}
-                       <button onclick="editReview('${game.game_id}')" style="margin-top:6px; padding:4px 10px; background:#667eea; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
+                       <button onclick="editReview('${game.game_id}')" style="margin-top:6px; padding:4px 10px; background:#4f46e5; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
                        <button onclick="deleteReview('${game.game_id}')" style="margin-top:6px; margin-left:4px; padding:4px 10px; background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
                    </div>`
-                : `<button onclick="editReview('${game.game_id}')" style="margin-top:8px; padding:6px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">
+                : `<button onclick="editReview('${game.game_id}')" style="margin-top:8px; padding:6px 14px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.9em;">
                        ✏️ Write a Review
                    </button>`;
 
@@ -3513,7 +3526,7 @@
                 return;
             }
             
-            statsDiv.innerHTML = '<div class="loading">Loading comparison...</div>';
+            statsDiv.innerHTML = renderSkeletonList(3);
             
             try {
                 const response = await fetch(`/api/stats/compare?users=${selectedUsers.join(',')}`);
@@ -3531,7 +3544,7 @@
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
                 `;
                 
-                const colors = ['#667eea', '#764ba2', '#f39c12', '#e74c3c', '#27ae60'];
+                const colors = ['#4f46e5', '#7c3aed', '#f59e0b', '#e74c3c', '#10b981'];
                 
                 data.users.forEach((user, idx) => {
                     if (user.error) {
@@ -3545,7 +3558,7 @@
                         const color = colors[idx % colors.length];
                         html += `
                             <div class="stat-card" style="border-left: 4px solid ${color};">
-                                <div style="color: ${color}; font-weight: 700; margin-bottom: 15px; font-size: 1.1em;">${user.username}</div>
+                                <div style="color: ${color}; font-weight: 700; margin-bottom: 12px; font-size: 1.05em;">${user.username}</div>
                                 <div style="display: grid; gap: 10px; font-size: 0.95em;">
                                     <div><strong>Total Games:</strong> ${user.total_games}</div>
                                     <div><strong>Played:</strong> ${user.played_games}</div>
@@ -3566,13 +3579,13 @@
                         <div style="margin-bottom: 30px;">
                             <h3 style="margin-bottom: 15px;">📈 Comparison Metrics</h3>
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #667eea;">
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #4f46e5;">
                                     <div style="color: var(--text-secondary); font-size: 0.9em;">Most Games</div>
-                                    <div style="font-size: 1.8em; font-weight: 700; color: #667eea;">${data.comparison_metrics.most_games}</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #4f46e5;">${data.comparison_metrics.most_games}</div>
                                 </div>
-                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #764ba2;">
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #7c3aed;">
                                     <div style="color: var(--text-secondary); font-size: 0.9em;">Least Games</div>
-                                    <div style="font-size: 1.8em; font-weight: 700; color: #764ba2;">${data.comparison_metrics.least_games}</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #7c3aed;">${data.comparison_metrics.least_games}</div>
                                 </div>
                                 <div style="background: var(--card-bg); padding: 15px; border-radius: 8px; border-left: 4px solid #f39c12;">
                                     <div style="color: var(--text-secondary); font-size: 0.9em;">Average Games</div>
@@ -3619,7 +3632,7 @@
                                     {
                                         label: 'Played',
                                         data: playedGames,
-                                        backgroundColor: '#667eea',
+                                        backgroundColor: '#4f46e5',
                                     },
                                     {
                                         label: 'Unplayed',
@@ -3692,9 +3705,9 @@
                         document.getElementById('view-single-btn').style.color = 'var(--text-secondary)';
                         document.getElementById('view-single-btn').style.border = '2px solid var(--text-secondary)';
                         
-                        document.getElementById('view-compare-btn').style.background = '#667eea';
+                        document.getElementById('view-compare-btn').style.background = '#4f46e5';
                         document.getElementById('view-compare-btn').style.color = 'white';
-                        document.getElementById('view-compare-btn').style.border = '2px solid #667eea';
+                        document.getElementById('view-compare-btn').style.border = '2px solid #4f46e5';
                         
                         await loadStatsComparison();
                     });
@@ -3706,9 +3719,9 @@
                     clearBtn.addEventListener('click', function() {
                         document.querySelectorAll('.compare-user-checkbox').forEach(cb => cb.checked = false);
                         
-                        document.getElementById('view-single-btn').style.background = '#667eea';
+                        document.getElementById('view-single-btn').style.background = '#4f46e5';
                         document.getElementById('view-single-btn').style.color = 'white';
-                        document.getElementById('view-single-btn').style.border = '2px solid #667eea';
+                        document.getElementById('view-single-btn').style.border = '2px solid #4f46e5';
                         
                         document.getElementById('view-compare-btn').style.background = 'transparent';
                         document.getElementById('view-compare-btn').style.color = 'var(--text-secondary)';
@@ -3724,9 +3737,9 @@
                 
                 if (singleBtn) {
                     singleBtn.addEventListener('click', function() {
-                        singleBtn.style.background = '#667eea';
+                        singleBtn.style.background = '#4f46e5';
                         singleBtn.style.color = 'white';
-                        singleBtn.style.border = '2px solid #667eea';
+                        singleBtn.style.border = '2px solid #4f46e5';
                         
                         compareBtn2.style.background = 'transparent';
                         compareBtn2.style.color = 'var(--text-secondary)';
@@ -3785,7 +3798,7 @@
                         const isAdmin = user.role === 'admin';
                         const roleList = user.roles && user.roles.length ? user.roles : [user.role];
                         const roleBadges = roleList.map(r => `<span style=\"display:inline-block; margin:2px 6px 0 0; padding:2px 8px; background:#eef1ff; color:#445; border-radius:10px; font-size:0.75em; font-weight:600;\">${r}</span>`).join(' ');
-                        const roleColor = isAdmin ? '#f39c12' : '#667eea';
+                        const roleColor = isAdmin ? '#f59e0b' : '#4f46e5';
                         const roleIcon = isAdmin ? '👑' : '👤';
                         
                         html += `
@@ -3823,7 +3836,7 @@
                                         </button>
                                     ` : `
                                         <button onclick="toggleUserRole('${user.username}', 'user')" 
-                                                style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
+                                                style="padding: 6px 12px; background: #4f46e5; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600;"
                                                 title="Make Regular User">
                                             👤 User
                                         </button>
@@ -3936,7 +3949,7 @@
                 top: 20px;
                 right: 20px;
                 padding: 15px 25px;
-                background: ${type === 'success' ? '#27ae60' : type === 'error' ? '#e74c3c' : '#667eea'};
+                background: ${type === 'success' ? '#10b981' : type === 'error' ? '#e74c3c' : '#4f46e5'};
                 color: white;
                 border-radius: 8px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.15);
@@ -3958,7 +3971,7 @@
         // Multi-User Functions
         async function loadUsersForMultiUser() {
             const checkboxDiv = document.getElementById('user-checkboxes');
-            checkboxDiv.innerHTML = '<div class="loading">Loading...</div>';
+            checkboxDiv.innerHTML = renderSkeletonList(3);
             
             try {
                 const response = await fetch('/api/users');
@@ -3972,7 +3985,7 @@
                         const tooltipText = hasAnyId ? 'Has platform IDs configured' : 'No platform IDs - add in Settings';
                         
                         html += `
-                            <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: 8px; cursor: pointer; border: 2px solid ${hasAnyId ? '#667eea' : '#e0e0e0'};" title="${tooltipText}">
+                            <label style="display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: 8px; cursor: pointer; border: 2px solid ${hasAnyId ? '#4f46e5' : 'var(--card-border)'};" title="${tooltipText}">
                                 <input type="checkbox" class="user-checkbox" value="${user.username}" ${!hasAnyId ? 'disabled' : ''} style="width: 18px; height: 18px;" onchange="refreshMultiUserPlatformFilters()">
                                 <span><strong>${badge} ${user.username}</strong></span>
                             </label>
@@ -4097,7 +4110,7 @@
             const listDiv = document.getElementById('common-games-list');
             const countSpan = document.getElementById('common-count');
 
-            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            listDiv.innerHTML = renderSkeletonList(5);
             showSpinner('Loading common games…');
             try {
                 const usersParam = selectedUsers.length > 0 ? selectedUsers.join(',') : '';
@@ -4236,10 +4249,10 @@
                     <div style="background: white; border-radius: 10px; padding: 15px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
                         <div style="font-weight: bold; margin-bottom: 8px;">${candidate.name}</div>
                         <div style="color: #666; font-size: 0.9em; margin-bottom: 10px;">${candidate.playtime_hours}h played</div>
-                        <div id="vote-count-${candidate.app_id}" style="font-size: 1.4em; font-weight: bold; color: #667eea; margin-bottom: 6px;">${voteCount} vote${voteCount !== 1 ? 's' : ''}</div>
+                        <div id="vote-count-${candidate.app_id}" style="font-size: 1.4em; font-weight: bold; color: #4f46e5; margin-bottom: 6px;">${voteCount} vote${voteCount !== 1 ? 's' : ''}</div>
                         ${voters ? `<div style="font-size: 0.8em; color: #888; margin-bottom: 8px;">${voters}</div>` : ''}
                         <button onclick="castVote('${candidate.app_id}')"
-                                style="padding: 8px 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 20px; cursor: pointer; font-size: 0.95em;">
+                                style="padding: 8px 18px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; border: none; border-radius: 20px; cursor: pointer; font-size: 0.95em;">
                             👍 Vote
                         </button>
                     </div>`;
@@ -4362,7 +4375,7 @@
         async function loadSchedule() {
             const listDiv = document.getElementById('schedule-list');
             if (!listDiv) return;
-            listDiv.innerHTML = '<div class="loading">Loading schedule…</div>';
+            listDiv.innerHTML = renderSkeletonList(5);
             try {
                 const resp = await fetch('/api/schedule');
                 if (!resp.ok) { listDiv.innerHTML = '<div class="error">Could not load schedule</div>'; return; }
@@ -4467,7 +4480,7 @@
                     </div>
                 </div>` : ''}
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                    <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
+                    <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">✏️ Edit</button>
                     ${!ev.discord_event_id && ev.game_appid ? `<button onclick="createDiscordEventForSchedule('${ev.id}', '${safeGame}')" style="padding:5px 14px; background:#5865F2; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">📢 Create Discord Event</button>` : ''}
                     <button onclick="deleteScheduleEvent('${ev.id}', ${ev.discord_event_id ? 'true' : 'false'}, '${(ev.discord_guild_id || '').replace(/'/g,"\\'")}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
                 </div>
@@ -4655,7 +4668,7 @@
             const tags = document.getElementById('attendee-tags');
             const attendees = field.value.split(',').map(x => x.trim()).filter(x => x);
             tags.innerHTML = attendees.map(name => `
-                <span style="padding:4px 10px; background:#667eea; color:white; border-radius:16px; font-size:0.85em;">
+                <span style="padding:4px 10px; background:#4f46e5; color:white; border-radius:16px; font-size:0.85em;">
                     ${name}
                     <span onclick="removeAttendee('${name.replace(/'/g,"\\'")}'" style="margin-left:6px; cursor:pointer;">×</span>
                 </span>
@@ -4802,7 +4815,7 @@
                         </div>
                         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
                             <button onclick="viewPlaylist('${p.name}')" style="padding:5px 14px; background:var(--list-hover); border:1px solid var(--card-border); border-radius:8px; cursor:pointer; color:var(--text-primary);">👁 View</button>
-                            <button onclick="pickFromPlaylist('${p.name}')" style="padding:5px 14px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer;">🎲 Pick</button>
+                            <button onclick="pickFromPlaylist('${p.name}')" style="padding:5px 14px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer;">🎲 Pick</button>
                             <button onclick="deletePlaylist('${p.name}')" style="padding:5px 14px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer;">🗑️ Delete</button>
                         </div>
                         <div id="playlist-games-${CSS.escape(p.name)}" style="margin-top:10px; display:none;"></div>
@@ -4928,7 +4941,7 @@
                     return;
                 }
                 
-                const statusColors = {want_to_play:'#667eea', playing:'#27ae60', completed:'#f39c12', dropped:'#e74c3c'};
+                const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#e74c3c'};
                 const BATCH_SIZE = 10; // Render 10 items at a time for backlog
                 let allHtml = '';
                 
@@ -5742,11 +5755,11 @@
                                         <div>
                                             <small style="color: var(--text-secondary);">Progress:</small><br>
                                             <div style="background: var(--list-hover); border-radius: 8px; height: 20px; overflow: hidden; margin-top: 5px;">
-                                                <div style="background: linear-gradient(90deg, #667eea, #764ba2); height: 100%; width: ${totalCount > 0 ? (unlockedCount / totalCount * 100) : 0}%; transition: width 0.3s;"></div>
+                                                <div style="background: linear-gradient(90deg, #4f46e5, #7c3aed); height: 100%; width: ${totalCount > 0 ? (unlockedCount / totalCount * 100) : 0}%; transition: width 0.3s;"></div>
                                             </div>
                                         </div>
                                         <div style="text-align: center;">
-                                            <strong style="font-size: 1.2em; color: #667eea;">${unlockedCount}/${totalCount}</strong><br>
+                                            <strong style="font-size: 1.2em; color: #4f46e5;">${unlockedCount}/${totalCount}</strong><br>
                                             <small style="color: var(--text-secondary);">Unlocked</small>
                                         </div>
                                     </div>
@@ -6131,7 +6144,7 @@
                                 ${renderGameListThumb(game.appid, game.name)}
                                 <div style="flex:1; min-width:0;">
                                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                                    <span style="background:linear-gradient(135deg,#667eea,#764ba2); color:white; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9em; flex-shrink:0;">${idx + 1}</span>
+                                    <span style="background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9em; flex-shrink:0;">${idx + 1}</span>
                                     <strong class="list-item-title">${game.name}</strong>
                                     <span style="font-size:0.85em; color:var(--text-secondary);">${game.playtime_hours > 0 ? game.playtime_hours + 'h played' : 'Never played'}</span>
                                 </div>
@@ -6211,7 +6224,7 @@
             const grid = document.getElementById('app-friends-list');
             const reqSection = document.getElementById('friend-requests-section');
             const reqList = document.getElementById('friend-requests-list');
-            grid.innerHTML = '<div class="loading">Loading…</div>';
+            grid.innerHTML = renderSkeletonList(3);
             try {
                 const resp = await fetch('/api/app-friends');
                 if (!resp.ok) { grid.innerHTML = '<div class="loading">Not available (no DB).</div>'; return; }
@@ -6242,7 +6255,7 @@
                 ));
                 grid.innerHTML = cards.map(card =>
                     buildUserCard(card, [
-                        { label: '👤 View Card', onclick: `showUserCardModal('${card.username}')`, bg: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white' },
+                        { label: '👤 View Card', onclick: `showUserCardModal('${card.username}')`, bg: 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: 'white' },
                         { label: '❌ Remove', onclick: `removeAppFriend('${card.username}')`, bg: '#fdecea', color: '#c0392b' },
                     ])
                 ).join('');
@@ -6419,7 +6432,7 @@
             const listDiv = document.getElementById('leaderboard-list');
             const metric = document.getElementById('leaderboard-metric').value;
             const labels = { playtime: '⏱️ h played', games: '🎮 games', achievements: '🏅 achievements' };
-            listDiv.innerHTML = '<div class="loading">Loading…</div>';
+            listDiv.innerHTML = renderSkeletonList(10);
             try {
                 const resp = await fetch(`/api/leaderboard?metric=${metric}&limit=20`);
                 if (!resp.ok) { listDiv.innerHTML = '<div class="loading">Leaderboard not available (no DB).</div>'; return; }
@@ -6881,7 +6894,7 @@
                 for (const [emoji, users] of Object.entries(msg.reactions)) {
                     const hasReacted = users.some(u => u.username === myUsername);
                     const userList = users.map(u => u.username).join(', ');
-                    reactionsHtml += `<button onclick=\"toggleReaction(${msg.id}, '${emoji}')\" title=\"${userList}\" style=\"padding:3px 8px; border-radius:12px; border:1px solid ${hasReacted ? '#667eea' : 'var(--input-border)'}; background:${hasReacted ? '#e8f4fd' : 'var(--card-bg)'}; color:var(--text-primary); cursor:pointer; font-size:0.85em; display:flex; align-items:center; gap:4px;\"><span>${emoji}</span><span style=\"font-size:0.8em;\">${users.length}</span></button>`;
+                    reactionsHtml += `<button onclick=\"toggleReaction(${msg.id}, '${emoji}')\" title=\"${userList}\" style=\"padding:3px 8px; border-radius:12px; border:1px solid ${hasReacted ? '#4f46e5' : 'var(--input-border)'}; background:${hasReacted ? 'rgba(79,70,229,0.08)' : 'var(--card-bg)'}; color:var(--text-primary); cursor:pointer; font-size:0.85em; display:flex; align-items:center; gap:4px;\"><span>${emoji}</span><span style=\"font-size:0.8em;\">${users.length}</span></button>`;
                 }
                 reactionsHtml += `<button onclick=\"openEmojiPickerForMessage(${msg.id})\" style=\"padding:3px 8px; border-radius:12px; border:1px solid var(--input-border); background:var(--card-bg); color:var(--text-secondary); cursor:pointer; font-size:0.85em;\">+</button>`;
                 reactionsHtml += '</div>';
@@ -6904,7 +6917,7 @@
                 <span style=\"font-size:0.75em; color:var(--text-secondary);\">${isMe ? 'You' : escapeHtml(msg.sender)} · ${time}</span>
                 <div class=\"chat-message-wrapper\" style=\"position:relative; max-width:75%;\" onmouseenter=\"showMessageActions(${msg.id}, ${isMe})\" onmouseleave=\"hideMessageActions(${msg.id})\">
                     <div title=\"${fullDateTime}\" style=\"padding:10px 14px; border-radius:${isMe?'16px 16px 4px 16px':'16px 16px 16px 4px'};
-                         background:${isMe?'linear-gradient(135deg,#667eea,#764ba2)':'var(--list-hover)'};
+                         background:${isMe?'linear-gradient(135deg,#4f46e5,#7c3aed)':'var(--list-hover)'};
                          color:${isMe?'white':'var(--text-primary)'}; word-break:break-word; font-size:0.95em; position:relative; cursor:default;\">
                         ${replyContextHtml}
                         ${formattedMessage}${editedLabel}
@@ -7146,12 +7159,12 @@
                     
                     for (const user of users) {
                         html += `<div style="display:flex; align-items:center; gap:6px; padding:4px 0; color:var(--text-secondary); flex-wrap:wrap;">
-                            <span style="cursor:pointer; color:#667eea; text-decoration:underline;" onclick="showUserPreview('${user}')">👤 ${user}</span>
+                            <span style="cursor:pointer; color:#4f46e5; text-decoration:underline;" onclick="showUserPreview('${user}')">👤 ${user}</span>
                             <div style="margin-left:auto; display:flex; gap:4px;">`;
                         
                         // Show room invite button if in a private room
                         if (room === currentRoom) {
-                            html += `<button onclick="inviteUserToRoom('${user}')" title="Invite to room" style="padding:2px 6px; background:#667eea; color:white; border:none; border-radius:3px; cursor:pointer; font-size:0.7em;">🎫 Room</button>`;
+                            html += `<button onclick="inviteUserToRoom('${user}')" title="Invite to room" style="padding:2px 6px; background:#4f46e5; color:white; border:none; border-radius:3px; cursor:pointer; font-size:0.7em;">🎫 Room</button>`;
                         }
                         
                         // Always show friend invite button
@@ -7232,7 +7245,7 @@
                     : `<div style="width:60px; height:60px; border-radius:8px; background:var(--card-border); margin:0 auto 12px;"></div>`;
                 
                 const rolesBadges = (profile.roles || []).map(role => 
-                    `<span style="display:inline-block; padding:3px 8px; margin:0 4px 4px 0; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border-radius:12px; font-size:0.75em; font-weight:600;">${role}</span>`
+                    `<span style="display:inline-block; padding:3px 8px; margin:0 4px 4px 0; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border-radius:12px; font-size:0.75em; font-weight:600;font-family:inherit;">${role}</span>`
                 ).join('');
                 
                 const joinDate = profile.joined ? new Date(profile.joined).toLocaleDateString() : 'Unknown';
@@ -7360,7 +7373,7 @@
                             </div>
                             <div style="font-size:0.85em; color:var(--text-secondary); margin-top:4px;">Host: ${s.host} · Players: ${(s.participants || []).length}</div>
                             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-                                <button onclick="openLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#667eea; color:white; cursor:pointer;">Open</button>
+                                <button onclick="openLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#4f46e5; color:white; cursor:pointer;">Open</button>
                                 ${joined
                                     ? `<button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#e74c3c; color:white; cursor:pointer;">Leave</button>`
                                     : `<button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:6px; background:#27ae60; color:white; cursor:pointer;">Join</button>`}
@@ -7684,7 +7697,7 @@
         async function loadNotifications() {
             const listDiv = document.getElementById('notifications-list');
             const unreadOnly = document.getElementById('notif-unread-only').checked;
-            listDiv.innerHTML = '<div class="loading">Loading…</div>';
+            listDiv.innerHTML = renderSkeletonList(5);
             try {
                 const resp = await fetch(`/api/notifications?unread_only=${unreadOnly}`);
                 if (!resp.ok) { listDiv.innerHTML = '<div class="loading">Notifications not available (no DB).</div>'; return; }
@@ -7698,7 +7711,7 @@
                 const typeBg   = { info:'#e8f4fd', success:'#d4edda', warning:'#fff3cd', error:'#f8d7da', friend_request:'#e8f4fd' };
                 listDiv.innerHTML = data.notifications.map(n => `
                     <div style="padding:14px; border-radius:10px; margin-bottom:10px; background:${n.is_read ? 'var(--list-hover)' : typeBg[n.type] || '#e8f4fd'};
-                                border-left:4px solid ${n.is_read ? 'var(--card-border)' : '#667eea'}; opacity:${n.is_read ? '0.75' : '1'};">
+                                border-left:4px solid ${n.is_read ? 'var(--card-border)' : '#4f46e5'}; opacity:${n.is_read ? '0.75' : '1'};">
                         <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                             <span style="font-size:1.1em;">${typeIcon[n.type] || 'ℹ️'}</span>
                             <strong style="color:var(--text-primary);">${n.title}</strong>
@@ -7775,7 +7788,7 @@
 
         async function loadPlugins() {
             const listDiv = document.getElementById('plugins-list');
-            listDiv.innerHTML = '<div class="loading">Loading…</div>';
+            listDiv.innerHTML = renderSkeletonList(3);
             try {
                 const resp = await fetch('/api/plugins');
                 if (!resp.ok) { listDiv.innerHTML = '<div class="loading">Plugins not available (no DB).</div>'; return; }
@@ -8329,7 +8342,7 @@
             localStorage.setItem('gapi_library_view', view);
             const listBtn = document.getElementById('library-view-list-btn');
             const gridBtn = document.getElementById('library-view-grid-btn');
-            const activeStyle = 'linear-gradient(135deg,#667eea,#764ba2)';
+            const activeStyle = 'linear-gradient(135deg,#4f46e5,#7c3aed)';
             const inactiveStyle = 'var(--card-bg)';
             const activeColor = 'white';
             const inactiveColor = 'var(--text-primary)';
@@ -8406,7 +8419,7 @@
         const _origLoadLibrary = window.loadLibrary;
         window.loadLibrary = async function() {
             const listDiv = document.getElementById('library-list');
-            listDiv.innerHTML = '<div class="loading">Loading...</div>';
+            listDiv.innerHTML = renderSkeletonList(8);
             try {
                 const response = await fetch('/api/library');
                 const data = await response.json();
@@ -8576,7 +8589,7 @@
                         </div>
                     ` : ''}
                     
-                    <button onclick="openUserChat('${user.username}')" style="width:100%; padding:10px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:600; margin-bottom:8px;">💬 Send Message</button>
+                    <button onclick="openUserChat('${user.username}')" style="width:100%; padding:10px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit; margin-bottom:8px;">💬 Send Message</button>
                     <button onclick="closeUserPreviewPhase5()" style="width:100%; padding:10px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
                 `;
                 contentDiv.innerHTML = profileHtml;
@@ -8647,7 +8660,7 @@
                 const time = new Date(notif.created_at).toLocaleString();
                 
                 html += `
-                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-left:3px solid ${notif.unread ? '#667eea' : '#666'}; border-radius:6px;">
+                    <div style="background:rgba(255,255,255,0.05); padding:12px; border-left:3px solid ${notif.unread ? '#4f46e5' : 'var(--card-border)'}; border-radius:6px;">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                             <div style="flex:1;">
                                 <p style="margin:0 0 6px 0; color:var(--text-primary); font-weight:600;">${icon} ${notif.title}</p>
@@ -8716,7 +8729,7 @@
                         <h4 style="margin:0 0 8px 0; color:var(--text-primary);">${ch.icon} ${ch.name}</h4>
                         <p style="margin:0 0 8px 0; font-size:0.9em; color:var(--text-secondary);">${ch.description}</p>
                         <div style="background:rgba(0,0,0,0.3); border-radius:4px; height:8px; margin-bottom:6px;">
-                            <div style="background:linear-gradient(90deg, #667eea, #764ba2); height:100%; width:${progress}%; border-radius:4px;"></div>
+                            <div style="background:linear-gradient(90deg, #4f46e5, #7c3aed); height:100%; width:${progress}%; border-radius:4px;"></div>
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:0.85em;">
                             <span style="color:var(--text-secondary);">${ch.progress}/${ch.goal}</span>
@@ -8845,7 +8858,7 @@
         function renderDMConversations() {
             const conv = document.getElementById('dm-conversations');
             conv.innerHTML = dmConversations.map(c => `
-                <div onclick="selectDMConversation('${c.username}')" style="padding:12px; border-right:1px solid var(--input-border); cursor:pointer; background:${currentDMUser === c.username ? 'rgba(102,126,234,0.2)' : 'transparent'}; border-left:3px solid ${c.unread ? '#667eea' : 'transparent'};">
+                <div onclick="selectDMConversation('${c.username}')" style="padding:12px; border-right:1px solid var(--input-border); cursor:pointer; background:${currentDMUser === c.username ? 'rgba(79,70,229,0.12)' : 'transparent'}; border-left:3px solid ${c.unread ? '#4f46e5' : 'transparent'};">
                     <p style="margin:0 0 4px 0; color:var(--text-primary); font-weight:600;">${c.username}</p>
                     <p style="margin:0; font-size:0.85em; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.last_message}</p>
                 </div>
@@ -8875,7 +8888,7 @@
                 const isMe = m.sender === currentUser;
                 return `
                     <div style="display:flex; justify-content:${isMe ? 'flex-end' : 'flex-start'};">
-                        <div style="background:${isMe ? 'linear-gradient(135deg,#667eea,#764ba2)' : 'rgba(255,255,255,0.05)'}; color:var(--text-primary); padding:10px 12px; border-radius:8px; max-width:70%; word-wrap:break-word;">
+                        <div style="background:${isMe ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : 'var(--list-hover)'}; color:var(--text-primary); padding:10px 12px; border-radius:8px; max-width:70%; word-wrap:break-word;">
                             <p style="margin:0; font-size:0.9em;">${m.message}</p>
                             <p style="margin:4px 0 0 0; font-size:0.75em; color:var(--text-secondary);">${new Date(m.created_at).toLocaleTimeString()}</p>
                         </div>
@@ -8940,7 +8953,7 @@
                         </div>
                         <p style="margin-top:10px; color:var(--text-secondary);">Total: ${data.their_count || 0} games</p>
                     </div>
-                    <div style="grid-column:1/-1; background:rgba(102,126,234,0.1); padding:15px; border-radius:8px; border-left:3px solid #667eea;">
+                    <div style="grid-column:1/-1; background:rgba(79,70,229,0.08); padding:15px; border-radius:8px; border-left:3px solid #4f46e5;">
                         <h4 style="color:var(--accent); margin:0 0 8px 0;">🎮 Shared Games</h4>
                         <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:12px;">
                             ${(data.shared_games || []).slice(0, 8).map(g => `<div style="font-size:0.85em; padding:8px; background:rgba(255,255,255,0.1); border-radius:4px;">${g}</div>`).join('')}
@@ -9245,14 +9258,14 @@
                     <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:8px;">
                         <h4 style="margin:0 0 12px 0; color:var(--text-primary);">📈 Activity Over Time</h4>
                         <div style="height:150px; background:rgba(0,0,0,0.2); border-radius:6px; display:flex; align-items:flex-end; justify-content:space-around; padding:10px; gap:5px;">
-                            ${[30, 45, 35, 60, 55, 70, 65].map((h, i) => `<div style="flex:1; background:linear-gradient(180deg, #667eea, #764ba2); border-radius:4px; height:${h}%; opacity:0.8;"></div>`).join('')}
+                            ${[30, 45, 35, 60, 55, 70, 65].map((h, i) => `<div style="flex:1; background:linear-gradient(180deg, #4f46e5, #7c3aed); border-radius:4px; height:${h}%; opacity:0.8;"></div>`).join('')}
                         </div>
                     </div>
                     <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:8px;">
                         <h4 style="margin:0 0 12px 0; color:var(--text-primary);">🎯 Top Categories</h4>
                         <div style="display:flex; flex-direction:column; gap:8px;">
-                            <div style="display:flex; justify-content:space-between;"><span>Action</span><span style="font-weight:bold; color:#667eea;">45%</span></div>
-                            <div style="display:flex; justify-content:space-between;"><span>RPG</span><span style="font-weight:bold; color:#764ba2;">30%</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Action</span><span style="font-weight:bold; color:#4f46e5;">45%</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>RPG</span><span style="font-weight:bold; color:#7c3aed;">30%</span></div>
                             <div style="display:flex; justify-content:space-between;"><span>Puzzle</span><span style="font-weight:bold; color:#3498db;">25%</span></div>
                         </div>
                     </div>
@@ -9323,9 +9336,9 @@
                             <h4 style="margin:0 0 8px 0; color:var(--text-primary);">${s.icon} ${s.name}</h4>
                             <p style="margin:0 0 8px 0; font-size:0.9em; color:var(--text-secondary);">Progress: ${s.owned_games}/${s.total_games}</p>
                             <div style="background:rgba(0,0,0,0.3); border-radius:4px; height:8px; margin-bottom:8px;">
-                                <div style="background:linear-gradient(90deg, #667eea, #764ba2); height:100%; width:${completion}%; border-radius:4px;"></div>
+                                <div style="background:linear-gradient(90deg, #4f46e5, #7c3aed); height:100%; width:${completion}%; border-radius:4px;"></div>
                             </div>
-                            <button onclick="viewSeries('${s.id}')" style="padding:6px 10px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">View Series</button>
+                            <button onclick="viewSeries('${s.id}')" style="padding:6px 10px; background:#4f46e5; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">View Series</button>
                         </div>
                     `;
                 });
@@ -9410,7 +9423,7 @@
                             <div style="font-size:2em; margin-bottom:6px;">${item.icon}</div>
                             <h5 style="margin:0 0 4px 0; color:var(--text-primary); font-size:0.9em;">${item.name}</h5>
                             <p style="margin:0 0 8px 0; font-size:0.85em; color:var(--text-secondary);">${item.price} ${item.currency === 'xp' ? '⭐' : '💎'}</p>
-                            <button onclick="purchaseItem('${item.id}')" style="padding:6px 12px; background:${item.owned ? '#95a5a6' : '#667eea'}; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em; width:100%;">${item.owned ? '✓ Owned' : 'Buy'}</button>
+                            <button onclick="purchaseItem('${item.id}')" style="padding:6px 12px; background:${item.owned ? '#9ca3af' : '#4f46e5'}; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em; width:100%;">${item.owned ? '✓ Owned' : 'Buy'}</button>
                         </div>
                     `;
                 });
@@ -9460,7 +9473,7 @@
                         <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px;">
                             <h5 style="margin:0 0 4px 0; color:var(--text-primary);">${vod.title}</h5>
                             <p style="margin:0 0 6px 0; font-size:0.85em; color:var(--text-secondary);">📺 ${vod.duration} • 👁️ ${vod.views} views</p>
-                            <button onclick="playVOD('${vod.id}')" style="padding:6px 12px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">▶️ Watch</button>
+                            <button onclick="playVOD('${vod.id}')" style="padding:6px 12px; background:#4f46e5; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">▶️ Watch</button>
                         </div>
                     `;
                 });
@@ -9584,9 +9597,9 @@
                     html += `
                         <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; text-align:center; cursor:pointer; transition:0.3s;" onmouseover="this.style.background='rgba(102,126,234,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.05)';">
                             <h5 style="margin:0 0 4px 0; color:var(--text-primary); font-size:0.9em;">${game.name}</h5>
-                            <p style="margin:0 0 6px 0; font-size:0.8em; color:#667eea; font-weight:600;">Match: ${game.match_score}%</p>
+                            <p style="margin:0 0 6px 0; font-size:0.8em; color:#4f46e5; font-weight:600;">Match: ${game.match_score}%</p>
                             <p style="margin:0 0 8px 0; font-size:0.85em; color:var(--text-secondary);">${game.reason}</p>
-                            <button onclick="addGameToWishlist('${game.id}')" style="padding:6px 12px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em; width:100%;">+ Wishlist</button>
+                            <button onclick="addGameToWishlist('${game.id}')" style="padding:6px 12px; background:#4f46e5; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em; width:100%;">+ Wishlist</button>
                         </div>
                     `;
                 });
@@ -9621,7 +9634,7 @@
                         <div style="background:rgba(255,255,255,0.05); padding:12px; border-radius:8px; border-left:3px solid ${t.color};">
                             <h4 style="margin:0 0 6px 0; color:var(--text-primary);">${t.name}</h4>
                             <p style="margin:0 0 8px 0; font-size:0.9em; color:var(--text-secondary);">👥 ${t.members.length}/${t.max_members} | Win Rate: ${t.winrate}%</p>
-                            <button onclick="joinTeam('${t.id}')" style="padding:6px 10px; background:${t.is_member ? '#95a5a6' : '#667eea'}; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">${t.is_member ? '✓ Member' : 'Join'}</button>
+                            <button onclick="joinTeam('${t.id}')" style="padding:6px 10px; background:${t.is_member ? '#9ca3af' : '#4f46e5'}; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.85em;">${t.is_member ? '✓ Member' : 'Join'}</button>
                         </div>
                     `;
                 });
@@ -9679,7 +9692,7 @@
                 tiers.forEach((tier, idx) => {
                     const isCurrent = idx === data.current_tier_index;
                     html += `
-                        <div style="padding:12px; background:${isCurrent ? 'rgba(102,126,234,0.3)' : 'rgba(255,255,255,0.05)'}; border-radius:8px; text-align:center; border:2px solid ${isCurrent ? '#667eea' : 'transparent'};">
+                        <div style="padding:12px; background:${isCurrent ? 'rgba(79,70,229,0.25)' : 'rgba(255,255,255,0.05)'}; border-radius:8px; text-align:center; border:2px solid ${isCurrent ? '#4f46e5' : 'transparent'};">
                             <p style="margin:0; font-weight:600; color:var(--text-primary);">${tier}</p>
                         </div>
                     `;
@@ -9779,7 +9792,7 @@
             </div>
             <div style="display:flex; gap:10px; margin-top:20px;">
                 <button onclick="closeCreateRoomModal()" style="flex:1; padding:10px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-weight:600;">Cancel</button>
-                <button onclick="createRoomFromModal()" style="flex:1; padding:10px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create</button>
+                <button onclick="createRoomFromModal()" style="flex:1; padding:10px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">Create</button>
             </div>
         </div>
     </div>
@@ -9854,7 +9867,7 @@
                     <span style="color:var(--accent); font-weight:bold;" id="xp-display">0 XP</span>
                 </div>
                 <div style="background:rgba(0,0,0,0.3); border-radius:6px; height:12px; overflow:hidden;">
-                    <div id="xp-bar" style="background:linear-gradient(90deg, #667eea, #764ba2); height:100%; width:0%; transition:width 0.3s;"></div>
+                    <div id="xp-bar" style="background:linear-gradient(90deg, #4f46e5, #7c3aed); height:100%; width:0%; transition:width 0.3s;"></div>
                 </div>
             </div>
             <div id="challenges-list" style="display:grid; grid-template-columns:1fr 1fr; gap:15px;"></div>
@@ -9898,7 +9911,7 @@
                     <div id="dm-messages" style="flex:1; overflow-y:auto; padding:15px; display:flex; flex-direction:column; gap:8px;"></div>
                     <div style="padding:15px; border-top:1px solid var(--input-border); display:flex; gap:8px;">
                         <input id="dm-input" type="text" placeholder="Type a message..." style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                        <button onclick="sendDirectMessage()" style="padding:10px 20px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Send</button>
+                        <button onclick="sendDirectMessage()" style="padding:10px 20px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Send</button>
                     </div>
                 </div>
             </div>
@@ -9952,7 +9965,7 @@
                 </div>
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"> <input id="profile-private" type="checkbox"> <span style="color:var(--text-primary);">Make profile private</span></label>
                 <div style="display:flex; gap:10px;">
-                    <button onclick="saveProfileChanges()" style="flex:1; padding:12px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Save Changes</button>
+                    <button onclick="saveProfileChanges()" style="flex:1; padding:12px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">Save Changes</button>
                     <button onclick="closeProfileEdit()" style="flex:1; padding:12px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:6px; cursor:pointer; font-weight:600;">Cancel</button>
                 </div>
             </div>
@@ -10022,7 +10035,7 @@
                     <textarea id="review-text" placeholder="Share your thoughts..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box; resize:vertical; min-height:80px;"></textarea>
                 </div>
             </div>
-            <button onclick="submitReview()" style="width:100%; padding:12px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Post Review</button>
+            <button onclick="submitReview()" style="width:100%; padding:12px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Post Review</button>
             <div id="reviews-list" style="margin-top:20px; display:flex; flex-direction:column; gap:12px;"></div>
         </div>
     </div>
@@ -10035,7 +10048,7 @@
                 <button onclick="closeAnalytics()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
             </div>
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-bottom:20px;">
-                <div style="background:rgba(102,126,234,0.1); padding:12px; border-radius:8px; text-align:center;">
+                <div style="background:rgba(79,70,229,0.08); padding:12px; border-radius:8px; text-align:center;">
                     <p style="margin:0 0 6px 0; color:var(--text-secondary); font-size:0.9em;">Games Picked</p>
                     <p style="margin:0; font-size:1.8em; color:var(--accent); font-weight:bold;" id="stat-picks">0</p>
                 </div>
@@ -10161,7 +10174,7 @@
                 <h3 style="margin:0; color:var(--text-primary);">🤖 AI Game Recommendations</h3>
                 <button onclick="closeAIRecommend()" style="padding:4px 8px; background:var(--input-border); color:var(--text-primary); border:none; border-radius:4px; cursor:pointer; font-size:1.1em;">✕</button>
             </div>
-            <div style="margin-bottom:15px; padding:12px; background:rgba(102,126,234,0.1); border-left:3px solid #667eea; border-radius:6px;">
+            <div style="margin-bottom:15px; padding:12px; background:rgba(79,70,229,0.08); border-left:3px solid #4f46e5; border-radius:6px;">
                 <p style="margin:0; color:var(--text-secondary); font-size:0.9em;;">🧠 Based on your history: action games, puzzle-solving, and competitive play</p>
             </div>
             <div id="ai-recommendations" style="display:grid; grid-template-columns:1fr 1fr; gap:15px;"></div>
@@ -10177,7 +10190,7 @@
             </div>
             <div style="margin-bottom:15px; display:flex; gap:8px;">
                 <input id="team-name-input" type="text" placeholder="Team name..." style="flex:1; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box;">
-                <button onclick="createTeam()" style="padding:10px 20px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create</button>
+                <button onclick="createTeam()" style="padding:10px 20px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create</button>
             </div>
             <div id="teams-list" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;"></div>
         </div>
@@ -10254,7 +10267,7 @@
                     <span style="color:var(--text-primary);"><strong>🔊 Sound Alerts</strong> - Audio notifications</span>
                 </label>
             </div>
-            <div style="margin-top:20px; padding:15px; background:rgba(102,126,234,0.1); border-radius:8px;">
+            <div style="margin-top:20px; padding:15px; background:rgba(79,70,229,0.08); border-radius:8px;">
                 <h4 style="margin:0 0 10px 0; color:var(--text-primary);">🔗 Webhook URL</h4>
                 <input id="webhook-url" type="text" placeholder="https://discord.com/api/webhooks/..." style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); box-sizing:border-box; font-size:0.85em;">
                 <p style="margin:8px 0 0 0; color:var(--text-secondary); font-size:0.8em;">Integrate with Discord, Slack, or custom webhooks</p>
@@ -10275,7 +10288,7 @@
             <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
                     <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Total Users</p>
-                    <p id="analytics-total-users" style="color:#667eea; font-size:1.8em; font-weight:bold; margin:0;">0</p>
+                    <p id="analytics-total-users" style="color:#4f46e5; font-size:1.8em; font-weight:bold; margin:0;">0</p>
                 </div>
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border); text-align:center;">
                     <p style="color:var(--text-secondary); margin:0 0 8px 0; font-size:0.9em;">Active (7d)</p>
@@ -10307,7 +10320,7 @@
                 </div>
             </div>
 
-            <button onclick="exportAnalytics()" style="width:100%; padding:12px; background:#667eea; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">📥 Export Analytics</button>
+            <button onclick="exportAnalytics()" style="width:100%; padding:12px; background:#4f46e5; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">📥 Export Analytics</button>
         </div>
     </div>
 
@@ -10347,7 +10360,7 @@
 
             <div id="audit-pagination" style="display:flex; justify-content:center; gap:8px; margin-bottom:15px;"></div>
 
-            <button onclick="exportAuditLogs()" style="width:100%; padding:12px; background:#667eea; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">📥 Export as CSV</button>
+            <button onclick="exportAuditLogs()" style="width:100%; padding:12px; background:#4f46e5; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">📥 Export as CSV</button>
         </div>
     </div>
 
@@ -10377,7 +10390,7 @@
                     background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
 
                 <div style="display:flex; gap:10px;">
-                    <button onclick="performAdvancedSearch()" style="flex:1; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔎 Search</button>
+                    <button onclick="performAdvancedSearch()" style="flex:1; padding:10px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔎 Search</button>
                     <button onclick="saveCurrentSearch()" style="flex:1; padding:10px; background:#f39c12; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💾 Save</button>
                 </div>
             </div>
@@ -10432,7 +10445,7 @@
                     <input id="batch-tags" type="text" placeholder="Tags (comma-separated)" 
                         style="width:100%; padding:10px; border:1px solid var(--input-border); border-radius:6px; 
                         background:var(--input-bg); color:var(--text-primary); margin-bottom:10px;">
-                    <button onclick="batchTagGames()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Apply Tags</button>
+                    <button onclick="batchTagGames()" style="width:100%; padding:10px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Apply Tags</button>
                 </div>
 
                 <div style="background:var(--card-bg); padding:15px; border-radius:8px; border:1px solid var(--card-border);">
@@ -10444,7 +10457,7 @@
                         <option value="abandoned">Abandoned</option>
                         <option value="backlog">Backlog</option>
                     </select>
-                    <button onclick="batchChangeStatus()" style="width:100%; padding:10px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Change Status</button>
+                    <button onclick="batchChangeStatus()" style="width:100%; padding:10px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Change Status</button>
                 </div>
             </div>
 
