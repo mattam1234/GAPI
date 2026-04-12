@@ -412,6 +412,18 @@
                 .replace(/'/g, '&#39;');
         }
 
+        // Escape a value for safe embedding inside a JS single-quoted string
+        // that itself lives in an HTML attribute (e.g. onclick="f('VALUE')")
+        function escAttr(value) {
+            return String(value || '')
+                .replace(/\\/g, '\\\\')   // backslash first
+                .replace(/'/g, "\\'")      // single-quote
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
         function getGameThumbUrl(appId) {
             const cached = gameDetailsCache.get(appId);
             return (cached && (cached.header_image || cached.capsule_image))
@@ -570,7 +582,7 @@
             const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
             
             // Multi-user specific info
-            const playersInfo = game.owners ? game.owners.join(', ') : selectedUsers.join(', ');
+            const playersInfo = escapeHtml(game.owners ? game.owners.join(', ') : selectedUsers.join(', '));
             const multiplayerBadges = `
                 ${game.is_coop ? '<span style="display:inline-block; background:#10b981; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em; margin-right:5px;">✅ Co-op</span>' : ''}
                 ${game.is_multiplayer ? '<span style="display:inline-block; background:#3b82f6; color:white; padding:4px 12px; border-radius:15px; font-size:0.85em;">✅ Multiplayer</span>' : ''}
@@ -841,7 +853,7 @@
                     let html = '';
                     data.games.forEach(game => {
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
-                        const safeName = game.name.replace(/'/g, "\\'");
+                        const safeName = escAttr(game.name);
                         html += `
                             <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                                 <div class="list-item-media">
@@ -938,7 +950,7 @@
                     data.games.forEach(game => {
                         appIds.push(game.app_id);
                         const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
-                        const safeName = game.name.replace(/'/g, "\\'");
+                        const safeName = escAttr(game.name);
                         html += `
                             <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                                 <div class="list-item-media">
@@ -1121,7 +1133,7 @@
                     const appIds = [];
                     data.favorites.forEach(game => {
                         appIds.push(game.app_id);
-                        const safeName = (game.name || '').replace(/'/g, "\\'");
+                        const safeName = escAttr(game.name || '');
                         html += `
                             <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                                 <div class="list-item-media">
@@ -2222,7 +2234,7 @@
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
                     <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#4f46e5; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">✏️ Edit</button>
                     ${!ev.discord_event_id && ev.game_appid ? `<button onclick="createDiscordEventForSchedule('${ev.id}', '${safeGame}')" style="padding:5px 14px; background:#5865F2; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">📢 Create Discord Event</button>` : ''}
-                    <button onclick="deleteScheduleEvent('${ev.id}', ${ev.discord_event_id ? 'true' : 'false'}, '${(ev.discord_guild_id || '').replace(/'/g,"\\'")}')" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
+                    <button onclick="deleteScheduleEvent('${ev.id}', ${ev.discord_event_id ? 'true' : 'false'}, '${escAttr(ev.discord_guild_id || '')}')" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
                 </div>
             </div>`;
         }
@@ -2409,8 +2421,8 @@
             const attendees = field.value.split(',').map(x => x.trim()).filter(x => x);
             tags.innerHTML = attendees.map(name => `
                 <span style="padding:4px 10px; background:#4f46e5; color:white; border-radius:var(--radius-lg,16px); font-size:0.85em;">
-                    ${name}
-                    <span onclick="removeAttendee('${name.replace(/'/g,"\\'")}'" style="margin-left:6px; cursor:pointer;">×</span>
+                    ${escapeHtml(name)}
+                    <span onclick="removeAttendee('${escAttr(name)}'" style="margin-left:6px; cursor:pointer;">×</span>
                 </span>
             `).join('');
         }
@@ -3875,7 +3887,7 @@
                 const appIds = [];
                 recs.forEach((game, idx) => {
                     appIds.push(game.appid);
-                    const safeName = game.name.replace(/'/g, "\\'");
+                    const safeName = escAttr(game.name);
                     const scoreStars = '⭐'.repeat(Math.min(Math.round(game.recommendation_score), 5));
                     html += `
                         <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:var(--radius,12px);"
@@ -4645,9 +4657,9 @@
             const formattedMessage = formatMessageText(msg.message, false, myUsername);
             const fullDateTime = msg.created_at ? new Date(msg.created_at).toLocaleString() : '';
             
-            const escapedMessage = msg.message.replace(/\\\\/g, '\\\\\\\\').replace(/`/g, '\\\\`').replace(/\\$/g, '\\\\$').replace(/'/g, "\\'");
-            const escapedSender = msg.sender.replace(/'/g, "\\'");
-            const escapedPreview = msg.message.substring(0, 50).replace(/'/g, "\\'");
+            const escapedMessage = escAttr(msg.message);
+            const escapedSender = escAttr(msg.sender);
+            const escapedPreview = escAttr(msg.message.substring(0, 50));
             
             const bubble = document.createElement('div');
             bubble.id = `msg-${msg.id}`;
