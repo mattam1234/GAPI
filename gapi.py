@@ -734,9 +734,14 @@ class GamePicker:
     DEFAULT_WELL_PLAYED_HOURS = 10
     DEFAULT_API_TIMEOUT = 10
     
-    def __init__(self, config_path: str = 'config.json'):
+    def __init__(self, config_path: str = 'config.json', data_dir: str = ''):
         self._log = logging.getLogger('gapi.picker')
         self.config = self.load_config(config_path)
+
+        # Ensure user-specific data directory exists when provided
+        if data_dir:
+            os.makedirs(data_dir, exist_ok=True)
+        self._data_dir = data_dir
 
         # Re-apply log level from config (allows "log_level": "DEBUG" in config.json)
         log_level = self.config.get('log_level', 'WARNING')
@@ -837,15 +842,19 @@ class GamePicker:
             PlaylistRepository, BacklogRepository, BudgetRepository,
             WishlistRepository, FavoritesRepository, HistoryRepository,
         )
-        self._history_repo = HistoryRepository(self.HISTORY_FILE, self.MAX_HISTORY)
-        self._favorites_repo = FavoritesRepository(self.FAVORITES_FILE)
-        self._review_repo = ReviewRepository(self.REVIEWS_FILE)
-        self._tag_repo = TagRepository(self.TAGS_FILE)
-        self._schedule_repo = ScheduleRepository(self.SCHEDULE_FILE)
-        self._playlist_repo = PlaylistRepository(self.PLAYLISTS_FILE)
-        self._backlog_repo = BacklogRepository(self.BACKLOG_FILE)
-        self._budget_repo = BudgetRepository(self.BUDGET_FILE)
-        self._wishlist_repo = WishlistRepository(self.WISHLIST_FILE)
+        def _dp(filename: str) -> str:
+            """Prefix *filename* with the per-user data directory when set."""
+            return os.path.join(self._data_dir, filename) if self._data_dir else filename
+
+        self._history_repo = HistoryRepository(_dp(self.HISTORY_FILE), self.MAX_HISTORY)
+        self._favorites_repo = FavoritesRepository(_dp(self.FAVORITES_FILE))
+        self._review_repo = ReviewRepository(_dp(self.REVIEWS_FILE))
+        self._tag_repo = TagRepository(_dp(self.TAGS_FILE))
+        self._schedule_repo = ScheduleRepository(_dp(self.SCHEDULE_FILE))
+        self._playlist_repo = PlaylistRepository(_dp(self.PLAYLISTS_FILE))
+        self._backlog_repo = BacklogRepository(_dp(self.BACKLOG_FILE))
+        self._budget_repo = BudgetRepository(_dp(self.BUDGET_FILE))
+        self._wishlist_repo = WishlistRepository(_dp(self.WISHLIST_FILE))
 
         # ----------------------------------------------------------------
         # Services — contain all business / domain logic.
