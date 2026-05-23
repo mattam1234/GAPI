@@ -627,6 +627,7 @@
     
     .tabs {
         overflow-x: auto;
+        flex-wrap: nowrap;
         scrollbar-width: none;
         -ms-overflow-style: none;
     }
