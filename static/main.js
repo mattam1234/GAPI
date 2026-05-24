@@ -2767,6 +2767,8 @@
         let scheduleAgendaSelectionActive = false;
         let scheduleAgendaDraggedEventId = null;
         let scheduleDiscordGuildsCache = [];
+        let scheduleCollectionsCache = [];
+        let activeScheduleId = '';
         let scheduleCommonGamesCache = [];
         let scheduleIcalSyncInfo = null;
 
@@ -3105,19 +3107,82 @@
             applyScheduleFilters();
         }
 
+        function renderScheduleSelector() {
+            const selector = document.getElementById('schedule-selector');
+            if (!selector) return;
+            if (!scheduleCollectionsCache.length) {
+                selector.innerHTML = '<option value="">No schedules yet</option>';
+                selector.value = '';
+                activeScheduleId = '';
+                return;
+            }
+            selector.innerHTML = scheduleCollectionsCache.map(schedule => {
+                const members = Array.isArray(schedule.members) ? schedule.members : [];
+                const memberSuffix = schedule.is_shared
+                    ? ` · shared with ${Math.max(members.length - 1, 0)}`
+                    : '';
+                return `<option value="${escAttr(schedule.id || '')}">${escapeHtml(schedule.name || 'Schedule')}${escapeHtml(memberSuffix)}</option>`;
+            }).join('');
+            if (!activeScheduleId || !scheduleCollectionsCache.some(schedule => schedule.id === activeScheduleId)) {
+                activeScheduleId = scheduleCollectionsCache[0].id || '';
+            }
+            selector.value = activeScheduleId || '';
+        }
+
+        function changeActiveSchedule(scheduleId) {
+            activeScheduleId = String(scheduleId || '').trim();
+            clearAgendaSelection(false);
+            loadSchedule();
+        }
+
+        async function openCreateSchedulePrompt() {
+            const name = prompt('Schedule name');
+            if (!name || !name.trim()) return;
+            const membersInput = prompt('Invite friends by username (comma separated). Leave blank for personal schedule.') || '';
+            const members = membersInput
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+            try {
+                const resp = await safeFetch('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name.trim(),
+                        members,
+                        is_shared: members.length > 0,
+                    }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Could not create schedule.', 'error');
+                    return;
+                }
+                activeScheduleId = data.id || '';
+                await loadSchedule();
+                showMessage(`Created schedule: ${data.name || 'New schedule'}`, 'success');
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            }
+        }
+
         async function loadSchedule() {
             const listDiv = document.getElementById('schedule-list');
             const agendaDiv = document.getElementById('schedule-agenda');
             if (listDiv) listDiv.innerHTML = renderSkeletonList(5);
             if (agendaDiv) agendaDiv.innerHTML = '<div class="loading">Loading agenda…</div>';
             try {
-                const resp = await fetch('/api/schedule');
+                const query = activeScheduleId ? `?schedule_id=${encodeURIComponent(activeScheduleId)}` : '';
+                const resp = await fetch(`/api/schedule${query}`);
                 if (!resp.ok) {
                     if (listDiv) listDiv.innerHTML = '<div class="error">Could not load schedule</div>';
                     if (agendaDiv) agendaDiv.innerHTML = '<div class="error">Could not load agenda</div>';
                     return;
                 }
                 const data = await resp.json();
+                scheduleCollectionsCache = Array.isArray(data.schedules) ? data.schedules : scheduleCollectionsCache;
+                activeScheduleId = String(data.active_schedule_id || activeScheduleId || '').trim();
+                renderScheduleSelector();
                 scheduleEventsCache = Array.isArray(data.events) ? data.events : [];
                 if (!hasScheduleFilters()) {
                     scheduleAgendaWeekStart = null;
@@ -3504,6 +3569,7 @@
                         game_name: '',
                         game_appid: '',
                         game_image_url: '',
+                        schedule_id: activeScheduleId || null,
                         notes: '',
                         create_discord_event: false,
                         discord_guild_id: null,
@@ -3580,6 +3646,7 @@
                 game_name: document.getElementById('sch-game').value.trim(),
                 game_appid: document.getElementById('sch-game-appid').value,
                 game_image_url: document.getElementById('sch-game-image-url').value,
+                schedule_id: activeScheduleId || null,
                 notes: document.getElementById('sch-notes').value.trim(),
                 create_discord_event: createDiscord,
                 discord_guild_id: guildId || null,
@@ -4020,6 +4087,30 @@ Event ID: ${result.discord_event_id}`);
             selectGame(appId, name, imageUrl);
             closeScheduleCommonGamePicker();
             showMessage(`Selected ${name}`, 'success');
+        }
+
+        async function pickRandomScheduleCommonGame() {
+            const attendees = getScheduleEventAttendees();
+            if (!attendees.length) {
+                showMessage('Invite at least one person before picking a random shared game.', 'warning');
+                return;
+            }
+            try {
+                const resp = await safeFetch('/api/schedule/common-games/random', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ attendees }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Could not pick a random shared game.', 'error');
+                    return;
+                }
+                const game = data.game || {};
+                selectScheduleCommonGame(String(game.app_id || ''), game.name || 'Random game', game.image_url || '');
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            }
         }
 
         async function openScheduleIcalSyncModal() {
