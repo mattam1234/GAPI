@@ -1,6 +1,6 @@
 # 🚀 Quick Setup Guide
 
-This is a quick reference for setting up GAPI. For detailed documentation, see [README.md](README.md).
+This is a quick reference for setting up GAPI. For detailed documentation, see [README.md](../README.md).
 
 ## Prerequisites
 
@@ -125,7 +125,7 @@ docker-compose up -d
 
 ## Next Steps
 
-- 📖 Read the full [README.md](README.md) for detailed feature documentation
+- 📖 Read the full [README.md](../README.md) for detailed feature documentation
 - 🔧 Check [TROUBLESHOOTING.md](README.md#-troubleshooting) for common issues
 - 🤝 See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute
 - 📚 Read [TUTORIALS.md](TUTORIALS.md) for advanced usage guides
@@ -159,4 +159,4 @@ python discord_bot.py
 
 - 🐛 [Report Issues](https://github.com/mattam1234/GAPI/issues)
 - 💡 [Request Features](https://github.com/mattam1234/GAPI/issues)
-- 📖 [Full Documentation](README.md)
+- 📖 [Full Documentation](../README.md)

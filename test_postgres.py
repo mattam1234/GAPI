@@ -148,8 +148,8 @@ def test_database():
         print("\nTroubleshooting:")
         print("1. Is PostgreSQL running?")
         print("2. Check .env and config.json")
-        print("3. Run: python setup_postgres.py")
-        print("4. Run: python initialize_db.py")
+        print("3. Run: python scripts/setup_postgres.py")
+        print("4. Run: python scripts/initialize_db.py")
         
         try:
             session.close()

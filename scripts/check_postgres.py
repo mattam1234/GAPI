@@ -97,10 +97,10 @@ def check_postgres_health():
                     missing = [t for t in expected_tables if t not in tables]
                     if missing:
                         print(f"\n   ⚠️  Missing tables: {', '.join(missing)}")
-                        print("      Run: python initialize_db.py")
+                        print("      Run: python scripts/initialize_db.py")
                 else:
                     print("   ⚠️  No tables found!")
-                    print("      Run: python initialize_db.py")
+                    print("      Run: python scripts/initialize_db.py")
                 
             except Exception as e:
                 print(f"   ℹ️  Could not inspect schema: {e}")

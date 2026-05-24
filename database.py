@@ -6,11 +6,14 @@ Handles PostgreSQL connections for user data, ignored games, and achievements.
 
 import os
 import json
+import hashlib
+from string import Template
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table, Float, UniqueConstraint, Index
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, Dict, List, Optional
+from werkzeug.security import check_password_hash, generate_password_hash
 
 logger = logging.getLogger('gapi.database')
 
@@ -25,7 +28,7 @@ def _load_database_url() -> str:
     """Load DATABASE_URL from env or config.json."""
     env_url = os.getenv('DATABASE_URL')
     if env_url:
-        return env_url
+        return Template(env_url).safe_substitute(os.environ)
 
     config_path = os.getenv('GAPI_CONFIG_PATH', 'config.json')
     try:
@@ -34,7 +37,7 @@ def _load_database_url() -> str:
                 data = json.load(f)
             config_url = data.get('database_url')
             if isinstance(config_url, str) and config_url.strip():
-                return config_url.strip()
+                return Template(config_url.strip()).safe_substitute(os.environ)
     except Exception as e:
         logger.warning("Failed to read database_url from config: %s", e)
 
@@ -84,7 +87,7 @@ class User(Base):
     
     id = Column(Integer, primary_key=True)
     username = Column(String(255), unique=True, index=True)
-    password = Column(String(64), nullable=False)  # SHA256 hash
+    password = Column(String(255), nullable=False)
     steam_id = Column(String(20), nullable=True)
     discord_id = Column(String(50), nullable=True, index=True)  # Discord user ID
     epic_id = Column(String(255), nullable=True)
@@ -848,6 +851,25 @@ def _json_loads(value: Optional[str], default: Any):
         return default
 
 
+def _is_legacy_password_hash(value: str) -> bool:
+    """Return True when *value* looks like a legacy SHA-256 password hash."""
+    return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdefABCDEF' for c in value)
+
+
+def hash_password(password: str) -> str:
+    """Hash a password for storage."""
+    return generate_password_hash(password)
+
+
+def verify_password(password: str, stored_password: str) -> bool:
+    """Verify a password against a stored hash."""
+    if not stored_password:
+        return False
+    if stored_password.startswith(('pbkdf2:', 'scrypt:')) or stored_password.count(':') >= 2:
+        return check_password_hash(stored_password, password)
+    return stored_password == password
+
+
 def refresh_discord_location_cache(db, guild_payloads: List[Dict]) -> bool:
     """Replace the cached guild/channel/member view mirrored from Discord."""
     if not db:
@@ -1410,7 +1432,7 @@ def create_or_update_user(db, username: str, password: str = '', steam_id: str =
     Args:
         db: Database session
         username: Username
-        password: Password hash (SHA256). If empty and user exists, password is not updated.
+        password: Password. If empty and user exists, password is not updated.
         steam_id: Steam ID
         epic_id: Epic Games ID
         gog_id: GOG ID
@@ -1424,7 +1446,7 @@ def create_or_update_user(db, username: str, password: str = '', steam_id: str =
         if user:
             # Update existing user
             if password:  # Only update password if provided
-                user.password = password
+                user.password = password if ':' in password else hash_password(password)
             user.steam_id = steam_id
             user.epic_id = epic_id
             user.gog_id = gog_id
@@ -1436,7 +1458,7 @@ def create_or_update_user(db, username: str, password: str = '', steam_id: str =
                 return None
             user = User(
                 username=username,
-                password=password,
+                password=password if ':' in password else hash_password(password),
                 steam_id=steam_id,
                 epic_id=epic_id,
                 gog_id=gog_id
@@ -1580,13 +1602,13 @@ def update_user_role(db, username: str, role: str):
         return False
 
 
-def verify_user_password(db, username: str, password_hash: str):
-    """Verify a user's password hash."""
+def verify_user_password(db, username: str, password: str):
+    """Verify a user's password."""
     if not db:
         return False
     try:
         user = db.query(User).filter(User.username == username).first()
-        if user and user.password == password_hash:
+        if user and verify_password(password, user.password):
             return True
         return False
     except Exception as e:

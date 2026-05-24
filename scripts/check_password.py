@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Check user's password hash and verify login."""
 import sys
-import hashlib
 import database
 
 def check_password(username: str, password: str):
@@ -17,20 +16,11 @@ def check_password(username: str, password: str):
             return False
         
         print(f"✓ Found user: {username}")
-        print(f"  Stored password hash: {user.password[:20]}... (truncated)")
-        
-        # Hash the provided password
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        print(f"  Provided password hash: {password_hash[:20]}... (truncated)")
-        
-        # Compare
-        if user.password == password_hash:
+        if database.verify_user_password(db, username, password):
             print(f"\n✓ Password MATCHES")
             return True
         else:
             print(f"\n❌ Password DOES NOT MATCH")
-            print(f"\nFull stored hash: {user.password}")
-            print(f"Full provided hash: {password_hash}")
             return False
         
         db.close()
@@ -43,7 +33,7 @@ def check_password(username: str, password: str):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python check_password.py <username> <password>")
+        print("Usage: python scripts/check_password.py <username> <password>")
         sys.exit(1)
     
     username = sys.argv[1]

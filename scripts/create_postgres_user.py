@@ -144,11 +144,11 @@ def main():
     print("=" * 70)
     print(f"\nUser and database created:")
     print(f"  User: {gapi_user}")
-    print(f"  Password: {gapi_password}")
+    print("  Password: [hidden]")
     print(f"  Database: {gapi_db}")
     print(f"  Host: {host}:{port}")
     print(f"\nNext steps:")
-    print(f"1. Run: python initialize_db.py")
+    print(f"1. Run: python scripts/initialize_db.py")
     print(f"2. Run: python test_postgres.py")
     print(f"3. Run: python gapi.py")
 

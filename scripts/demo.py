@@ -5,8 +5,8 @@ GAPI Interactive Demo
 Showcases GAPI functionality without requiring Steam credentials or a
 database connection.  Run it with:
 
-    python3 demo.py            # full showcase
-    python3 demo.py --quiet    # minimal output (good for CI)
+    python3 scripts/demo.py            # full showcase
+    python3 scripts/demo.py --quiet    # minimal output (good for CI)
 
 The demo exercises:
   • Game-picker filters (random, unplayed, playtime ranges, genre)

@@ -24,7 +24,7 @@ I've created a complete toolkit to help you set up and manage PostgreSQL for you
 
 #### **setup_postgres.py** (Automated Setup)
 ```powershell
-python setup_postgres.py
+python ../scripts/setup_postgres.py
 ```
 - Automatically finds PostgreSQL installation
 - Creates database user: `gapi`
@@ -35,7 +35,7 @@ python setup_postgres.py
 
 #### **initialize_db.py** (Create Schema)
 ```powershell
-python initialize_db.py
+python ../scripts/initialize_db.py
 ```
 - Creates all database tables
 - Sets up schema relationships
@@ -57,7 +57,7 @@ python test_postgres.py
 
 #### **check_postgres.py** (Health Check)
 ```powershell
-python check_postgres.py
+python ../scripts/check_postgres.py
 ```
 - Checks PostgreSQL configuration
 - Verifies connection
@@ -68,7 +68,7 @@ python check_postgres.py
 
 #### **migrate_to_postgres.py** (Data Migration)
 ```powershell
-python migrate_to_postgres.py
+python ../scripts/migrate_to_postgres.py
 ```
 - Migrates data from SQLite to PostgreSQL
 - Creates automatic backup before migration
@@ -87,14 +87,14 @@ Follow these 5 steps in order:
 ### Step 2: Run Setup Script
 ```powershell
 & .\.venv\Scripts\Activate.ps1
-python setup_postgres.py
+python ../scripts/setup_postgres.py
 ```
 - Provide PostgreSQL superuser password
 - Script creates user, database, and updates config
 
 ### Step 3: Initialize Schema
 ```powershell
-python initialize_db.py
+python ../scripts/initialize_db.py
 ```
 - Creates all tables
 - Verifies tables exist
@@ -119,12 +119,12 @@ If something doesn't work:
 
 1. **First check:** Run health check
    ```powershell
-   python check_postgres.py
+   python ../scripts/check_postgres.py
    ```
 
 2. **Common issues:**
    - PostgreSQL not installed? Download and install
-   - Wrong password? Re-run `setup_postgres.py`
+   - Wrong password? Re-run `../scripts/setup_postgres.py`
    - Connection refused? Check PostgreSQL service is running
    - Still using SQLite? Check `.env` DATABASE_URL setting
 
@@ -230,13 +230,13 @@ Automatically created:
 
 1. **If scripts fail:**
    - Check PostgreSQL is installed: https://www.postgresql.org/download/windows/
-   - Run `check_postgres.py` for diagnostics
+   - Run `../scripts/check_postgres.py` for diagnostics
    - Check PostgreSQL logs in `C:\Program Files\PostgreSQL\15\data\log\`
 
 2. **Common error messages:**
    - "psql: command not found" → Add PostgreSQL to PATH
    - "password authentication failed" → Wrong password in `.env`
-   - "FATAL: database doesn't exist" → Run `setup_postgres.py`
+   - "FATAL: database doesn't exist" → Run `../scripts/setup_postgres.py`
    - "Connection refused" → PostgreSQL service not running
 
 3. **Test connection manually:**
@@ -262,14 +262,14 @@ PostgreSQL offers better performance than SQLite for GAPI because:
 3. Add game libraries from Steam, Epic, GOG, etc.
 4. Use voting features
 5. Set up backups
-6. Monitor performance with `check_postgres.py`
+6. Monitor performance with `../scripts/check_postgres.py`
 
 ## 📞 Questions?
 
 Check files in this order:
 1. POSTGRES_QUICKSTART.md - Quick answers
 2. POSTGRES_SETUP_GUIDE.md - Detailed info
-3. Run `check_postgres.py` - Diagnose issues
+3. Run `../scripts/check_postgres.py` - Diagnose issues
 4. PostgreSQL logs - Technical details
 
 ---

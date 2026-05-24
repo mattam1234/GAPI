@@ -33,7 +33,7 @@ The `UserManager` class in [gapi_gui.py](gapi_gui.py) has been completely refact
 If you have an existing database, run the migration script first:
 
 ```powershell
-python migrate_database.py
+python ../scripts/migrate_database.py
 ```
 
 This will add the `password` column to your existing `users` table.
@@ -59,7 +59,7 @@ All tests passed successfully:
 
 1. [database.py](database.py) - Added password field and auth functions
 2. [gapi_gui.py](gapi_gui.py) - Refactored UserManager to use database
-3. [migrate_database.py](migrate_database.py) - New migration script (created)
+3. [migrate_database.py](../scripts/migrate_database.py) - New migration script (created)
 4. [migrate_add_password.sql](migrate_add_password.sql) - SQL migration (created)
 
 ## Backward Compatibility
@@ -86,7 +86,7 @@ If you see "Database not available" errors:
 ### Migration Issues
 
 If migration fails:
-1. Run `python migrate_database.py` manually
+1. Run `python ../scripts/migrate_database.py` manually
 2. Check the logs in `logs/gapi_gui.log`
 
 ### User Not Found Errors
@@ -108,4 +108,4 @@ If you get "User not found in database" errors:
 If you encounter any issues, check:
 - Application logs in `logs/gapi_gui.log`
 - Database connection via `psql -U gapi -d gapi_db`
-- Run migration script for detailed output: `python migrate_database.py`
+- Run migration script for detailed output: `python ../scripts/migrate_database.py`

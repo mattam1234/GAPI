@@ -17,10 +17,10 @@ import unittest
 from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
-# Import demo.py from the repo root
+# Import demo.py from the scripts folder
 # ---------------------------------------------------------------------------
 _DEMO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           'demo.py')
+                           'scripts', 'demo.py')
 spec = importlib.util.spec_from_file_location('demo', _DEMO_PATH)
 demo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(demo)

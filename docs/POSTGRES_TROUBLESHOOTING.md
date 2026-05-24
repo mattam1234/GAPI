@@ -75,7 +75,7 @@ FATAL:  Ident authentication failed for user "gapi"
 
 2. **Re-run setup to confirm user and password:**
    ```powershell
-   python setup_postgres.py
+   python ../scripts/setup_postgres.py
    ```
 
 3. **Manually reset the password:**
@@ -183,7 +183,7 @@ FATAL:  database "gapi_db" does not exist
 
 2. **If not in list, create it:**
    ```powershell
-   python setup_postgres.py
+   python ../scripts/setup_postgres.py
    ```
    
    Or manually:
@@ -220,7 +220,7 @@ FATAL:  role "gapi" does not exist
 
 2. **Create user if missing:**
    ```powershell
-   python setup_postgres.py
+   python ../scripts/setup_postgres.py
    ```
    
    Or manually:
@@ -371,24 +371,24 @@ ERROR: permission denied for schema public
 **Symptoms:**
 ```
 ❌ No tables found!
-Run: python initialize_db.py
+Run: python ../scripts/initialize_db.py
 ```
 
 **Causes:**
 - Schema not initialized
-- `initialize_db.py` failed
+- `../scripts/initialize_db.py` failed
 - Wrong database
 
 **Solutions:**
 
 1. **Initialize schema:**
    ```powershell
-   python initialize_db.py
+   python ../scripts/initialize_db.py
    ```
 
 2. **Check for errors:**
    ```powershell
-   python initialize_db.py 2>&1 | Tee-Object output.log
+   python ../scripts/initialize_db.py 2>&1 | Tee-Object output.log
    ```
 
 3. **Verify database is correct:**
@@ -399,9 +399,9 @@ Run: python initialize_db.py
 
 4. **If still failing:**
    ```powershell
-   python setup_postgres.py  # Recreate everything
-   python initialize_db.py    # Initialize schema
-   python check_postgres.py   # Verify
+   python ../scripts/setup_postgres.py  # Recreate everything
+   python ../scripts/initialize_db.py    # Initialize schema
+   python ../scripts/check_postgres.py   # Verify
    ```
 
 ---
@@ -468,7 +468,7 @@ $env:PGPASSWORD = "gapi_password_secure"
 
 ### Run Health Check
 ```powershell
-python check_postgres.py
+python ../scripts/check_postgres.py
 ```
 
 ### View Recent Logs
@@ -480,7 +480,7 @@ Get-Content "C:\Program Files\PostgreSQL\15\data\log\postgresql-*.log" -Tail 50
 
 ## 📞 Getting More Help
 
-1. **Run diagnostic:** `python check_postgres.py`
+1. **Run diagnostic:** `python ../scripts/check_postgres.py`
 2. **Check logs:** `C:\Program Files\PostgreSQL\15\data\log\`
 3. **Read docs:** `POSTGRES_SETUP_GUIDE.md`
 4. **Verify config:** `.env` and `config.json`

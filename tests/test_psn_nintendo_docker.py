@@ -695,11 +695,11 @@ class TestTutorials(unittest.TestCase):
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def test_tutorials_md_exists(self):
-        path = os.path.join(self.ROOT, 'TUTORIALS.md')
+        path = os.path.join(self.ROOT, 'docs', 'TUTORIALS.md')
         self.assertTrue(os.path.exists(path), 'TUTORIALS.md missing')
 
     def test_tutorials_covers_all_major_topics(self):
-        path = os.path.join(self.ROOT, 'TUTORIALS.md')
+        path = os.path.join(self.ROOT, 'docs', 'TUTORIALS.md')
         with open(path) as f:
             content = f.read()
         for topic in ('Steam', 'Docker', 'Browser Extension', 'PSN', 'Nintendo',

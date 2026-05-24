@@ -43,7 +43,7 @@ def check_admin_role(username: str):
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print("Usage: python check_admin_role.py <username>")
+        print("Usage: python scripts/check_admin_role.py <username>")
         sys.exit(1)
     
     username = sys.argv[1]

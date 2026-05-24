@@ -140,15 +140,19 @@ def main():
         
         # Replace SQLite with PostgreSQL
         old_db_url = "DATABASE_URL=sqlite:///gapi.db"
-        new_db_url = f"DATABASE_URL=postgresql://gapi:{gapi_password}@localhost:5432/gapi_db"
+        postgres_password_line = f"POSTGRES_PASSWORD={gapi_password}"
+        new_db_url = "DATABASE_URL=postgresql://gapi:${POSTGRES_PASSWORD}@localhost:5432/gapi_db"
         
         if old_db_url in content:
-            content = content.replace(old_db_url, f"# {old_db_url} (switched to PostgreSQL)\n{new_db_url}")
+            content = content.replace(
+                old_db_url,
+                f"# {old_db_url} (switched to PostgreSQL)\n{postgres_password_line}\n{new_db_url}",
+            )
         elif "DATABASE_URL=postgresql://" not in content:
             # Add after SECRET_KEY
             content = content.replace(
                 "# Database connection",
-                f"{new_db_url}\n\n# Database connection"
+                f"{postgres_password_line}\n{new_db_url}\n\n# Database connection"
             )
         
         with open(env_file, "w") as f:
@@ -164,7 +168,7 @@ def main():
         with open(config_file, "r") as f:
             config = json.load(f)
         
-        config["database_url"] = f"postgresql://gapi:{gapi_password}@localhost:5432/gapi_db"
+        config["database_url"] = "postgresql://gapi:${POSTGRES_PASSWORD}@localhost:5432/gapi_db"
         
         with open(config_file, "w") as f:
             json.dump(config, f, indent=2)
@@ -203,7 +207,7 @@ def main():
     print("1. Activate your virtual environment:")
     print("   & .\.venv\Scripts\Activate.ps1")
     print("\n2. Initialize the database schema:")
-    print("   python initialize_db.py")
+    print("   python scripts/initialize_db.py")
     print("\n3. Start GAPI:")
     print("   python gapi.py")
     print("\nConfiguration saved:")

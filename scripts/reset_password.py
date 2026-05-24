@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Reset user password."""
 import sys
-import hashlib
 import database
 
 def reset_password(username: str, new_password: str):
@@ -18,15 +17,11 @@ def reset_password(username: str, new_password: str):
         
         print(f"✓ Found user: {username}")
         
-        # Hash the new password
-        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
-        
         # Update password
-        user.password = password_hash
+        user.password = database.hash_password(new_password)
         db.commit()
         
         print(f"✓ Password updated successfully")
-        print(f"  New password hash: {password_hash}")
         
         db.close()
         return True
@@ -39,7 +34,7 @@ def reset_password(username: str, new_password: str):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python reset_password.py <username> <new_password>")
+        print("Usage: python scripts/reset_password.py <username> <new_password>")
         sys.exit(1)
     
     username = sys.argv[1]
