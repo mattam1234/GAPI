@@ -100,12 +100,17 @@
             </div>
 
             <div class="sidebar-nav">
+                <a class="sidebar-item active" id="nav-dashboard" onclick="switchTab('dashboard',event)" role="button" tabindex="0">
+                    <span class="sidebar-item-icon">🏠</span>
+                    <span class="sidebar-item-label">Dashboard</span>
+                </a>
+
                 <div class="sidebar-section-label">Discover</div>
                 <a class="sidebar-item" id="nav-recommendations" onclick="switchTab('recommendations',event)" role="button" tabindex="0">
                     <span class="sidebar-item-icon">🏠</span>
                     <span class="sidebar-item-label">For You</span>
                 </a>
-                <a class="sidebar-item active" id="nav-picker" onclick="switchTab('picker',event)" role="button" tabindex="0">
+                <a class="sidebar-item" id="nav-picker" onclick="switchTab('picker',event)" role="button" tabindex="0">
                     <span class="sidebar-item-icon">🎲</span>
                     <span class="sidebar-item-label">Game Picker</span>
                 </a>
@@ -210,7 +215,7 @@
 
         <main class="main-content" id="main-content">
             <div class="topbar">
-                <span class="topbar-title" id="topbar-page-title">Game Picker</span>
+                <span class="topbar-title" id="topbar-page-title">Dashboard</span>
                 <span class="topbar-spacer"></span>
                 <span class="topbar-status" id="status">Loading...</span>
                 <div id="topbar-user-info" style="display:none;">
@@ -223,8 +228,150 @@
             </div>
 
             <div class="page-body">
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active">
+            <div class="dash-wrap">
+
+                <!-- Welcome Banner -->
+                <div class="dash-welcome">
+                    <div class="dash-welcome-circles"></div>
+                    <div class="dash-welcome-text">
+                        <p class="dash-welcome-sub">Welcome back</p>
+                        <h2 class="dash-welcome-title" id="dash-greeting">Gamer 👋</h2>
+                        <p class="dash-welcome-hint" id="dash-events-teaser">Ready for game night?</p>
+                    </div>
+                    <div class="dash-welcome-actions">
+                        <button class="dash-btn-glass" onclick="switchTab('picker',event)">⚡ Pick a Game</button>
+                        <button class="dash-btn-solid" onclick="switchTab('sessions',event)">▶ Start Session</button>
+                    </div>
+                </div>
+
+                <!-- Stats Row -->
+                <div class="dash-stats-row">
+                    <div class="dash-stat-card" style="--stat-color:#5865F2">
+                        <div class="dash-stat-icon">🎮</div>
+                        <div class="dash-stat-body">
+                            <div class="dash-stat-value" id="dash-stat-library">—</div>
+                            <div class="dash-stat-label">Library</div>
+                            <div class="dash-stat-sub">games owned</div>
+                        </div>
+                    </div>
+                    <div class="dash-stat-card" style="--stat-color:#23A559">
+                        <div class="dash-stat-icon">🎯</div>
+                        <div class="dash-stat-body">
+                            <div class="dash-stat-value" id="dash-stat-sessions">—</div>
+                            <div class="dash-stat-label">Active Sessions</div>
+                            <div class="dash-stat-sub">playing now</div>
+                        </div>
+                    </div>
+                    <div class="dash-stat-card" style="--stat-color:#F0B232">
+                        <div class="dash-stat-icon">📅</div>
+                        <div class="dash-stat-body">
+                            <div class="dash-stat-value" id="dash-stat-events">—</div>
+                            <div class="dash-stat-label">Events</div>
+                            <div class="dash-stat-sub">upcoming</div>
+                        </div>
+                    </div>
+                    <div class="dash-stat-card" style="--stat-color:#9B59B6">
+                        <div class="dash-stat-icon">📈</div>
+                        <div class="dash-stat-body">
+                            <div class="dash-stat-value" id="dash-stat-catalog">—</div>
+                            <div class="dash-stat-label">Total Games</div>
+                            <div class="dash-stat-sub">in catalog</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main content grid -->
+                <div class="dash-main-grid">
+
+                    <!-- Left column (2/3) -->
+                    <div class="dash-left-col">
+
+                        <!-- Top Played Games -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">⚡ Top Played Games</span>
+                                <button class="dash-card-link" onclick="switchTab('library',event)">View all →</button>
+                            </div>
+                            <div id="dash-games-grid" class="dash-games-grid">
+                                <div class="dash-skeleton-row">
+                                    <div class="dash-game-tile-skel skeleton"></div>
+                                    <div class="dash-game-tile-skel skeleton"></div>
+                                    <div class="dash-game-tile-skel skeleton"></div>
+                                    <div class="dash-game-tile-skel skeleton"></div>
+                                    <div class="dash-game-tile-skel skeleton"></div>
+                                    <div class="dash-game-tile-skel skeleton"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Live Sessions -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title"><span class="dash-live-dot"></span> Live Sessions</span>
+                                <button class="dash-card-link" onclick="switchTab('sessions',event)">View all →</button>
+                            </div>
+                            <div id="dash-sessions-list">
+                                <div class="dash-empty" style="padding:20px 0;">
+                                    <span style="opacity:0.4;">No active sessions right now.</span>
+                                    <button class="dash-card-link" style="margin-top:6px;display:block;" onclick="switchTab('sessions',event)">Start one →</button>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div><!-- end left col -->
+
+                    <!-- Right column (1/3) -->
+                    <div class="dash-right-col">
+
+                        <!-- Quick Actions -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">Quick Actions</span>
+                            </div>
+                            <div class="dash-quick-actions">
+                                <button class="dash-qa-btn" onclick="switchTab('picker',event)"><span>🎲</span><span>Game Picker</span></button>
+                                <button class="dash-qa-btn" onclick="switchTab('sessions',event)"><span>🎯</span><span>Sessions</span></button>
+                                <button class="dash-qa-btn" onclick="switchTab('schedule',event)"><span>📅</span><span>Schedule</span></button>
+                                <button class="dash-qa-btn" onclick="switchTab('friends',event)"><span>👥</span><span>Friends</span></button>
+                                <button class="dash-qa-btn" onclick="switchTab('leaderboard',event)"><span>🏆</span><span>Leaderboard</span></button>
+                                <button class="dash-qa-btn" onclick="switchTab('chat',event)"><span>💬</span><span>Chat</span></button>
+                            </div>
+                        </div>
+
+                        <!-- Upcoming Events -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">📅 Upcoming</span>
+                                <button class="dash-card-link" onclick="switchTab('schedule',event)">Schedule →</button>
+                            </div>
+                            <div id="dash-upcoming-list">
+                                <div class="dash-empty" style="padding:16px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">No upcoming events.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Activity Feed -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">🕹️ Recent Activity</span>
+                            </div>
+                            <div id="dash-activity-feed">
+                                <div class="dash-empty" style="padding:16px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">Loading activity…</span>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div><!-- end right col -->
+                </div><!-- end main grid -->
+            </div><!-- end dash-wrap -->
+        </div>
+
         <!-- Picker Tab -->
-        <div id="picker-tab" class="tab-content active">
+        <div id="picker-tab" class="tab-content">
             <div class="filters">
                 <div class="filter-group">
                     <label class="filter-label">Filter Options</label>

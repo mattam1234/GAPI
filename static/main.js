@@ -307,6 +307,7 @@
 
             // Update topbar title
             const titleMap = {
+                dashboard: 'Dashboard',
                 picker: 'Game Picker', library: 'Library', favorites: 'Favorites',
                 stats: 'Statistics', users: 'Users', multiuser: 'Multi-User',
                 schedule: 'Schedule', playlists: 'Playlists', backlog: 'Backlog',
@@ -386,6 +387,158 @@
             }
             if (tabName === 'settings') {
                 loadSettings();
+            }
+            if (tabName === 'dashboard') {
+                loadDashboard();
+            }
+        }
+
+        // ── Dashboard ─────────────────────────────────────────────────────────
+        async function loadDashboard() {
+            // Fetch data in parallel; fail gracefully
+            const [libRes, sessRes, schedRes] = await Promise.allSettled([
+                safeFetch('/api/library').then(r => r.json()),
+                safeFetch('/api/live-session/active').then(r => r.json()),
+                safeFetch('/api/schedule').then(r => r.json()),
+            ]);
+
+            const games    = libRes.status   === 'fulfilled' ? (libRes.value.games    || []) : [];
+            const sessions = sessRes.status  === 'fulfilled' ? (sessRes.value.sessions || []) : [];
+            const allEvs   = schedRes.status === 'fulfilled' ? (schedRes.value.events  || []) : [];
+
+            // Filter upcoming events
+            const now = Date.now();
+            const upcoming = allEvs.filter(e => {
+                if (!e.date) return false;
+                try { return new Date(e.date + (e.time ? 'T' + e.time : 'T00:00')).getTime() >= now - 3600000; }
+                catch (_) { return false; }
+            }).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            // ── Welcome banner ──────────────────────────────────────────────
+            const rawName = (document.getElementById('sidebar-username') || {}).textContent
+                         || (document.getElementById('current-username') || {}).textContent || '';
+            const firstName = rawName.trim().split(/\s+/)[0] || 'Gamer';
+            const greetEl = document.getElementById('dash-greeting');
+            const hintEl  = document.getElementById('dash-events-teaser');
+            if (greetEl) greetEl.textContent = firstName + ' 👋';
+            if (hintEl)  hintEl.textContent  = upcoming.length
+                ? `Ready for game night? You have ${upcoming.length} upcoming event${upcoming.length !== 1 ? 's' : ''}.`
+                : 'Ready for game night?';
+
+            // ── Stat cards ──────────────────────────────────────────────────
+            const _stat = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+            _stat('dash-stat-library',  games.length);
+            _stat('dash-stat-sessions', sessions.length);
+            _stat('dash-stat-events',   upcoming.length);
+            _stat('dash-stat-catalog',  games.length);
+
+            // ── Top games grid ──────────────────────────────────────────────
+            const topGames = [...games]
+                .sort((a, b) => (b.playtime_hours || 0) - (a.playtime_hours || 0))
+                .slice(0, 6);
+            const gridEl = document.getElementById('dash-games-grid');
+            if (gridEl) {
+                if (topGames.length === 0) {
+                    gridEl.innerHTML = '<div class="dash-empty" style="grid-column:1/-1; padding:24px;">No games yet — add some to your library.</div>';
+                } else {
+                    gridEl.innerHTML = topGames.map(g => {
+                        const appId = g.app_id || g.appid;
+                        const coverUrl = appId
+                            ? `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`
+                            : '';
+                        const fallback = appId
+                            ? `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`
+                            : '';
+                        const safeName = escapeHtml(g.name || 'Game');
+                        const hrs = g.playtime_hours != null ? `${g.playtime_hours}h` : '';
+                        return `<div class="dash-game-tile" onclick="showGameDetails(${appId || 0}, '${escAttr(g.name || '')}', ${g.playtime_hours || 0}, '')">
+                            <div class="dash-game-tile-cover">
+                                <img src="${coverUrl}" alt="${safeName}"
+                                     onerror="this.src='${fallback}'" loading="lazy">
+                            </div>
+                            <div class="dash-game-tile-name" title="${safeName}">${safeName}</div>
+                            ${hrs ? `<div class="dash-game-tile-hours">${hrs}</div>` : ''}
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ── Live sessions list ──────────────────────────────────────────
+            const sessListEl = document.getElementById('dash-sessions-list');
+            if (sessListEl) {
+                if (sessions.length === 0) {
+                    sessListEl.innerHTML = `<div class="dash-empty"><span style="opacity:0.4;">No active sessions right now.</span>
+                        <button class="dash-card-link" style="margin-top:6px;" onclick="switchTab('sessions',event)">Start one →</button></div>`;
+                } else {
+                    sessListEl.innerHTML = sessions.slice(0, 5).map(s => {
+                        const gameName = escapeHtml(s.game_title || s.game_name || 'Game TBD');
+                        const sessName = escapeHtml(s.name || 'Session');
+                        const appId    = s.game_appid || s.appid;
+                        const thumb    = appId
+                            ? `<img src="https://cdn.akamai.steamstatic.com/steam/apps/${appId}/capsule_sm_120.jpg" onerror="this.style.display='none'" loading="lazy">`
+                            : '🎮';
+                        return `<div class="dash-session-item">
+                            <div class="dash-session-thumb">${thumb}</div>
+                            <div class="dash-session-info">
+                                <div class="dash-session-name">${sessName}</div>
+                                <div class="dash-session-game">${gameName}</div>
+                            </div>
+                            <span class="dash-live-badge">Live</span>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ── Upcoming events ─────────────────────────────────────────────
+            const upcomingEl = document.getElementById('dash-upcoming-list');
+            if (upcomingEl) {
+                if (upcoming.length === 0) {
+                    upcomingEl.innerHTML = `<div class="dash-empty"><span style="opacity:0.4; font-size:0.85em;">No upcoming events.</span>
+                        <button class="dash-card-link" style="margin-top:6px;" onclick="switchTab('schedule',event)">Plan one →</button></div>`;
+                } else {
+                    upcomingEl.innerHTML = upcoming.slice(0, 4).map(ev => {
+                        let monthStr = '', dayStr = '';
+                        try {
+                            const d = new Date(ev.date + 'T00:00');
+                            monthStr = d.toLocaleDateString('en', { month: 'short' });
+                            dayStr   = d.getDate();
+                        } catch(_) {}
+                        return `<div class="dash-event-item">
+                            <div class="dash-event-date-box">
+                                <div class="dash-event-month">${monthStr}</div>
+                                <div class="dash-event-day">${dayStr}</div>
+                            </div>
+                            <div style="flex:1; min-width:0;">
+                                <div class="dash-event-title">${escapeHtml(ev.title || 'Event')}</div>
+                                <div class="dash-event-time">${escapeHtml(ev.time || 'Time TBD')}</div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ── Activity feed (most-played games as proxy for recent activity) ─
+            const actEl = document.getElementById('dash-activity-feed');
+            if (actEl) {
+                const recent = [...games]
+                    .filter(g => (g.playtime_hours || 0) > 0)
+                    .sort((a, b) => (b.playtime_hours || 0) - (a.playtime_hours || 0))
+                    .slice(0, 6);
+                if (recent.length === 0) {
+                    actEl.innerHTML = '<div class="dash-empty"><span style="opacity:0.4; font-size:0.85em;">No activity yet.</span></div>';
+                } else {
+                    actEl.innerHTML = recent.map(g => {
+                        const safeName = escapeHtml(g.name || 'Game');
+                        const hrs = g.playtime_hours != null ? `${g.playtime_hours}h played` : '';
+                        return `<div class="dash-activity-item">
+                            <div class="dash-activity-icon">🎮</div>
+                            <div class="dash-activity-text">
+                                <div class="dash-activity-msg">${safeName}</div>
+                                <div class="dash-activity-time">${hrs}</div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
             }
         }
 
@@ -3702,6 +3855,8 @@
             const topbarLoginBtn = document.getElementById('topbar-login-btn');
             if (topbarLoginBtn) topbarLoginBtn.style.display = 'inline-block';
             checkAuthStatus();
+            // Load dashboard data for the default page
+            loadDashboard();
 
             const loginForm = document.getElementById('login-form');
             if (loginForm) loginForm.addEventListener('submit', handleLogin);
