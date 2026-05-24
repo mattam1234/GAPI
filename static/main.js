@@ -25,6 +25,15 @@
             document.getElementById('loading-overlay').classList.remove('active');
         }
 
+        function handleTopbarSearch(query) {
+            if (!query.trim()) return;
+            const q = query.toLowerCase();
+            void q;
+            switchTab('library', null);
+            const input = document.getElementById('library-search');
+            if (input) { input.value = query; searchLibraryDebounced(); }
+        }
+
         // ---- Dark Mode ----
         function applyTheme(theme) {
             const normalized = theme === 'dark' ? 'dark' : 'light';
@@ -185,7 +194,7 @@
                 'backlog-list', 'playlists-list', 'playlists-container',
                 'achievements-list', 'friends-list', 'recommendations-list',
                 'schedule-list', 'notifications-list', 'leaderboard-list',
-                'users-list', 'common-games-list'
+                'users-list', 'common-games-list', 'presence-avatars', 'dash-online-list'
             ];
             listIds.forEach(id => {
                 const el = document.getElementById(id);
@@ -540,6 +549,8 @@
                     }).join('');
                 }
             }
+
+            await updatePresenceStrip();
         }
 
         async function pickGame() {
@@ -1971,26 +1982,15 @@
                 showToast(message, type);
                 return;
             }
-            // Fallback: simple fixed-position notification
+            // Fallback: styled fixed-position notification
+            const normalizedType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
             const messageDiv = document.createElement('div');
-            messageDiv.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 15px 25px;
-                background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#4f46e5'};
-                color: white;
-                border-radius: var(--radius-sm, 8px);
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                z-index: 10000;
-                font-weight: 600;
-                animation: slideIn 0.3s ease-out;
-            `;
+            messageDiv.className = `app-toast app-toast--${normalizedType}`;
             messageDiv.textContent = message;
             document.body.appendChild(messageDiv);
             setTimeout(() => {
-                messageDiv.style.animation = 'slideOut 0.3s ease-out';
-                setTimeout(() => messageDiv.remove(), 300);
+                messageDiv.style.animation = 'toastSlideIn 0.24s ease-out reverse';
+                setTimeout(() => messageDiv.remove(), 240);
             }, 3000);
         }
         
@@ -3932,6 +3932,9 @@
                     return;
                 }
                 const data = await response.json();
+                presenceCache.friends = data.friends || [];
+                presenceCache.timestamp = Date.now();
+                void updatePresenceStrip();
                 if (!data.friends || data.friends.length === 0) {
                     listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No friends found, or your friend list is private.</div>';
                     return;
@@ -6501,6 +6504,90 @@
             if (listBtn) { listBtn.style.background = view === 'list' ? activeStyle : inactiveStyle; listBtn.style.color = view === 'list' ? activeColor : inactiveColor; }
             if (gridBtn) { gridBtn.style.background = view === 'grid' ? activeStyle : inactiveStyle; gridBtn.style.color = view === 'grid' ? activeColor : inactiveColor; }
             if (_libraryData) renderLibraryData(_libraryData);
+        }
+
+        function getGamePlatforms(game) {
+            const sourceText = [
+                game.platform,
+                game.platform_name,
+                game.source,
+                game.store,
+                game.storefront,
+                game.client,
+                Array.isArray(game.platforms) ? game.platforms.join(', ') : game.platforms,
+                Array.isArray(game.tags) ? game.tags.join(', ') : game.tags
+            ].filter(Boolean).join(' ').toLowerCase();
+
+            const platforms = [];
+            if (/epic/.test(sourceText)) platforms.push({ key: 'epic', label: 'Epic', shortLabel: 'E', className: 'platform-epic' });
+            if (/\bgog\b|good old games/.test(sourceText)) platforms.push({ key: 'gog', label: 'GOG', shortLabel: 'GOG', className: 'platform-gog' });
+            if (/steam/.test(sourceText) || (!platforms.length && (game.app_id || game.appid))) {
+                platforms.unshift({ key: 'steam', label: 'Steam', shortLabel: 'S', className: 'platform-steam' });
+            }
+
+            return Array.from(new Map(platforms.map(platform => [platform.key, platform])).values()).slice(0, 3);
+        }
+
+        function getGameRating(game) {
+            const candidates = [game.metacritic, game.rating, game.user_rating, game.score];
+            for (const candidate of candidates) {
+                const value = Number(candidate);
+                if (Number.isFinite(value) && value > 0) return Math.round(value);
+            }
+            return null;
+        }
+
+        function renderInlinePlatformBadges(game) {
+            return getGamePlatforms(game).map(platform =>
+                `<span class="game-inline-badge ${platform.className}" title="${platform.label}">${platform.shortLabel}</span>`
+            ).join('');
+        }
+
+        function renderGameCard(game) {
+            const appId = game.app_id || game.appid || 0;
+            const safeName = escapeHtml(game.name || 'Untitled Game');
+            const safeNameJs = escAttr(game.name || 'Untitled Game');
+            const safeTagsJs = escAttr((game.tags || []).join(', '));
+            const coverSrc = getGameThumbUrl(appId);
+            const favoriteLabel = game.is_favorite ? 'Unsave' : 'Save';
+            const platforms = getGamePlatforms(game);
+            const rating = getGameRating(game);
+            const playtime = `${game.playtime_hours || 0}h played`;
+            const platformBadges = platforms.map(platform =>
+                `<span class="game-card-platform-badge ${platform.className}" title="${platform.label}">${platform.shortLabel}</span>`
+            ).join('');
+
+            return `
+                <div class="game-card" onclick="showGameDetails(${appId}, '${safeNameJs}', ${game.playtime_hours || 0}, '${safeTagsJs}')">
+                    <div class="game-card-cover-wrap">
+                        <img class="game-card-cover" src="${coverSrc}"
+                             onerror="handleMissingCover(this)"
+                             alt="${safeName}" loading="lazy">
+                        ${platformBadges ? `<div class="game-card-platform-badges">${platformBadges}</div>` : ''}
+                        ${rating ? `<div class="game-card-rating-badge">★ ${rating}</div>` : ''}
+                        <div class="game-card-overlay">
+                            <div class="game-card-overlay-content">
+                                <div class="game-card-overlay-chips">
+                                    <span class="game-card-overlay-chip">⏱ ${playtime}</span>
+                                    ${platforms[0] ? `<span class="game-card-overlay-chip">${platforms[0].label}</span>` : ''}
+                                </div>
+                                <div class="game-card-overlay-actions">
+                                    <button class="game-card-overlay-btn primary" onclick="event.stopPropagation(); showGameDetails(${appId}, '${safeNameJs}', ${game.playtime_hours || 0}, '${safeTagsJs}')">Details</button>
+                                    <button class="game-card-overlay-btn" onclick="event.stopPropagation(); toggleFavorite(${appId})">${favoriteLabel}</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="game-card-body">
+                        <div class="game-card-title" title="${safeName}">${safeName}</div>
+                        <div class="game-card-meta">
+                            <span>${game.playtime_hours || 0}h</span>
+                            <span class="game-card-actions-inline">
+                                <span class="game-card-action-icon" title="Favorite" onclick="event.stopPropagation(); toggleFavorite(${appId})">${game.is_favorite ? '⭐' : '☆'}</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>`;
         }
 
         function renderLibraryData(data) {
