@@ -264,6 +264,7 @@
                 startChatPolling();
             }
             if (tabName === 'sessions') {
+                loadLiveSessionDiscordLocations();
                 loadLiveSessions();
                 if (activeLiveSessionId) {
                     openLiveSession(activeLiveSessionId);
@@ -4225,6 +4226,9 @@
         let sessionsPollInterval = null;
         let activeLiveSessionId = null;
         let activeSessionEventSource = null;
+        let liveSessionDiscordGuilds = [];
+        let liveSessionLootboxTimer = null;
+        let liveSessionLootboxSessionId = null;
         let chatLastId = 0;
         let chatOldestId = null;
         let hasMoreOldMessages = true;
@@ -5068,15 +5072,73 @@
             return (el && el.textContent ? el.textContent.trim() : '');
         }
 
+        function populateLiveSessionDiscordChannels() {
+            const guildSelect = document.getElementById('session-discord-guild');
+            const channelSelect = document.getElementById('session-discord-channel');
+            if (!guildSelect || !channelSelect) return;
+            const guild = liveSessionDiscordGuilds.find(g => g.guild_id === guildSelect.value);
+            const channels = guild ? (guild.channels || []) : [];
+            channelSelect.innerHTML = '<option value="">Choose Discord channel</option>';
+            channels.forEach(channel => {
+                const option = document.createElement('option');
+                option.value = channel.channel_id;
+                option.textContent = `#${channel.channel_name}`;
+                channelSelect.appendChild(option);
+            });
+            channelSelect.disabled = !guild;
+        }
+
+        async function loadLiveSessionDiscordLocations() {
+            const guildSelect = document.getElementById('session-discord-guild');
+            const hintEl = document.getElementById('session-discord-hint');
+            if (!guildSelect) return;
+            try {
+                const resp = await fetch('/api/live-session/discord-locations');
+                const data = await resp.json();
+                const guilds = data.guilds || [];
+                liveSessionDiscordGuilds = guilds;
+                guildSelect.innerHTML = '<option value="">No Discord sync</option>';
+                guilds.forEach(guild => {
+                    const option = document.createElement('option');
+                    option.value = guild.guild_id;
+                    option.textContent = guild.guild_name;
+                    guildSelect.appendChild(option);
+                });
+                if (hintEl) {
+                    if (guilds.length) {
+                        hintEl.textContent = 'Choose a Discord server and channel to mirror the session through the bot.';
+                    } else {
+                        hintEl.textContent = data.error || 'Link your Discord ID in Settings, then talk to the bot in your server so it can cache your available channels.';
+                    }
+                }
+                populateLiveSessionDiscordChannels();
+            } catch (err) {
+                if (hintEl) hintEl.textContent = 'Could not load Discord channels right now.';
+            }
+        }
+
         async function createLiveSession() {
             const nameInput = document.getElementById('session-name-input');
             const coopOnly = document.getElementById('session-coop-only').checked;
+            const guildSelect = document.getElementById('session-discord-guild');
+            const channelSelect = document.getElementById('session-discord-channel');
             const name = (nameInput.value || '').trim();
+            const discordGuildId = (guildSelect && guildSelect.value) || '';
+            const discordChannelId = (channelSelect && channelSelect.value) || '';
+            if (discordGuildId && !discordChannelId) {
+                showMessage('Choose a Discord channel for the selected server', 'error');
+                return;
+            }
             try {
                 const resp = await safeFetch('/api/live-session/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name || undefined, coop_only: coopOnly }),
+                    body: JSON.stringify({
+                        name: name || undefined,
+                        coop_only: coopOnly,
+                        discord_guild_id: discordGuildId || undefined,
+                        discord_channel_id: discordChannelId || undefined,
+                    }),
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
@@ -5085,6 +5147,8 @@
                 }
                 showMessage('Session created!', 'success');
                 if (nameInput) nameInput.value = '';
+                if (guildSelect) guildSelect.value = '';
+                populateLiveSessionDiscordChannels();
                 activeLiveSessionId = data.session_id;
                 await loadLiveSessions();
                 renderLiveSessionDetails(data);
@@ -5123,6 +5187,9 @@
                 listDiv.innerHTML = sessions.map(s => {
                     const joined = (s.participants || []).includes(me);
                     const isHost = s.host === me;
+                    const discordSummary = s.discord && s.discord.guild_name && s.discord.channel_name
+                        ? `<div style="font-size:0.82em; color:var(--text-secondary); margin-top:4px;">Discord: ${s.discord.guild_name} / #${s.discord.channel_name}</div>`
+                        : '';
                     return `
                         <div style="border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); padding:10px; margin-bottom:10px; background:var(--list-hover);">
                             <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
@@ -5130,6 +5197,7 @@
                                 <span style="font-size:0.8em; color:var(--text-secondary);">${s.status}</span>
                             </div>
                             <div style="font-size:0.85em; color:var(--text-secondary); margin-top:4px;">Host: ${s.host} · Players: ${(s.participants || []).length}</div>
+                            ${discordSummary}
                             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
                                 <button onclick="openLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:var(--radius-xs,6px); background:#4f46e5; color:white; cursor:pointer;">Open</button>
                                 ${joined
@@ -5332,6 +5400,43 @@
             `;
         }
 
+        function playLiveSessionLootboxReveal(session) {
+            const revealEl = document.getElementById('live-session-lootbox');
+            if (!revealEl || !session || session.status !== 'completed' || !session.picked_game) return;
+            if (liveSessionLootboxSessionId === session.session_id) return;
+            liveSessionLootboxSessionId = session.session_id;
+            if (liveSessionLootboxTimer) {
+                clearInterval(liveSessionLootboxTimer);
+                liveSessionLootboxTimer = null;
+            }
+            const finalName = session.picked_game.name || 'Unknown game';
+            const tease = ['🎁', '🎲', '🎮', '⭐', '🔥', '💥', '✨'];
+            let step = 0;
+            revealEl.style.display = 'block';
+            revealEl.innerHTML = '<div style="font-size:0.9em; color:var(--text-secondary);">Rolling final pick…</div>';
+            liveSessionLootboxTimer = setInterval(() => {
+                step += 1;
+                if (step >= 10) {
+                    clearInterval(liveSessionLootboxTimer);
+                    liveSessionLootboxTimer = null;
+                    revealEl.innerHTML = `
+                        <div style="padding:14px; border:1px solid rgba(124,58,237,0.45); border-radius:12px; background:linear-gradient(135deg, rgba(79,70,229,0.18), rgba(124,58,237,0.25)); text-align:center;">
+                            <div style="font-size:0.82em; color:var(--text-secondary); margin-bottom:6px;">Lootbox reveal</div>
+                            <div style="font-size:1.3em; font-weight:700; color:var(--text-primary);">🎉 ${finalName}</div>
+                        </div>
+                    `;
+                    return;
+                }
+                const randomTag = tease[Math.floor(Math.random() * tease.length)];
+                revealEl.innerHTML = `
+                    <div style="padding:14px; border:1px solid rgba(124,58,237,0.25); border-radius:12px; background:linear-gradient(135deg, rgba(79,70,229,0.12), rgba(124,58,237,0.18)); text-align:center;">
+                        <div style="font-size:0.82em; color:var(--text-secondary); margin-bottom:6px;">Lootbox reveal</div>
+                        <div style="font-size:1.1em; font-weight:700; color:var(--text-primary); letter-spacing:1px;">${randomTag} ${finalName}</div>
+                    </div>
+                `;
+            }, 140);
+        }
+
         function renderLiveSessionDetails(session) {
             const detailsDiv = document.getElementById('session-details');
             if (!detailsDiv || !session) return;
@@ -5344,6 +5449,8 @@
             const yesCount = voteState.yes_count || 0;
             const noCount = voteState.no_count || 0;
             const canVote = joined && session.status === 'awaiting_vote' && !!session.picked_game;
+            const pendingJoins = session.pending_joins || [];
+            const discordInfo = session.discord || {};
 
             detailsDiv.innerHTML = `
                 <div style="display:grid; gap:10px;">
@@ -5353,6 +5460,9 @@
                     </div>
                     <div style="font-size:0.9em; color:var(--text-secondary);">Host: ${session.host} · Round: ${session.round || 0}</div>
                     <div style="font-size:0.9em; color:var(--text-secondary);">Players: ${participants.join(', ') || 'None'}</div>
+                    ${discordInfo.guild_name && discordInfo.channel_name
+                        ? `<div style="font-size:0.9em; color:var(--text-secondary);">Discord sync: ${discordInfo.guild_name} / #${discordInfo.channel_name} · Pending joins: ${session.pending_join_count || 0}</div>`
+                        : ''}
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         ${joined
                             ? `<button onclick="leaveLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#ef4444; color:white; cursor:pointer;">Leave</button>`
@@ -5362,7 +5472,18 @@
                                <button onclick="openInviteUsersModal('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#3b82f6; color:white; cursor:pointer;">Invite Users</button>`
                             : ''}
                     </div>
+                    <div id="live-session-lootbox" style="display:${session.status === 'completed' && session.picked_game ? 'block' : 'none'};"></div>
                     ${renderPickedGameCard(session.picked_game)}
+                    ${pendingJoins.length
+                        ? `<div style="border:1px dashed var(--input-border); border-radius:10px; padding:10px;">
+                               <div style="font-size:0.9em; font-weight:600; color:var(--text-primary); margin-bottom:6px;">Discord onboarding queue</div>
+                               <div style="display:grid; gap:6px;">${pendingJoins.map(join => `
+                                   <div style="font-size:0.85em; color:var(--text-secondary);">
+                                       Discord user <code>${join.discord_user_id}</code> — ${join.status}
+                                   </div>
+                               `).join('')}</div>
+                           </div>`
+                        : ''}
                     <div style="border-top:1px solid var(--input-border); padding-top:10px;">
                         <div style="font-size:0.9em; color:var(--text-primary); font-weight:600; margin-bottom:6px;">Majority Vote</div>
                         <div style="font-size:0.85em; color:var(--text-secondary); margin-bottom:8px;">Need ${required} votes · ✅ ${yesCount} · ❌ ${noCount}</div>
@@ -5375,6 +5496,11 @@
                     </div>
                 </div>
             `;
+            if (session.status === 'completed' && session.picked_game) {
+                playLiveSessionLootboxReveal(session);
+            } else {
+                liveSessionLootboxSessionId = null;
+            }
         }
 
         function subscribeToLiveSession(sessionId) {
@@ -6052,7 +6178,7 @@
                 const configEl = document.getElementById('diag-config-files');
                 if (configEl) {
                     const config = data.config_file_exists ? '✅ config.json' : '❌ config.json';
-                    const discordConfig = data.discord_config_exists ? '✅ discord_config.json' : '❌ discord_config.json';
+                    const discordConfig = data.discord_config_exists ? '✅ Discord links DB' : '❌ Discord links DB';
                     configEl.innerHTML = `${config} | ${discordConfig}`;
                 }
 

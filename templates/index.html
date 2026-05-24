@@ -832,6 +832,12 @@
             <p style="color: var(--text-secondary); margin-bottom: 14px;">Create or join a live session, pick a game, and vote to accept/reject. Rejected picks trigger a new game and fresh vote.</p>
             <div style="display:flex; gap:var(--space-10); align-items:center; flex-wrap:wrap; margin-bottom:14px;">
                 <input id="session-name-input" type="text" placeholder="Session name (optional)" maxlength="80" style="padding:var(--space-9) var(--space-md); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); min-width:220px;">
+                <select id="session-discord-guild" onchange="populateLiveSessionDiscordChannels()" style="padding:var(--space-9) var(--space-md); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); min-width:220px;">
+                    <option value="">No Discord sync</option>
+                </select>
+                <select id="session-discord-channel" style="padding:var(--space-9) var(--space-md); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); min-width:220px;">
+                    <option value="">Choose Discord channel</option>
+                </select>
                 <label style="display:flex; align-items:center; gap:var(--space-sm); color:var(--text-primary);">
                     <input id="session-coop-only" type="checkbox">
                     <span>Co-op only</span>
@@ -839,6 +845,7 @@
                 <button onclick="createLiveSession()" style="padding:var(--space-9) var(--space-lg); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">➕ Create Session</button>
                 <button onclick="loadLiveSessions()" style="padding:var(--space-9) var(--space-lg); background:var(--input-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer; font-weight:600;">🔄 Refresh</button>
             </div>
+            <div id="session-discord-hint" style="color:var(--text-secondary); margin:-4px 0 12px 0; font-size:0.9em;">Link your Discord ID in Settings to create a Discord-synced session.</div>
             <div style="display:grid; grid-template-columns: minmax(300px, 1fr) minmax(380px, 1.2fr); gap:var(--space-14); align-items:start;">
                 <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:var(--radius,12px); padding:var(--space-md);">
                     <h3 style="margin:0 0 var(--space-10);">Active Sessions</h3>
