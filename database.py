@@ -758,11 +758,8 @@ def init_db():
     if engine:
         try:
             Base.metadata.create_all(bind=engine)
+            _run_migrations()
             logger.info("Database tables initialized successfully")
-            
-            # Run migrations
-            # Disabled automatic migration - run manually if needed
-            # _run_migrations()
             return True
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
@@ -779,8 +776,17 @@ def _run_migrations():
     try:
         from sqlalchemy import inspect, text
         inspector = inspect(engine)
-        
-        if 'chat_messages' in inspector.get_table_names():
+        tables = set(inspector.get_table_names())
+
+        if 'users' in tables:
+            columns = {col['name'] for col in inspector.get_columns('users')}
+            if 'email' not in columns:
+                with engine.connect() as conn:
+                    conn.execute(text('ALTER TABLE users ADD COLUMN email VARCHAR(255)'))
+                    conn.commit()
+                    logger.info("Migrated: Added email column to users table")
+
+        if 'chat_messages' in tables:
             columns = {col['name'] for col in inspector.get_columns('chat_messages')}
             
             if 'command_only' not in columns:
