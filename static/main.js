@@ -32,10 +32,110 @@
             localStorage.setItem('gapi_theme', normalized);
             const btn = document.getElementById('dark-mode-btn');
             if (btn) btn.textContent = normalized === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+            const themeBtn = document.getElementById('theme-toggle-btn');
+            if (themeBtn) themeBtn.textContent = normalized === 'dark' ? '☀️' : '🌙';
         }
         function toggleDarkMode() {
             const current = document.documentElement.getAttribute('data-theme') || 'light';
             applyTheme(current === 'dark' ? 'light' : 'dark');
+        }
+        // ── Sidebar ──────────────────────────────────────────────────────────────
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const btn = sidebar ? sidebar.querySelector('.sidebar-toggle-btn') : null;
+            if (!sidebar) return;
+            const collapsed = sidebar.classList.toggle('collapsed');
+            localStorage.setItem('gapi_sidebar_collapsed', collapsed ? '1' : '0');
+            if (btn) btn.textContent = collapsed ? '›' : '‹';
+        }
+
+        (function initSidebar() {
+            document.addEventListener('DOMContentLoaded', function() {
+                const sidebar = document.getElementById('sidebar');
+                if (!sidebar) return;
+                const btn = sidebar.querySelector('.sidebar-toggle-btn');
+                if (localStorage.getItem('gapi_sidebar_collapsed') === '1') {
+                    sidebar.classList.add('collapsed');
+                    if (btn) btn.textContent = '›';
+                }
+            });
+        })();
+
+        // ── Discord Rich Presence ─────────────────────────────────────────────────
+        let _presenceEnabled = false;
+
+        function initPresenceToggle() {
+            const saved = localStorage.getItem('gapi_presence_enabled');
+            _presenceEnabled = saved === '1';
+            const toggle = document.getElementById('presence-enabled-toggle');
+            if (toggle) toggle.checked = _presenceEnabled;
+        }
+
+        function setPresenceEnabled(enabled) {
+            _presenceEnabled = !!enabled;
+            localStorage.setItem('gapi_presence_enabled', enabled ? '1' : '0');
+            const banner = document.getElementById('presence-status-banner');
+            if (banner) {
+                banner.style.display = '';
+                banner.style.background = enabled ? 'rgba(35,165,89,0.15)' : 'rgba(255,255,255,0.05)';
+                banner.style.color = enabled ? '#23A559' : 'var(--text-muted)';
+                banner.style.border = '1px solid ' + (enabled ? 'rgba(35,165,89,0.3)' : 'var(--border)');
+                banner.textContent = enabled ? '✅ Rich Presence is ON — your Discord status will update when you pick a game.' : 'Rich Presence is OFF.';
+                setTimeout(() => { if (banner) banner.style.display = 'none'; }, 3500);
+            }
+        }
+
+        async function updatePresence(gameName, playtimeHours) {
+            if (!_presenceEnabled) return;
+            try {
+                await safeFetch('/api/presence/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({game: gameName, playtime_hours: playtimeHours})
+                });
+            } catch(e) { /* silent */ }
+        }
+
+        async function clearPresence() {
+            try {
+                await safeFetch('/api/presence/clear', { method: 'POST' });
+                const banner = document.getElementById('presence-status-banner');
+                if (banner) {
+                    banner.style.display = '';
+                    banner.style.background = 'rgba(255,255,255,0.05)';
+                    banner.style.color = 'var(--text-muted)';
+                    banner.style.border = '1px solid var(--border)';
+                    banner.textContent = 'Discord status cleared.';
+                    setTimeout(() => { banner.style.display = 'none'; }, 2500);
+                }
+            } catch(e) { console.debug('clearPresence error', e); }
+        }
+
+        async function testPresence() {
+            try {
+                const r = await safeFetch('/api/presence/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({game: 'GameNight (test)', playtime_hours: 0})
+                });
+                const data = await r.json();
+                const banner = document.getElementById('presence-status-banner');
+                if (banner) {
+                    banner.style.display = '';
+                    if (data.ok || data.updated) {
+                        banner.style.background = 'rgba(35,165,89,0.15)';
+                        banner.style.color = '#23A559';
+                        banner.style.border = '1px solid rgba(35,165,89,0.3)';
+                        banner.textContent = '✅ Discord status updated! Check your Discord profile.';
+                    } else {
+                        banner.style.background = 'rgba(242,63,66,0.1)';
+                        banner.style.color = '#F23F42';
+                        banner.style.border = '1px solid rgba(242,63,66,0.3)';
+                        banner.textContent = '⚠️ ' + (data.error || 'Could not update presence. Is Discord running and DISCORD_CLIENT_ID set?');
+                    }
+                    setTimeout(() => { banner.style.display = 'none'; }, 4000);
+                }
+            } catch(e) { console.debug('testPresence error', e); }
         }
         // Restore saved theme on load
         (function() {
@@ -200,29 +300,46 @@
         }
         
         function switchTab(tabName, event) {
-            // Ensure we're working with a tab button even when called programmatically
+            // Sync sidebar active state
+            document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+            const navItem = document.getElementById('nav-' + tabName);
+            if (navItem) navItem.classList.add('active');
+
+            // Update topbar title
+            const titleMap = {
+                picker: 'Game Picker', library: 'Library', favorites: 'Favorites',
+                stats: 'Statistics', users: 'Users', multiuser: 'Multi-User',
+                schedule: 'Schedule', playlists: 'Playlists', backlog: 'Backlog',
+                ignored: 'No-Play List', achievements: 'Achievements', friends: 'Friends',
+                recommendations: 'For You', leaderboard: 'Leaderboard', chat: 'Chat',
+                sessions: 'Sessions', notifications: 'Notifications',
+                plugins: 'Plugins', settings: 'Settings', admin: 'Admin'
+            };
+            const titleEl = document.getElementById('topbar-page-title');
+            if (titleEl) titleEl.textContent = titleMap[tabName] || 'GameNight';
+
+            // Ensure we're working with a navigation trigger even when called programmatically
             let button = null;
             if (event && event.target) {
-                button = event.target.closest('.tab') || event.target;
+                button = event.target.closest('.sidebar-item, .tab') || event.target;
             }
             if (!button) {
-                button = document.querySelector(`.tab[onclick*=\"switchTab('${tabName}'\"]`);
+                button = document.querySelector(`.sidebar-item[onclick*="switchTab('${tabName}'"]`)
+                    || document.querySelector(`.tab[onclick*="switchTab('${tabName}'"]`);
             }
 
             if (tabName !== 'chat' && typeof stopChatPolling === 'function') stopChatPolling();
             if (tabName !== 'sessions' && typeof stopSessionsPolling === 'function') stopSessionsPolling();
-            
-            // Update tab buttons
-            document.querySelectorAll('.tab').forEach(tab => {
+
+            document.querySelectorAll('.tab, .sidebar-item').forEach(tab => {
                 tab.classList.remove('active');
-                tab.setAttribute('aria-selected', 'false');
+                if (typeof tab.setAttribute === 'function') tab.setAttribute('aria-selected', 'false');
             });
             if (button && button.classList) {
                 button.classList.add('active');
-                button.setAttribute('aria-selected', 'true');
+                if (typeof button.setAttribute === 'function') button.setAttribute('aria-selected', 'true');
             }
-            
-            // Update tab content
+
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             const tabContent = document.getElementById(tabName + '-tab');
             if (tabContent) {
@@ -231,11 +348,7 @@
                 console.error('Tab content not found: ' + tabName + '-tab');
                 return;
             }
-            
-            // Reload data for the tab
-            if (tabName === 'picker') {
-                // Picker tab - no special loading needed
-            }
+
             if (tabName === 'library') loadLibrary();
             if (tabName === 'favorites') loadFavorites();
             if (tabName === 'stats') {
@@ -275,7 +388,7 @@
                 loadSettings();
             }
         }
-        
+
         async function pickGame() {
             const filterValue = document.querySelector('input[name="filter"]:checked').value;
             const genreValue = document.getElementById('genre-filter').value.trim();
@@ -322,6 +435,7 @@
                 const game = await response.json();
                 currentGame = game;
                 displayGame(game);
+                updatePresence(game.name, game.playtime_hours);
 
             } catch (error) {
                 alert('Error: ' + error.message);
@@ -2740,44 +2854,44 @@
         
         function setAuthenticatedUI(isAuthenticated, userRole, username = null) {
             console.log('🔐 setAuthenticatedUI called:', { isAuthenticated, userRole, username });
-            // Show/hide auth modal and user info
             const authModal = document.getElementById('auth-modal');
             const userInfo = document.getElementById('user-info');
-            
+            const topbarUserInfo = document.getElementById('topbar-user-info');
+            const topbarLoginBtn = document.getElementById('topbar-login-btn');
+            const currentUsernameEl = document.getElementById('current-username');
+            const sidebarAvatar = document.getElementById('sidebar-avatar');
+            const sidebarUsername = document.getElementById('sidebar-username');
+            const sidebarUserInfo = document.getElementById('sidebar-user-info');
+            const sidebarActionBtns = document.getElementById('sidebar-action-btns');
+            const sidebarStatusDot = document.getElementById('sidebar-status-dot');
+            const authTabs = [
+                document.getElementById('nav-sessions'),
+                document.getElementById('nav-chat'),
+                document.getElementById('nav-friends'),
+                document.getElementById('nav-recommendations'),
+                document.getElementById('nav-leaderboard'),
+                document.getElementById('nav-achievements')
+            ];
+            const adminTab = document.getElementById('nav-admin');
+
             if (isAuthenticated) {
                 if (authModal) authModal.style.display = 'none';
                 if (userInfo) userInfo.style.display = 'block';
-                
-                // Show all auth-required tabs by removing !important with inline style
-                const authTabs = [
-                    document.getElementById('sessions-tab-btn'),
-                    document.getElementById('chat-tab-btn'),
-                    document.getElementById('friends-tab-btn'),
-                    document.getElementById('recommendations-tab-btn'),
-                    document.getElementById('leaderboard-tab-btn'),
-                    document.getElementById('achievements-tab-btn')
-                ];
-                
-                console.log('🎯 Auth tabs found:', authTabs.map(t => t ? t.id || t.tagName : 'null'));
-                
-                authTabs.forEach((tab, index) => {
-                    if (tab) {
-                        // Use inline-block for buttons, inline-flex for links
-                        const displayValue = tab.tagName === 'A' ? 'inline-flex' : 'inline-block';
-                        tab.style.setProperty('display', displayValue, 'important');
-                        console.log(`✅ Showing tab ${index}:`, tab.id || tab.tagName, 'display:', displayValue);
-                    } else {
-                        console.warn(`❌ Tab ${index} not found`);
-                    }
+                if (currentUsernameEl) currentUsernameEl.textContent = username || '';
+
+                if (sidebarAvatar) sidebarAvatar.textContent = (username || '?')[0].toUpperCase();
+                if (sidebarUsername) sidebarUsername.textContent = username || '';
+                if (sidebarUserInfo) sidebarUserInfo.style.display = '';
+                if (sidebarActionBtns) sidebarActionBtns.style.display = '';
+                if (sidebarStatusDot) sidebarStatusDot.classList.remove('offline');
+                if (topbarUserInfo) topbarUserInfo.style.display = '';
+                if (topbarLoginBtn) topbarLoginBtn.style.display = 'none';
+
+                authTabs.forEach(tab => {
+                    if (tab) tab.style.setProperty('display', 'flex', 'important');
                 });
-                
-                // Handle admin tab
-                const adminTab = document.getElementById('admin-tab-btn');
-                if (adminTab) {
-                    adminTab.style.display = userRole === 'admin' ? 'inline-block' : 'none';
-                }
-                
-                // Start/restart realtime client
+                if (adminTab) adminTab.style.display = userRole === 'admin' ? 'flex' : 'none';
+
                 if (username && typeof initRealtime !== 'undefined') {
                     try {
                         if (window.realtimeClient) {
@@ -2792,25 +2906,22 @@
             } else {
                 if (authModal) authModal.style.display = 'flex';
                 if (userInfo) userInfo.style.display = 'none';
-                
-                // Hide all auth-protected tabs
-                const authTabs = [
-                    document.getElementById('sessions-tab-btn'),
-                    document.getElementById('chat-tab-btn'),
-                    document.getElementById('friends-tab-btn'),
-                    document.getElementById('recommendations-tab-btn'),
-                    document.getElementById('leaderboard-tab-btn'),
-                    document.getElementById('achievements-tab-btn'),
-                    document.getElementById('admin-tab-btn')
-                ];
-                
+                if (currentUsernameEl) currentUsernameEl.textContent = '';
+                if (sidebarAvatar) sidebarAvatar.textContent = '?';
+                if (sidebarUsername) sidebarUsername.textContent = '';
+                if (sidebarUserInfo) sidebarUserInfo.style.display = 'none';
+                if (sidebarActionBtns) sidebarActionBtns.style.display = 'none';
+                if (sidebarStatusDot) sidebarStatusDot.classList.add('offline');
+                if (topbarUserInfo) topbarUserInfo.style.display = 'none';
+                if (topbarLoginBtn) topbarLoginBtn.style.display = 'inline-block';
+                window.currentUser = null;
+                window.currentUserRole = null;
+
                 authTabs.forEach(tab => {
-                    if (tab) {
-                        tab.style.setProperty('display', 'none', 'important');
-                    }
+                    if (tab) tab.style.setProperty('display', 'none', 'important');
                 });
-                
-                // Stop realtime client
+                if (adminTab) adminTab.style.display = 'none';
+
                 if (window.realtimeClient) {
                     try {
                         window.realtimeClient.disconnect();
@@ -2820,7 +2931,7 @@
                 }
             }
         }
-        
+
         async function checkAuthStatus() {
             console.log('🔍 Checking auth status...');
             try {
@@ -3587,6 +3698,9 @@
         // Initialize auth status on page load
         document.addEventListener('DOMContentLoaded', () => {
             console.log('🚀 Page loaded, checking auth status...');
+            initPresenceToggle();
+            const topbarLoginBtn = document.getElementById('topbar-login-btn');
+            if (topbarLoginBtn) topbarLoginBtn.style.display = 'inline-block';
             checkAuthStatus();
 
             const loginForm = document.getElementById('login-form');
@@ -5060,8 +5174,7 @@
         }
 
         function openSessionsTab() {
-            const sessionsTabButton = Array.from(document.querySelectorAll('.tab'))
-                .find(btn => (btn.textContent || '').includes('Sessions'));
+            const sessionsTabButton = document.getElementById('nav-sessions');
             if (sessionsTabButton) {
                 switchTab('sessions', { target: sessionsTabButton });
             }
@@ -5786,8 +5899,8 @@
         checkIfAdmin(isAdmin => {
             const adminSend = document.getElementById('admin-send-notification');
             if (adminSend) adminSend.style.display = isAdmin ? 'block' : 'none';
-            const adminTabBtn = document.getElementById('admin-tab-btn');
-            if (adminTabBtn) adminTabBtn.style.display = isAdmin ? 'inline-block' : 'none';
+            const adminTabBtn = document.getElementById('nav-admin');
+            if (adminTabBtn) adminTabBtn.style.display = isAdmin ? 'flex' : 'none';
         });
 
         // Load and show site announcement banner
