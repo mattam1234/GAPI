@@ -403,7 +403,7 @@
                 'library-list', 'favorites-list', 'ignored-games-list',
                 'backlog-list', 'playlists-list', 'playlists-container',
                 'achievements-list', 'friends-list', 'recommendations-list',
-                'schedule-list', 'notifications-list', 'leaderboard-list',
+                'schedule-list', 'notifications-list', 'leaderboard-list', 'dash-leaderboard-list',
                 'users-list', 'common-games-list', 'presence-avatars', 'dash-online-list'
             ];
             listIds.forEach(id => {
@@ -430,6 +430,7 @@
         async function init() {
             showSpinner('Loading your game library…');
             try {
+                renderChatRoomList();
                 await updateStatus();
                 await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter(), refreshPlatformFilters()]);
                 checkInitialSetup();
@@ -538,7 +539,7 @@
                 stats: 'Statistics', users: 'Users', multiuser: 'Multi-User',
                 schedule: 'Schedule', playlists: 'Playlists', backlog: 'Backlog',
                 ignored: 'No-Play List', achievements: 'Achievements', friends: 'Friends',
-                recommendations: 'For You', leaderboard: 'Leaderboard', chat: 'Chat',
+                recommendations: 'For You', chat: 'Chat',
                 sessions: 'Sessions', notifications: 'Notifications',
                 plugins: 'Plugins', settings: 'Settings', admin: 'Admin'
             };
@@ -638,6 +639,8 @@
             const unreadCount = notifRes.status === 'fulfilled'
                 ? (notifRes.value.unread_count || 0)
                 : notifications.filter(n => !n.is_read).length;
+
+            await loadLeaderboard({ listId: 'dash-leaderboard-list', metricId: 'dash-leaderboard-metric', limit: 5 });
 
             // Filter upcoming events
             const now = Date.now();
@@ -3378,7 +3381,6 @@
                 document.getElementById('nav-chat'),
                 document.getElementById('nav-friends'),
                 document.getElementById('nav-recommendations'),
-                document.getElementById('nav-leaderboard'),
                 document.getElementById('nav-achievements')
             ];
             const adminTab = document.getElementById('nav-admin');
@@ -4834,13 +4836,18 @@
         // Leaderboard
         // ==============================================================================================
 
-        async function loadLeaderboard() {
-            const listDiv = document.getElementById('leaderboard-list');
-            const metric = document.getElementById('leaderboard-metric').value;
+        async function loadLeaderboard(options = {}) {
+            const listId = options.listId || 'leaderboard-list';
+            const metricId = options.metricId || 'leaderboard-metric';
+            const limit = Number(options.limit || 20);
+            const listDiv = document.getElementById(listId);
+            const metricSelect = document.getElementById(metricId);
+            if (!listDiv || !metricSelect) return;
+            const metric = metricSelect.value;
             const labels = { playtime: '⏱️ h played', games: '🎮 games', achievements: '🏅 achievements' };
             listDiv.innerHTML = renderSkeletonList(10);
             try {
-                const resp = await fetch(`/api/leaderboard?metric=${metric}&limit=20`);
+                const resp = await fetch(`/api/leaderboard?metric=${metric}&limit=${limit}`);
                 if (!resp.ok) { listDiv.innerHTML = '<div class="loading">Leaderboard not available (no DB).</div>'; return; }
                 const data = await resp.json();
                 if (!data.entries || data.entries.length === 0) {
@@ -4867,6 +4874,71 @@
         // ==============================================================================================
         // Chat
         // ==============================================================================================
+
+        function getChatRoomDisplayParts(option) {
+            const raw = String(option?.textContent || option?.value || '').trim();
+            const match = raw.match(/^(\S+)\s+(.+)$/);
+            if (match) {
+                return { prefix: match[1], label: match[2] };
+            }
+            return { prefix: '#', label: raw || 'room' };
+        }
+
+        function updateChatRoomHeader() {
+            const roomSelect = document.getElementById('chat-room');
+            if (!roomSelect) return;
+            const activeOption = roomSelect.options[roomSelect.selectedIndex];
+            const iconEl = document.querySelector('.chat-main-room-icon');
+            const labelEl = document.getElementById('chat-active-room-label');
+            const metaEl = document.getElementById('chat-active-room-meta');
+            const parts = getChatRoomDisplayParts(activeOption);
+            if (iconEl) iconEl.textContent = parts.prefix;
+            if (labelEl) labelEl.textContent = activeOption ? activeOption.textContent.trim() : '# room';
+            if (metaEl) metaEl.textContent = `Room · ${parts.label} conversation`;
+        }
+
+        function renderChatRoomList() {
+            const roomSelect = document.getElementById('chat-room');
+            const roomList = document.getElementById('chat-room-list');
+            if (!roomSelect || !roomList) return;
+            roomList.innerHTML = '';
+
+            Array.from(roomSelect.options).forEach(option => {
+                const parts = getChatRoomDisplayParts(option);
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'chat-room-item' + (option.value === roomSelect.value ? ' active' : '');
+
+                const prefix = document.createElement('span');
+                prefix.className = 'chat-room-item-prefix';
+                prefix.textContent = parts.prefix;
+
+                const textWrap = document.createElement('span');
+                textWrap.className = 'chat-room-item-text';
+
+                const name = document.createElement('span');
+                name.className = 'chat-room-item-name';
+                name.textContent = parts.label;
+
+                const meta = document.createElement('span');
+                meta.className = 'chat-room-item-meta';
+                meta.textContent = option.value === roomSelect.value ? 'Active room' : 'Click to switch';
+
+                textWrap.appendChild(name);
+                textWrap.appendChild(meta);
+                button.appendChild(prefix);
+                button.appendChild(textWrap);
+                button.addEventListener('click', () => {
+                    if (roomSelect.value !== option.value) {
+                        roomSelect.value = option.value;
+                    }
+                    switchChatRoom();
+                });
+                roomList.appendChild(button);
+            });
+
+            updateChatRoomHeader();
+        }
 
         let chatPollInterval = null;
         let onlineUsersPollInterval = null;
@@ -5456,6 +5528,7 @@
             chatOldestId = null;
             hasMoreOldMessages = true;
             const room = document.getElementById('chat-room').value;
+            renderChatRoomList();
             
             // Update backend with current room
             fetch('/api/chat/update-room', {
@@ -6412,7 +6485,6 @@
         const _origSwitchTab = window.switchTab;
         window.switchTab = function(tabName, event) {
             if (_origSwitchTab) _origSwitchTab(tabName, event);
-            if (tabName === 'leaderboard') loadLeaderboard();
             if (tabName === 'chat') { chatLastId = 0; loadChatMessages(false); startChatPolling(); }
             else if (typeof stopChatPolling === 'function') stopChatPolling();
             if (tabName === 'notifications') loadNotifications();
@@ -7101,6 +7173,7 @@
             // Switch to new room
             roomDropdown.value = roomName;
             switchChatRoom();
+            renderChatRoomList();
             
             // Close modal
             closeCreateRoomModal();

@@ -16,32 +16,84 @@ from typing import Any, Dict, List, Optional
 from werkzeug.security import check_password_hash, generate_password_hash
 
 logger = logging.getLogger('gapi.database')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_SQLITE_PATH = os.path.join(BASE_DIR, 'data', 'gapi.db')
 
 # Load .env if available so DATABASE_URL can be picked up
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(os.path.join(BASE_DIR, '.env'))
 except Exception:
     pass
+
+def _normalize_database_url(db_url: Optional[str], base_dir: Optional[str] = None) -> str:
+    """Return a normalized database URL with persistent SQLite defaults."""
+    root_dir = os.path.abspath(base_dir or BASE_DIR)
+    raw_url = (db_url or '').strip()
+    if not raw_url:
+        return f"sqlite:///{os.path.join(root_dir, 'data', 'gapi.db')}"
+
+    if not raw_url.startswith('sqlite:'):
+        return raw_url
+
+    sqlite_url, separator, query = raw_url.partition('?')
+    if sqlite_url in ('sqlite:///:memory:', 'sqlite://'):
+        return raw_url
+
+    if sqlite_url.startswith('sqlite:////'):
+        normalized = sqlite_url
+    elif sqlite_url.startswith('sqlite:///'):
+        rel_path = sqlite_url[len('sqlite:///'):]
+        abs_path = os.path.abspath(os.path.join(root_dir, rel_path))
+        normalized = f"sqlite:///{abs_path}"
+    elif sqlite_url.startswith('sqlite://'):
+        rel_path = sqlite_url[len('sqlite://'):]
+        abs_path = os.path.abspath(os.path.join(root_dir, rel_path))
+        normalized = f"sqlite:///{abs_path}"
+    else:
+        normalized = sqlite_url
+
+    return f"{normalized}{separator}{query}" if separator else normalized
+
+
+def _sqlite_file_path_from_url(db_url: str) -> Optional[str]:
+    """Extract the SQLite database file path from a database URL."""
+    sqlite_url = db_url.split('?', 1)[0]
+    if sqlite_url in ('sqlite:///:memory:', 'sqlite://'):
+        return None
+    if sqlite_url.startswith('sqlite:///'):
+        return sqlite_url[len('sqlite:///'):]
+    if sqlite_url.startswith('sqlite://'):
+        return sqlite_url[len('sqlite://'):]
+    return None
+
 
 def _load_database_url() -> str:
     """Load DATABASE_URL from env or config.json."""
     env_url = os.getenv('DATABASE_URL')
     if env_url:
-        return Template(env_url).safe_substitute(os.environ)
+        return _normalize_database_url(
+            Template(env_url).safe_substitute(os.environ),
+            base_dir=BASE_DIR,
+        )
 
-    config_path = os.getenv('GAPI_CONFIG_PATH', 'config.json')
+    config_path = os.getenv('GAPI_CONFIG_PATH') or os.path.join(BASE_DIR, 'config.json')
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(BASE_DIR, config_path)
     try:
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 data = json.load(f)
             config_url = data.get('database_url')
             if isinstance(config_url, str) and config_url.strip():
-                return Template(config_url.strip()).safe_substitute(os.environ)
+                return _normalize_database_url(
+                    Template(config_url.strip()).safe_substitute(os.environ),
+                    base_dir=os.path.dirname(os.path.abspath(config_path)),
+                )
     except Exception as e:
         logger.warning("Failed to read database_url from config: %s", e)
 
-    return 'postgresql://gapi:gapi_password@localhost:5432/gapi_db'
+    return _normalize_database_url(None, base_dir=BASE_DIR)
 
 
 # Database URL - adjust for your PostgreSQL setup
@@ -54,6 +106,11 @@ try:
     connect_args = {}
     if DATABASE_URL.startswith('postgresql'):
         connect_args = {'client_encoding': 'utf8'}
+    elif DATABASE_URL.startswith('sqlite'):
+        connect_args = {'check_same_thread': False}
+        sqlite_path = _sqlite_file_path_from_url(DATABASE_URL)
+        if sqlite_path:
+            os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
     
     engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

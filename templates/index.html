@@ -140,10 +140,6 @@
                     <span class="sidebar-item-icon">👥</span>
                     <span class="sidebar-item-label">Friends</span>
                 </a>
-                <a class="sidebar-item auth-required" id="nav-leaderboard" onclick="switchTab('leaderboard',event)" role="button" tabindex="0">
-                    <span class="sidebar-item-icon">🏆</span>
-                    <span class="sidebar-item-label">Leaderboard</span>
-                </a>
                 <a class="sidebar-item" id="nav-multiuser" onclick="switchTab('multiuser',event)" role="button" tabindex="0">
                     <span class="sidebar-item-icon">🎮</span>
                     <span class="sidebar-item-label">Multi-User</span>
@@ -392,8 +388,27 @@
                                 <button class="dash-qa-btn" onclick="switchTab('sessions',event)"><span>🎯</span><span>Sessions</span></button>
                                 <button class="dash-qa-btn" onclick="switchTab('schedule',event)"><span>📅</span><span>Schedule</span></button>
                                 <button class="dash-qa-btn" onclick="switchTab('friends',event)"><span>👥</span><span>Friends</span></button>
-                                <button class="dash-qa-btn" onclick="switchTab('leaderboard',event)"><span>🏆</span><span>Leaderboard</span></button>
                                 <button class="dash-qa-btn" onclick="switchTab('chat',event)"><span>💬</span><span>Chat</span></button>
+                            </div>
+                        </div>
+
+                        <!-- Leaderboard -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">🏆 Leaderboard</span>
+                                <div class="dash-leaderboard-controls">
+                                    <select id="dash-leaderboard-metric" onchange="loadLeaderboard({ listId: 'dash-leaderboard-list', metricId: 'dash-leaderboard-metric', limit: 5 })">
+                                        <option value="playtime">⏱️ Total Playtime</option>
+                                        <option value="games">🎮 Games Owned</option>
+                                        <option value="achievements">🏅 Achievements</option>
+                                    </select>
+                                    <button class="dash-card-link" onclick="loadLeaderboard({ listId: 'dash-leaderboard-list', metricId: 'dash-leaderboard-metric', limit: 5 })">Refresh ↻</button>
+                                </div>
+                            </div>
+                            <div id="dash-leaderboard-list">
+                                <div class="dash-empty" style="padding:16px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">Loading leaderboard…</span>
+                                </div>
                             </div>
                         </div>
 
@@ -1071,90 +1086,96 @@
             </div>
         </div>
 
-        <!-- Leaderboard Tab -->
-        <div id="leaderboard-tab" class="tab-content">
-            <h2>🏆 Leaderboard</h2>
-            <p style="color: var(--text-secondary); margin-bottom: 20px;">See who leads in playtime, library size, or unlocked achievements.</p>
-            <div style="display:flex; gap:var(--space-md); align-items:center; margin-bottom:20px; flex-wrap:wrap;">
-                <label style="font-weight:600; color:var(--text-primary);">Rank by:</label>
-                <select id="leaderboard-metric" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
-                    <option value="playtime">⏱️ Total Playtime</option>
-                    <option value="games">🎮 Games Owned</option>
-                    <option value="achievements">🏅 Achievements</option>
-                </select>
-                <button onclick="loadLeaderboard()" style="padding:var(--space-10) var(--space-28); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">🔄 Refresh</button>
-            </div>
-            <div id="leaderboard-list"><div class="loading">Select a metric and click Refresh…</div></div>
-        </div>
-
         <!-- Chat Tab -->
         <div id="chat-tab" class="tab-content">
             <h2>💬 Chat</h2>
             <p style="color: var(--text-secondary); margin-bottom: 12px;">Real-time chat with other users.</p>
-            <div style="display:flex; gap:var(--space-md); align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-                <label style="font-weight:600; color:var(--text-primary);">Room:</label>
-                <select id="chat-room" onchange="switchChatRoom()" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
-                    <option value="general">💬 general</option>
-                    <option value="gaming">🎮 gaming</option>
-                    <option value="off-topic">🎲 off-topic</option>
-                </select>
-                <button onclick="openCreateRoomModal()" style="padding:var(--space-sm) var(--space-lg); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">+ Create Room</button>
-            </div>
-            <div style="display:flex; gap:var(--space-sm); align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-                <input id="chat-search" type="text" placeholder="🔍 Search messages..." maxlength="100" oninput="filterChatMessages()" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); flex:0 1 200px;" />
-                <button id="chat-show-pinned-btn" onclick="togglePinnedMessages()" style="padding:var(--space-sm) var(--space-lg); background:#ef4444; color:white; border:none; border-radius:var(--radius-sm,8px); cursor:pointer; font-weight:600;">📌 Pinned (<span id="pinned-count">0</span>)</button>
-            </div>
             <div id="pinned-messages-container" style="display:none; margin-bottom:12px; padding:var(--space-md); background:rgba(231,76,60,0.1); border:2px solid #ef4444; border-radius:var(--radius-sm,8px);">
                 <h3 style="margin-top:0; margin-bottom:8px; color:#ef4444;">📌 Pinned Messages</h3>
                 <div id="pinned-messages-list"></div>
                 <button onclick="togglePinnedMessages()" style="margin-top:8px; padding:var(--space-6) var(--space-md); background:#ef4444; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:var(--font-md);">Hide Pinned</button>
             </div>
-            <div style="display:flex; gap:var(--space-sm); align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-                <span style="font-size:var(--font-md); color:var(--text-secondary);">Session Quick Actions:</span>
-                <button onclick="sendPickerCommand('/picker start')" style="padding:var(--space-6) var(--space-md); background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">▶️ Start Session</button>
-                <button onclick="sendPickerCommand('/picker join')" style="padding:var(--space-6) var(--space-md); background:#3b82f6; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🤝 Join Session</button>
-                <button onclick="sendPickerCommand('/picker pick')" style="padding:var(--space-6) var(--space-md); background:#7c3aed; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🎲 Pick Game</button>
-                <button onclick="openSessionsTab()" style="padding:var(--space-6) var(--space-md); background:var(--input-border); color:var(--text-primary); border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🎯 Open Sessions Tab</button>
-                <button onclick="showUserProfiles()" style="padding:var(--space-6) var(--space-md); background:#7c3aed; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">👥 User Profiles</button>
-                <button onclick="showNotifications()" style="padding:var(--space-6) var(--space-md); background:#ef4444; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🔔 Notifications</button>
-                <button onclick="showChallenges()" style="padding:var(--space-6) var(--space-md); background:#f59e0b; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">🎯 Challenges</button>
-                <button onclick="showFriendsModal()" style="padding:var(--space-6) var(--space-md); background:#3b82f6; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">👫 Friends</button>
-                <button onclick="showLibraryCompare()" style="padding:var(--space-6) var(--space-md); background:#10b981; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">📚 Compare Libraries</button>
-                <button onclick="showAIRecommend()" style="padding:var(--space-6) var(--space-md); background:#7c3aed; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🤖 AI</button>
-                <button onclick="showAdvancedNotif()" style="padding:var(--space-6) var(--space-md); background:#059669; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🔔 Settings</button>
-            </div>
-            <div style="display:flex; gap:var(--space-md); flex:1;">
-                <!-- Chat column -->
-                <div style="flex:1; display:flex; flex-direction:column;">
-                    <div id="chat-messages" style="height:350px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:var(--radius,12px); padding:var(--space-md); margin-bottom:0; display:flex; flex-direction:column; gap:var(--space-sm);">
+            <div class="chat-layout">
+                <aside class="chat-room-sidebar">
+                    <div class="chat-room-sidebar-header">
+                        <div>
+                            <div class="chat-sidebar-eyebrow">Text channels</div>
+                            <h3>Rooms</h3>
+                        </div>
+                        <button type="button" class="chat-room-create-icon" onclick="openCreateRoomModal()" title="Create room" aria-label="Create room">＋</button>
+                    </div>
+                    <p class="chat-sidebar-copy">Jump between rooms and spin up a new one from the sidebar.</p>
+                    <label class="chat-room-select-label" for="chat-room">Current room</label>
+                    <select id="chat-room" onchange="switchChatRoom()" class="chat-room-select">
+                        <option value="general">💬 general</option>
+                        <option value="gaming">🎮 gaming</option>
+                        <option value="off-topic">🎲 off-topic</option>
+                    </select>
+                    <div id="chat-room-list" class="chat-room-list" aria-label="Chat rooms"></div>
+                    <button type="button" class="chat-room-create-btn" onclick="openCreateRoomModal()">+ Create Room</button>
+                    <div class="chat-room-sidebar-footer">
+                        <span class="chat-room-sidebar-footer-label">Sidebar actions</span>
+                        <button type="button" class="chat-room-secondary-btn" onclick="showFriendsModal()">👫 Friends</button>
+                        <button type="button" class="chat-room-secondary-btn" onclick="openSessionsTab()">🎯 Sessions</button>
+                    </div>
+                </aside>
+
+                <div class="chat-main-panel">
+                    <div class="chat-main-header">
+                        <div class="chat-main-heading">
+                            <span class="chat-main-room-icon">#</span>
+                            <div>
+                                <h3 id="chat-active-room-label">💬 general</h3>
+                                <p id="chat-active-room-meta">Real-time chat with other users.</p>
+                            </div>
+                        </div>
+                        <div class="chat-main-toolbar">
+                            <input id="chat-search" class="chat-search-input" type="text" placeholder="🔍 Search messages..." maxlength="100" oninput="filterChatMessages()" />
+                            <button id="chat-show-pinned-btn" onclick="togglePinnedMessages()" class="chat-toolbar-btn chat-toolbar-btn-danger">📌 Pinned (<span id="pinned-count">0</span>)</button>
+                        </div>
+                    </div>
+
+                    <div class="chat-quick-actions">
+                        <span class="chat-quick-actions-label">Session Quick Actions:</span>
+                        <button onclick="sendPickerCommand('/picker start')" style="padding:var(--space-6) var(--space-md); background:#10b981; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">▶️ Start Session</button>
+                        <button onclick="sendPickerCommand('/picker join')" style="padding:var(--space-6) var(--space-md); background:#3b82f6; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🤝 Join Session</button>
+                        <button onclick="sendPickerCommand('/picker pick')" style="padding:var(--space-6) var(--space-md); background:#7c3aed; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🎲 Pick Game</button>
+                        <button onclick="showUserProfiles()" style="padding:var(--space-6) var(--space-md); background:#7c3aed; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">👥 User Profiles</button>
+                        <button onclick="showNotifications()" style="padding:var(--space-6) var(--space-md); background:#ef4444; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🔔 Notifications</button>
+                        <button onclick="showChallenges()" style="padding:var(--space-6) var(--space-md); background:#f59e0b; color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;">🎯 Challenges</button>
+                        <button onclick="showLibraryCompare()" style="padding:var(--space-6) var(--space-md); background:#10b981; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">📚 Compare Libraries</button>
+                        <button onclick="showAIRecommend()" style="padding:var(--space-6) var(--space-md); background:#7c3aed; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🤖 AI</button>
+                        <button onclick="showAdvancedNotif()" style="padding:var(--space-6) var(--space-md); background:#059669; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-weight:600;">🔔 Settings</button>
+                    </div>
+
+                    <div id="chat-messages" class="chat-messages-panel">
                         <div class="loading">Loading messages…</div>
                     </div>
-                    <div id="typing-indicator" style="display:none; padding:var(--space-6) var(--space-md); font-size:var(--font-sm); color:var(--text-secondary); font-style:italic;"></div>
-                    <div id="reply-preview" style="display:none; margin-top:8px; padding:var(--space-sm) var(--space-md); background:var(--input-bg); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); border-left:3px solid #4f46e5; gap:var(--space-sm); align-items:center;"></div>
-                    <div style="display:flex; gap:var(--space-sm); align-items:center; margin-top:8px;">
-                        <span title="Formatting: **bold** *italic* `code` ~~strike~~ URLs auto-link" style="font-size:var(--font-xs); color:var(--text-secondary); cursor:help;">ℹ️ Markdown supported</span>
+                    <div id="typing-indicator" class="chat-typing-indicator" style="display:none;"></div>
+                    <div id="reply-preview" class="chat-reply-preview" style="display:none;"></div>
+                    <div class="chat-formatting-note">
+                        <span title="Formatting: **bold** *italic* `code` ~~strike~~ URLs auto-link">ℹ️ Markdown supported</span>
                     </div>
-                    <div style="display:flex; gap:var(--space-sm); align-items:flex-end; margin-top:4px;">
-                        <button onclick="openEmojiPicker()" title="Add emoji" style="padding:var(--space-10); background:var(--input-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer; font-size:var(--font-xl);">😊</button>
+                    <div class="chat-composer">
+                        <button onclick="openEmojiPicker()" title="Add emoji" class="chat-emoji-btn">😊</button>
                         <input id="chat-input" type="text" placeholder="Type a message…" maxlength="500"
                                oninput="handleTypingInput()"
                                onkeydown="if(event.key==='Enter'&&!editingMessageId)sendChatMessage()"
-                               style="flex:1; padding:var(--space-10); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary);">
-                        <button id="chat-send-btn" onclick="sendChatMessage()" style="padding:var(--space-10) var(--space-2xl); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">Send</button>
-                        <button id="chat-cancel-edit-btn" onclick="cancelEditMessage()" style="display:none; padding:var(--space-10) var(--space-xl); background:var(--input-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer; font-weight:600;">Cancel</button>
+                               class="chat-input-field">
+                        <button id="chat-send-btn" onclick="sendChatMessage()" class="chat-send-btn">Send</button>
+                        <button id="chat-cancel-edit-btn" onclick="cancelEditMessage()" class="chat-cancel-btn" style="display:none;">Cancel</button>
                     </div>
                 </div>
-                
-                <!-- Online users sidebar -->
-                <div id="chat-sidebar" style="width:250px; background:var(--input-bg); border:1px solid var(--input-border); border-radius:var(--radius,12px); padding:var(--space-md); display:flex; flex-direction:column;">
-                    <h4 style="margin:0 0 var(--space-md) 0; color:var(--text-primary); font-size:var(--font-md); display:flex; align-items:center; gap:var(--space-6);">
+
+                <aside id="chat-sidebar" class="chat-presence-sidebar">
+                    <h4 class="chat-presence-title">
                         👥 Online Users
-                        <button onclick="loadOnlineUsers()" style="margin-left:auto; padding:var(--space-xs) var(--space-sm); background:var(--input-border); border:none; border-radius:var(--radius-tag,4px); cursor:pointer; font-size:var(--font-sm); color:var(--text-primary);">🔄</button>
+                        <button onclick="loadOnlineUsers()" class="chat-presence-refresh">🔄</button>
                     </h4>
-                    <div id="online-users-list" style="flex:1; overflow-y:auto; font-size:var(--font-md);">
+                    <div id="online-users-list" class="chat-presence-list">
                         <div class="loading" style="font-size:var(--font-sm);">Loading…</div>
                     </div>
-                </div>
+                </aside>
             </div>
         </div>
 

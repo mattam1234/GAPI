@@ -8,6 +8,7 @@ Run with:
 import json
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -128,6 +129,27 @@ class TestDiscordBotStart(unittest.TestCase):
         data = json.loads(resp.data)
         self.assertTrue(data.get('started'))
         mock_popen.assert_called_once()
+        _, kwargs = mock_popen.call_args
+        self.assertEqual(kwargs.get('cwd'), os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.assertTrue(os.path.isabs(kwargs['env']['GAPI_DISCORD_CONFIG']))
+
+
+class TestDiscordBotAutostart(unittest.TestCase):
+
+    def test_token_configured_reads_env_override(self):
+        with patch.dict(os.environ, {'DISCORD_BOT_TOKEN': 'secret-token'}, clear=False):
+            self.assertTrue(gapi_gui._discord_bot_token_configured('/does/not/matter.json'))
+
+    def test_autostart_uses_config_token(self):
+        with tempfile.NamedTemporaryFile('w', delete=False, suffix='.json') as fh:
+            json.dump({'discord_bot_token': 'configured-token'}, fh)
+            config_path = fh.name
+        try:
+            with patch.object(gapi_gui, '_start_managed_discord_bot', return_value=(True, MagicMock(pid=1234), '')) as mock_start:
+                gapi_gui._auto_start_discord_bot_if_configured(config_path)
+            mock_start.assert_called_once_with(config_path)
+        finally:
+            os.unlink(config_path)
 
 
 class TestDiscordBotStop(unittest.TestCase):
@@ -419,3 +441,13 @@ class TestDiscordBotEnvVar(unittest.TestCase):
             src = fh.read()
         self.assertIn('GAPI_DISCORD_CONFIG', src,
                       'discord_bot.py should read the GAPI_DISCORD_CONFIG env var')
+
+    def test_env_var_used_as_discord_token(self):
+        bot_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'discord_bot.py',
+        )
+        with open(bot_path, 'r') as fh:
+            src = fh.read()
+        self.assertIn('DISCORD_BOT_TOKEN', src,
+                      'discord_bot.py should read the DISCORD_BOT_TOKEN env var')

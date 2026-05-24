@@ -18,6 +18,10 @@ import multiuser
 from dotenv import load_dotenv
 import database
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
+DEFAULT_ENV_PATH = os.path.join(BASE_DIR, '.env')
+
 # Fix Windows console encoding for emoji support
 if sys.platform == 'win32':
     try:
@@ -2096,10 +2100,12 @@ if __name__ == "__main__":
     import sys
     
     # Load .env file for environment variables
-    load_dotenv()
+    load_dotenv(DEFAULT_ENV_PATH)
     
     # Load configuration – honour GAPI_DISCORD_CONFIG env var set by admin panel
-    config_path = os.environ.get('GAPI_DISCORD_CONFIG', 'config.json')
+    config_path = os.environ.get('GAPI_DISCORD_CONFIG', DEFAULT_CONFIG_PATH)
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(BASE_DIR, config_path)
     if not os.path.exists(config_path):
         print("❌ config.json not found!")
         sys.exit(1)
@@ -2109,7 +2115,7 @@ if __name__ == "__main__":
     
     # Read Steam API key from environment (.env) first, then fall back to config.json
     steam_api_key = os.getenv('STEAM_API_KEY') or config.get('steam_api_key')
-    discord_token = config.get('discord_bot_token')
+    discord_token = os.getenv('DISCORD_BOT_TOKEN') or config.get('discord_bot_token')
     
     if not steam_api_key:
         print("❌ steam_api_key not found in .env (STEAM_API_KEY) or config.json")
@@ -2117,8 +2123,8 @@ if __name__ == "__main__":
         sys.exit(1)
     
     if not discord_token:
-        print("❌ discord_bot_token not found in config.json")
-        print("Please add your Discord bot token to config.json")
+        print("❌ discord_bot_token not found in DISCORD_BOT_TOKEN or config.json")
+        print("Please set DISCORD_BOT_TOKEN or add your Discord bot token to config.json")
         sys.exit(1)
     
     # Update config with steam_api_key from environment (priority: .env > config.json)
