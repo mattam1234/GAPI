@@ -79,6 +79,13 @@
   --tab-inactive-bg: rgba(255,255,255,0.04);
   --tab-inactive-color: var(--text-muted);
   --tab-hover-bg: rgba(255,255,255,0.07);
+  --tab-surface: rgba(255,255,255,0.04);
+  --tab-surface-hover: rgba(255,255,255,0.08);
+  --tab-active-surface: linear-gradient(135deg, rgba(88,101,242,0.24), rgba(88,101,242,0.10));
+  --tab-active-border: rgba(88,101,242,0.34);
+  --tab-icon-surface: rgba(255,255,255,0.05);
+  --tab-icon-hover-surface: rgba(255,255,255,0.09);
+  --tab-icon-active-surface: rgba(88,101,242,0.22);
   --header-color: var(--text-header);
   --status-bar-bg: var(--bg-card);
   --status-bar-color: var(--text-normal);
@@ -102,6 +109,11 @@ html[data-theme="light"] {
   --list-hover:   rgba(0,0,0,0.045);
   --skeleton-base: rgba(0,0,0,0.06);
   --skeleton-highlight: rgba(0,0,0,0.11);
+  --tab-surface: rgba(0,0,0,0.03);
+  --tab-surface-hover: rgba(0,0,0,0.055);
+  --tab-active-surface: linear-gradient(135deg, rgba(88,101,242,0.18), rgba(88,101,242,0.08));
+  --tab-icon-surface: rgba(0,0,0,0.04);
+  --tab-icon-hover-surface: rgba(0,0,0,0.06);
 }
 
 * {
@@ -316,22 +328,42 @@ h4 {
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  margin: 1px 8px;
-  border-radius: var(--radius);
+  gap: 12px;
+  padding: 10px 12px;
+  margin: 3px 8px;
+  border-radius: 14px;
   cursor: pointer;
   color: var(--text-muted);
   text-decoration: none;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.2s, box-shadow 0.2s;
   white-space: nowrap;
   position: relative;
   user-select: none;
+  overflow: hidden;
+  border: 1px solid transparent;
+  background: transparent;
+  isolation: isolate;
+}
+
+.sidebar-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .sidebar-item:hover {
-  background: rgba(255,255,255,0.07);
+  background: var(--tab-surface-hover);
   color: var(--text-header);
+  border-color: var(--border);
+  transform: translateX(2px);
 }
 
 html[data-theme="light"] .sidebar-item:hover,
@@ -340,12 +372,29 @@ html[data-theme="light"] .sidebar-icon-btn:hover {
 }
 
 .sidebar-item.active {
-  background: var(--accent-light);
-  color: var(--accent);
+  background: var(--tab-active-surface);
+  color: var(--text-header);
+  border-color: var(--tab-active-border);
+  box-shadow: 0 12px 28px rgba(12, 14, 22, 0.22);
+}
+
+.sidebar-item.active::before {
+  opacity: 1;
+  transform: scaleY(1);
 }
 
 .sidebar-item.active .sidebar-item-icon {
   color: var(--accent);
+}
+
+.sidebar-item.active .sidebar-item-label {
+  font-weight: 600;
+}
+
+.sidebar-item:focus-visible {
+  outline: none;
+  border-color: var(--tab-active-border);
+  box-shadow: 0 0 0 3px var(--accent-light);
 }
 
 .sidebar-item-icon {
@@ -1931,16 +1980,24 @@ html[data-theme="light"] .dash-rec-btn:hover {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  background: var(--tab-icon-surface);
+  border: 1px solid transparent;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
-  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
 
-.sidebar-item:hover .sidebar-item-icon,
+.sidebar-item:hover .sidebar-item-icon {
+  transform: translateY(-1px);
+  background: var(--tab-icon-hover-surface);
+  color: var(--text-header);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+}
+
 .sidebar-item.active .sidebar-item-icon {
   transform: translateY(-1px);
-  background: color-mix(in srgb, var(--accent) 18%, rgba(255,255,255,0.04));
+  background: var(--tab-icon-active-surface);
+  border-color: var(--tab-active-border);
   box-shadow: 0 6px 16px rgba(0,0,0,0.22);
 }
 
