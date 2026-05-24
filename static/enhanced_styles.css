@@ -385,21 +385,24 @@
 
 .tabs-modern {
     display: flex;
-    gap: 8px;
-    border-bottom: 2px solid var(--card-border);
-    padding-bottom: 0;
+    gap: 10px;
+    padding: 6px;
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    background: var(--tab-surface, rgba(255,255,255,0.04));
     overflow-x: auto;
     scrollbar-width: thin;
 }
 
 .tab-modern {
-    padding: 12px 24px;
-    border: none;
+    padding: 12px 18px;
+    border: 1px solid transparent;
+    border-radius: 14px;
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
     font-weight: 600;
-    transition: all 0.3s;
+    transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
     position: relative;
     white-space: nowrap;
 }
@@ -407,25 +410,29 @@
 .tab-modern::after {
     content: '';
     position: absolute;
-    bottom: -2px;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--accent, #4f46e5);
-    transform: scaleX(0);
-    transition: transform 0.3s;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid var(--tab-active-border, rgba(88,101,242,0.34));
+    opacity: 0;
+    transform: scale(0.96);
+    transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 .tab-modern:hover {
+    background: var(--tab-surface-hover, rgba(255,255,255,0.08));
     color: var(--text-primary);
+    transform: translateY(-1px);
 }
 
 .tab-modern.active {
-    color: var(--accent, #4f46e5);
+    background: var(--tab-active-surface, rgba(88,101,242,0.16));
+    color: var(--text-primary);
+    box-shadow: 0 10px 24px rgba(12, 14, 22, 0.18);
 }
 
 .tab-modern.active::after {
-    transform: scaleX(1);
+    opacity: 1;
+    transform: scale(1);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
