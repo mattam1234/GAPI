@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 
 from ..repositories.schedule_repository import ScheduleRepository
 
-_EDITABLE_FIELDS = ('title', 'date', 'time', 'attendees', 'game_name', 'notes', 
+_EDITABLE_FIELDS = ('title', 'date', 'time', 'duration_minutes', 'attendees', 'game_name', 'notes', 
                      'game_appid', 'attendee_ids', 'discord_event_id', 'discord_guild_id', 'game_image_url',
                      'timezone_name', 'timezone_offset_minutes')
 
@@ -23,6 +23,7 @@ class ScheduleService:
     # ------------------------------------------------------------------
 
     def add_event(self, title: str, date: str, time_str: str,
+                  duration_minutes: Optional[int] = None,
                   attendees: Optional[List[str]] = None,
                   game_name: str = '', notes: str = '',
                   game_appid: Optional[str] = None,
@@ -57,6 +58,7 @@ class ScheduleService:
             'title': title,
             'date': date,
             'time': time_str,
+            'duration_minutes': duration_minutes,
             'attendees': attendees or [],
             'game_name': game_name,
             'notes': notes,

@@ -374,6 +374,18 @@ class TestScheduleService(TmpDirMixin):
         svc = self._make()
         self.assertIsNone(svc.update_event('nonexistent', title='X'))
 
+    def test_add_event_duration_persisted(self):
+        svc = self._make()
+        event = svc.add_event('Long Session', '2026-03-01', '19:00', duration_minutes=90)
+        self.assertEqual(event['duration_minutes'], 90)
+        self.assertEqual(svc.get_events()[0]['duration_minutes'], 90)
+
+    def test_update_event_duration(self):
+        svc = self._make()
+        event = svc.add_event('Old Title', '2026-03-01', '19:00')
+        updated = svc.update_event(event['id'], duration_minutes=120)
+        self.assertEqual(updated['duration_minutes'], 120)
+
     def test_remove_event(self):
         svc = self._make()
         event = svc.add_event('Test', '2026-03-01', '19:00')

@@ -4592,6 +4592,11 @@ def api_create_event():
             existing_url=game_image_url
         ) or None
     notes = str(data.get('notes', '')).strip()
+    duration_minutes_raw = data.get('duration_minutes')
+    try:
+        duration_minutes = int(duration_minutes_raw) if duration_minutes_raw is not None else None
+    except (TypeError, ValueError):
+        duration_minutes = None
     create_discord_event = data.get('create_discord_event', False)
     discord_guild_id = data.get('discord_guild_id')
     timezone_name = str(data.get('timezone_name', '')).strip() or None
@@ -4605,7 +4610,7 @@ def api_create_event():
     
     with picker_lock:
         event = p.schedule_service.add_event(
-            title, date, time_str, attendees, game_name, notes,
+            title, date, time_str, duration_minutes, attendees, game_name, notes,
             game_appid=game_appid,
             attendee_ids=attendee_ids,
             game_image_url=game_image_url,
@@ -4724,15 +4729,31 @@ def api_update_event(event_id: str):
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     safe: Dict = {}
-    for k in ('title', 'date', 'time', 'game_name', 'notes'):
+    for k in ('title', 'date', 'time', 'game_name', 'notes', 'game_appid', 'game_image_url', 'discord_guild_id', 'timezone_name'):
         if k in data:
             safe[k] = str(data[k]).strip()
+    if 'duration_minutes' in data:
+        try:
+            safe['duration_minutes'] = int(data['duration_minutes']) if data['duration_minutes'] is not None else None
+        except (TypeError, ValueError):
+            safe['duration_minutes'] = None
     if 'attendees' in data:
         raw = data['attendees']
         if isinstance(raw, str):
             safe['attendees'] = [a.strip() for a in raw.split(',') if a.strip()]
         else:
             safe['attendees'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
+    if 'attendee_ids' in data:
+        raw = data['attendee_ids']
+        if isinstance(raw, str):
+            safe['attendee_ids'] = [a.strip() for a in raw.split(',') if a.strip()]
+        else:
+            safe['attendee_ids'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
+    if 'timezone_offset_minutes' in data:
+        try:
+            safe['timezone_offset_minutes'] = int(data['timezone_offset_minutes']) if data['timezone_offset_minutes'] is not None else None
+        except (TypeError, ValueError):
+            safe['timezone_offset_minutes'] = None
     with picker_lock:
         event = p.schedule_service.update_event(event_id, **safe)
     if event is None:
