@@ -6,12 +6,14 @@ Discord integration for multi-user game picking with voting and co-op support.
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 import json
 import os
 import sys
 import asyncio
 from typing import Dict, List, Set, Optional
 from datetime import datetime, timedelta
+import requests
 import multiuser
 from dotenv import load_dotenv
 import database
@@ -37,7 +39,7 @@ class GAPIBot(discord.Client):
         # enabling in Discord Developer Portal. Since this bot uses slash commands,
         # we don't need message_content. Members intent is optional.
         # intents.message_content = True  # Not needed for slash commands
-        # intents.members = True  # Only needed if you want to list server members
+        intents.members = True  # Needed for web-side guild/channel/member validation cache
         
         super().__init__(intents=intents)
         
@@ -46,6 +48,11 @@ class GAPIBot(discord.Client):
         self.config = config
         self.steam_api_key = config.get('steam_api_key')
         self.multi_picker = multiuser.MultiUserPicker(config)
+        self.app_url = (
+            os.getenv('GAPI_APP_URL')
+            or self.config.get('app_url')
+            or 'http://localhost:5000'
+        ).rstrip('/')
         
         # Active voting sessions
         self.active_votes: Dict[int, Dict] = {}  # channel_id -> vote_data
@@ -60,6 +67,8 @@ class GAPIBot(discord.Client):
         self.load_user_mappings()
         
         # Add commands
+        if database.SessionLocal:
+            database.init_db()
         self.setup_commands()
     
     def load_user_mappings(self):
@@ -141,6 +150,242 @@ class GAPIBot(discord.Client):
             if str(platforms.get('steam', '')) == str(steam_id):
                 return str(user.get('name') or '')
         return None
+
+    def _db_session(self):
+        """Create a database session when available."""
+        if not database.SessionLocal:
+            return None
+        return database.SessionLocal()
+
+    def _build_discord_location_payloads(self) -> List[Dict]:
+        """Snapshot guild/channel/member data for the web UI cache."""
+        payloads: List[Dict] = []
+        for guild in self.guilds:
+            me = guild.me
+            channels = []
+            for channel in guild.text_channels:
+                permissions = channel.permissions_for(me) if me else None
+                channels.append({
+                    'channel_id': str(channel.id),
+                    'name': channel.name,
+                    'channel_type': 'text',
+                    'can_send': bool(permissions.send_messages) if permissions else True,
+                })
+            members = []
+            for member in getattr(guild, 'members', []) or []:
+                if member.bot:
+                    continue
+                members.append({
+                    'discord_user_id': str(member.id),
+                    'display_name': member.display_name or member.name,
+                })
+            payloads.append({
+                'guild_id': str(guild.id),
+                'name': guild.name,
+                'icon_url': str(guild.icon.url) if getattr(guild, 'icon', None) else '',
+                'channels': channels,
+                'members': members,
+            })
+        return payloads
+
+    def _build_linked_session_embed(self, session: Dict) -> discord.Embed:
+        """Create or update the single Discord status message for a linked session."""
+        discord_meta = session.get('discord') or {}
+        participants = session.get('participants') or []
+        pending = session.get('pending_joins') or []
+        picked_game = session.get('picked_game') or {}
+        embed = discord.Embed(
+            title=f"🎯 {session.get('name') or session.get('session_id')}",
+            color=discord.Color.blurple(),
+            timestamp=datetime.utcnow(),
+            description="React with ✅ to join or leave this linked GAPI session.",
+        )
+        embed.add_field(name="Host", value=session.get('host') or 'Unknown', inline=True)
+        embed.add_field(name="Status", value=session.get('status') or 'waiting', inline=True)
+        embed.add_field(name="Joined", value=str(len(participants)), inline=True)
+        embed.add_field(
+            name="Discord Target",
+            value=f"{discord_meta.get('guild_name', 'Unknown')} / #{discord_meta.get('channel_name', 'unknown')}",
+            inline=False,
+        )
+        embed.add_field(
+            name="Participants",
+            value=", ".join(participants) if participants else "No one joined yet",
+            inline=False,
+        )
+        if pending:
+            pending_lines = []
+            for row in pending[:10]:
+                status = row.get('status', 'pending')
+                if status == 'pending':
+                    pending_lines.append(f"{row.get('discord_user_id')} — pending link until {row.get('expires_at', 'soon')}")
+                else:
+                    pending_lines.append(f"{row.get('discord_user_id')} — {status}")
+            embed.add_field(name="Pending Discord joins", value="\n".join(pending_lines), inline=False)
+        if picked_game:
+            embed.add_field(
+                name="Current pick",
+                value=picked_game.get('name') or 'Unknown game',
+                inline=False,
+            )
+        vote_state = session.get('vote_state') or {}
+        embed.set_footer(
+            text=(
+                f"Round {session.get('round', 0)} • "
+                f"Vote ✅ {vote_state.get('yes_count', 0)} / ❌ {vote_state.get('no_count', 0)} • "
+                f"Need {vote_state.get('required_for_majority', 1)}"
+            )
+        )
+        return embed
+
+    async def _sync_discord_location_cache_once(self) -> None:
+        """Mirror current guild/channel/member data into the shared database."""
+        db = self._db_session()
+        if not db:
+            return
+        try:
+            database.refresh_discord_location_cache(db, self._build_discord_location_payloads())
+        finally:
+            db.close()
+
+    async def _announce_or_update_linked_session(self, session: Dict) -> None:
+        """Ensure the linked session has one up-to-date Discord status message."""
+        discord_meta = session.get('discord') or {}
+        channel_id = discord_meta.get('channel_id')
+        if not channel_id:
+            return
+        channel = self.get_channel(int(channel_id))
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(int(channel_id))
+            except Exception:
+                return
+        embed = self._build_linked_session_embed(session)
+        message_id = discord_meta.get('message_id')
+        db = self._db_session()
+        if not db:
+            return
+        try:
+            db_session = database.get_linked_pick_session(db, session.get('session_id', ''))
+            if not db_session:
+                return
+            if message_id:
+                try:
+                    message = await channel.fetch_message(int(message_id))
+                    await message.edit(embed=embed, content=None)
+                except Exception:
+                    message_id = ''
+            if not message_id:
+                message = await channel.send(embed=embed)
+                await message.add_reaction('✅')
+                database.save_linked_session_state(db, db_session, discord_message_id=str(message.id))
+        finally:
+            db.close()
+
+    async def _notify_unlinked_join_attempt(self, session: Dict, user: discord.User) -> None:
+        """DM onboarding instructions for a Discord user who is not linked yet."""
+        db = self._db_session()
+        if not db:
+            return
+        try:
+            pending = database.upsert_pending_discord_session_join(
+                db,
+                session.get('session_id', ''),
+                str(user.id),
+                invite_message=f"Join request for {session.get('name') or session.get('session_id')}",
+                expires_in_minutes=5,
+            )
+        finally:
+            db.close()
+        expires_at = getattr(pending, 'expires_at', None)
+        expiry_text = expires_at.strftime('%H:%M UTC') if expires_at else '5 minutes from now'
+        try:
+            dm = await user.create_dm()
+            await dm.send(
+                "🎮 You tried to join a linked GAPI game-pick session, but your Discord account is not linked yet.\n"
+                f"Create or sign in to GAPI at {self.app_url}, open Settings, and add your Discord ID (`{user.id}`) plus your game-service IDs.\n"
+                f"This join request stays open until **{expiry_text}**."
+            )
+        except Exception:
+            pass
+
+    async def _set_linked_session_membership(self, session_id: str, user: discord.User, joined: bool) -> Optional[Dict]:
+        """Join or leave a persistent linked session from Discord."""
+        db = self._db_session()
+        if not db:
+            return None
+        try:
+            db_session = database.get_linked_pick_session(db, session_id)
+            if not db_session:
+                return None
+            if joined:
+                linked_name = self._resolve_linked_user_name(user.id)
+                if not linked_name:
+                    await self._notify_unlinked_join_attempt(database.linked_pick_session_to_dict(db, db_session), user)
+                    return database.linked_pick_session_to_dict(db, db_session)
+                participants = database.get_linked_session_participants(db_session)
+                if linked_name not in participants:
+                    participants.append(linked_name)
+                database.save_linked_session_state(db, db_session, participants=participants)
+            else:
+                linked_name = self._resolve_linked_user_name(user.id)
+                if linked_name:
+                    participants = database.get_linked_session_participants(db_session)
+                    if linked_name in participants:
+                        participants.remove(linked_name)
+                    host_username = db_session.host_username
+                    new_status = None
+                    if not participants:
+                        new_status = 'closed'
+                    elif host_username == linked_name:
+                        host_username = participants[0]
+                    database.save_linked_session_state(
+                        db,
+                        db_session,
+                        participants=participants,
+                        host_username=host_username,
+                        status=new_status,
+                    )
+            return database.linked_pick_session_to_dict(db, db_session)
+        finally:
+            db.close()
+
+    async def setup_hook(self):
+        """Start background sync loops once the client is initialized."""
+        if not self.location_cache_loop.is_running():
+            self.location_cache_loop.start()
+        if not self.linked_session_sync_loop.is_running():
+            self.linked_session_sync_loop.start()
+
+    @tasks.loop(seconds=45)
+    async def location_cache_loop(self):
+        """Refresh guild/channel/member cache for the web UI."""
+        await self._sync_discord_location_cache_once()
+
+    @location_cache_loop.before_loop
+    async def before_location_cache_loop(self):
+        await self.wait_until_ready()
+
+    @tasks.loop(seconds=5)
+    async def linked_session_sync_loop(self):
+        """Announce and refresh linked session status messages in Discord."""
+        db = self._db_session()
+        if not db:
+            return
+        try:
+            database.expire_pending_discord_session_joins(db)
+            rows = db.query(database.LinkedPickSession).filter(
+                database.LinkedPickSession.status != 'closed'
+            ).all()
+            for row in rows:
+                session = database.linked_pick_session_to_dict(db, row)
+                await self._announce_or_update_linked_session(session)
+        finally:
+            db.close()
+
+    @linked_session_sync_loop.before_loop
+    async def before_linked_session_sync_loop(self):
+        await self.wait_until_ready()
 
     def _filter_vote_candidates(self, games: List[Dict], genre: Optional[str] = None,
                                 min_metacritic: Optional[int] = None,
@@ -1702,6 +1947,18 @@ class GAPIBot(discord.Client):
         
         # Check if this is a poll or vote message
         message_id = reaction.message.id
+        if str(reaction.emoji) == '✅':
+            db = self._db_session()
+            try:
+                linked_session = database.get_linked_pick_session_by_message_id(db, str(message_id)) if db else None
+            finally:
+                if db:
+                    db.close()
+            if linked_session:
+                view = await self._set_linked_session_membership(linked_session.session_id, user, True)
+                if view:
+                    await self._announce_or_update_linked_session(view)
+                return
         
         if message_id not in self.active_polls:
             return
@@ -1764,6 +2021,18 @@ class GAPIBot(discord.Client):
             return
         
         message_id = reaction.message.id
+        if str(reaction.emoji) == '✅':
+            db = self._db_session()
+            try:
+                linked_session = database.get_linked_pick_session_by_message_id(db, str(message_id)) if db else None
+            finally:
+                if db:
+                    db.close()
+            if linked_session:
+                view = await self._set_linked_session_membership(linked_session.session_id, user, False)
+                if view:
+                    await self._announce_or_update_linked_session(view)
+                return
         
         if message_id not in self.active_polls:
             return
@@ -1811,6 +2080,7 @@ def run_bot(token: str, config: Dict):
     async def on_ready():
         print(f'✅ {bot.user} is now online!')
         print(f'Loaded {len(bot.multi_picker.users)} linked accounts')
+        await bot._sync_discord_location_cache_once()
         
         # Sync slash commands with Discord
         try:

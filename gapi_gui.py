@@ -1127,7 +1127,8 @@ class UserManager:
                 return {
                     'steam_id': user.steam_id or '',
                     'epic_id': user.epic_id or '',
-                    'gog_id': user.gog_id or ''
+                    'gog_id': user.gog_id or '',
+                    'discord_id': user.discord_id or ''
                 }
             return {}
             
@@ -1135,7 +1136,8 @@ class UserManager:
             gui_logger.exception('Error getting user IDs: %s', e)
             return {}
     
-    def update_user_ids(self, username: str, steam_id: str = '', epic_id: str = '', gog_id: str = '') -> bool:
+    def update_user_ids(self, username: str, steam_id: str = '', epic_id: str = '', gog_id: str = '',
+                        discord_id: str = '') -> bool:
         """Update user's platform IDs"""
         if not DB_AVAILABLE:
             return False
@@ -1152,6 +1154,8 @@ class UserManager:
             user.steam_id = steam_id
             user.epic_id = epic_id
             user.gog_id = gog_id
+            if discord_id:
+                user.discord_id = discord_id
             user.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.close()
@@ -2179,7 +2183,7 @@ def api_auth_update_ids():
     gog_id = data.get('gog_id', '').strip()
     discord_id = data.get('discord_id', '').strip()
     
-    success = user_manager.update_user_ids(username, steam_id, epic_id, gog_id)
+    success = user_manager.update_user_ids(username, steam_id, epic_id, gog_id, discord_id=discord_id)
     
     if not success:
         return jsonify({'error': 'Failed to update IDs'}), 400
@@ -2222,6 +2226,27 @@ def api_auth_update_ids():
             gapi._atomic_write_json(discord_cfg_path, discord_cfg)
         except IOError as exc:
             return jsonify({'error': f'Failed to save Discord mapping: {exc}'}), 500
+
+    if DB_AVAILABLE and discord_id:
+        try:
+            db = database.SessionLocal()
+            try:
+                joined_sessions = database.complete_pending_discord_session_joins_for_user(db, discord_id, username)
+            finally:
+                db.close()
+            for joined_session_id in joined_sessions:
+                try:
+                    db = database.SessionLocal()
+                    try:
+                        linked_session = database.get_linked_pick_session(db, joined_session_id)
+                        if linked_session:
+                            _sse_publish(joined_session_id, 'session', database.linked_pick_session_to_dict(db, linked_session))
+                    finally:
+                        db.close()
+                except Exception:
+                    pass
+        except Exception as exc:
+            gui_logger.warning('Failed to complete pending Discord joins for %s: %s', username, exc)
     
     # Trigger library sync if Steam ID was added/changed
     user_ids = user_manager.get_user_ids(username)
@@ -9140,6 +9165,50 @@ def api_online_users():
 # Live Pick Sessions API
 # ---------------------------------------------------------------------------
 
+def _get_db_linked_session(session_id: str):
+    """Fetch a persistent linked session if it exists."""
+    if not DB_AVAILABLE or not ensure_db_available() or not session_id:
+        return None
+    db = None
+    try:
+        db = database.SessionLocal()
+        session = database.get_linked_pick_session(db, session_id)
+        if not session:
+            return None
+        return database.linked_pick_session_to_dict(db, session)
+    except Exception as exc:
+        gui_logger.warning('Failed to load linked session %s: %s', session_id, exc)
+        return None
+    finally:
+        if db:
+            db.close()
+
+
+def _get_current_user_record():
+    """Return the current DB user record, when available."""
+    if not DB_AVAILABLE or not ensure_db_available():
+        return None
+    username = get_current_username()
+    if not username:
+        return None
+    db = None
+    try:
+        db = database.SessionLocal()
+        user = database.get_user_by_username(db, username)
+        if not user:
+            return None
+        return {
+            'username': user.username,
+            'discord_id': str(getattr(user, 'discord_id', '') or '').strip(),
+            'steam_id': str(getattr(user, 'steam_id', '') or '').strip(),
+        }
+    except Exception as exc:
+        gui_logger.warning('Failed to load current user record: %s', exc)
+        return None
+    finally:
+        if db:
+            db.close()
+
 def _live_session_view(session: Dict) -> Dict:
     """Return a JSON-serialisable view of a live session dict."""
     vote_state = session.get('vote_state') or {}
@@ -9164,6 +9233,25 @@ def _live_session_view(session: Dict) -> Dict:
     }
 
 
+@app.route('/api/live-session/discord-locations')
+@require_login
+def api_live_session_discord_locations():
+    """List cached Discord guild/channel targets for the linked current user."""
+    user = _get_current_user_record()
+    if not user or not user.get('discord_id'):
+        return jsonify({'guilds': [], 'error': 'Link your Discord ID in Settings before creating a Discord-linked session.'})
+    if not DB_AVAILABLE or not ensure_db_available():
+        return jsonify({'guilds': [], 'error': 'Database unavailable'})
+    db = None
+    try:
+        db = database.SessionLocal()
+        guilds = database.list_discord_locations_for_user(db, user['discord_id'])
+        return jsonify({'guilds': guilds, 'discord_id': user['discord_id']})
+    finally:
+        if db:
+            db.close()
+
+
 @app.route('/api/live-session/create', methods=['POST'])
 @require_login
 def api_live_session_create():
@@ -9179,6 +9267,44 @@ def api_live_session_create():
     global current_user
     username = get_current_username()
     data = request.get_json() or {}
+    discord_guild_id = str(data.get('discord_guild_id', '') or '').strip()
+    discord_channel_id = str(data.get('discord_channel_id', '') or '').strip()
+    if discord_guild_id or discord_channel_id:
+        if not discord_guild_id or not discord_channel_id:
+            return jsonify({'error': 'Both discord_guild_id and discord_channel_id are required'}), 400
+        user = _get_current_user_record()
+        if not user or not user.get('discord_id'):
+            return jsonify({'error': 'Link your Discord ID in Settings before creating a Discord-linked session'}), 400
+        if not user.get('steam_id') or gapi.is_placeholder_value(user.get('steam_id')):
+            return jsonify({'error': 'A valid Steam ID is required before creating a Discord-linked session'}), 400
+        if not DB_AVAILABLE or not ensure_db_available():
+            return jsonify({'error': 'Database unavailable for Discord-linked sessions'}), 503
+        db = None
+        try:
+            db = database.SessionLocal()
+            discord_location = database.get_discord_channel_for_user(
+                db, user['discord_id'], discord_guild_id, discord_channel_id
+            )
+            if not discord_location:
+                return jsonify({'error': 'Selected Discord server or channel is unavailable for this linked user'}), 403
+            session_id = str(uuid.uuid4())
+            linked_session = database.create_linked_pick_session(
+                db=db,
+                session_id=session_id,
+                host_username=username,
+                host_discord_id=user['discord_id'],
+                name=data.get('name', f"{username}'s session"),
+                discord_location=discord_location,
+                coop_only=bool(data.get('coop_only', False)),
+            )
+            if not linked_session:
+                return jsonify({'error': 'Failed to create linked session'}), 500
+            view = database.linked_pick_session_to_dict(db, linked_session)
+        finally:
+            if db:
+                db.close()
+        _sse_publish(session_id, 'session', view)
+        return jsonify(view), 201
     session_id = str(uuid.uuid4())
     session = {
         'session_id': session_id,
@@ -9213,6 +9339,19 @@ def api_live_session_active():
             for s in live_sessions.values()
             if s['status'] != 'completed'
         ]
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            active.extend([
+                database.linked_pick_session_to_dict(db, session)
+                for session in database.list_active_linked_pick_sessions(db)
+            ])
+        except Exception as exc:
+            gui_logger.warning('Failed to load linked sessions: %s', exc)
+        finally:
+            if db:
+                db.close()
     return jsonify({'sessions': active})
 
 
@@ -9222,6 +9361,24 @@ def api_live_session_join(session_id: str):
     """Join an existing live pick session."""
     global current_user
     username = get_current_username()
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            linked_session = database.get_linked_pick_session(db, session_id)
+            if linked_session:
+                if linked_session.status in ('completed', 'closed'):
+                    return jsonify({'error': 'Session has already completed'}), 400
+                participants = database.get_linked_session_participants(linked_session)
+                if username not in participants:
+                    participants.append(username)
+                database.save_linked_session_state(db, linked_session, participants=participants)
+                view = database.linked_pick_session_to_dict(db, linked_session)
+                _sse_publish(session_id, 'session', view)
+                return jsonify(view)
+        finally:
+            if db:
+                db.close()
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -9246,6 +9403,31 @@ def api_live_session_leave(session_id: str):
     """
     global current_user
     username = get_current_username()
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            linked_session = database.get_linked_pick_session(db, session_id)
+            if linked_session:
+                participants = database.get_linked_session_participants(linked_session)
+                if username in participants:
+                    participants.remove(username)
+                if not participants:
+                    database.save_linked_session_state(db, linked_session, participants=[], status='closed', picked_game=None)
+                    _sse_publish(session_id, 'session', {'status': 'closed', 'session_id': session_id})
+                    return jsonify({'success': True, 'message': 'Session closed (no participants left)'})
+                host_username = linked_session.host_username
+                if host_username == username:
+                    host_username = participants[0]
+                database.save_linked_session_state(
+                    db, linked_session, participants=participants, host_username=host_username
+                )
+                view = database.linked_pick_session_to_dict(db, linked_session)
+                _sse_publish(session_id, 'session', view)
+                return jsonify({'success': True, 'session': view})
+        finally:
+            if db:
+                db.close()
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -9276,6 +9458,80 @@ def api_live_session_pick(session_id: str):
     """
     global current_user, multi_picker
     username = get_current_username()
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            linked_session = database.get_linked_pick_session(db, session_id)
+            if linked_session:
+                if linked_session.host_username != username:
+                    return jsonify({'error': 'Only the session host can start a pick'}), 403
+                if linked_session.status == 'completed':
+                    return jsonify({'error': 'Session has already completed'}), 400
+                participants = database.get_linked_session_participants(linked_session)
+                data = request.get_json() or {}
+                coop_only = bool(data.get('coop_only', False) or linked_session.coop_only)
+                rejected_game_ids = database.get_linked_session_rejected_game_ids(linked_session)
+                database.save_linked_session_state(db, linked_session, status='picking', coop_only=coop_only)
+
+                _ensure_multi_picker()
+                if not multi_picker:
+                    return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+                with multi_picker_lock:
+                    game = multi_picker.pick_common_game(
+                        user_names=participants,
+                        coop_only=coop_only,
+                        max_players=len(participants),
+                        exclude_game_ids=rejected_game_ids if rejected_game_ids else None,
+                    )
+
+                next_round = int(linked_session.round or 0) + 1
+                if not game:
+                    database.save_linked_session_state(db, linked_session, status='waiting')
+                    return jsonify({'error': 'No common game found for all participants'}), 404
+
+                participants_count = max(1, len(participants))
+                vote_state = {
+                    'round': next_round,
+                    'required_for_majority': (participants_count // 2) + 1,
+                    'votes_by_user': {},
+                    'result': 'pending',
+                }
+                database.save_linked_session_state(
+                    db,
+                    linked_session,
+                    round=next_round,
+                    picked_game=game,
+                    vote_state=vote_state,
+                    status='awaiting_vote',
+                    coop_only=coop_only,
+                )
+                view = database.linked_pick_session_to_dict(db, linked_session)
+        finally:
+            if db:
+                db.close()
+
+        if DB_AVAILABLE:
+            game_name = (view.get('picked_game') or {}).get('name', 'a game')
+            for participant in view.get('participants', []):
+                db = next(database.get_db())
+                try:
+                    database.create_notification(
+                        db,
+                        participant,
+                        title='Game picked - vote required',
+                        message=f'{username} picked "{game_name}" for your live session. Vote to accept or reject it.',
+                        type='success',
+                    )
+                except Exception as exc:
+                    gui_logger.warning('Failed to notify %s after linked pick: %s', participant, exc)
+                finally:
+                    if db:
+                        db.close()
+
+        _sse_publish(session_id, 'session', view)
+        return jsonify({'picked_game': view.get('picked_game'), 'session': view})
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -9356,6 +9612,9 @@ def api_live_session_pick(session_id: str):
 @require_login
 def api_live_session_get(session_id: str):
     """Return the current state of a specific live pick session."""
+    linked_session = _get_db_linked_session(session_id)
+    if linked_session:
+        return jsonify(linked_session)
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -9379,6 +9638,110 @@ def api_live_session_vote(session_id: str):
     if 'accept' not in data:
         return jsonify({'error': 'accept is required'}), 400
     accept = bool(data.get('accept'))
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            linked_session = database.get_linked_pick_session(db, session_id)
+            if linked_session:
+                participants = database.get_linked_session_participants(linked_session)
+                if username not in participants:
+                    return jsonify({'error': 'Only participants can vote'}), 403
+                current_game = database.get_linked_session_picked_game(linked_session)
+                if linked_session.status != 'awaiting_vote' or not current_game:
+                    return jsonify({'error': 'No active game vote in this session'}), 400
+                vote_state = database.get_linked_session_vote_state(linked_session) or {}
+                votes_by_user = vote_state.setdefault('votes_by_user', {})
+                votes_by_user[username] = accept
+                required = (max(1, len(participants)) // 2) + 1
+                vote_state['required_for_majority'] = required
+                vote_state['round'] = int(vote_state.get('round', linked_session.round or 0))
+
+                yes_count = sum(1 for v in votes_by_user.values() if bool(v))
+                no_count = sum(1 for v in votes_by_user.values() if not bool(v))
+
+                if yes_count >= required:
+                    vote_state['result'] = 'accepted'
+                    database.save_linked_session_state(
+                        db, linked_session, vote_state=vote_state, status='completed'
+                    )
+                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    _sse_publish(session_id, 'session', view)
+                    return jsonify({'success': True, 'result': 'accepted', 'session': view})
+
+                if no_count < required:
+                    vote_state['result'] = 'pending'
+                    database.save_linked_session_state(db, linked_session, vote_state=vote_state)
+                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    _sse_publish(session_id, 'session', view)
+                    return jsonify({'success': True, 'result': 'pending', 'session': view})
+
+                rejected_game_ids = database.get_linked_session_rejected_game_ids(linked_session)
+                rejected_app_id = str((current_game or {}).get('appid', '')).strip()
+                if rejected_app_id:
+                    rejected_game_ids.append(rejected_app_id)
+
+                _ensure_multi_picker()
+                if not multi_picker:
+                    database.save_linked_session_state(
+                        db, linked_session, status='waiting', picked_game=None, vote_state={
+                            'round': int(linked_session.round or 0),
+                            'required_for_majority': required,
+                            'votes_by_user': {},
+                            'result': 'pending',
+                        }
+                    )
+                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    _sse_publish(session_id, 'session', view)
+                    return jsonify({'success': True, 'result': 'rejected_no_repick', 'session': view})
+
+                with multi_picker_lock:
+                    next_game = multi_picker.pick_common_game(
+                        user_names=participants,
+                        coop_only=bool(linked_session.coop_only),
+                        max_players=len(participants),
+                        exclude_game_ids=rejected_game_ids if rejected_game_ids else None,
+                    )
+
+                if not next_game:
+                    database.save_linked_session_state(
+                        db,
+                        linked_session,
+                        status='waiting',
+                        picked_game=None,
+                        vote_state={
+                            'round': int(linked_session.round or 0),
+                            'required_for_majority': required,
+                            'votes_by_user': {},
+                            'result': 'rejected',
+                        },
+                        rejected_game_ids=rejected_game_ids,
+                    )
+                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    _sse_publish(session_id, 'session', view)
+                    return jsonify({'success': True, 'result': 'rejected_no_more_games', 'session': view})
+
+                next_round = int(linked_session.round or 0) + 1
+                database.save_linked_session_state(
+                    db,
+                    linked_session,
+                    round=next_round,
+                    picked_game=next_game,
+                    status='awaiting_vote',
+                    rejected_game_ids=rejected_game_ids,
+                    vote_state={
+                        'round': next_round,
+                        'required_for_majority': required,
+                        'votes_by_user': {},
+                        'result': 'pending',
+                    },
+                )
+                view = database.linked_pick_session_to_dict(db, linked_session)
+                _sse_publish(session_id, 'session', view)
+                return jsonify({'success': True, 'result': 'rejected_repicked', 'session': view})
+        finally:
+            if db:
+                db.close()
 
     with live_sessions_lock:
         session = live_sessions.get(session_id)
@@ -9498,6 +9861,43 @@ def api_live_session_invite(session_id: str):
     """
     global current_user
     username = get_current_username()
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            linked_session = database.get_linked_pick_session(db, session_id)
+            if linked_session:
+                if linked_session.host_username != username:
+                    return jsonify({'error': 'Only the session host can invite users'}), 403
+                session_name = linked_session.name
+                data = request.get_json() or {}
+                usernames = data.get('usernames', [])
+                if not usernames or not isinstance(usernames, list):
+                    return jsonify({'error': 'usernames (list) is required'}), 400
+                sent, failed = [], []
+                for target in usernames:
+                    target = str(target).strip()
+                    if not target:
+                        continue
+                    try:
+                        ok = database.create_notification(
+                            db,
+                            target,
+                            title=f'Game session invite from {username}',
+                            message=(
+                                f'{username} invited you to join their Discord-linked live pick session '
+                                f'"{session_name}". Session ID: {session_id}'
+                            ),
+                            type='info',
+                        )
+                        (sent if ok else failed).append(target)
+                    except Exception as exc:
+                        gui_logger.warning('Failed to send linked session invite to %s: %s', target, exc)
+                        failed.append(target)
+                return jsonify({'sent': sent, 'failed': failed})
+        finally:
+            if db:
+                db.close()
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -9550,11 +9950,15 @@ def api_live_session_events(session_id: str):
 
     The stream ends when the session is completed or no longer exists.
     """
-    with live_sessions_lock:
-        session = live_sessions.get(session_id)
-        if not session:
-            return jsonify({'error': 'Session not found'}), 404
-        initial_data = _live_session_view(session)
+    linked_session = _get_db_linked_session(session_id)
+    if linked_session:
+        initial_data = linked_session
+    else:
+        with live_sessions_lock:
+            session = live_sessions.get(session_id)
+            if not session:
+                return jsonify({'error': 'Session not found'}), 404
+            initial_data = _live_session_view(session)
 
     sub_queue: _queue.Queue = _queue.Queue(maxsize=64)
     with _sse_subscribers_lock:
