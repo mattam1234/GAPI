@@ -1740,6 +1740,157 @@ a.auth-required,
   color: var(--text-muted);
 }
 
+/* Dashboard recommendations */
+.dash-rec-item,
+.dash-notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+
+.dash-rec-item:last-child,
+.dash-notif-item:last-child {
+  border-bottom: none;
+}
+
+.dash-rec-item:hover,
+.dash-notif-item:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.dash-rec-rank {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72em;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.dash-rec-thumb {
+  width: 44px;
+  height: 58px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.dash-rec-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dash-rec-info,
+.dash-notif-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-rec-topline,
+.dash-notif-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dash-rec-name,
+.dash-notif-title {
+  font-size: 0.84em;
+  font-weight: 700;
+  color: var(--text-header);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-rec-score,
+.dash-notif-time {
+  font-size: 0.68em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dash-rec-reason,
+.dash-notif-message {
+  margin-top: 4px;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.dash-rec-meta {
+  margin-top: 6px;
+  font-size: 0.68em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.dash-rec-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dash-rec-btn {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-normal);
+  font-size: 0.7em;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  width: auto;
+}
+
+.dash-rec-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dash-rec-btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+.dash-rec-btn.primary:hover {
+  background: var(--accent-hover);
+  color: #fff;
+}
+
+.dash-notif-item.read {
+  opacity: 0.75;
+}
+
+.dash-notif-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 /* Empty state */
 .dash-empty {
   display: flex;
@@ -1757,6 +1908,18 @@ html[data-theme="light"] .dash-stat-icon {
   background: color-mix(in srgb, var(--stat-color) 12%, transparent);
 }
 html[data-theme="light"] .dash-qa-btn { background: rgba(0,0,0,0.03); }
+html[data-theme="light"] .dash-rec-item:hover,
+html[data-theme="light"] .dash-notif-item:hover,
+html[data-theme="light"] .dash-activity-item:hover,
+html[data-theme="light"] .dash-session-item:hover {
+  background: rgba(0,0,0,0.03);
+}
+html[data-theme="light"] .dash-rec-btn {
+  background: rgba(0,0,0,0.04);
+}
+html[data-theme="light"] .dash-rec-btn:hover {
+  background: rgba(88,101,242,0.12);
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DASHBOARD PRESENCE + LIBRARY OVERHAUL

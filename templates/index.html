@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -290,12 +290,12 @@
                             <div class="dash-stat-sub">upcoming</div>
                         </div>
                     </div>
-                    <div class="dash-stat-card" style="--stat-color:#9B59B6">
-                        <div class="dash-stat-icon">📈</div>
+                    <div class="dash-stat-card" style="--stat-color:#F0B132">
+                        <div class="dash-stat-icon">🔔</div>
                         <div class="dash-stat-body">
                             <div class="dash-stat-value" id="dash-stat-catalog">—</div>
-                            <div class="dash-stat-label">Total Games</div>
-                            <div class="dash-stat-sub">in catalog</div>
+                            <div class="dash-stat-label">Alerts</div>
+                            <div class="dash-stat-sub">unread notifications</div>
                         </div>
                     </div>
                 </div>
@@ -320,6 +320,19 @@
                                     <div class="dash-game-tile-skel skeleton"></div>
                                     <div class="dash-game-tile-skel skeleton"></div>
                                     <div class="dash-game-tile-skel skeleton"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recommended for You -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">✨ Recommended for You</span>
+                                <button class="dash-card-link" onclick="switchTab('recommendations',event)">Open →</button>
+                            </div>
+                            <div id="dash-recommendations-list">
+                                <div class="dash-empty" style="padding:18px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">Loading recommendations…</span>
                                 </div>
                             </div>
                         </div>
@@ -352,6 +365,19 @@
                             <div id="dash-online-list">
                                 <div class="dash-empty" style="padding:20px 0;">
                                     <span style="opacity:0.4; font-size:0.85em;">No friends online right now.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Notifications -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">🔔 Notifications</span>
+                                <button class="dash-card-link" onclick="switchTab('notifications',event)">Open →</button>
+                            </div>
+                            <div id="dash-notifications-list">
+                                <div class="dash-empty" style="padding:16px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">Loading notifications…</span>
                                 </div>
                             </div>
                         </div>

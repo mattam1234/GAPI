@@ -329,9 +329,36 @@
             renderPresenceContainers(friends, { emptyTitle, emptyDetail });
             return friends;
         }
+
+        async function markDashboardNotification(id) {
+            if (!id) return;
+            try {
+                await safeFetch('/api/notifications/read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ids: [id] })
+                });
+                await loadDashboard();
+            } catch (error) {
+                console.debug('markDashboardNotification error', error);
+            }
+        }
+
+        async function markAllDashboardNotificationsRead() {
+            try {
+                await safeFetch('/api/notifications/read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                await loadDashboard();
+            } catch (error) {
+                console.debug('markAllDashboardNotificationsRead error', error);
+            }
+        }
         // Restore saved theme on load
         (function() {
-            const saved = localStorage.getItem('gapi_theme') || 'light';
+            const saved = localStorage.getItem('gapi_theme') || 'dark';
             document.addEventListener('DOMContentLoaded', () => applyTheme(saved));
         })();
 
@@ -595,15 +622,22 @@
         // ── Dashboard ─────────────────────────────────────────────────────────
         async function loadDashboard() {
             // Fetch data in parallel; fail gracefully
-            const [libRes, sessRes, schedRes] = await Promise.allSettled([
+            const [libRes, sessRes, schedRes, recRes, notifRes] = await Promise.allSettled([
                 safeFetch('/api/library').then(r => r.json()),
                 safeFetch('/api/live-session/active').then(r => r.json()),
                 safeFetch('/api/schedule').then(r => r.json()),
+                safeFetch('/api/recommendations?count=4').then(r => r.json()),
+                safeFetch('/api/notifications?unread_only=false').then(r => r.json()),
             ]);
 
             const games    = libRes.status   === 'fulfilled' ? (libRes.value.games    || []) : [];
             const sessions = sessRes.status  === 'fulfilled' ? (sessRes.value.sessions || []) : [];
             const allEvs   = schedRes.status === 'fulfilled' ? (schedRes.value.events  || []) : [];
+            const recommendations = recRes.status === 'fulfilled' ? (recRes.value.recommendations || []) : [];
+            const notifications = notifRes.status === 'fulfilled' ? (notifRes.value.notifications || []) : [];
+            const unreadCount = notifRes.status === 'fulfilled'
+                ? (notifRes.value.unread_count || 0)
+                : notifications.filter(n => !n.is_read).length;
 
             // Filter upcoming events
             const now = Date.now();
@@ -622,14 +656,17 @@
             if (greetEl) greetEl.textContent = firstName + ' 👋';
             if (hintEl)  hintEl.textContent  = upcoming.length
                 ? `Ready for game night? You have ${upcoming.length} upcoming event${upcoming.length !== 1 ? 's' : ''}.`
-                : 'Ready for game night?';
+                : recommendations.length
+                    ? `${recommendations.length} personalised pick${recommendations.length !== 1 ? 's are' : ' is'} waiting for you.`
+                    : 'Ready for game night?';
 
             // ── Stat cards ──────────────────────────────────────────────────
             const _stat = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
             _stat('dash-stat-library',  games.length);
             _stat('dash-stat-sessions', sessions.length);
             _stat('dash-stat-events',   upcoming.length);
-            _stat('dash-stat-catalog',  games.length);
+            _stat('dash-stat-catalog',  unreadCount);
+            updateNotifBadge(unreadCount);
 
             // ── Top games grid ──────────────────────────────────────────────
             const topGames = [...games]
@@ -662,6 +699,44 @@
                 }
             }
 
+            // ── Recommended games ───────────────────────────────────────────
+            const recEl = document.getElementById('dash-recommendations-list');
+            if (recEl) {
+                if (recommendations.length === 0) {
+                    recEl.innerHTML = `<div class="dash-empty" style="padding:18px 0;">
+                        <span style="opacity:0.45; font-size:0.85em;">No recommendations yet. Add more games to your library to personalize For You.</span>
+                        <button class="dash-card-link" style="margin-top:8px;" onclick="switchTab('recommendations',event)">Open For You →</button>
+                    </div>`;
+                } else {
+                    recEl.innerHTML = recommendations.slice(0, 4).map((game, idx) => {
+                        const appId = game.appid || game.app_id || 0;
+                        const safeName = escapeHtml(game.name || 'Game');
+                        const safeNameJs = escAttr(game.name || 'Game');
+                        const reason = escapeHtml(game.recommendation_reason || 'Good fit for your library');
+                        const score = Number(game.recommendation_score || 0);
+                        const scoreText = score ? score.toFixed(1) : '—';
+                        const playtime = game.playtime_hours || 0;
+                        const platform = escapeHtml(game.platform || game.store || 'Steam');
+                        return `<div class="dash-rec-item" onclick="showGameDetails(${appId}, '${safeNameJs}', ${playtime}, '')">
+                            <div class="dash-rec-rank">${idx + 1}</div>
+                            <div class="dash-rec-thumb">${renderGameListThumb(appId, game.name)}</div>
+                            <div class="dash-rec-info">
+                                <div class="dash-rec-topline">
+                                    <div class="dash-rec-name">${safeName}</div>
+                                    <div class="dash-rec-score">★ ${scoreText}</div>
+                                </div>
+                                <div class="dash-rec-reason">${reason}</div>
+                                <div class="dash-rec-meta">${playtime > 0 ? `${playtime}h played` : 'Never played'} · ${platform}</div>
+                            </div>
+                            <div class="dash-rec-actions">
+                                <button class="dash-rec-btn" onclick="event.stopPropagation(); showGameDetails(${appId}, '${safeNameJs}', ${playtime}, '')">Details</button>
+                                <button class="dash-rec-btn primary" onclick="event.stopPropagation(); toggleFavorite(${appId})">★</button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
             // ── Live sessions list ──────────────────────────────────────────
             const sessListEl = document.getElementById('dash-sessions-list');
             if (sessListEl) {
@@ -685,6 +760,39 @@
                             <span class="dash-live-badge">Live</span>
                         </div>`;
                     }).join('');
+                }
+            }
+
+            // ── Notifications preview ──────────────────────────────────────
+            const notifEl = document.getElementById('dash-notifications-list');
+            if (notifEl) {
+                const latest = notifications.slice(0, 4);
+                if (latest.length === 0) {
+                    notifEl.innerHTML = `<div class="dash-empty" style="padding:16px 0;">
+                        <span style="opacity:0.45; font-size:0.85em;">You're all caught up.</span>
+                        <button class="dash-card-link" style="margin-top:8px;" onclick="switchTab('notifications',event)">Open inbox →</button>
+                    </div>`;
+                } else {
+                    const typeIcon = { info:'ℹ️', success:'✅', warning:'⚠️', error:'❌', friend_request:'👥' };
+                    notifEl.innerHTML = latest.map(n => {
+                        const isRead = !!n.is_read;
+                        return `<div class="dash-notif-item${isRead ? ' read' : ''}" onclick="switchTab('notifications',event)">
+                            <div class="dash-notif-icon">${typeIcon[n.type] || '🔔'}</div>
+                            <div class="dash-notif-body">
+                                <div class="dash-notif-title-row">
+                                    <div class="dash-notif-title">${escapeHtml(n.title || 'Notification')}</div>
+                                    <div class="dash-notif-time">${n.created_at ? new Date(n.created_at).toLocaleString() : ''}</div>
+                                </div>
+                                <div class="dash-notif-message">${escapeHtml(n.message || '')}</div>
+                            </div>
+                            ${!isRead ? `<button class="dash-rec-btn" onclick="event.stopPropagation(); markDashboardNotification(${n.id})">Mark read</button>` : ''}
+                        </div>`;
+                    }).join('');
+                    if (unreadCount > 1) {
+                        notifEl.innerHTML += `<div style="padding:0 18px 14px;">
+                            <button class="dash-card-link" onclick="markAllDashboardNotificationsRead()">Mark all read</button>
+                        </div>`;
+                    }
                 }
             }
 
