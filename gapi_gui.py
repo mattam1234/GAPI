@@ -708,10 +708,18 @@ ADMIN_MIGRATIONS = {
             "    username VARCHAR(255) UNIQUE,\n"
             "    password VARCHAR(64) NOT NULL,\n"
             "    steam_id VARCHAR(20),\n"
+            "    discord_id VARCHAR(50),\n"
             "    epic_id VARCHAR(255),\n"
             "    gog_id VARCHAR(255),\n"
+            "    email VARCHAR(255),\n"
             "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
-            "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n"
+            "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n"
+            "    last_seen TIMESTAMP,\n"
+            "    is_suspended BOOLEAN NOT NULL DEFAULT FALSE,\n"
+            "    suspended_until TIMESTAMP,\n"
+            "    suspended_reason VARCHAR(500),\n"
+            "    suspended_by VARCHAR(255),\n"
+            "    suspended_at TIMESTAMP\n"
             ");"
         )
     },
@@ -721,6 +729,14 @@ ADMIN_MIGRATIONS = {
         'sql': (
             "ALTER TABLE users \n"
             "ADD COLUMN IF NOT EXISTS password VARCHAR(64);"
+        )
+    },
+    'users_add_email': {
+        'label': 'Users add email column',
+        'description': 'Add email column to users table (if missing).',
+        'sql': (
+            "ALTER TABLE users \n"
+            "ADD COLUMN IF NOT EXISTS email VARCHAR(255);"
         )
     },
     'roles_table': {

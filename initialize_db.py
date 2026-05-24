@@ -20,7 +20,7 @@ def initialize_database():
     
     try:
         print("\n📦 Importing database module...")
-        from database import Base, engine, SessionLocal
+        from database import engine, SessionLocal, init_db
         
         if not engine:
             print("❌ Error: Database engine not initialized!")
@@ -30,9 +30,9 @@ def initialize_database():
         print(f"✅ Connected to database: {engine.url}")
         
         print("\n📋 Creating tables...")
-        # This creates all tables defined in the database module
-        Base.metadata.create_all(bind=engine)
-        
+        if not init_db():
+            print("❌ Failed to initialize the database schema")
+            sys.exit(1)
         print("✅ Tables created successfully!")
         
         # Verify connection

@@ -95,6 +95,43 @@ class TestDbStats(unittest.TestCase):
 
 
 # ===========================================================================
+# Database schema migration helpers
+# ===========================================================================
+
+class TestLegacyUserSchemaMigration(unittest.TestCase):
+    def test_run_migrations_adds_missing_email_column(self):
+        from sqlalchemy import create_engine, inspect, text
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            eng = create_engine(f'sqlite:///{tmp_path}')
+            with eng.begin() as conn:
+                conn.execute(text(
+                    'CREATE TABLE users ('
+                    'id INTEGER PRIMARY KEY, '
+                    'username VARCHAR(255) UNIQUE, '
+                    'password VARCHAR(64) NOT NULL, '
+                    'steam_id VARCHAR(20), '
+                    'discord_id VARCHAR(50), '
+                    'epic_id VARCHAR(255), '
+                    'gog_id VARCHAR(255), '
+                    'created_at DATETIME, '
+                    'updated_at DATETIME'
+                    ')'
+                ))
+
+            with patch.object(database, 'engine', eng):
+                database._run_migrations()
+
+            columns = [col['name'] for col in inspect(eng).get_columns('users')]
+            self.assertIn('email', columns)
+        finally:
+            os.unlink(tmp_path)
+
+
+# ===========================================================================
 # GET/POST /api/admin/db/apply-indexes
 # ===========================================================================
 
