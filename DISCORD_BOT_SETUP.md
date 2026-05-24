@@ -17,18 +17,15 @@ Complete guide to set up and use the GAPI Discord Bot with achievement tracking 
    - Guild Messages
    - Reactions / Read Message History so users can join linked sessions with ✅
 
-### 2. Create Discord Config
+### 2. Create App Config
 
-Create `discord_config.json` in your GAPI directory:
+Create or update `config.json` in your GAPI directory:
 
 ```json
 {
-    "token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+    "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
     "steam_api_key": "YOUR_STEAM_API_KEY_HERE",
-    "command_prefix": "!",
-    "steam_client": {
-        "api_key": "YOUR_STEAM_API_KEY_HERE"
-    }
+    "app_url": "http://localhost:5000"
 }
 ```
 
@@ -202,12 +199,11 @@ Alice: /hunt progress
 
 ## Configuration Options
 
-Edit `discord_config.json` for:
+Edit `config.json` for:
 
-- `token`: Your Discord bot token (required)
+- `discord_bot_token`: Your Discord bot token (required)
 - `steam_api_key`: Your Steam API key (optional, for Steam data)
-- `command_prefix`: Prefix for commands (default: `!`, slash commands always available)
-- `steam_client`: Additional Steam client configuration
+- `app_url`: Base web URL used in Discord DMs and `/url`
 
 ## Troubleshooting
 
@@ -215,7 +211,7 @@ Edit `discord_config.json` for:
 - Check bot has "Applications.commands" scope
 - Verify bot is online in server member list
 - Ensure MESSAGE CONTENT INTENT is enabled
-- Verify your `discord_config.json` has valid token
+- Verify your `config.json` has a valid `discord_bot_token`
 
 ### "Failed to add game" error
 - Ensure your account is created/logged in on the web dashboard
@@ -245,20 +241,19 @@ The Discord bot connects to the Flask API:
   - `POST /api/pick` - Pick random game
   - `GET /api/multiuser/common` - Get common games
 
-## Advanced: Custom User Mapping
+## Advanced: User Mapping Storage
 
-The bot automatically saves user mappings in `discord_config.json`:
+The bot stores Discord account links in the main database on each user row:
 
 ```json
 {
-    "user_mappings": {
-        "123456789": "76561198000000000",
-        "987654321": "76561198000000001"
-    }
+    "username": "alice",
+    "steam_id": "76561198000000000",
+    "discord_id": "123456789"
 }
 ```
 
-This maps Discord user IDs to Steam IDs for quick lookups.
+This keeps mappings user-separated and shared safely between the web UI and the Discord bot.
 
 ## Support
 

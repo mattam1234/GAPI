@@ -6178,7 +6178,7 @@
                 const configEl = document.getElementById('diag-config-files');
                 if (configEl) {
                     const config = data.config_file_exists ? '✅ config.json' : '❌ config.json';
-                    const discordConfig = data.discord_config_exists ? '✅ discord_config.json' : '❌ discord_config.json';
+                    const discordConfig = data.discord_config_exists ? '✅ Discord links DB' : '❌ Discord links DB';
                     configEl.innerHTML = `${config} | ${discordConfig}`;
                 }
 

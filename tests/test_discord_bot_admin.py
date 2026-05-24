@@ -175,26 +175,29 @@ class TestDiscordBotStats(unittest.TestCase):
         resp = self.client.get('/api/admin/discord-bot/stats')
         self.assertIn(resp.status_code, (401, 403))
 
-    def test_stats_returns_zero_linked_users_when_no_config(self):
+    def test_stats_returns_zero_linked_users_when_no_db_links(self):
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             with self.client.session_transaction() as sess:
                 sess['username'] = 'admin'
-            with patch('os.path.exists', return_value=False):
-                with patch.object(gapi_gui, '_discord_bot_process', None):
-                    resp = self.client.get('/api/admin/discord-bot/stats')
+            with patch.object(gapi_gui, '_get_discord_linked_users_from_db', return_value=[]):
+                with patch.object(gapi_gui, 'ensure_db_available', return_value=False):
+                    with patch.object(gapi_gui, '_discord_bot_process', None):
+                        resp = self.client.get('/api/admin/discord-bot/stats')
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertEqual(data['linked_users'], 0)
         self.assertFalse(data['config_exists'])
 
-    def test_stats_counts_linked_users_from_config(self):
-        fake_config = json.dumps({'user_mappings': {'111': 'steam1', '222': 'steam2'}})
+    def test_stats_counts_linked_users_from_db(self):
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             with self.client.session_transaction() as sess:
                 sess['username'] = 'admin'
             with patch.object(gapi_gui, '_discord_bot_process', None):
-                with patch('os.path.exists', return_value=True):
-                    with patch('builtins.open', unittest.mock.mock_open(read_data=fake_config)):
+                with patch.object(gapi_gui, '_get_discord_linked_users_from_db', return_value=[
+                    {'discord_id': '111', 'steam_id': 'steam1', 'username': 'alice'},
+                    {'discord_id': '222', 'steam_id': 'steam2', 'username': 'bob'},
+                ]):
+                    with patch.object(gapi_gui, 'ensure_db_available', return_value=True):
                         resp = self.client.get('/api/admin/discord-bot/stats')
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
@@ -347,24 +350,25 @@ class TestDiscordBotUserManagement(unittest.TestCase):
         resp = self.client.delete('/api/admin/discord-bot/users/12345')
         self.assertIn(resp.status_code, (401, 403))
 
-    def test_list_users_empty_when_no_config(self):
+    def test_list_users_empty_when_no_db_rows(self):
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             with self.client.session_transaction() as sess:
                 sess['username'] = 'admin'
-            with patch('os.path.exists', return_value=False):
+            with patch.object(gapi_gui, '_get_discord_linked_users_from_db', return_value=[]):
                 resp = self.client.get('/api/admin/discord-bot/users')
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertEqual(data['users'], [])
 
-    def test_list_users_returns_all_mappings(self):
-        fake_cfg = json.dumps({'user_mappings': {'111': 'steam_aaa', '222': 'steam_bbb'}})
+    def test_list_users_returns_all_db_links(self):
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             with self.client.session_transaction() as sess:
                 sess['username'] = 'admin'
-            with patch('os.path.exists', return_value=True):
-                with patch('builtins.open', unittest.mock.mock_open(read_data=fake_cfg)):
-                    resp = self.client.get('/api/admin/discord-bot/users')
+            with patch.object(gapi_gui, '_get_discord_linked_users_from_db', return_value=[
+                {'discord_id': '111', 'steam_id': 'steam_aaa', 'username': 'alice'},
+                {'discord_id': '222', 'steam_id': 'steam_bbb', 'username': 'bob'},
+            ]):
+                resp = self.client.get('/api/admin/discord-bot/users')
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertEqual(len(data['users']), 2)
@@ -373,31 +377,34 @@ class TestDiscordBotUserManagement(unittest.TestCase):
         self.assertIn('222', ids)
 
     def test_remove_user_not_found(self):
-        fake_cfg = json.dumps({'user_mappings': {'111': 'steam_aaa'}})
+        fake_db = MagicMock()
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             with self.client.session_transaction() as sess:
                 sess['username'] = 'admin'
-            with patch('os.path.exists', return_value=True):
-                with patch('builtins.open', unittest.mock.mock_open(read_data=fake_cfg)):
-                    resp = self.client.delete('/api/admin/discord-bot/users/999')
+            with patch.object(gapi_gui, 'DB_AVAILABLE', True):
+                with patch.object(gapi_gui, 'ensure_db_available', return_value=True):
+                    with patch.object(gapi_gui.database, 'SessionLocal', return_value=fake_db):
+                        with patch.object(gapi_gui.database, 'get_user_by_discord_id', return_value=None):
+                            resp = self.client.delete('/api/admin/discord-bot/users/999')
         self.assertEqual(resp.status_code, 404)
 
     def test_remove_user_success(self):
-        fake_cfg = json.dumps({'user_mappings': {'111': 'steam_aaa', '222': 'steam_bbb'}})
+        fake_db = MagicMock()
+        fake_user = MagicMock()
+        fake_user.discord_id = '111'
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             with self.client.session_transaction() as sess:
                 sess['username'] = 'admin'
-            with patch('os.path.exists', return_value=True):
-                with patch('builtins.open', unittest.mock.mock_open(read_data=fake_cfg)):
-                    with patch.object(gapi_gui.gapi, '_atomic_write_json') as mock_write:
-                        resp = self.client.delete('/api/admin/discord-bot/users/111')
+            with patch.object(gapi_gui, 'DB_AVAILABLE', True):
+                with patch.object(gapi_gui, 'ensure_db_available', return_value=True):
+                    with patch.object(gapi_gui.database, 'SessionLocal', return_value=fake_db):
+                        with patch.object(gapi_gui.database, 'get_user_by_discord_id', return_value=fake_user):
+                            resp = self.client.delete('/api/admin/discord-bot/users/111')
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertTrue(data.get('removed'))
-        mock_write.assert_called_once()
-        _, written = mock_write.call_args[0]
-        self.assertNotIn('111', written.get('user_mappings', {}))
-        self.assertIn('222', written.get('user_mappings', {}))
+        self.assertIsNone(fake_user.discord_id)
+        fake_db.commit.assert_called_once()
 
 
 class TestDiscordBotEnvVar(unittest.TestCase):
@@ -412,4 +419,3 @@ class TestDiscordBotEnvVar(unittest.TestCase):
             src = fh.read()
         self.assertIn('GAPI_DISCORD_CONFIG', src,
                       'discord_bot.py should read the GAPI_DISCORD_CONFIG env var')
-

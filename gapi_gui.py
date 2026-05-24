@@ -2188,44 +2188,8 @@ def api_auth_update_ids():
     if not success:
         return jsonify({'error': 'Failed to update IDs'}), 400
 
-    # Optional: persist Discord ID mapping (discord_id -> steam_id)
-    if discord_id:
-        if not discord_id.isdigit():
-            return jsonify({'error': 'Discord ID must be numeric'}), 400
-
-        # Use the newly saved Steam ID, or existing one if unchanged in this request.
-        resolved_steam_id = steam_id
-        if not resolved_steam_id:
-            current_ids = user_manager.get_user_ids(username)
-            resolved_steam_id = (current_ids.get('steam_id') or '').strip()
-
-        if not resolved_steam_id or not resolved_steam_id.isdigit():
-            return jsonify({'error': 'A valid Steam ID is required before setting Discord ID'}), 400
-
-        discord_cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
-        discord_cfg: Dict = {}
-        if os.path.exists(discord_cfg_path):
-            try:
-                with open(discord_cfg_path, 'r') as fh:
-                    discord_cfg = json.load(fh)
-            except (json.JSONDecodeError, IOError):
-                discord_cfg = {}
-
-        mappings = discord_cfg.get('user_mappings', {})
-        if not isinstance(mappings, dict):
-            mappings = {}
-
-        # Ensure a Steam ID maps to only one Discord ID by removing stale entries.
-        stale_ids = [k for k, v in mappings.items() if str(v) == resolved_steam_id and str(k) != discord_id]
-        for stale_id in stale_ids:
-            del mappings[stale_id]
-
-        mappings[discord_id] = resolved_steam_id
-        discord_cfg['user_mappings'] = mappings
-        try:
-            gapi._atomic_write_json(discord_cfg_path, discord_cfg)
-        except IOError as exc:
-            return jsonify({'error': f'Failed to save Discord mapping: {exc}'}), 500
+    if discord_id and not discord_id.isdigit():
+        return jsonify({'error': 'Discord ID must be numeric'}), 400
 
     if DB_AVAILABLE and discord_id:
         try:
@@ -2300,23 +2264,18 @@ def api_auth_get_ids():
         except Exception as e:
             gui_logger.exception('Failed to read IDs from DB for %s: %s', username, e)
 
-    # Include mapped Discord ID (if any) by reversing discord_config user_mappings.
-    user_ids['discord_id'] = ''
-    try:
-        steam_id = (user_ids.get('steam_id') or '').strip()
-        if steam_id:
-            discord_cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
-            if os.path.exists(discord_cfg_path):
-                with open(discord_cfg_path, 'r') as fh:
-                    discord_cfg = json.load(fh)
-                mappings = discord_cfg.get('user_mappings', {})
-                if isinstance(mappings, dict):
-                    for discord_id, mapped_steam in mappings.items():
-                        if str(mapped_steam) == steam_id:
-                            user_ids['discord_id'] = str(discord_id)
-                            break
-    except Exception as e:
-        gui_logger.warning('Failed to resolve discord_id for %s: %s', username, e)
+    user_ids['discord_id'] = user_ids.get('discord_id', '')
+    if DB_AVAILABLE and not user_ids['discord_id']:
+        try:
+            db = database.SessionLocal()
+            try:
+                db_user = database.get_user_by_username(db, username)
+                if db_user and getattr(db_user, 'discord_id', None):
+                    user_ids['discord_id'] = str(db_user.discord_id)
+            finally:
+                db.close()
+        except Exception as e:
+            gui_logger.warning('Failed to resolve discord_id for %s: %s', username, e)
 
     return jsonify(user_ids)
 
@@ -11133,6 +11092,33 @@ def _capture_bot_output(proc: subprocess.Popen) -> None:
         pass
 
 
+def _get_discord_linked_users_from_db() -> List[Dict]:
+    """Return Discord-linked users from the primary users table."""
+    if not DB_AVAILABLE or not ensure_db_available():
+        return []
+    db = None
+    try:
+        db = database.SessionLocal()
+        users = db.query(database.User).filter(database.User.discord_id.isnot(None)).all()
+        results = []
+        for user in users:
+            discord_id = str(getattr(user, 'discord_id', '') or '').strip()
+            if not discord_id:
+                continue
+            results.append({
+                'discord_id': discord_id,
+                'steam_id': str(getattr(user, 'steam_id', '') or '').strip(),
+                'username': getattr(user, 'username', '') or '',
+            })
+        return results
+    except Exception as exc:
+        gui_logger.warning('Failed to load Discord-linked users from DB: %s', exc)
+        return []
+    finally:
+        if db:
+            db.close()
+
+
 @app.route('/api/admin/discord-bot/status', methods=['GET'])
 @require_admin
 def api_discord_bot_status():
@@ -11234,23 +11220,15 @@ def api_discord_bot_stop():
 @app.route('/api/admin/discord-bot/stats', methods=['GET'])
 @require_admin
 def api_discord_bot_stats():
-    """Return Discord bot statistics from the config file (admin only).
+    """Return Discord bot statistics from database-backed linked users (admin only).
 
     Response JSON:
       - ``running``: bool
-      - ``linked_users``: int – number of Discord→Steam mappings
-      - ``config_exists``: bool – whether discord_config.json is present
+      - ``linked_users``: int – number of Discord-linked users stored in DB
+      - ``config_exists``: bool – whether the shared database is available
     """
-    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
-    linked_users = 0
-    config_exists = os.path.exists(config_file)
-    if config_exists:
-        try:
-            with open(config_file, 'r') as fh:
-                cfg = json.load(fh)
-                linked_users = len(cfg.get('user_mappings', {}))
-        except (json.JSONDecodeError, IOError):
-            pass
+    linked_users = len(_get_discord_linked_users_from_db())
+    config_exists = bool(DB_AVAILABLE and ensure_db_available())
 
     with _discord_bot_lock:
         running = _discord_bot_is_running()
@@ -11396,47 +11374,12 @@ def api_discord_bot_restart():
 @app.route('/api/admin/discord-bot/users', methods=['GET'])
 @require_admin
 def api_discord_bot_list_users():
-    """List all Discord→Steam user mappings stored in discord_config.json (admin only).
+    """List all Discord-linked users stored in the database (admin only).
 
     Response JSON:
       - ``users``: list of ``{discord_id, steam_id, username}`` objects
     """
-    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
-    if not os.path.exists(config_file):
-        return jsonify({'users': []})
-    try:
-        with open(config_file, 'r') as fh:
-            cfg = json.load(fh)
-    except (json.JSONDecodeError, IOError):
-        return jsonify({'users': []})
-
-    mappings = cfg.get('user_mappings', {})
-    
-    # Load multiuser picker to get usernames by discord_id
-    users_list = []
-    try:
-        picker_cfg = load_base_config()
-        picker = multiuser.MultiUserPicker(picker_cfg)
-        
-        for discord_id, steam_id in mappings.items():
-            username = None
-            # Find username by discord_id in multiuser system
-            for user in picker.users:
-                if user.get('discord_id') == str(discord_id):
-                    username = user.get('name')
-                    break
-            
-            users_list.append({
-                'discord_id': str(discord_id),
-                'steam_id': steam_id,
-                'username': username or f'discord_{discord_id}'
-            })
-    except Exception:
-        # Fallback to basic mapping if multiuser lookup fails
-        users_list = [{'discord_id': str(k), 'steam_id': v, 'username': f'discord_{k}'} 
-                      for k, v in mappings.items()]
-    
-    return jsonify({'users': users_list})
+    return jsonify({'users': _get_discord_linked_users_from_db()})
 
 
 @app.route('/api/admin/discord-bot/users', methods=['POST'])
@@ -11461,38 +11404,29 @@ def api_discord_bot_add_user():
     if not steam_id.isdigit():
         return jsonify({'error': 'steam_id must be numeric'}), 400
 
-    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
-    cfg: Dict = {}
-    if os.path.exists(config_file):
-        try:
-            with open(config_file, 'r') as fh:
-                cfg = json.load(fh)
-        except (json.JSONDecodeError, IOError):
-            cfg = {}
+    if not DB_AVAILABLE or not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
 
-    mappings = cfg.get('user_mappings', {})
-    if not isinstance(mappings, dict):
-        mappings = {}
-    mappings[discord_id] = steam_id
-    cfg['user_mappings'] = mappings
-
+    db = None
     try:
-        gapi._atomic_write_json(config_file, cfg)
-    except IOError as exc:
-        return jsonify({'error': f'Failed to save discord_config.json: {exc}'}), 500
-
-    # Also add/update entry in multiuser users for slash command workflows.
-    try:
-        picker_cfg = load_base_config()
-        picker = multiuser.MultiUserPicker(picker_cfg)
-        auto_name = username if username else f'discord_{discord_id}'
-        # Update existing user by discord ID if present; otherwise add a new user.
-        updated = picker.update_user(discord_id, name=auto_name, discord_id=discord_id, steam_id=steam_id)
-        if not updated:
-            picker.add_user(auto_name, steam_id=steam_id, discord_id=discord_id)
-    except Exception:
-        # Mapping was saved already; keep request successful even if user sync fails.
-        pass
+        db = database.SessionLocal()
+        user = db.query(database.User).filter(database.User.steam_id == steam_id).first()
+        if not user and username:
+            user = database.get_user_by_username(db, username)
+        if not user:
+            return jsonify({'error': 'User with matching Steam ID or username not found'}), 404
+        user.discord_id = discord_id
+        if not getattr(user, 'steam_id', None):
+            user.steam_id = steam_id
+        db.commit()
+    except Exception as exc:
+        if db:
+            db.rollback()
+        gui_logger.warning('Failed to save Discord mapping: %s', exc)
+        return jsonify({'error': 'Failed to save Discord mapping'}), 500
+    finally:
+        if db:
+            db.close()
 
     return jsonify({'saved': True, 'discord_id': discord_id, 'steam_id': steam_id})
 
@@ -11500,35 +11434,32 @@ def api_discord_bot_add_user():
 @app.route('/api/admin/discord-bot/users/<discord_id>', methods=['DELETE'])
 @require_admin
 def api_discord_bot_remove_user(discord_id: str):
-    """Remove a Discord→Steam mapping from discord_config.json (admin only).
+    """Remove a Discord→Steam mapping from the database (admin only).
 
     Path parameter:
       - ``discord_id``: the Discord user ID string to remove
 
     Returns ``{'removed': True}`` on success or ``{'error': ...}`` if not found.
     """
-    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'discord_config.json')
-    if not os.path.exists(config_file):
-        return jsonify({'error': 'discord_config.json not found'}), 404
+    if not DB_AVAILABLE or not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+    db = None
     try:
-        with open(config_file, 'r') as fh:
-            cfg = json.load(fh)
-    except (json.JSONDecodeError, IOError):
-        return jsonify({'error': 'Failed to read discord_config.json'}), 500
-
-    mappings = cfg.get('user_mappings', {})
-    # Keys may be stored as strings; normalize for lookup
-    if discord_id not in mappings:
-        return jsonify({'error': 'User not found'}), 404
-
-    del mappings[discord_id]
-    cfg['user_mappings'] = mappings
-    try:
-        gapi._atomic_write_json(config_file, cfg)
-    except IOError as exc:
-        return jsonify({'error': f'Failed to save config: {exc}'}), 500
-
-    return jsonify({'removed': True})
+        db = database.SessionLocal()
+        user = database.get_user_by_discord_id(db, discord_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        user.discord_id = None
+        db.commit()
+        return jsonify({'removed': True})
+    except Exception as exc:
+        if db:
+            db.rollback()
+        gui_logger.warning('Failed to remove Discord mapping: %s', exc)
+        return jsonify({'error': 'Failed to remove user'}), 500
+    finally:
+        if db:
+            db.close()
 
 
 @app.route('/api/admin/discord-bot/diagnostics', methods=['GET'])
@@ -11541,13 +11472,12 @@ def api_discord_bot_diagnostics():
       - ``steam_api_key_set``: bool – whether key is configured
       - ``discord_token_set``: bool – whether Discord token is configured  
       - ``config_file_exists``: bool – whether config.json exists
-      - ``discord_config_exists``: bool – whether discord_config.json exists
+      - ``discord_config_exists``: bool – whether Discord user-link storage in DB is available
       - ``bot_invite_url``: str – Discord bot invite URL with permissions
       - ``python_version``: str – Python version running the bot
     """
     import sys
     config_path = 'config.json'
-    discord_config_path = 'discord_config.json'
     
     # Check Steam API key source
     steam_key_from_env = os.getenv('STEAM_API_KEY')
@@ -11597,7 +11527,7 @@ def api_discord_bot_diagnostics():
         'steam_api_key_set': steam_key_set,
         'discord_token_set': discord_token_set,
         'config_file_exists': os.path.exists(config_path),
-        'discord_config_exists': os.path.exists(discord_config_path),
+        'discord_config_exists': bool(DB_AVAILABLE and ensure_db_available()),
         'bot_invite_url': bot_invite_url,
         'python_version': f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}'
     })
