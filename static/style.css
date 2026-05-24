@@ -2009,6 +2009,7 @@ a.auth-required,
 .dash-games-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
+  grid-auto-rows: 1fr;
   gap: 10px;
   padding: 14px;
 }
@@ -2016,6 +2017,9 @@ a.auth-required,
 
 .dash-game-tile {
   cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 .dash-game-tile-cover {
   aspect-ratio: 3 / 4;
@@ -2023,6 +2027,7 @@ a.auth-required,
   overflow: hidden;
   background: var(--bg-tertiary);
   margin-bottom: 6px;
+  flex: 0 0 auto;
 }
 .dash-game-tile-cover img {
   width: 100%;
@@ -2035,13 +2040,18 @@ a.auth-required,
   font-size: 0.68em;
   font-weight: 600;
   color: var(--text-normal);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  min-height: calc(2 * 1.35em);
 }
 .dash-game-tile-hours {
   font-size: 0.62em;
   color: var(--text-muted);
+  margin-top: auto;
+  padding-top: 4px;
 }
 .dash-game-tile-skel {
   aspect-ratio: 3 / 4;

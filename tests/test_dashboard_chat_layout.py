@@ -30,6 +30,8 @@ class TestDashboardChatLayout(unittest.TestCase):
         self.assertIn('.chat-layout {', styles)
         self.assertIn('.chat-room-sidebar {', styles)
         self.assertIn('.dash-leaderboard-controls {', styles)
+        self.assertIn('grid-auto-rows: 1fr;', styles)
+        self.assertIn('-webkit-line-clamp: 2;', styles)
 
 
 if __name__ == '__main__':
