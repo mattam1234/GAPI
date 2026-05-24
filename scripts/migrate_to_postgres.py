@@ -24,7 +24,7 @@ def migrate_to_postgres():
     if not sqlite_db.exists():
         print("\n⚠️  No SQLite database found (gapi.db)")
         print("   If you're starting fresh, you don't need to migrate.")
-        print("   Just run: python initialize_db.py")
+        print("   Just run: python scripts/initialize_db.py")
         return
     
     print(f"\n📊 SQLite database found: {sqlite_db.name}")

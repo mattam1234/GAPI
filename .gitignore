@@ -41,6 +41,7 @@ Thumbs.db
 config.json
 *.ini
 .env
+gapi.db
 
 # Demo
 .demo_config.json
@@ -73,9 +74,12 @@ config.json
 # Users
 users.json
 discord_config.json
+users_auth.json.migrated
 
 # Export files
 history_export.json
 
 # Logs
 *.log
+test_results.txt
+discord_bot_changes.txt

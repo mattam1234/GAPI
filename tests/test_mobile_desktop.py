@@ -284,7 +284,7 @@ class TestDesktopAppStructure(unittest.TestCase):
 class TestROADMAP(unittest.TestCase):
 
     def setUp(self):
-        self._content = _read('ROADMAP.md')
+        self._content = _read('docs', 'ROADMAP.md')
 
     def test_mobile_app_not_unchecked(self):
         """Mobile App should no longer be an unchecked item."""
@@ -313,7 +313,7 @@ class TestROADMAP(unittest.TestCase):
 class TestFeaturesSummary(unittest.TestCase):
 
     def setUp(self):
-        self._content = _read('FEATURES_SUMMARY.md')
+        self._content = _read('docs', 'FEATURES_SUMMARY.md')
 
     def test_mobile_app_mentioned(self):
         self.assertIn('Mobile App', self._content)

@@ -15,7 +15,6 @@ import json
 import os
 import sys
 import csv
-import hashlib
 import io
 import tempfile
 import subprocess
@@ -1066,7 +1065,7 @@ class UserManager:
     
     def hash_password(self, password: str) -> str:
         """Hash a password"""
-        return hashlib.sha256(password.encode()).hexdigest()
+        return database.hash_password(password)
     
     def register(self, username: str, password: str, role: str = None) -> Tuple[bool, str]:
         """Register a new user"""
@@ -1093,8 +1092,7 @@ class UserManager:
                 role = 'admin' if len(all_users) == 0 else 'user'
             
             # Create user in database
-            password_hash = self.hash_password(password)
-            user = database.create_or_update_user(db, username, password_hash, '', '', '', role)
+            user = database.create_or_update_user(db, username, password, '', '', '', role)
             db.close()
             
             if user:
@@ -1115,10 +1113,8 @@ class UserManager:
             
         try:
             db = database.SessionLocal()
-            password_hash = self.hash_password(password)
-            gui_logger.info('Login attempt - username=%s, password_hash=%s...', username, password_hash[:20])
-            is_valid = database.verify_user_password(db, username, password_hash)
-            gui_logger.info('Password verification result: %s', is_valid)
+            gui_logger.info('Login attempt - username=%s', username)
+            is_valid = database.verify_user_password(db, username, password)
             db.close()
             
             if is_valid:
@@ -2060,12 +2056,11 @@ def api_setup_initial_admin():
             if count > 0:
                 return jsonify({'error': 'Users already exist'}), 409
 
-            password_hash = user_manager.hash_password(password)
             if _user_service:
-                user = _user_service.create_admin(db, username, password_hash)
+                user = _user_service.create_admin(db, username, password)
             else:
                 user = database.create_or_update_user(
-                    db, username, password_hash, '', '', '',
+                    db, username, password, '', '', '',
                     role='admin', roles=['admin'])
         finally:
             db.close()
@@ -2325,20 +2320,18 @@ def api_auth_change_password():
         db = database.SessionLocal()
         try:
             # Verify current password
-            current_password_hash = user_manager.hash_password(current_password)
-            is_valid = database.verify_user_password(db, username, current_password_hash)
+            is_valid = database.verify_user_password(db, username, current_password)
             
             if not is_valid:
                 return jsonify({'error': 'Current password is incorrect'}), 401
             
             # Update to new password
-            new_password_hash = user_manager.hash_password(new_password)
             user = database.get_user_by_username(db, username)
             
             if not user:
                 return jsonify({'error': 'User not found'}), 404
             
-            user.password = new_password_hash
+            user.password = database.hash_password(new_password)
             user.updated_at = datetime.utcnow()
             db.commit()
             

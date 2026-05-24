@@ -270,7 +270,7 @@ If PostgreSQL is not available:
 - [x] **Progressive Web App (PWA)** — `manifest.json` + service worker at `/sw.js`
   enable "Add to Home Screen" on mobile/desktop and offline shell caching.
   PWA meta tags added to `index.html`.
-- [x] **Interactive Demo** — `python3 demo.py [--quiet]` showcases all major
+- [x] **Interactive Demo** — `python3 ../scripts/demo.py [--quiet]` showcases all major
   features without requiring credentials or a database.
 - [x] **CodeQL Security Scanning** — automated weekly security analysis via
   `.github/workflows/codeql.yml` using the `security-extended` query suite.

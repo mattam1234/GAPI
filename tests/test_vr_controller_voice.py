@@ -396,7 +396,7 @@ class TestControllerSupport(unittest.TestCase):
 class TestROADMAPUnderConsideration(unittest.TestCase):
 
     def setUp(self):
-        self._content = _read('ROADMAP.md')
+        self._content = _read('docs', 'ROADMAP.md')
 
     def test_vr_filtering_marked_done(self):
         """VR game filtering should be ~~struck~~ as done."""

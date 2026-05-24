@@ -26,7 +26,7 @@ Thank you for your interest in contributing to GAPI! This document provides guid
 
 5. Try the demo to ensure everything works:
    ```bash
-   python3 demo.py
+   python3 ../scripts/demo.py
    ```
 
 ## Code Style
@@ -46,7 +46,7 @@ Thank you for your interest in contributing to GAPI! This document provides guid
 
 2. **Demo Mode**: Test basic functionality without Steam credentials
    ```bash
-   python3 demo.py
+   python3 ../scripts/demo.py
    ```
 
 3. **Real Testing**: If you have Steam credentials configured, test all modes:

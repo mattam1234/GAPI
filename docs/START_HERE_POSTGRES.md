@@ -27,10 +27,10 @@ I've created a complete PostgreSQL setup toolkit for GAPI. Here's everything you
 # 2. Install PostgreSQL from: https://www.postgresql.org/download/windows/
 
 # 3. Run automated setup
-python setup_postgres.py
+python ../scripts/setup_postgres.py
 
 # 4. Initialize database
-python initialize_db.py
+python ../scripts/initialize_db.py
 
 # 5. Test operations
 python test_postgres.py
@@ -64,11 +64,11 @@ c:\Users\matta\source\repos\GAPI\
 | Starting fresh | POSTGRES_QUICKSTART.md | Read first |
 | Need detailed info | POSTGRES_SETUP_GUIDE.md | Reference |
 | Something broke | POSTGRES_TROUBLESHOOTING.md | Debug |
-| Set up database | setup_postgres.py | `python setup_postgres.py` |
-| Create tables | initialize_db.py | `python initialize_db.py` |
+| Set up database | setup_postgres.py | `python ../scripts/setup_postgres.py` |
+| Create tables | initialize_db.py | `python ../scripts/initialize_db.py` |
 | Verify it works | test_postgres.py | `python test_postgres.py` |
-| Check health | check_postgres.py | `python check_postgres.py` |
-| Migrate from SQLite | migrate_to_postgres.py | `python migrate_to_postgres.py` |
+| Check health | check_postgres.py | `python ../scripts/check_postgres.py` |
+| Migrate from SQLite | migrate_to_postgres.py | `python ../scripts/migrate_to_postgres.py` |
 
 ## 🎯 Your Action Plan
 
@@ -80,14 +80,14 @@ c:\Users\matta\source\repos\GAPI\
 ### Phase 2: Run Setup Scripts
 ```powershell
 & .\.venv\Scripts\Activate.ps1
-python setup_postgres.py
-python initialize_db.py
+python ../scripts/setup_postgres.py
+python ../scripts/initialize_db.py
 python test_postgres.py
 ```
 
 ### Phase 3: Verify Everything
 ```powershell
-python check_postgres.py
+python ../scripts/check_postgres.py
 ```
 
 ### Phase 4: Start GAPI
@@ -155,7 +155,7 @@ All scripts include:
 
 1. **Run health check:**
    ```powershell
-   python check_postgres.py
+   python ../scripts/check_postgres.py
    ```
 
 2. **Read appropriate section:**
@@ -202,7 +202,7 @@ Automatically created in PostgreSQL:
 ## ✅ Success Indicators
 
 When everything is working:
-- ✅ `python check_postgres.py` shows all green
+- ✅ `python ../scripts/check_postgres.py` shows all green
 - ✅ `python test_postgres.py` creates/reads/updates/deletes successfully
 - ✅ GAPI logs show "Database connected to: postgresql://..."
 - ✅ You can create user accounts in GAPI web interface
@@ -222,7 +222,7 @@ When everything is working:
 - **Detailed guide:** POSTGRES_SETUP_GUIDE.md
 - **Troubleshooting:** POSTGRES_TROUBLESHOOTING.md
 - **Script overview:** POSTGRES_TOOLKIT_README.md
-- **Current status:** `python check_postgres.py`
+- **Current status:** `python ../scripts/check_postgres.py`
 
 ---
 

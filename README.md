@@ -777,18 +777,18 @@ Contributions are welcome! We'd love your help to make GAPI even better.
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/GAPI.git`
 3. Create a branch: `git checkout -b feature/your-feature-name`
 4. Make your changes
-5. Test with the demo: `python3 demo.py`
+5. Test with the demo: `python3 scripts/demo.py`
 6. Submit a pull request
 
-For detailed guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md)
+For detailed guidelines, see [CONTRIBUTING.md](docs/CONTRIBUTING.md)
 
 ## 📚 Additional Resources
 
-- **[Contributing Guide](CONTRIBUTING.md)** - Detailed contribution guidelines
-- **[Roadmap](ROADMAP.md)** - Planned features and improvements
-- **[Changelog](CHANGELOG.md)** - Version history and changes
+- **[Contributing Guide](docs/CONTRIBUTING.md)** - Detailed contribution guidelines
+- **[Roadmap](docs/ROADMAP.md)** - Planned features and improvements
+- **[Changelog](docs/CHANGELOG.md)** - Version history and changes
 - **[License](LICENSE)** - MIT License details
-- **[Demo script](demo.py)** - `python3 demo.py` — try all features without credentials
+- **[Demo script](scripts/demo.py)** - `python3 scripts/demo.py` — try all features without credentials
 
 ## 📜 License
 
@@ -828,6 +828,6 @@ GAPI is a community project designed to enhance your gaming experience by helpin
 
 If you find GAPI useful, give it a ⭐ on GitHub!
 
-[Report a Bug](https://github.com/mattam1234/GAPI/issues) · [Request a Feature](https://github.com/mattam1234/GAPI/issues) · [Contribute](CONTRIBUTING.md)
+[Report a Bug](https://github.com/mattam1234/GAPI/issues) · [Request a Feature](https://github.com/mattam1234/GAPI/issues) · [Contribute](docs/CONTRIBUTING.md)
 
 </div>

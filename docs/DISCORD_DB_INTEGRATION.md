@@ -15,9 +15,9 @@
 - ✅ Keeps JSON file as backup for redundancy
 
 ### 3. Migration Scripts Created
-- `migrate_add_discord_id.py` - Adds discord_id column to users table
-- `migrate_discord_mappings_to_db.py` - Imports existing JSON mappings to database
-- `verify_discord_db.py` - Verifies Discord integration in database
+- `../scripts/migrate_add_discord_id.py` - Adds discord_id column to users table
+- `../scripts/migrate_discord_mappings_to_db.py` - Imports existing JSON mappings to database
+- `../scripts/verify_discord_db.py` - Verifies Discord integration in database
 - `test_discord_bot_db.py` - Tests bot database functionality
 
 ## How It Works Now
@@ -94,9 +94,9 @@ If you need to temporarily disable database integration:
 
 ## Files Created
 
-- ✅ `migrate_add_discord_id.py`
-- ✅ `migrate_discord_mappings_to_db.py`
-- ✅ `verify_discord_db.py`
+- ✅ `../scripts/migrate_add_discord_id.py`
+- ✅ `../scripts/migrate_discord_mappings_to_db.py`
+- ✅ `../scripts/verify_discord_db.py`
 - ✅ `test_discord_bot_db.py`
 
 ---

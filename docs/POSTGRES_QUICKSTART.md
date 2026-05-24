@@ -40,7 +40,7 @@ Open **PowerShell** in your GAPI directory and run:
 & .\.venv\Scripts\Activate.ps1
 
 # Run the automated setup
-python setup_postgres.py
+python ../scripts/setup_postgres.py
 ```
 
 The script will:
@@ -60,7 +60,7 @@ The script will:
 
 ```powershell
 # Should already be activated from previous step
-python initialize_db.py
+python ../scripts/initialize_db.py
 ```
 
 This creates all the tables GAPI needs:
@@ -73,7 +73,7 @@ This creates all the tables GAPI needs:
 ### Step 4: Verify Everything Works (2 minutes)
 
 ```powershell
-python check_postgres.py
+python ../scripts/check_postgres.py
 ```
 
 You should see:
@@ -134,7 +134,7 @@ SECRET_KEY=...
 
 ### Check Health
 ```powershell
-python check_postgres.py
+python ../scripts/check_postgres.py
 ```
 
 ### View Database
@@ -168,7 +168,7 @@ $env:PGPASSWORD = "gapi_password_secure"
 - Restart this script
 
 ### "FATAL: password authentication failed"
-- Check the password you entered in `setup_postgres.py`
+- Check the password you entered in `../scripts/setup_postgres.py`
 - Update DATABASE_URL in `.env` with correct password
 - Password is case-sensitive!
 
@@ -262,7 +262,7 @@ For more details:
 
 ## 💬 Need Help?
 
-1. Run the health check: `python check_postgres.py`
+1. Run the health check: `python ../scripts/check_postgres.py`
 2. Check PostgreSQL logs:
    ```
    C:\Program Files\PostgreSQL\15\data\log\

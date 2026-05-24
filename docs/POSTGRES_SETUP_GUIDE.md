@@ -76,7 +76,7 @@ Run the automated setup script to create the database and user:
 
 ```powershell
 # In your GAPI directory
-python setup_postgres.py
+python ../scripts/setup_postgres.py
 ```
 
 The script will:
@@ -121,7 +121,7 @@ To manually initialize the schema:
 & .\.venv\Scripts\Activate.ps1
 
 # Run the initialization script
-python initialize_db.py
+python ../scripts/initialize_db.py
 ```
 
 ## Step 6: Verify PostgreSQL Connection
@@ -157,7 +157,7 @@ Check the logs for successful database connection:
 If you have existing data in SQLite (`gapi.db`), run:
 
 ```powershell
-python migrate_to_postgres.py
+python ../scripts/migrate_to_postgres.py
 ```
 
 This will:
