@@ -42,6 +42,7 @@ config.json
 *.ini
 .env
 gapi.db
+data/
 
 # Demo
 .demo_config.json

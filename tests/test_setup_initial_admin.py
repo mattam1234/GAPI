@@ -23,6 +23,14 @@ def _make_db():
 
 
 class TestInitialAdminSetupHelpers(unittest.TestCase):
+    def test_normalize_database_url_uses_persistent_sqlite_default(self):
+        url = database._normalize_database_url(None, base_dir='/opt/gapi')
+        self.assertEqual(url, 'sqlite:////opt/gapi/data/gapi.db')
+
+    def test_normalize_database_url_resolves_relative_sqlite_paths(self):
+        url = database._normalize_database_url('sqlite:///data/custom.db', base_dir='/opt/gapi')
+        self.assertEqual(url, 'sqlite:////opt/gapi/data/custom.db')
+
     def test_create_or_update_user_bootstraps_admin_role(self):
         db = _make_db()
         try:
@@ -52,4 +60,3 @@ class TestInitialAdminSetupHelpers(unittest.TestCase):
 
         self.assertIsNone(role)
         db.rollback.assert_called_once()
-

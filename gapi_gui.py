@@ -27,11 +27,15 @@ from werkzeug.local import LocalProxy
 from urllib.parse import unquote, quote_plus
 import gapi
 import multiuser
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
+DEFAULT_ENV_PATH = os.path.join(BASE_DIR, '.env')
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(DEFAULT_ENV_PATH)
 except Exception:
     pass
+os.environ.setdefault('GAPI_CONFIG_PATH', DEFAULT_CONFIG_PATH)
 try:
     from sqlalchemy import text
 except Exception:
@@ -196,7 +200,7 @@ app = Flask(__name__)
 # This ensures session cookies remain valid across app restarts
 def _get_or_create_secret_key():
     """Get the Flask secret key, persisting it to config.json if needed."""
-    config_path = 'config.json'
+    config_path = DEFAULT_CONFIG_PATH
     secret_key = None
     
     # Try to load from config.json
@@ -1342,11 +1346,17 @@ class UserManager:
 user_manager = UserManager()
 
 
-def load_base_config(config_path: str = 'config.json') -> Dict:
+def _resolve_repo_path(path: str) -> str:
+    """Resolve application-local paths relative to the repository root."""
+    return path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
+
+
+def load_base_config(config_path: str = DEFAULT_CONFIG_PATH) -> Dict:
     """Load base config without enforcing Steam ID requirements.
 
     The GUI uses per-user Steam IDs, so only the API key is required here.
     """
+    config_path = _resolve_repo_path(config_path)
     if not os.path.exists(config_path):
         return {}
     try:
@@ -11140,6 +11150,86 @@ def _capture_bot_output(proc: subprocess.Popen) -> None:
         pass
 
 
+def _discord_bot_token_configured(config_path: str = DEFAULT_CONFIG_PATH) -> bool:
+    """Return True when the Discord bot has enough configuration to start."""
+    if os.getenv('DISCORD_BOT_TOKEN'):
+        return True
+
+    config_path = _resolve_repo_path(config_path)
+    if not os.path.exists(config_path):
+        return False
+
+    try:
+        with open(config_path, 'r') as fh:
+            cfg = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    return bool(str(cfg.get('discord_bot_token', '')).strip())
+
+
+def _validate_repo_config_path(config_path: str) -> str:
+    """Resolve and validate a config path under the repository root."""
+    abs_config = os.path.normpath(_resolve_repo_path(config_path))
+    try:
+        if os.path.commonpath([BASE_DIR, abs_config]) != BASE_DIR:
+            raise ValueError('Invalid config_path')
+    except ValueError as exc:
+        raise ValueError('Invalid config_path') from exc
+    return abs_config
+
+
+def _start_managed_discord_bot(config_path: str) -> Tuple[bool, Optional[subprocess.Popen], str]:
+    """Start the managed Discord bot subprocess."""
+    global _discord_bot_process, _discord_bot_log_lines
+
+    abs_config = _validate_repo_config_path(config_path)
+
+    with _discord_bot_lock:
+        if _discord_bot_is_running():
+            return False, _discord_bot_process, 'Discord bot is already running'
+
+        bot_script = os.path.join(BASE_DIR, 'discord_bot.py')
+        if not os.path.exists(bot_script):
+            return False, None, 'discord_bot.py not found'
+
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, bot_script],
+                env={**os.environ, 'GAPI_DISCORD_CONFIG': abs_config},
+                cwd=BASE_DIR,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            _discord_bot_process = proc
+            _discord_bot_log_lines.clear()
+        except OSError as exc:
+            return False, None, f'Failed to start bot: {exc}'
+
+    t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
+    t.start()
+    return True, proc, ''
+
+
+def _auto_start_discord_bot_if_configured(config_path: str = DEFAULT_CONFIG_PATH) -> None:
+    """Start the Discord bot during app startup when configured."""
+    if os.getenv('GAPI_DISABLE_DISCORD_AUTOSTART', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+        gui_logger.info('Discord bot auto-start disabled by environment')
+        return
+
+    resolved_config = _resolve_repo_path(config_path)
+    if not _discord_bot_token_configured(resolved_config):
+        return
+
+    started, proc, error = _start_managed_discord_bot(resolved_config)
+    if started:
+        gui_logger.info('Discord bot started automatically (pid=%s)', getattr(proc, 'pid', None))
+    elif error != 'Discord bot is already running':
+        gui_logger.warning('Discord bot auto-start skipped: %s', error)
+
+
 def _get_discord_linked_users_from_db() -> List[Dict]:
     """Return Discord-linked users from the primary users table."""
     if not DB_AVAILABLE or not ensure_db_available():
@@ -11195,46 +11285,17 @@ def api_discord_bot_start():
     The config path is passed to the bot subprocess via the ``GAPI_DISCORD_CONFIG``
     environment variable, which discord_bot.py should read to locate its config file.
     """
-    global _discord_bot_process, _discord_bot_log_lines
     data = request.get_json(silent=True) or {}
-    config_path = data.get('config_path', 'config.json')
-    # Prevent path traversal: resolve against the application base directory and
-    # verify the result stays within that directory.
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    abs_config = os.path.normpath(os.path.join(base_dir, config_path))
     try:
-        if os.path.commonpath([base_dir, abs_config]) != base_dir:
-            return jsonify({'error': 'Invalid config_path'}), 400
+        config_path = _validate_repo_config_path(data.get('config_path', DEFAULT_CONFIG_PATH))
     except ValueError:
         return jsonify({'error': 'Invalid config_path'}), 400
 
-    with _discord_bot_lock:
-        if _discord_bot_is_running():
-            return jsonify({'error': 'Discord bot is already running'}), 409
-
-        bot_script = os.path.join(base_dir, 'discord_bot.py')
-        if not os.path.exists(bot_script):
-            return jsonify({'error': 'discord_bot.py not found'}), 500
-
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, bot_script],
-                # GAPI_DISCORD_CONFIG tells discord_bot.py which config file to use
-                env={**os.environ, 'GAPI_DISCORD_CONFIG': abs_config},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            _discord_bot_process = proc
-            _discord_bot_log_lines.clear()
-        except OSError as exc:
-            return jsonify({'error': f'Failed to start bot: {exc}'}), 500
-
-    # Capture output in background thread
-    t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
-    t.start()
-
+    started, proc, error = _start_managed_discord_bot(config_path)
+    if not started:
+        if error == 'Discord bot is already running':
+            return jsonify({'error': error}), 409
+        return jsonify({'error': error}), 500
     return jsonify({'started': True, 'pid': proc.pid})
 
 
@@ -11299,7 +11360,7 @@ def api_discord_bot_get_config():
       - ``steam_api_key_set``: bool
       - ``config_exists``: bool
     """
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    config_path = DEFAULT_CONFIG_PATH
     if not os.path.exists(config_path):
         return jsonify({'config_exists': False, 'discord_token_set': False, 'steam_api_key_set': False})
     try:
@@ -11337,7 +11398,7 @@ def api_discord_bot_save_config():
     if not token and not client_id and not steam_key:
         return jsonify({'error': 'Provide at least one value: discord_bot_token, discord_bot_client_id, or steam_api_key'}), 400
 
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    config_path = DEFAULT_CONFIG_PATH
     cfg: Dict = {}
     if os.path.exists(config_path):
         try:
@@ -11370,14 +11431,9 @@ def api_discord_bot_restart():
     Expects optional JSON body with ``config_path``.
     Returns ``{'restarted': True, 'pid': <pid>}`` on success.
     """
-    global _discord_bot_process, _discord_bot_log_lines
     data = request.get_json(silent=True) or {}
-    config_path = data.get('config_path', 'config.json')
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    abs_config = os.path.normpath(os.path.join(base_dir, config_path))
     try:
-        if os.path.commonpath([base_dir, abs_config]) != base_dir:
-            return jsonify({'error': 'Invalid config_path'}), 400
+        config_path = _validate_repo_config_path(data.get('config_path', DEFAULT_CONFIG_PATH))
     except ValueError:
         return jsonify({'error': 'Invalid config_path'}), 400
 
@@ -11396,26 +11452,9 @@ def api_discord_bot_restart():
                 pass
             _discord_bot_process = None
 
-        bot_script = os.path.join(base_dir, 'discord_bot.py')
-        if not os.path.exists(bot_script):
-            return jsonify({'error': 'discord_bot.py not found'}), 500
-
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, bot_script],
-                env={**os.environ, 'GAPI_DISCORD_CONFIG': abs_config},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            _discord_bot_process = proc
-            _discord_bot_log_lines.clear()
-        except OSError as exc:
-            return jsonify({'error': f'Failed to start bot: {exc}'}), 500
-
-    t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
-    t.start()
+    started, proc, error = _start_managed_discord_bot(config_path)
+    if not started:
+        return jsonify({'error': error}), 500
     return jsonify({'restarted': True, 'pid': proc.pid})
 
 
@@ -16295,7 +16334,7 @@ def create_templates():
 def main():
     """Main entry point for GUI"""
     parser = argparse.ArgumentParser(description='GAPI Web GUI')
-    parser.add_argument('--config', default='config.json', help='Path to config file')
+    parser.add_argument('--config', default=DEFAULT_CONFIG_PATH, help='Path to config file')
     parser.add_argument('--demo', action='store_true', help='Run with demo data')
     parser.add_argument(
         '--host',
@@ -16311,7 +16350,7 @@ def main():
     args = parser.parse_args()
 
     demo_mode = args.demo
-    config_path = args.config
+    config_path = _resolve_repo_path(args.config)
     host = args.host
     port = args.port
 
@@ -16359,6 +16398,8 @@ def main():
             gui_logger.info('Real-time routes initialized')
         except Exception as e:
             gui_logger.warning('Real-time initialization failed: %s', e)
+
+    _auto_start_discord_bot_if_configured(config_path)
     
     # Start background sync scheduler
     sync_scheduler.start()
