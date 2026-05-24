@@ -23,7 +23,7 @@ flask-compress>=1.14           # Automatic gzip/brotli compression of HTTP respo
 
 # Database (PostgreSQL — required for multi-user web GUI)
 sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0      # swap for psycopg2 if you build from source
+psycopg2-binary>=2.9.12      # swap for psycopg2 if you build from source
 
 # -----------------------------------------------------------------------------
 # Optional — Discord bot (discord_bot.py)
