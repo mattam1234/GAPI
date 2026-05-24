@@ -168,6 +168,10 @@ venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
+> On some distro-managed Python installs (for example Debian/Ubuntu Python 3.13),
+> use a virtual environment or pass `--break-system-packages` if you install
+> dependencies system-wide.
+
 <details>
 <summary>Optional integrations</summary>
 

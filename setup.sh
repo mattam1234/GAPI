@@ -69,7 +69,13 @@ else
 fi
 
 echo "📦 Installing from $REQUIREMENTS_FILE ..."
-python3 -m pip install -r "$REQUIREMENTS_FILE"
+PIP_INSTALL_ARGS=(-r "$REQUIREMENTS_FILE")
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo "⚠️  System-wide install requested; using --break-system-packages for PEP 668 environments."
+    PIP_INSTALL_ARGS=(--break-system-packages "${PIP_INSTALL_ARGS[@]}")
+fi
+
+python3 -m pip install "${PIP_INSTALL_ARGS[@]}"
 
 if [ $? -ne 0 ]; then
     echo "❌ Error: Failed to install dependencies."
@@ -110,4 +116,3 @@ echo "    python3 gapi.py"
 echo ""
 echo "  Full installation guide: README.md → Installation section"
 echo "════════════════════════════════════════════════════════"
-
