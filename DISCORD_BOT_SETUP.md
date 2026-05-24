@@ -15,6 +15,7 @@ Complete guide to set up and use the GAPI Discord Bot with achievement tracking 
    - Server Members Intent
    - Guilds
    - Guild Messages
+   - Reactions / Read Message History so users can join linked sessions with ✅
 
 ### 2. Create Discord Config
 
@@ -123,6 +124,27 @@ python discord_bot.py
 **`/stats`**
 - View combined library statistics for all linked users
 - Shows total games per user and common games count
+
+## Linked Web Sessions
+
+You can create a session in the web UI and mirror it into a Discord server/channel:
+
+1. Start both `gapi_gui.py` and `discord_bot.py`
+2. Save your Discord ID in the web UI **Settings**
+3. Let the bot join your server so it can cache the guild, available channels, and your membership
+4. In the web UI **🎯 Sessions** tab, choose the Discord server/channel and create the session
+5. The bot posts one session status message in that channel and keeps editing it as users join, picks are made, and results finalize
+
+### Join flow for Discord friends
+
+- Linked users join or leave by reacting with ✅ on the session message
+- Unlinked users receive a DM with onboarding instructions and a 5-minute join window
+- When they finish linking their GAPI account and game-service IDs, the pending join is completed automatically
+
+### Result presentation
+
+- **Web UI:** lootbox-style final reveal animation
+- **Discord:** plain embed/message updates only, to avoid spam
 
 ## Multi-User Shared Rules
 
