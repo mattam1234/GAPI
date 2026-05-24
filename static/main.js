@@ -1,11 +1,9 @@
-// Debug: surface runtime errors to alert/console for easier diagnosis
+// Surface runtime errors to the console for easier diagnosis
         window.addEventListener('error', function (ev) {
             try { console.error('Runtime error caught:', ev && ev.error ? ev.error : ev.message); } catch(e){}
-            try { alert('JS runtime error: ' + (ev && ev.message ? ev.message : 'unknown')); } catch(e){}
         });
         window.addEventListener('unhandledrejection', function (ev) {
             try { console.error('Unhandled promise rejection:', ev.reason); } catch(e){}
-            try { alert('Unhandled promise rejection: ' + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason))); } catch(e){}
         });
 
         // CSRF disabled - safeFetch is now just an alias for fetch with credentials
@@ -215,8 +213,14 @@
             if (tabName !== 'sessions' && typeof stopSessionsPolling === 'function') stopSessionsPolling();
             
             // Update tab buttons
-            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-            if (button && button.classList) button.classList.add('active');
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+                tab.setAttribute('aria-selected', 'false');
+            });
+            if (button && button.classList) {
+                button.classList.add('active');
+                button.setAttribute('aria-selected', 'true');
+            }
             
             // Update tab content
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -962,8 +966,8 @@
                                     <span title="Favorite" style="cursor:pointer; font-size:1.2em; color: ${game.is_favorite ? '#ffc107' : 'inherit'};" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
-                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeName}')">📋</span>
-                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeName}')">📚</span>
+                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
+                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
                                     <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeName}')">🚫</span>
                                 </div>
                             </div>
@@ -1142,8 +1146,8 @@
                                 </div>
                                 <div style="display:flex; gap:8px; align-items:center;">
                                     <span>${game.playtime_hours}h</span>
-                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeName}')">📋</span>
-                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeName}')">📚</span>
+                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
+                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
                                     <button class="btn btn-favorite" style="padding: 5px 10px; font-size:0.85em;"
                                             onclick="event.stopPropagation(); removeFavorite(${game.app_id})">Remove</button>
                                 </div>
@@ -1694,7 +1698,12 @@
         }
         
         function showMessage(message, type = 'info') {
-            // Create message element
+            // Delegate to the richer toast system when available
+            if (typeof showToast === 'function') {
+                showToast(message, type);
+                return;
+            }
+            // Fallback: simple fixed-position notification
             const messageDiv = document.createElement('div');
             messageDiv.style.cssText = `
                 position: fixed;
@@ -1711,8 +1720,6 @@
             `;
             messageDiv.textContent = message;
             document.body.appendChild(messageDiv);
-            
-            // Remove after 3 seconds
             setTimeout(() => {
                 messageDiv.style.animation = 'slideOut 0.3s ease-out';
                 setTimeout(() => messageDiv.remove(), 300);

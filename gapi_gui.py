@@ -495,10 +495,32 @@ _client_errors_lock = threading.Lock()
 _client_errors: collections.deque = collections.deque(maxlen=_CLIENT_ERROR_MAX)
 
 
-# Global game picker instance
+# ---------------------------------------------------------------------------
+# Per-user GamePicker instances
+# ---------------------------------------------------------------------------
+# The global ``picker`` is kept for backward-compat / demo mode.  All web
+# route handlers should call ``ensure_picker_initialized(username)`` which
+# returns the *caller's* private GamePicker instead of mutating the global.
+# ---------------------------------------------------------------------------
+
+# Global game picker instance (kept for backward-compat and demo mode only)
 picker: Optional[gapi.GamePicker] = None
 picker_lock = threading.Lock()
 current_game: Optional[Dict] = None
+
+# Per-user picker instances: username -> GamePicker
+_pickers: Dict[str, gapi.GamePicker] = {}
+_pickers_lock = threading.Lock()
+
+# Directory that holds per-user sub-directories with JSON data files
+_USER_DATA_DIR = 'user_data'
+
+
+def _sanitize_username(username: str) -> str:
+    """Return a filesystem-safe version of *username* for use as a directory name."""
+    import re
+    safe = re.sub(r'[^A-Za-z0-9._-]', '_', username)
+    return safe[:64] or 'user'
 
 # Multi-user picker instance
 multi_picker: Optional[multiuser.MultiUserPicker] = None
@@ -1792,109 +1814,130 @@ self.addEventListener('notificationclick', (event) => {
 
 
 
-def ensure_picker_initialized(username: str = None):
-    """Ensure picker is initialized and loaded with user's games from database.
-    
+def _invalidate_picker_for_user(username: str) -> None:
+    """Evict the per-user picker from the cache so the next request reloads it.
+
+    Call this after a library sync so the updated game list is picked up.
+    """
+    with _pickers_lock:
+        _pickers.pop(username, None)
+
+
+def ensure_picker_initialized(username: str = None) -> Optional[gapi.GamePicker]:
+    """Return the per-user GamePicker, creating and populating it if needed.
+
+    Each authenticated user gets their own GamePicker instance stored in
+    ``_pickers``.  Private data (reviews, tags, playlists, backlog, budget,
+    wishlist, schedule, history, favorites) is persisted in per-user
+    sub-directories under ``_USER_DATA_DIR`` so it is never visible to other
+    users.
+
     Args:
         username: Username to load games for. If None, uses current_user.
-        
+
     Returns:
-        True if picker was successfully initialized, False otherwise.
+        The user's GamePicker instance, or None on failure.
     """
-    global picker, current_user
-    
+    global picker  # kept for backward-compat / demo mode
+
     if username is None:
         username = get_current_username()
-    
+
     if not username:
-        return False
-    
-    # Initialize picker if needed
-    if not picker:
-        with picker_lock:
-            if not picker:  # Double-check after acquiring lock
-                # Properly initialize GamePicker with config
-                try:
-                    picker = gapi.GamePicker(config_path='config.json')
-                    gui_logger.info("Initialized GamePicker")
-                except Exception as e:
-                    gui_logger.exception(f"Failed to initialize GamePicker: {e}")
-                    return False
-    
-    # Load games from database if not already loaded
-    if not picker.games or len(picker.games) == 0:
-        if DB_AVAILABLE and ensure_db_available():
+        return None
+
+    # Fast path: return existing instance with games already loaded
+    with _pickers_lock:
+        existing = _pickers.get(username)
+        if existing is not None and existing.games:
+            picker = existing  # keep backward-compat global in sync
+            return existing
+
+    # Slow path: create a new GamePicker for this user
+    user_data_dir = os.path.join(_USER_DATA_DIR, _sanitize_username(username))
+    try:
+        os.makedirs(user_data_dir, exist_ok=True)
+        p = gapi.GamePicker(config_path='config.json', data_dir=user_data_dir)
+    except Exception as e:
+        gui_logger.exception("Failed to create picker for user %s: %s", username, e)
+        return None
+
+    # Load the user's game library from the database cache
+    if DB_AVAILABLE and ensure_db_available():
+        try:
+            db = database.SessionLocal()
             try:
-                db = database.SessionLocal()
-                try:
-                    if _library_service:
-                        cached_games = _library_service.get_cached(db, username)
-                    else:
-                        cached_games = database.get_cached_library(db, username)
-                    
-                    if cached_games:
-                        with picker_lock:
-                            picker.games = [
-                                {
-                                    'appid': int(g['app_id']) if str(g['app_id']).isdigit() else g['app_id'],
-                                    'name': g['name'],
-                                    'playtime_forever': int(g.get('playtime_hours', 0) * 60),
-                                    'platform': g.get('platform', 'steam')
-                                }
-                                for g in cached_games
-                            ]
-                        gui_logger.info(f"Loaded {len(picker.games)} games for {username} from database cache")
-                        return True
-                    else:
-                        gui_logger.warning(f"No cached games for {username}")
-                        with picker_lock:
-                            picker.games = DEMO_GAMES
-                        return False
-                finally:
-                    db.close()
-            except Exception as e:
-                gui_logger.exception(f"Failed to load games from database: {e}")
-                with picker_lock:
-                    picker.games = DEMO_GAMES
-                return False
-        else:
-            with picker_lock:
-                picker.games = DEMO_GAMES
-            return False
-    
-    return True
+                if _library_service:
+                    cached_games = _library_service.get_cached(db, username)
+                else:
+                    cached_games = database.get_cached_library(db, username)
+
+                if cached_games:
+                    p.games = [
+                        {
+                            'appid': int(g['app_id']) if str(g['app_id']).isdigit() else g['app_id'],
+                            'name': g['name'],
+                            'playtime_forever': int(g.get('playtime_hours', 0) * 60),
+                            'platform': g.get('platform', 'steam'),
+                        }
+                        for g in cached_games
+                    ]
+                    gui_logger.info(
+                        "Loaded %d games for %s from database cache", len(p.games), username
+                    )
+                else:
+                    gui_logger.warning("No cached games for %s", username)
+                    p.games = list(DEMO_GAMES)
+            finally:
+                db.close()
+        except Exception as e:
+            gui_logger.exception("Failed to load games from database: %s", e)
+            p.games = list(DEMO_GAMES)
+    else:
+        p.games = list(DEMO_GAMES)
+
+    with _pickers_lock:
+        # Another thread may have won the race; prefer the one that already has
+        # games loaded (returned via the fast path above) to avoid double work.
+        existing = _pickers.get(username)
+        if existing is not None and existing.games:
+            picker = existing
+            return existing
+        _pickers[username] = p
+
+    picker = p  # keep backward-compat global in sync
+    return p
 
 
 @app.route('/api/status')
 def api_status():
     """Get application status"""
-    global picker, current_user
-    
+    username = get_current_username()
+
     # Check if user is logged in
-    if not current_user:
+    if not username:
         return jsonify({
             'ready': False,
             'logged_in': False,
             'message': 'Please log in'
         })
-    
-    # Ensure picker is initialized with user's games
-    ensure_picker_initialized()
-    
-    if picker is None:
+
+    p = ensure_picker_initialized(username)
+
+    if p is None:
         return jsonify({
             'ready': False,
             'logged_in': True,
             'message': 'Loading games...'
         })
-    
+
     return jsonify({
         'ready': True,
         'logged_in': True,
-        'current_user': get_current_username(),
-        'is_admin': user_manager.is_admin(get_current_username()),
-        'total_games': len(picker.games) if picker.games else 0,
-        'favorites': len(picker.favorites) if picker.favorites else 0
+        'current_user': username,
+        'is_admin': user_manager.is_admin(username),
+        'total_games': len(p.games) if p.games else 0,
+        'favorites': len(p.favorites) if p.favorites else 0
     })
 
 
@@ -2349,20 +2392,17 @@ def api_filter_platform_options():
 @require_login
 def api_pick_game():
     """Pick a random game"""
-    global picker, current_game, current_user
-
-    # Get current user
     username = get_current_username()
-    
+
     try:
         gui_logger.info(f"Pick request from user {username}")
-        
-        # Ensure picker is initialized with user's games
-        if not ensure_picker_initialized(username):
+
+        p = ensure_picker_initialized(username)
+        if p is None:
             gui_logger.warning(f"Failed to initialize picker for {username}")
             return jsonify({'error': 'Failed to load games'}), 500
-        
-        if not picker.games or len(picker.games) == 0:
+
+        if not p.games or len(p.games) == 0:
             gui_logger.error(f"No games available for {username} after loading attempt")
             return jsonify({'error': 'No games available in your library'}), 400
 
@@ -2413,7 +2453,7 @@ def api_pick_game():
                             rarity_set = set(str(aid) for aid in rarity_app_ids)
                             extra_excludes = [
                                 str(g.get('appid', g.get('id', '')))
-                                for g in picker.games
+                                for g in p.games
                                 if str(g.get('appid', g.get('id', ''))) not in rarity_set
                             ]
                             if exclude_game_ids:
@@ -2455,28 +2495,28 @@ def api_pick_game():
                 filtered_games = None
 
                 if filter_type == "unplayed":
-                    filtered_games = picker.filter_games(max_playtime=0, **adv)
+                    filtered_games = p.filter_games(max_playtime=0, **adv)
                 elif filter_type == "barely":
-                    filtered_games = picker.filter_games(
-                        max_playtime=picker.BARELY_PLAYED_THRESHOLD_MINUTES, **adv)
+                    filtered_games = p.filter_games(
+                        max_playtime=p.BARELY_PLAYED_THRESHOLD_MINUTES, **adv)
                 elif filter_type == "well":
-                    filtered_games = picker.filter_games(
-                        min_playtime=picker.WELL_PLAYED_THRESHOLD_MINUTES, **adv)
+                    filtered_games = p.filter_games(
+                        min_playtime=p.WELL_PLAYED_THRESHOLD_MINUTES, **adv)
                 elif filter_type == "favorites":
-                    filtered_games = picker.filter_games(favorites_only=True, **adv)
+                    filtered_games = p.filter_games(favorites_only=True, **adv)
                 elif any(v is not None and v != [] for v in adv.values()):
-                    filtered_games = picker.filter_games(**adv)
+                    filtered_games = p.filter_games(**adv)
 
                 # Apply tag filter on top of other filters (or on whole library)
                 if tag_filter:
-                    filtered_games = picker.tag_service.filter_by_tag(
+                    filtered_games = p.tag_service.filter_by_tag(
                         tag_filter,
-                        filtered_games if filtered_games is not None else picker.games,
+                        filtered_games if filtered_games is not None else p.games,
                     )
 
                 # Apply platform/device filter even when no other filter was active
                 if platform_filter or device_filter:
-                    base_games = filtered_games if filtered_games is not None else picker.games
+                    base_games = filtered_games if filtered_games is not None else p.games
                     filtered_games = _filter_games_by_platform_device(
                         base_games,
                         platform_filter,
@@ -2488,12 +2528,13 @@ def api_pick_game():
                     return jsonify({'error': 'No games match the selected filters'}), 400
 
                 # Pick game
-                game = picker.pick_random_game(filtered_games)
+                game = p.pick_random_game(filtered_games)
 
                 if not game:
                     gui_logger.error(f"Failed to pick game for {username}")
                     return jsonify({'error': 'Failed to pick a game'}), 500
 
+                global current_game
                 current_game = game
                 gui_logger.info(f"Picked game for {username}: {game.get('name')}")
 
@@ -2507,10 +2548,10 @@ def api_pick_game():
                 if _discord_presence:
                     _discord_presence.update(name, playtime_hours=round(playtime_hours, 1))
 
-                is_favorite = app_id in picker.favorites if app_id else False
-                review = picker.review_service.get(game_id) if game_id else None
-                tags = picker.tag_service.get(game_id) if game_id else []
-                backlog_status = picker.backlog_service.get_status(game_id) if game_id else None
+                is_favorite = app_id in p.favorites if app_id else False
+                review = p.review_service.get(game_id) if game_id else None
+                tags = p.tag_service.get(game_id) if game_id else []
+                backlog_status = p.backlog_service.get_status(game_id) if game_id else None
 
                 response = {
                     'app_id': app_id,
@@ -2527,8 +2568,8 @@ def api_pick_game():
 
                 # Try to get details and cache them
                 try:
-                    if app_id and picker and picker.steam_client:
-                        details = picker.steam_client.get_game_details(app_id)
+                    if app_id and p.steam_client:
+                        details = p.steam_client.get_game_details(app_id)
                         if details:
                             # Extract key fields for the response
                             if 'short_description' in details:
@@ -2543,7 +2584,7 @@ def api_pick_game():
                                 response['release_date'] = details['release_date'].get('date', '')
                             if 'metacritic' in details:
                                 response['metacritic_score'] = details['metacritic'].get('score')
-                            
+
                             # Cache the full details for later use
                             try:
                                 if DB_AVAILABLE and ensure_db_available():
@@ -2562,23 +2603,23 @@ def api_pick_game():
                                             db.close()
                             except Exception as e:
                                 gui_logger.debug(f"Failed to cache game details: {e}")
-                            
+
                             # Fetch ProtonDB rating in background (non-blocking)
-                            def fetch_protondb():
+                            def fetch_protondb(_p=p, _app_id=app_id):
                                 try:
-                                    if picker and picker.steam_client:
-                                        protondb = picker.steam_client.get_protondb_rating(app_id)
+                                    if _p.steam_client:
+                                        protondb = _p.steam_client.get_protondb_rating(_app_id)
                                         if protondb:
                                             response['protondb'] = protondb
                                 except Exception:
                                     pass
-                            
+
                             threading.Thread(target=fetch_protondb, daemon=True).start()
                 except Exception as e:
                     gui_logger.debug(f"Failed to fetch game details: {e}")
 
                 # Fire webhook if one is configured (non-blocking, best-effort)
-                webhook_url = picker.config.get('webhook_url', '').strip() if picker.config else ''
+                webhook_url = p.config.get('webhook_url', '').strip() if p.config else ''
                 if webhook_url and not gapi.is_placeholder_value(webhook_url):
                     wh_payload = {
                         'content': f"🎮 **Game pick:** {name} ({round(playtime_hours, 1)}h played)\n"
@@ -2594,7 +2635,7 @@ def api_pick_game():
                 # Fire Slack / Teams / IFTTT / Home Assistant notifications
                 try:
                     from webhook_notifier import WebhookNotifier
-                    _notifier = WebhookNotifier(picker.config or {})
+                    _notifier = WebhookNotifier(p.config or {})
                     _has_extra = any(
                         _notifier._get(k) for k in (
                             'slack_webhook_url', 'teams_webhook_url',
@@ -2611,7 +2652,7 @@ def api_pick_game():
                     gui_logger.debug("WebhookNotifier error: %s", _wh_exc)
 
                 return jsonify(response)
-            
+
             except Exception as e:
                 gui_logger.exception(f"Error in pick endpoint for {username}: {e}")
                 return jsonify({'error': f'Error picking game: {str(e)}'}), 500
@@ -2671,13 +2712,12 @@ def api_game_details(app_id):
 
         # Step 2: Cache is missing or stale. Try to fetch from API
         api_details = None
-        global picker
+        p = ensure_picker_initialized(username)
 
-        if picker:
+        if p:
             try:
-                with picker_lock:
-                    if picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
-                        api_details = picker.steam_client.get_game_details(app_id)
+                if p.steam_client and isinstance(p.steam_client, gapi.SteamAPIClient):
+                    api_details = p.steam_client.get_game_details(app_id)
             except Exception as e:
                 gui_logger.debug(f"Could not fetch from Steam API: {e}")
 
@@ -2705,11 +2745,10 @@ def api_game_details(app_id):
 
             # Try to get ProtonDB rating
             try:
-                with picker_lock:
-                    if picker and picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
-                        protondb = picker.steam_client.get_protondb_rating(app_id)
-                        if protondb:
-                            response['protondb'] = protondb
+                if p and p.steam_client and isinstance(p.steam_client, gapi.SteamAPIClient):
+                    protondb = p.steam_client.get_protondb_rating(app_id)
+                    if protondb:
+                        response['protondb'] = protondb
             except Exception:
                 pass  # ProtonDB is best-effort, don't fail on it
 
@@ -4100,28 +4139,26 @@ def api_voting_close(session_id: str):
 @require_login
 def api_get_reviews():
     """Return all personal game reviews."""
-    global picker
-
-    ensure_picker_initialized()
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({}), 500
-    
+
     with picker_lock:
-        return jsonify(picker.review_service.get_all())
+        return jsonify(p.review_service.get_all())
 
 
 @app.route('/api/reviews/<game_id>', methods=['GET'])
 @require_login
 def api_get_review(game_id: str):
     """Return the review for a specific game."""
-    global picker
-
-    ensure_picker_initialized()
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Picker not initialized'}), 500
-    
+
     with picker_lock:
-        review = picker.review_service.get(game_id)
+        review = p.review_service.get(game_id)
     if review is None:
         return jsonify({'error': 'No review found'}), 404
     return jsonify(review)
@@ -4134,10 +4171,9 @@ def api_save_review(game_id: str):
 
     Body JSON: {"rating": 1-10, "notes": "optional text"}
     """
-    global picker
-
-    ensure_picker_initialized()
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Picker not initialized'}), 500
 
     data = request.json or {}
@@ -4153,7 +4189,7 @@ def api_save_review(game_id: str):
         return jsonify({'error': 'rating must be an integer'}), 400
 
     with picker_lock:
-        success = picker.review_service.add_or_update(game_id, rating, notes)
+        success = p.review_service.add_or_update(game_id, rating, notes)
 
     if not success:
         return jsonify({'error': 'rating must be between 1 and 10'}), 400
@@ -4165,14 +4201,13 @@ def api_save_review(game_id: str):
 @require_login
 def api_delete_review(game_id: str):
     """Delete the review for a game."""
-    global picker
-
-    ensure_picker_initialized()
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Picker not initialized'}), 500
 
     with picker_lock:
-        removed = picker.review_service.remove(game_id)
+        removed = p.review_service.remove(game_id)
 
     if not removed:
         return jsonify({'error': 'No review found'}), 404
@@ -4188,49 +4223,50 @@ def api_delete_review(game_id: str):
 @require_login
 def api_get_all_tags():
     """Return all unique tags and a mapping of game_id → tags."""
-    global picker
+    username = get_current_username()
 
     try:
-        # Ensure picker is initialized for logged-in user
-        ensure_picker_initialized()
-        if not picker:
+        p = ensure_picker_initialized(username)
+        if not p:
             return jsonify({'tags': [], 'game_tags': {}}), 500
 
         with picker_lock:
-            return jsonify({'tags': picker.tag_service.all_tag_names(),
-                            'game_tags': picker.tag_service.get_all()})
+            return jsonify({'tags': p.tag_service.all_tag_names(),
+                            'game_tags': p.tag_service.get_all()})
     except Exception as e:
         gui_logger.error(f"Error getting tags: {e}")
         return jsonify({'tags': [], 'game_tags': {}})
 
 
 @app.route('/api/tags/<game_id>', methods=['GET'])
+@require_login
 def api_get_game_tags(game_id: str):
     """Return the tags for a specific game."""
-    global picker
+    username = get_current_username()
 
     try:
-        ensure_picker_initialized()
-        if not picker:
+        p = ensure_picker_initialized(username)
+        if not p:
             return jsonify({'game_id': game_id, 'tags': []}), 500
         with picker_lock:
-            return jsonify({'game_id': game_id, 'tags': picker.tag_service.get(game_id)})
+            return jsonify({'game_id': game_id, 'tags': p.tag_service.get(game_id)})
     except Exception as e:
         gui_logger.error(f"Error getting game tags: {e}")
         return jsonify({'game_id': game_id, 'tags': []})
 
 
 @app.route('/api/tags/<game_id>', methods=['POST'])
+@require_login
 def api_add_tag(game_id: str):
     """Add a tag to a game.
 
     Body JSON: {"tag": "cozy"}
     """
-    global picker
+    username = get_current_username()
 
     try:
-        ensure_picker_initialized()
-        if not picker:
+        p = ensure_picker_initialized(username)
+        if not p:
             return jsonify({'error': 'Picker not initialized'}), 500
 
         data = request.json or {}
@@ -4239,8 +4275,8 @@ def api_add_tag(game_id: str):
             return jsonify({'error': 'tag is required'}), 400
 
         with picker_lock:
-            added = picker.tag_service.add(game_id, tag)
-            tags = picker.tag_service.get(game_id)
+            added = p.tag_service.add(game_id, tag)
+            tags = p.tag_service.get(game_id)
 
         return jsonify({'success': True, 'added': added,
                         'game_id': game_id, 'tags': tags})
@@ -4250,18 +4286,19 @@ def api_add_tag(game_id: str):
 
 
 @app.route('/api/tags/<game_id>/<tag>', methods=['DELETE'])
+@require_login
 def api_remove_tag(game_id: str, tag: str):
     """Remove a tag from a game."""
-    global picker
+    username = get_current_username()
 
     try:
-        ensure_picker_initialized()
-        if not picker:
+        p = ensure_picker_initialized(username)
+        if not p:
             return jsonify({'error': 'Picker not initialized'}), 500
 
         with picker_lock:
-            removed = picker.tag_service.remove(game_id, tag)
-            tags = picker.tag_service.get(game_id)
+            removed = p.tag_service.remove(game_id, tag)
+            tags = p.tag_service.get(game_id)
 
         if not removed:
             return jsonify({'error': 'Tag not found'}), 404
@@ -4276,22 +4313,20 @@ def api_remove_tag(game_id: str, tag: str):
 @require_login
 def api_library_by_tag(tag: str):
     """Return games that have a specific tag."""
-    global picker
-
-    # Ensure picker is initialized for logged-in user
-    ensure_picker_initialized()
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'tag': tag, 'games': [], 'count': 0}), 500
 
     with picker_lock:
-        games = picker.tag_service.filter_by_tag(tag, picker.games)
+        games = p.tag_service.filter_by_tag(tag, p.games)
         result = [
             {
                 'app_id': g.get('appid'),
                 'game_id': g.get('game_id'),
                 'name': g.get('name', 'Unknown'),
                 'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
-                'tags': picker.tag_service.get(g.get('game_id', str(g.get('appid', '')))),
+                'tags': p.tag_service.get(g.get('game_id', str(g.get('appid', '')))),
             }
             for g in games
         ]
@@ -4354,13 +4389,18 @@ def _build_schedule_game_links(game_appid: Optional[str], game_name: str = '') -
 def _get_schedule_game_short_description(game_appid: Optional[str]) -> str:
     """Fetch game short description using the same source as game details API."""
     appid = str(game_appid or '').strip()
-    if not appid.isdigit() or not picker:
+    if not appid.isdigit():
+        return ''
+    # Use the global picker as a best-effort helper (it is shared infrastructure
+    # after the per-user migration; we only need the Steam client here, not user
+    # data, so any initialised picker will do).
+    p = picker
+    if not p:
         return ''
     try:
-        with picker_lock:
-            if picker.steam_client and isinstance(picker.steam_client, gapi.SteamAPIClient):
-                details = picker.steam_client.get_game_details(int(appid)) or {}
-                return str(details.get('short_description', '') or '').strip()
+        if p.steam_client and isinstance(p.steam_client, gapi.SteamAPIClient):
+            details = p.steam_client.get_game_details(int(appid)) or {}
+            return str(details.get('short_description', '') or '').strip()
     except Exception as exc:
         gui_logger.debug(f'Could not fetch short description for app {appid}: {exc}')
     return ''
@@ -4434,12 +4474,15 @@ def _schedule_local_to_utc(date_str: str,
     return dt.astimezone(timezone.utc)
 
 @app.route('/api/schedule', methods=['GET'])
+@require_login
 def api_get_schedule():
     """Return all game night events sorted by date/time."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        events = picker.schedule_service.get_events()
+        events = p.schedule_service.get_events()
     for event in events:
         if not event.get('game_image_url'):
             event['game_image_url'] = _resolve_schedule_game_image_url(
@@ -4450,6 +4493,7 @@ def api_get_schedule():
 
 
 @app.route('/api/schedule', methods=['POST'])
+@require_login
 def api_create_event():
     """Create a new game night event (optionally with Discord event integration).
     
@@ -4468,7 +4512,9 @@ def api_create_event():
             "discord_guild_id": 123456789
         }
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     title = str(data.get('title', '')).strip()
@@ -4495,7 +4541,7 @@ def api_create_event():
         with picker_lock:
             selected_game = next(
                 (
-                    g for g in picker.games
+                    g for g in p.games
                     if str(g.get('appid') or g.get('app_id') or '').strip() == str(game_appid or '').strip()
                 ),
                 None
@@ -4518,7 +4564,7 @@ def api_create_event():
     gui_logger.info(f'Creating schedule event: title={title}, game_name={game_name}, game_appid={game_appid}, game_image_url={game_image_url}, create_discord={create_discord_event}')
     
     with picker_lock:
-        event = picker.schedule_service.add_event(
+        event = p.schedule_service.add_event(
             title, date, time_str, attendees, game_name, notes,
             game_appid=game_appid,
             attendee_ids=attendee_ids,
@@ -4606,7 +4652,7 @@ def api_create_event():
                     discord_event = response.json()
                     discord_event_id = discord_event.get('id')
                     with picker_lock:
-                        picker.schedule_service.set_discord_event_info(event['id'], discord_event_id, str(discord_guild_id).strip())
+                        p.schedule_service.set_discord_event_info(event['id'], discord_event_id, str(discord_guild_id).strip())
                     event['discord_event_id'] = discord_event_id
                     event['discord_guild_id'] = str(discord_guild_id).strip()
                     discord_result = {
@@ -4629,9 +4675,12 @@ def api_create_event():
 
 
 @app.route('/api/schedule/<event_id>', methods=['PUT'])
+@require_login
 def api_update_event(event_id: str):
     """Update a game night event."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     safe: Dict = {}
@@ -4645,22 +4694,25 @@ def api_update_event(event_id: str):
         else:
             safe['attendees'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
     with picker_lock:
-        event = picker.schedule_service.update_event(event_id, **safe)
+        event = p.schedule_service.update_event(event_id, **safe)
     if event is None:
         return jsonify({'error': 'Event not found'}), 404
     return jsonify(event)
 
 
 @app.route('/api/schedule/<event_id>', methods=['DELETE'])
+@require_login
 def api_delete_event(event_id: str):
     """Delete a game night event."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     override_guild_id = str(data.get('guild_id', '')).strip()
 
     with picker_lock:
-        event = picker.schedule_service._repo.find(event_id)
+        event = p.schedule_service._repo.find(event_id)
 
     if not event:
         return jsonify({'error': 'Event not found'}), 404
@@ -4708,7 +4760,7 @@ def api_delete_event(event_id: str):
             return jsonify({'error': f'Failed to cancel Discord event: {str(exc)}'}), 502
 
     with picker_lock:
-        removed = picker.schedule_service.remove_event(event_id)
+        removed = p.schedule_service.remove_event(event_id)
     if not removed:
         return jsonify({'error': 'Event not found'}), 404
     return jsonify({'success': True, 'id': event_id, 'discord_cancelled': bool(discord_event_id)})
@@ -4807,6 +4859,7 @@ def _fuzzy_search_users(query: str, users: List[Dict], limit: int = 10) -> List[
 
 
 @app.route('/api/schedule/search-games', methods=['POST'])
+@require_login
 def api_search_games():
     """Fuzzy search for games by title or app ID.
     
@@ -4816,7 +4869,9 @@ def api_search_games():
             "limit": 10
         }
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     
     data = request.json or {}
@@ -4827,7 +4882,7 @@ def api_search_games():
         return jsonify({'error': 'query is required'}), 400
     
     with picker_lock:
-        results = _fuzzy_search_games(query, picker.games, limit=limit)
+        results = _fuzzy_search_games(query, p.games, limit=limit)
     
     # Clean up game data for response
     clean_results = []
@@ -4852,6 +4907,7 @@ def api_search_games():
 
 
 @app.route('/api/schedule/search-attendees', methods=['POST'])
+@require_login
 def api_search_attendees():
     """Fuzzy search for attendees from friends list.
     
@@ -4861,7 +4917,9 @@ def api_search_attendees():
             "limit": 10
         }
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     
     data = request.json or {}
@@ -4873,7 +4931,7 @@ def api_search_attendees():
     
     with picker_lock:
         # Get list of users (friends)
-        users_list = picker.multi_picker.users if hasattr(picker, 'multi_picker') else []
+        users_list = p.multi_picker.users if hasattr(p, 'multi_picker') else []
         results = _fuzzy_search_users(query, users_list, limit=limit)
     
     # Clean up user data for response
@@ -4889,6 +4947,7 @@ def api_search_attendees():
 
 
 @app.route('/api/schedule/<event_id>/create-discord-event', methods=['POST'])
+@require_login
 def api_create_discord_event_for_schedule(event_id: str):
     """Create a Discord scheduled event for a game night schedule event.
     
@@ -4897,7 +4956,9 @@ def api_create_discord_event_for_schedule(event_id: str):
             "guild_id": "123456789"
         }
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     
     data = request.json or {}
@@ -4913,7 +4974,7 @@ def api_create_discord_event_for_schedule(event_id: str):
         return jsonify({'error': 'guild_id is required'}), 400
     
     with picker_lock:
-        event = picker.schedule_service._repo.find(event_id)
+        event = p.schedule_service._repo.find(event_id)
     
     if not event:
         return jsonify({'error': 'Event not found'}), 404
@@ -5020,7 +5081,7 @@ def api_create_discord_event_for_schedule(event_id: str):
             
             # Update schedule event with Discord event ID
             with picker_lock:
-                picker.schedule_service.set_discord_event_info(event_id, discord_event_id, guild_id)
+                p.schedule_service.set_discord_event_info(event_id, discord_event_id, guild_id)
             
             return jsonify({
                 'success': True,
@@ -5051,77 +5112,95 @@ def api_create_discord_event_for_schedule(event_id: str):
 
 
 @app.route('/api/playlists', methods=['GET'])
+@require_login
 def api_list_playlists():
     """List all playlists."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        return jsonify({'playlists': picker.playlist_service.list_all()})
+        return jsonify({'playlists': p.playlist_service.list_all()})
 
 
 @app.route('/api/playlists', methods=['POST'])
+@require_login
 def api_create_playlist():
     """Create a new playlist. Expects JSON ``{"name": "..."}``."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'error': 'name is required'}), 400
     with picker_lock:
-        created = picker.playlist_service.create(name)
+        created = p.playlist_service.create(name)
     if not created:
         return jsonify({'error': 'Playlist already exists'}), 409
     return jsonify({'success': True, 'name': name}), 201
 
 
 @app.route('/api/playlists/<name>', methods=['DELETE'])
+@require_login
 def api_delete_playlist(name: str):
     """Delete a playlist by name."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        deleted = picker.playlist_service.delete(name)
+        deleted = p.playlist_service.delete(name)
     if not deleted:
         return jsonify({'error': 'Playlist not found'}), 404
     return jsonify({'success': True})
 
 
 @app.route('/api/playlists/<name>/games', methods=['GET'])
+@require_login
 def api_get_playlist_games(name: str):
     """Get all games in a playlist."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        games = picker.playlist_service.get_games(name, picker.games)
+        games = p.playlist_service.get_games(name, p.games)
     if games is None:
         return jsonify({'error': 'Playlist not found'}), 404
     return jsonify({'name': name, 'games': games, 'count': len(games)})
 
 
 @app.route('/api/playlists/<name>/games', methods=['POST'])
+@require_login
 def api_add_to_playlist(name: str):
     """Add a game to a playlist. Expects JSON ``{"game_id": "..."}``."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     game_id = str(data.get('game_id', '')).strip()
     if not game_id:
         return jsonify({'error': 'game_id is required'}), 400
     with picker_lock:
-        added = picker.playlist_service.add_game(name, game_id)
+        added = p.playlist_service.add_game(name, game_id)
     if not added:
         return jsonify({'error': 'Game already in playlist or invalid playlist'}), 409
     return jsonify({'success': True})
 
 
 @app.route('/api/playlists/<name>/games/<game_id>', methods=['DELETE'])
+@require_login
 def api_remove_from_playlist(name: str, game_id: str):
     """Remove a game from a playlist."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.playlist_service.remove_game(name, game_id)
+        removed = p.playlist_service.remove_game(name, game_id)
     if not removed:
         return jsonify({'error': 'Game or playlist not found'}), 404
     return jsonify({'success': True})
@@ -5132,53 +5211,65 @@ def api_remove_from_playlist(name: str, game_id: str):
 # ---------------------------------------------------------------------------
 
 @app.route('/api/backlog', methods=['GET'])
+@require_login
 def api_list_backlog():
     """List all backlog entries, optionally filtered by ``?status=``."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     status_filter = request.args.get('status', '').strip() or None
     if status_filter and status_filter not in gapi.GamePicker.BACKLOG_STATUSES:
         return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
     with picker_lock:
-        games = picker.backlog_service.get_games(picker.games, status_filter)
+        games = p.backlog_service.get_games(p.games, status_filter)
     return jsonify({'games': games, 'count': len(games)})
 
 
 @app.route('/api/backlog/<game_id>', methods=['GET'])
+@require_login
 def api_get_backlog_status(game_id: str):
     """Get the backlog status for a specific game."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        status = picker.backlog_service.get_status(game_id)
+        status = p.backlog_service.get_status(game_id)
     if status is None:
         return jsonify({'game_id': game_id, 'status': None})
     return jsonify({'game_id': game_id, 'status': status})
 
 
 @app.route('/api/backlog/<game_id>', methods=['POST', 'PUT'])
+@require_login
 def api_set_backlog_status(game_id: str):
     """Set the backlog status for a game. Expects JSON ``{"status": "..."}``."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     status = (data.get('status') or '').strip()
     if not status:
         return jsonify({'error': 'status is required'}), 400
     with picker_lock:
-        ok = picker.backlog_service.set_status(game_id, status)
+        ok = p.backlog_service.set_status(game_id, status)
     if not ok:
         return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
     return jsonify({'success': True, 'game_id': game_id, 'status': status})
 
 
 @app.route('/api/backlog/<game_id>', methods=['DELETE'])
+@require_login
 def api_delete_backlog_status(game_id: str):
     """Remove a game from the backlog."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.backlog_service.remove(game_id)
+        removed = p.backlog_service.remove(game_id)
     if not removed:
         return jsonify({'error': 'Game not in backlog'}), 404
     return jsonify({'success': True})
@@ -5192,10 +5283,12 @@ def api_delete_backlog_status(game_id: str):
 @require_login
 def api_get_budget():
     """Return all budget entries and an aggregated summary."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        summary = picker.budget_service.get_summary(picker.games)
+        summary = p.budget_service.get_summary(p.games)
     return jsonify(summary)
 
 
@@ -5213,7 +5306,9 @@ def api_set_budget(game_id: str):
             "notes":         "Steam sale" // optional
         }
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     if 'price' not in data:
@@ -5223,7 +5318,7 @@ def api_set_budget(game_id: str):
     except (TypeError, ValueError):
         return jsonify({'error': 'price must be a number'}), 400
     with picker_lock:
-        ok = picker.budget_service.set_entry(
+        ok = p.budget_service.set_entry(
             game_id,
             price=price,
             currency=str(data.get('currency', 'USD')),
@@ -5239,10 +5334,12 @@ def api_set_budget(game_id: str):
 @require_login
 def api_delete_budget(game_id: str):
     """Remove a budget entry for a game."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.budget_service.remove_entry(game_id)
+        removed = p.budget_service.remove_entry(game_id)
     if not removed:
         return jsonify({'error': 'No budget entry found for this game'}), 404
     return jsonify({'success': True})
@@ -5256,10 +5353,12 @@ def api_delete_budget(game_id: str):
 @require_login
 def api_get_wishlist():
     """Return all wishlist entries."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        entries = list(picker.wishlist_service.get_all().values())
+        entries = list(p.wishlist_service.get_all().values())
     return jsonify({'entries': entries, 'count': len(entries)})
 
 
@@ -5278,7 +5377,9 @@ def api_add_to_wishlist():
             "notes":        "Want this"   // optional
         }
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     game_id = (data.get('game_id') or '').strip()
@@ -5296,8 +5397,8 @@ def api_add_to_wishlist():
         except (TypeError, ValueError):
             return jsonify({'error': 'target_price must be a number'}), 400
     with picker_lock:
-        ok = picker.wishlist_service.add(game_id, name, platform=platform,
-                                         target_price=target_price, notes=notes)
+        ok = p.wishlist_service.add(game_id, name, platform=platform,
+                                    target_price=target_price, notes=notes)
     if not ok:
         return jsonify({'error': 'target_price must not be negative'}), 400
     return jsonify({'success': True, 'game_id': game_id}), 201
@@ -5307,10 +5408,12 @@ def api_add_to_wishlist():
 @require_login
 def api_remove_from_wishlist(game_id: str):
     """Remove a game from the wishlist."""
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
     with picker_lock:
-        removed = picker.wishlist_service.remove(game_id)
+        removed = p.wishlist_service.remove(game_id)
     if not removed:
         return jsonify({'error': 'Game not found in wishlist'}), 404
     return jsonify({'success': True})
@@ -5325,15 +5428,17 @@ def api_check_wishlist_sales():
     This makes live Steam Store API calls so may take a few seconds for large
     wishlists.  Results are not cached.
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
-    if not picker.wishlist_service.get_all():
+    if not p.wishlist_service.get_all():
         return jsonify({'sales': [], 'checked': 0})
-    if not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
+    if not p.steam_client or not isinstance(p.steam_client, gapi.SteamAPIClient):
         return jsonify({'error': 'Steam client not available; cannot check prices'}), 503
     with picker_lock:
-        sales = picker.wishlist_service.check_sales(picker.steam_client)
-        checked = len([e for e in picker.wishlist_service.get_all().values()
+        sales = p.wishlist_service.check_sales(p.steam_client)
+        checked = len([e for e in p.wishlist_service.get_all().values()
                        if e.get('platform', 'steam') == 'steam'])
     return jsonify({'sales': sales, 'checked': checked, 'on_sale_count': len(sales)})
 
@@ -5343,24 +5448,27 @@ def api_check_wishlist_sales():
 # ---------------------------------------------------------------------------
 
 @app.route('/api/achievements/<int:app_id>')
+@require_login
 def api_get_steam_achievements(app_id: int):
     """Get achievement completion stats for a Steam game.
 
     Requires a valid Steam ID to be configured; returns 503 otherwise.
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
-    if not picker.steam_client:
+    if not p.steam_client:
         return jsonify({'error': 'Steam client not available'}), 503
-    steam_id = picker.config.get('steam_id', '')
+    steam_id = p.config.get('steam_id', '')
     if gapi.is_placeholder_value(steam_id):
         return jsonify({'error': 'Steam ID not configured'}), 503
-    
-    if not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
+
+    if not p.steam_client or not isinstance(p.steam_client, gapi.SteamAPIClient):
         return jsonify({'error': 'Steam client not initialized'}), 400
-    
+
     with picker_lock:
-        stats = picker.steam_client.get_player_achievements(steam_id, app_id)
+        stats = p.steam_client.get_player_achievements(steam_id, app_id)
     if stats is None:
         return jsonify({'error': 'Achievements unavailable for this game'}), 404
     return jsonify({'app_id': app_id, **stats})
@@ -5567,11 +5675,13 @@ def api_export_schedule_ics():
 
     Response: ``text/calendar`` attachment named ``gapi_schedule.ics``.
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized'}), 400
 
     with picker_lock:
-        events = picker.schedule_service.get_events()
+        events = p.schedule_service.get_events()
 
     lines = [
         'BEGIN:VCALENDAR',
@@ -5852,7 +5962,6 @@ def api_get_friends():
 
     Returns 503 if Steam is not configured or the profile is private.
     """
-    global current_user
     username = get_current_username()
     user_ids = user_manager.get_user_ids(username)
     steam_id = user_ids.get('steam_id', '')
@@ -5860,10 +5969,11 @@ def api_get_friends():
     if not steam_id or gapi.is_placeholder_value(steam_id):
         return jsonify({'error': 'Steam ID not configured'}), 503
 
-    if not picker or not picker.steam_client or not isinstance(picker.steam_client, gapi.SteamAPIClient):
+    p = ensure_picker_initialized(username)
+    if not p or not p.steam_client or not isinstance(p.steam_client, gapi.SteamAPIClient):
         return jsonify({'error': 'Steam client not available'}), 503
 
-    steam_client: gapi.SteamAPIClient = picker.steam_client
+    steam_client: gapi.SteamAPIClient = p.steam_client
 
     # Fetch friend list
     friends_raw = steam_client.get_friend_list(steam_id)
@@ -5952,7 +6062,9 @@ def api_get_recommendations():
           ]
         }
     """
-    if not picker:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
         return jsonify({'error': 'Not initialized. Please log in and ensure your Steam ID is set.'}), 400
 
     try:
@@ -5962,7 +6074,7 @@ def api_get_recommendations():
 
     # Parse platform filter
     platforms_param = request.args.get('platforms', '').strip()
-    platforms = [p.strip() for p in platforms_param.split(',') if p.strip()] if platforms_param else None
+    platforms = [plat.strip() for plat in platforms_param.split(',') if plat.strip()] if platforms_param else None
 
     # Parse budget filter
     max_budget = None
@@ -5978,7 +6090,7 @@ def api_get_recommendations():
 
     try:
         with picker_lock:
-            recs = picker.get_recommendations(
+            recs = p.get_recommendations(
                 count=count,
                 platforms=platforms,
                 max_budget=max_budget,
@@ -5988,7 +6100,7 @@ def api_get_recommendations():
         # Fallback: try calling without new parameters for backward compatibility
         try:
             with picker_lock:
-                recs = picker.get_recommendations(count=count)
+                recs = p.get_recommendations(count=count)
         except Exception as e2:
             gui_logger.error(f"Error calling get_recommendations: {e2}")
             return jsonify({'error': f'Failed to generate recommendations: {str(e2)}'}), 500
@@ -7728,7 +7840,9 @@ def api_list_games_paginated():
         page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
         
         # Load games (mock for now)
-        all_games = picker.games if picker else []
+        username = get_current_username()
+        p = ensure_picker_initialized(username)
+        all_games = p.games if p else []
         
         result = performance.Paginator.paginate(
             all_games,
@@ -7883,11 +7997,13 @@ def api_search_games_optimized():
             return jsonify({'items': [], 'page': 1, 'total': 0})
         
         # Search in loaded games (optimized for client-side loading)
-        if not picker or not picker.games:
+        username = get_current_username()
+        p = ensure_picker_initialized(username)
+        if not p or not p.games:
             return jsonify({'items': [], 'page': 1, 'total': 0})
-        
+
         # Filter games by query
-        results = [g for g in picker.games if query in g.get('name', '').lower()]
+        results = [g for g in p.games if query in g.get('name', '').lower()]
         
         result = performance.Paginator.paginate(
             results,
@@ -8522,11 +8638,12 @@ def api_batch_export():
         game_ids = data.get('game_ids', [])
         format_type = data.get('format', 'csv')  # csv or json
         
-        if not picker or not picker.games:
+        p_batch = ensure_picker_initialized(username)
+        if not p_batch or not p_batch.games:
             return jsonify({'error': 'No games available'}), 400
-        
+
         selected_games = [
-            g for g in picker.games if str(g.get('app_id')) in [str(gid) for gid in game_ids]
+            g for g in p_batch.games if str(g.get('app_id')) in [str(gid) for gid in game_ids]
         ]
         
         if format_type == 'csv':
@@ -8594,12 +8711,13 @@ def api_get_duplicates():
     minimal game dicts).  Returns an empty list when only one platform is
     configured or no duplicates are found.
     """
-    global picker
-    if not picker or not picker.games:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p or not p.games:
         return jsonify({'duplicates': []}), 200
 
     with picker_lock:
-        raw = picker.find_duplicates()
+        raw = p.find_duplicates()
 
     # Slim down each game dict to what the UI needs
     result = []
@@ -8652,24 +8770,25 @@ def api_export_library():
     ``is_favorite``, ``backlog_status``, ``tags``, ``review_rating``,
     ``review_notes``.
     """
-    global picker
-    if not picker or not picker.games:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p or not p.games:
         return jsonify({'error': 'Library not loaded'}), 400
 
     with picker_lock:
         rows = []
-        for game in sorted(picker.games, key=lambda g: g.get('name', '').lower()):
+        for game in sorted(p.games, key=lambda g: g.get('name', '').lower()):
             app_id = game.get('appid') or game.get('id') or ''
             game_id = game.get('game_id', f"steam:{app_id}")
-            review = picker.review_service.get(game_id) or {}
+            review = p.review_service.get(game_id) or {}
             rows.append({
                 'app_id': app_id,
                 'name': game.get('name', ''),
                 'platform': game.get('platform', 'steam'),
                 'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
-                'is_favorite': 'yes' if picker.favorites_service.contains(game_id) else 'no',
-                'backlog_status': picker.backlog_service.get_status(game_id) or '',
-                'tags': ','.join(picker.tag_service.get(game_id)),
+                'is_favorite': 'yes' if p.favorites_service.contains(game_id) else 'no',
+                'backlog_status': p.backlog_service.get_status(game_id) or '',
+                'tags': ','.join(p.tag_service.get(game_id)),
                 'review_rating': review.get('rating', ''),
                 'review_notes': review.get('notes', ''),
             })
@@ -8690,24 +8809,25 @@ def api_export_favorites():
     Columns: ``app_id``, ``name``, ``platform``, ``playtime_hours``,
     ``tags``, ``review_rating``, ``review_notes``.
     """
-    global picker
-    if not picker or not picker.games:
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p or not p.games:
         return jsonify({'error': 'Library not loaded'}), 400
 
     with picker_lock:
         rows = []
-        for game in picker.games:
+        for game in p.games:
             game_id = game.get('game_id', '')
             app_id = game.get('appid') or game.get('id') or ''
-            if not picker.favorites_service.contains(game_id):
+            if not p.favorites_service.contains(game_id):
                 continue
-            review = picker.review_service.get(game_id) or {}
+            review = p.review_service.get(game_id) or {}
             rows.append({
                 'app_id': app_id,
                 'name': game.get('name', ''),
                 'platform': game.get('platform', 'steam'),
                 'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
-                'tags': ','.join(picker.tag_service.get(game_id)),
+                'tags': ','.join(p.tag_service.get(game_id)),
                 'review_rating': review.get('rating', ''),
                 'review_notes': review.get('notes', ''),
             })
@@ -11536,7 +11656,9 @@ def api_twitch_library_overlap():
         return jsonify({'error': 'Unexpected error'}), 500
 
     with picker_lock:
-        user_games = list(picker.games) if picker.games else []
+        username = get_current_username()
+        _p = ensure_picker_initialized(username)
+        user_games = list(_p.games) if _p and _p.games else []
 
     overlap = client.find_library_overlap(trending, user_games)
     return jsonify({'overlap': overlap, 'trending_count': len(trending)})
@@ -11548,7 +11670,9 @@ def api_twitch_library_overlap():
 
 def _get_platform_client(platform: str):
     """Return the platform client for *platform*, or None."""
-    return picker.clients.get(platform) if picker else None
+    username = get_current_username()
+    p = ensure_picker_initialized(username) if username else picker
+    return p.clients.get(platform) if p else None
 
 
 @app.route('/api/epic/oauth/authorize')

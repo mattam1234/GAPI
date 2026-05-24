@@ -495,21 +495,25 @@ const commands = [
     { name: '⌨️ Show Shortcuts', action: () => showKeyboardShortcutsHelp() }
 ];
 
+// Holds the commands currently rendered in the palette so click handlers can
+// look up the correct action by index without serialising arrow functions.
+let _paletteFiltered = [];
+
 function filterCommands(query) {
     const results = document.getElementById('command-palette-results');
     if (!results) return;
     
-    const filtered = query 
+    _paletteFiltered = query 
         ? commands.filter(cmd => cmd.name.toLowerCase().includes(query.toLowerCase()))
-        : commands;
+        : commands.slice();
     
-    if (filtered.length === 0) {
+    if (_paletteFiltered.length === 0) {
         results.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-secondary);">No commands found</div>';
         return;
     }
     
-    results.innerHTML = filtered.map(cmd => `
-        <div onclick="${cmd.action.toString()}(); closeCommandPalette();" 
+    results.innerHTML = _paletteFiltered.map((cmd, i) => `
+        <div data-cmd-idx="${i}"
              style="padding:16px 20px; cursor:pointer; transition:background 0.2s; 
                     color:var(--text-primary); border-bottom:1px solid var(--card-border);"
              onmouseenter="this.style.background='var(--list-hover)'"
@@ -517,6 +521,17 @@ function filterCommands(query) {
             ${cmd.name}
         </div>
     `).join('');
+
+    // Single delegated listener (replaced on every filter call)
+    results.onclick = (e) => {
+        const item = e.target.closest('[data-cmd-idx]');
+        if (!item) return;
+        const idx = parseInt(item.getAttribute('data-cmd-idx'), 10);
+        if (_paletteFiltered[idx]) {
+            try { _paletteFiltered[idx].action(); } catch(err) { console.error('Command error:', err); }
+        }
+        closeCommandPalette();
+    };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
