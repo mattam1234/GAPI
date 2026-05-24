@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -216,6 +216,10 @@
         <main class="main-content" id="main-content">
             <div class="topbar">
                 <span class="topbar-title" id="topbar-page-title">Dashboard</span>
+                <div class="topbar-search" id="topbar-search-wrap">
+                    <input type="text" id="topbar-search" placeholder="Search games, friends..." 
+                           oninput="handleTopbarSearch(this.value)" autocomplete="off">
+                </div>
                 <span class="topbar-spacer"></span>
                 <span class="topbar-status" id="status">Loading...</span>
                 <div id="topbar-user-info" style="display:none;">
@@ -246,6 +250,20 @@
                     </div>
                 </div>
 
+                <!-- Online Presence Strip -->
+                <div class="presence-strip" id="dash-presence-strip">
+                    <div class="presence-strip-header">
+                        <span class="presence-strip-title">
+                            <span class="dash-live-dot"></span>
+                            Online Now
+                        </span>
+                        <span class="presence-strip-count" id="presence-count"></span>
+                    </div>
+                    <div class="presence-strip-avatars" id="presence-avatars">
+                        <div class="presence-empty">No friends online right now</div>
+                    </div>
+                </div>
+
                 <!-- Stats Row -->
                 <div class="dash-stats-row">
                     <div class="dash-stat-card" style="--stat-color:#5865F2">
@@ -272,12 +290,12 @@
                             <div class="dash-stat-sub">upcoming</div>
                         </div>
                     </div>
-                    <div class="dash-stat-card" style="--stat-color:#9B59B6">
-                        <div class="dash-stat-icon">📈</div>
+                    <div class="dash-stat-card" style="--stat-color:#F0B132">
+                        <div class="dash-stat-icon">🔔</div>
                         <div class="dash-stat-body">
                             <div class="dash-stat-value" id="dash-stat-catalog">—</div>
-                            <div class="dash-stat-label">Total Games</div>
-                            <div class="dash-stat-sub">in catalog</div>
+                            <div class="dash-stat-label">Alerts</div>
+                            <div class="dash-stat-sub">unread notifications</div>
                         </div>
                     </div>
                 </div>
@@ -306,6 +324,19 @@
                             </div>
                         </div>
 
+                        <!-- Recommended for You -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">✨ Recommended for You</span>
+                                <button class="dash-card-link" onclick="switchTab('recommendations',event)">Open →</button>
+                            </div>
+                            <div id="dash-recommendations-list">
+                                <div class="dash-empty" style="padding:18px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">Loading recommendations…</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Live Sessions -->
                         <div class="dash-card">
                             <div class="dash-card-header">
@@ -324,6 +355,32 @@
 
                     <!-- Right column (1/3) -->
                     <div class="dash-right-col">
+
+                        <!-- Who's Playing (Online Panel) -->
+                        <div class="dash-card online-panel" id="dash-online-panel">
+                            <div class="dash-card-header online-panel-header">
+                                <span class="dash-card-title"><span class="dash-live-dot"></span> Who's Playing</span>
+                                <button class="dash-card-link" onclick="switchTab('friends',event)">See all →</button>
+                            </div>
+                            <div id="dash-online-list">
+                                <div class="dash-empty" style="padding:20px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">No friends online right now.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Notifications -->
+                        <div class="dash-card">
+                            <div class="dash-card-header">
+                                <span class="dash-card-title">🔔 Notifications</span>
+                                <button class="dash-card-link" onclick="switchTab('notifications',event)">Open →</button>
+                            </div>
+                            <div id="dash-notifications-list">
+                                <div class="dash-empty" style="padding:16px 0;">
+                                    <span style="opacity:0.4; font-size:0.85em;">Loading notifications…</span>
+                                </div>
+                            </div>
+                        </div>
 
                         <!-- Quick Actions -->
                         <div class="dash-card">

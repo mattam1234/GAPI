@@ -15,6 +15,9 @@
         let currentGame = null;
         let activeVoteSession = null;
         let voteTimerInterval = null;
+        let libraryLoadPromise = Promise.resolve();
+        const PRESENCE_CACHE_TTL_MS = 5 * 60 * 1000;
+        let presenceCache = { friends: [], fetchedAt: 0, error: null };
 
         // ---- Spinner helpers ----
         function showSpinner(label) {
@@ -23,6 +26,21 @@
         }
         function hideSpinner() {
             document.getElementById('loading-overlay').classList.remove('active');
+        }
+
+        function handleTopbarSearch(query) {
+            switchTab('library', null);
+            const input = document.getElementById('library-search');
+            if (input) { input.value = query; }
+
+            const trimmed = query.trim();
+            if (!trimmed) {
+                return;
+            }
+
+            libraryLoadPromise
+                .catch(() => {})
+                .then(() => searchLibraryDebounced());
         }
 
         // ---- Dark Mode ----
@@ -137,9 +155,210 @@
                 }
             } catch(e) { console.debug('testPresence error', e); }
         }
+
+        function normalizePresenceFriends(friends) {
+            return Array.isArray(friends) ? friends : [];
+        }
+
+        function updatePresenceCache(friends, error = null) {
+            presenceCache = {
+                friends: normalizePresenceFriends(friends),
+                fetchedAt: Date.now(),
+                error: error || null,
+            };
+        }
+
+        function resetPresenceCache() {
+            presenceCache = { friends: [], fetchedAt: 0, error: null };
+        }
+
+        function getPresenceStatusLabel(friend) {
+            const state = Number(friend && friend.personastate || 0);
+            if (friend && friend.current_game) return 'Playing';
+            return PERSONA_STATE[state] || 'Offline';
+        }
+
+        function getPresenceStatusClass(friend) {
+            const state = Number(friend && friend.personastate || 0);
+            if (friend && friend.current_game) return 'presence-status-online';
+            if (state === 2) return 'presence-status-dnd';
+            if (state === 3 || state === 4) return 'presence-status-idle';
+            if (state > 0) return 'presence-status-online';
+            return 'presence-status-offline';
+        }
+
+        function getPresenceInitials(name) {
+            return String(name || 'G')
+                .trim()
+                .split(/\s+/)
+                .slice(0, 2)
+                .map(part => part ? part[0] : '')
+                .join('')
+                .toUpperCase() || 'G';
+        }
+
+        function getPresenceActivitySummary(friend) {
+            if (friend && friend.current_game) {
+                return `Playing ${friend.current_game}`;
+            }
+            if (friend && friend.recently_played && friend.recently_played.length > 0) {
+                const recent = friend.recently_played[0];
+                const hours = recent.playtime_2weeks ? ` · ${(recent.playtime_2weeks / 60).toFixed(1)}h this week` : '';
+                return `Recently active: ${recent.name || 'Game'}${hours}`;
+            }
+            const state = Number(friend && friend.personastate || 0);
+            return PERSONA_STATE[state] || 'Online now';
+        }
+
+        function renderPresenceEmpty(containerClass, message, detail = '') {
+            return `<div class="${containerClass}">
+                <span>${escapeHtml(message || 'No friends online right now.')}</span>
+                ${detail ? `<span style="font-size:0.85em;">${escapeHtml(detail)}</span>` : ''}
+            </div>`;
+        }
+
+        function renderPresenceAvatarItem(friend) {
+            const name = friend.personaname || 'Friend';
+            const statusClass = getPresenceStatusClass(friend);
+            const avatarMarkup = friend.avatarfull
+                ? `<img src="${escAttr(friend.avatarfull)}" alt="${escapeHtml(name)}" loading="lazy">`
+                : `<span>${escapeHtml(getPresenceInitials(name))}</span>`;
+            return `<div class="presence-avatar-item" title="${escapeHtml(name)} — ${escapeHtml(getPresenceActivitySummary(friend))}">
+                <div class="presence-avatar">
+                    ${avatarMarkup}
+                    <span class="presence-avatar-status ${statusClass}"></span>
+                </div>
+                <div class="presence-avatar-name">${escapeHtml(name)}</div>
+            </div>`;
+        }
+
+        function renderPresenceFriendRow(friend) {
+            const name = friend.personaname || 'Friend';
+            const statusClass = getPresenceStatusClass(friend);
+            const avatarMarkup = friend.avatarfull
+                ? `<img src="${escAttr(friend.avatarfull)}" alt="${escapeHtml(name)}" loading="lazy">`
+                : `<span>${escapeHtml(getPresenceInitials(name))}</span>`;
+            return `<div class="online-friend-row">
+                <div class="online-friend-avatar">
+                    ${avatarMarkup}
+                    <span class="presence-avatar-status ${statusClass}"></span>
+                </div>
+                <div class="online-friend-info">
+                    <div class="online-friend-name-row">
+                        <div class="online-friend-name">${escapeHtml(name)}</div>
+                        <div class="online-friend-status">${escapeHtml(getPresenceStatusLabel(friend))}</div>
+                    </div>
+                    <div class="online-friend-game">${escapeHtml(getPresenceActivitySummary(friend))}</div>
+                </div>
+            </div>`;
+        }
+
+        function renderPresenceContainers(friends, options = {}) {
+            const activeFriends = normalizePresenceFriends(friends)
+                .filter(friend => Number(friend && friend.personastate || 0) > 0 || !!(friend && friend.current_game))
+                .sort((a, b) => {
+                    const aPlaying = !!(a && a.current_game);
+                    const bPlaying = !!(b && b.current_game);
+                    if (aPlaying !== bPlaying) return aPlaying ? -1 : 1;
+                    return Number(b && b.personastate || 0) - Number(a && a.personastate || 0);
+                });
+
+            const stripEl = document.getElementById('presence-avatars');
+            const panelEl = document.getElementById('dash-online-list');
+            const countEl = document.getElementById('presence-count');
+            const emptyTitle = options.emptyTitle || 'No friends online right now.';
+            const emptyDetail = options.emptyDetail || '';
+
+            if (countEl) {
+                countEl.textContent = activeFriends.length ? `${activeFriends.length} online` : '';
+            }
+            if (stripEl) {
+                stripEl.innerHTML = activeFriends.length
+                    ? activeFriends.map(renderPresenceAvatarItem).join('')
+                    : renderPresenceEmpty('presence-empty', emptyTitle, emptyDetail);
+            }
+            if (panelEl) {
+                panelEl.innerHTML = activeFriends.length
+                    ? activeFriends.map(renderPresenceFriendRow).join('')
+                    : renderPresenceEmpty('dash-empty', emptyTitle, emptyDetail);
+            }
+
+            return activeFriends;
+        }
+
+        async function updatePresenceStrip(force = false) {
+            const stripEl = document.getElementById('presence-avatars');
+            const panelEl = document.getElementById('dash-online-list');
+            if (!stripEl && !panelEl) return [];
+
+            const cacheAge = Date.now() - (presenceCache.fetchedAt || 0);
+            const hasFreshCache = Array.isArray(presenceCache.friends)
+                && presenceCache.fetchedAt
+                && cacheAge < PRESENCE_CACHE_TTL_MS;
+
+            let friends = hasFreshCache ? presenceCache.friends : [];
+            let emptyTitle = 'No friends online right now.';
+            let emptyDetail = presenceCache.error || '';
+
+            if (force || !hasFreshCache) {
+                try {
+                    const response = await safeFetch('/api/friends');
+                    if (response.status === 503) {
+                        const data = await response.json();
+                        emptyTitle = 'Friend activity is unavailable.';
+                        emptyDetail = data.error || 'Steam is not configured, or the profile is private.';
+                        updatePresenceCache([], emptyDetail);
+                        friends = [];
+                    } else if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    } else {
+                        const data = await response.json();
+                        friends = normalizePresenceFriends(data.friends);
+                        updatePresenceCache(friends, null);
+                        emptyDetail = '';
+                    }
+                } catch (error) {
+                    if (!friends.length) {
+                        emptyTitle = 'Friend activity could not be loaded.';
+                        emptyDetail = error.message || 'Please try again later.';
+                        presenceCache.error = emptyDetail;
+                    }
+                }
+            }
+
+            renderPresenceContainers(friends, { emptyTitle, emptyDetail });
+            return friends;
+        }
+
+        async function markDashboardNotification(id) {
+            if (!id) return;
+            try {
+                await safeFetch('/api/notifications/read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ids: [id] })
+                });
+                await loadDashboard();
+            } catch (error) {
+                console.debug('markDashboardNotification error', error);
+            }
+        }
+
+        async function markAllDashboardNotificationsRead() {
+            try {
+                await safeFetch('/api/notifications/read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                await loadDashboard();
+            } catch (error) {
+                console.debug('markAllDashboardNotificationsRead error', error);
+            }
+        }
         // Restore saved theme on load
         (function() {
-            const saved = localStorage.getItem('gapi_theme') || 'light';
+            const saved = localStorage.getItem('gapi_theme') || 'dark';
             document.addEventListener('DOMContentLoaded', () => applyTheme(saved));
         })();
 
@@ -185,7 +404,7 @@
                 'backlog-list', 'playlists-list', 'playlists-container',
                 'achievements-list', 'friends-list', 'recommendations-list',
                 'schedule-list', 'notifications-list', 'leaderboard-list',
-                'users-list', 'common-games-list'
+                'users-list', 'common-games-list', 'presence-avatars', 'dash-online-list'
             ];
             listIds.forEach(id => {
                 const el = document.getElementById(id);
@@ -196,6 +415,13 @@
             if (statsContent) statsContent.innerHTML = '';
             // Clear game details cache so no cross-user data leaks
             clearGameDetailsCache();
+            resetPresenceCache();
+            const presenceCount = document.getElementById('presence-count');
+            if (presenceCount) presenceCount.textContent = '';
+            const topbarSearch = document.getElementById('topbar-search');
+            if (topbarSearch) topbarSearch.value = '';
+            const librarySearch = document.getElementById('library-search');
+            if (librarySearch) librarySearch.value = '';
             // Reset status bar
             const statusEl = document.getElementById('status');
             if (statusEl) statusEl.textContent = 'Please sign in';
@@ -350,7 +576,7 @@
                 return;
             }
 
-            if (tabName === 'library') loadLibrary();
+            if (tabName === 'library') libraryLoadPromise = Promise.resolve(loadLibrary());
             if (tabName === 'favorites') loadFavorites();
             if (tabName === 'stats') {
                 loadStats();
@@ -396,15 +622,22 @@
         // ── Dashboard ─────────────────────────────────────────────────────────
         async function loadDashboard() {
             // Fetch data in parallel; fail gracefully
-            const [libRes, sessRes, schedRes] = await Promise.allSettled([
+            const [libRes, sessRes, schedRes, recRes, notifRes] = await Promise.allSettled([
                 safeFetch('/api/library').then(r => r.json()),
                 safeFetch('/api/live-session/active').then(r => r.json()),
                 safeFetch('/api/schedule').then(r => r.json()),
+                safeFetch('/api/recommendations?count=4').then(r => r.json()),
+                safeFetch('/api/notifications?unread_only=false').then(r => r.json()),
             ]);
 
             const games    = libRes.status   === 'fulfilled' ? (libRes.value.games    || []) : [];
             const sessions = sessRes.status  === 'fulfilled' ? (sessRes.value.sessions || []) : [];
             const allEvs   = schedRes.status === 'fulfilled' ? (schedRes.value.events  || []) : [];
+            const recommendations = recRes.status === 'fulfilled' ? (recRes.value.recommendations || []) : [];
+            const notifications = notifRes.status === 'fulfilled' ? (notifRes.value.notifications || []) : [];
+            const unreadCount = notifRes.status === 'fulfilled'
+                ? (notifRes.value.unread_count || 0)
+                : notifications.filter(n => !n.is_read).length;
 
             // Filter upcoming events
             const now = Date.now();
@@ -423,14 +656,17 @@
             if (greetEl) greetEl.textContent = firstName + ' 👋';
             if (hintEl)  hintEl.textContent  = upcoming.length
                 ? `Ready for game night? You have ${upcoming.length} upcoming event${upcoming.length !== 1 ? 's' : ''}.`
-                : 'Ready for game night?';
+                : recommendations.length
+                    ? `${recommendations.length} personalised pick${recommendations.length !== 1 ? 's are' : ' is'} waiting for you.`
+                    : 'Ready for game night?';
 
             // ── Stat cards ──────────────────────────────────────────────────
             const _stat = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
             _stat('dash-stat-library',  games.length);
             _stat('dash-stat-sessions', sessions.length);
             _stat('dash-stat-events',   upcoming.length);
-            _stat('dash-stat-catalog',  games.length);
+            _stat('dash-stat-catalog',  unreadCount);
+            updateNotifBadge(unreadCount);
 
             // ── Top games grid ──────────────────────────────────────────────
             const topGames = [...games]
@@ -463,6 +699,44 @@
                 }
             }
 
+            // ── Recommended games ───────────────────────────────────────────
+            const recEl = document.getElementById('dash-recommendations-list');
+            if (recEl) {
+                if (recommendations.length === 0) {
+                    recEl.innerHTML = `<div class="dash-empty" style="padding:18px 0;">
+                        <span style="opacity:0.45; font-size:0.85em;">No recommendations yet. Add more games to your library to personalize For You.</span>
+                        <button class="dash-card-link" style="margin-top:8px;" onclick="switchTab('recommendations',event)">Open For You →</button>
+                    </div>`;
+                } else {
+                    recEl.innerHTML = recommendations.slice(0, 4).map((game, idx) => {
+                        const appId = game.appid || game.app_id || 0;
+                        const safeName = escapeHtml(game.name || 'Game');
+                        const safeNameJs = escAttr(game.name || 'Game');
+                        const reason = escapeHtml(game.recommendation_reason || 'Good fit for your library');
+                        const score = Number(game.recommendation_score || 0);
+                        const scoreText = score ? score.toFixed(1) : '—';
+                        const playtime = game.playtime_hours || 0;
+                        const platform = escapeHtml(game.platform || game.store || 'Steam');
+                        return `<div class="dash-rec-item" onclick="showGameDetails(${appId}, '${safeNameJs}', ${playtime}, '')">
+                            <div class="dash-rec-rank">${idx + 1}</div>
+                            <div class="dash-rec-thumb">${renderGameListThumb(appId, game.name)}</div>
+                            <div class="dash-rec-info">
+                                <div class="dash-rec-topline">
+                                    <div class="dash-rec-name">${safeName}</div>
+                                    <div class="dash-rec-score">★ ${scoreText}</div>
+                                </div>
+                                <div class="dash-rec-reason">${reason}</div>
+                                <div class="dash-rec-meta">${playtime > 0 ? `${playtime}h played` : 'Never played'} · ${platform}</div>
+                            </div>
+                            <div class="dash-rec-actions">
+                                <button class="dash-rec-btn" onclick="event.stopPropagation(); showGameDetails(${appId}, '${safeNameJs}', ${playtime}, '')">Details</button>
+                                <button class="dash-rec-btn primary" onclick="event.stopPropagation(); toggleFavorite(${appId})">★</button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
             // ── Live sessions list ──────────────────────────────────────────
             const sessListEl = document.getElementById('dash-sessions-list');
             if (sessListEl) {
@@ -486,6 +760,39 @@
                             <span class="dash-live-badge">Live</span>
                         </div>`;
                     }).join('');
+                }
+            }
+
+            // ── Notifications preview ──────────────────────────────────────
+            const notifEl = document.getElementById('dash-notifications-list');
+            if (notifEl) {
+                const latest = notifications.slice(0, 4);
+                if (latest.length === 0) {
+                    notifEl.innerHTML = `<div class="dash-empty" style="padding:16px 0;">
+                        <span style="opacity:0.45; font-size:0.85em;">You're all caught up.</span>
+                        <button class="dash-card-link" style="margin-top:8px;" onclick="switchTab('notifications',event)">Open inbox →</button>
+                    </div>`;
+                } else {
+                    const typeIcon = { info:'ℹ️', success:'✅', warning:'⚠️', error:'❌', friend_request:'👥' };
+                    notifEl.innerHTML = latest.map(n => {
+                        const isRead = !!n.is_read;
+                        return `<div class="dash-notif-item${isRead ? ' read' : ''}" onclick="switchTab('notifications',event)">
+                            <div class="dash-notif-icon">${typeIcon[n.type] || '🔔'}</div>
+                            <div class="dash-notif-body">
+                                <div class="dash-notif-title-row">
+                                    <div class="dash-notif-title">${escapeHtml(n.title || 'Notification')}</div>
+                                    <div class="dash-notif-time">${n.created_at ? new Date(n.created_at).toLocaleString() : ''}</div>
+                                </div>
+                                <div class="dash-notif-message">${escapeHtml(n.message || '')}</div>
+                            </div>
+                            ${!isRead ? `<button class="dash-rec-btn" onclick="event.stopPropagation(); markDashboardNotification(${n.id})">Mark read</button>` : ''}
+                        </div>`;
+                    }).join('');
+                    if (unreadCount > 1) {
+                        notifEl.innerHTML += `<div style="padding:0 18px 14px;">
+                            <button class="dash-card-link" onclick="markAllDashboardNotificationsRead()">Mark all read</button>
+                        </div>`;
+                    }
                 }
             }
 
@@ -540,6 +847,8 @@
                     }).join('');
                 }
             }
+
+            await updatePresenceStrip();
         }
 
         async function pickGame() {
@@ -1971,26 +2280,15 @@
                 showToast(message, type);
                 return;
             }
-            // Fallback: simple fixed-position notification
+            // Fallback: styled fixed-position notification
+            const normalizedType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
             const messageDiv = document.createElement('div');
-            messageDiv.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 15px 25px;
-                background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#4f46e5'};
-                color: white;
-                border-radius: var(--radius-sm, 8px);
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                z-index: 10000;
-                font-weight: 600;
-                animation: slideIn 0.3s ease-out;
-            `;
+            messageDiv.className = `app-toast app-toast--${normalizedType}`;
             messageDiv.textContent = message;
             document.body.appendChild(messageDiv);
             setTimeout(() => {
-                messageDiv.style.animation = 'slideOut 0.3s ease-out';
-                setTimeout(() => messageDiv.remove(), 300);
+                messageDiv.style.animation = 'toastSlideIn 0.24s ease-out reverse';
+                setTimeout(() => messageDiv.remove(), 240);
             }, 3000);
         }
         
@@ -3928,10 +4226,17 @@
                 const response = await fetch('/api/friends');
                 if (response.status === 503) {
                     const data = await response.json();
+                    updatePresenceCache([], data.error || 'Steam is not configured.');
+                    renderPresenceContainers([], {
+                        emptyTitle: 'Friend activity is unavailable.',
+                        emptyDetail: data.error || 'Steam is not configured.'
+                    });
                     listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Steam not configured. Add your Steam ID in ⚙️ Settings.'}</div>`;
                     return;
                 }
                 const data = await response.json();
+                updatePresenceCache(data.friends || []);
+                void updatePresenceStrip();
                 if (!data.friends || data.friends.length === 0) {
                     listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No friends found, or your friend list is private.</div>';
                     return;
@@ -6503,6 +6808,90 @@
             if (_libraryData) renderLibraryData(_libraryData);
         }
 
+        function getGamePlatforms(game) {
+            const sourceText = [
+                game.platform,
+                game.platform_name,
+                game.source,
+                game.store,
+                game.storefront,
+                game.client,
+                Array.isArray(game.platforms) ? game.platforms.join(', ') : game.platforms,
+                Array.isArray(game.tags) ? game.tags.join(', ') : game.tags
+            ].filter(Boolean).join(' ').toLowerCase();
+
+            const platforms = [];
+            if (/epic/.test(sourceText)) platforms.push({ key: 'epic', label: 'Epic', shortLabel: 'E', className: 'platform-epic' });
+            if (/\bgog\b|good old games/.test(sourceText)) platforms.push({ key: 'gog', label: 'GOG', shortLabel: 'GOG', className: 'platform-gog' });
+            if (/steam/.test(sourceText) || (!platforms.length && (game.app_id || game.appid))) {
+                platforms.unshift({ key: 'steam', label: 'Steam', shortLabel: 'S', className: 'platform-steam' });
+            }
+
+            return Array.from(new Map(platforms.map(platform => [platform.key, platform])).values()).slice(0, 3);
+        }
+
+        function getGameRating(game) {
+            const candidates = [game.metacritic, game.rating, game.user_rating, game.score];
+            for (const candidate of candidates) {
+                const value = Number(candidate);
+                if (Number.isFinite(value) && value > 0) return Math.round(value);
+            }
+            return null;
+        }
+
+        function renderInlinePlatformBadges(game) {
+            return getGamePlatforms(game).map(platform =>
+                `<span class="game-inline-badge ${platform.className}" title="${platform.label}">${platform.shortLabel}</span>`
+            ).join('');
+        }
+
+        function renderGameCard(game) {
+            const appId = game.app_id || game.appid || 0;
+            const safeName = escapeHtml(game.name || 'Untitled Game');
+            const safeNameJs = escAttr(game.name || 'Untitled Game');
+            const safeTagsJs = escAttr((game.tags || []).join(', '));
+            const coverSrc = getGameThumbUrl(appId);
+            const favoriteLabel = game.is_favorite ? 'Unsave' : 'Save';
+            const platforms = getGamePlatforms(game);
+            const rating = getGameRating(game);
+            const playtime = `${game.playtime_hours || 0}h played`;
+            const platformBadges = platforms.map(platform =>
+                `<span class="game-card-platform-badge ${platform.className}" title="${platform.label}">${platform.shortLabel}</span>`
+            ).join('');
+
+            return `
+                <div class="game-card" onclick="showGameDetails(${appId}, '${safeNameJs}', ${game.playtime_hours || 0}, '${safeTagsJs}')">
+                    <div class="game-card-cover-wrap">
+                        <img class="game-card-cover" src="${coverSrc}"
+                             onerror="handleMissingCover(this)"
+                             alt="${safeName}" loading="lazy">
+                        ${platformBadges ? `<div class="game-card-platform-badges">${platformBadges}</div>` : ''}
+                        ${rating ? `<div class="game-card-rating-badge">★ ${rating}</div>` : ''}
+                        <div class="game-card-overlay">
+                            <div class="game-card-overlay-content">
+                                <div class="game-card-overlay-chips">
+                                    <span class="game-card-overlay-chip">⏱ ${playtime}</span>
+                                    ${platforms[0] ? `<span class="game-card-overlay-chip">${platforms[0].label}</span>` : ''}
+                                </div>
+                                <div class="game-card-overlay-actions">
+                                    <button class="game-card-overlay-btn primary" onclick="event.stopPropagation(); showGameDetails(${appId}, '${safeNameJs}', ${game.playtime_hours || 0}, '${safeTagsJs}')">Details</button>
+                                    <button class="game-card-overlay-btn" onclick="event.stopPropagation(); toggleFavorite(${appId})">${favoriteLabel}</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="game-card-body">
+                        <div class="game-card-title" title="${safeName}">${safeName}</div>
+                        <div class="game-card-meta">
+                            <span>${game.playtime_hours || 0}h</span>
+                            <span class="game-card-actions-inline">
+                                <span class="game-card-action-icon" title="Favorite" onclick="event.stopPropagation(); toggleFavorite(${appId})">${game.is_favorite ? '⭐' : '☆'}</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
         function renderLibraryData(data) {
             _libraryData = data;
             const listDiv = document.getElementById('library-list');
@@ -6511,39 +6900,22 @@
                 return;
             }
             if (_libraryView === 'grid') {
-                let html = '<div class="library-grid">';
-                data.games.forEach(game => {
-                    const safeName = escapeHtml(game.name || '');
-                    const safeNameJs = (game.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/`/g, '\\`');
-                    const coverSrc = getGameThumbUrl(game.app_id);
-                    const favIcon = game.is_favorite ? '⭐' : '☆';
-                    html += `
-                        <div class="game-card" onclick="showGameDetails(${game.app_id}, '${safeNameJs}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
-                            <img class="game-card-cover" src="${coverSrc}"
-                                 onerror="handleMissingCover(this)"
-                                 alt="${safeName}" loading="lazy">
-                            <div class="game-card-body">
-                                <div class="game-card-title" title="${safeName}">${safeName}</div>
-                                <div class="game-card-meta">
-                                    <span>${game.playtime_hours || 0}h</span>
-                                    <span onclick="event.stopPropagation(); toggleFavorite(${game.app_id})" style="cursor:pointer;">${favIcon}</span>
-                                </div>
-                            </div>
-                        </div>`;
-                });
-                html += '</div>';
-                listDiv.innerHTML = html;
+                listDiv.innerHTML = `<div class="library-grid">${data.games.map(game => renderGameCard(game)).join('')}</div>`;
             } else {
                 // Original list view
                 let html = '';
                 data.games.forEach(game => {
                     const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
                     const safeNameJs = (game.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/`/g, '\\`');
+                    const platformBadges = renderInlinePlatformBadges(game);
                     html += `
                         <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeNameJs}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                             <div class="list-item-media">
                                 ${renderGameListThumb(game.app_id, game.name)}
-                                <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
+                                <div>
+                                    ${favoriteIcon}<strong class="list-item-title">${game.name}</strong>
+                                    ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px;">${platformBadges}</div>` : ''}
+                                </div>
                             </div>
                             <div style="display:flex; gap:8px; align-items:center;">
                                 <span>${game.playtime_hours}h</span>
