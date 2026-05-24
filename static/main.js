@@ -1510,57 +1510,91 @@
                 timeoutId = setTimeout(() => func(...args), delay);
             };
         }
+
+        let _favoritesData = [];
+        let _backlogData = [];
+        let _recommendationsData = [];
+
+        function normalisePlatformKey(value) {
+            const key = String(value || '').trim().toLowerCase();
+            if (!key) return '';
+            if (key === 'psn') return 'playstation';
+            if (key.includes('playstation')) return 'playstation';
+            if (key.includes('switch') || key.includes('nintendo')) return 'nintendo';
+            if (key.includes('xbox')) return 'xbox';
+            if (key.includes('good old games') || key.includes('gog')) return 'gog';
+            if (key.includes('epic')) return 'epic';
+            if (key.includes('steam')) return 'steam';
+            return key;
+        }
+
+        function getGamePlatformKeys(game) {
+            const keys = new Set();
+            [
+                game.platform,
+                game.platform_name,
+                game.source,
+                game.store,
+                game.storefront,
+                game.client,
+                ...(Array.isArray(game.platforms) ? game.platforms : [game.platforms])
+            ].forEach(value => {
+                const key = normalisePlatformKey(value);
+                if (key) keys.add(key);
+            });
+            getGamePlatforms(game).forEach(platform => {
+                const key = normalisePlatformKey(platform.key);
+                if (key) keys.add(key);
+            });
+            if (!keys.size && (game.app_id || game.appid)) keys.add('steam');
+            return Array.from(keys);
+        }
+
+        function getFilterValue(id) {
+            const element = document.getElementById(id);
+            return element ? element.value : '';
+        }
+
+        function filterGamesByControls(games, searchInputId, platformSelectId) {
+            const searchText = getFilterValue(searchInputId).trim().toLowerCase();
+            const platformFilter = normalisePlatformKey(getFilterValue(platformSelectId));
+            return (games || []).filter(game => {
+                const matchesPlatform = !platformFilter || getGamePlatformKeys(game).includes(platformFilter);
+                if (!matchesPlatform) return false;
+                if (!searchText) return true;
+                const searchValues = [
+                    game.name,
+                    game.game_id,
+                    game.platform,
+                    game.platform_name,
+                    game.recommendation_reason,
+                    game.backlog_status,
+                    Array.isArray(game.tags) ? game.tags.join(' ') : game.tags
+                ].filter(Boolean).join(' ').toLowerCase();
+                return searchValues.includes(searchText);
+            });
+        }
         
         // Debounced search to prevent excessive API calls
-        const debouncedSearch = createDebounce(async (searchText) => {
-            if (!searchText || searchText.trim().length === 0) {
-                loadLibrary();
+        const debouncedSearch = createDebounce(async () => {
+            if (_libraryData) {
+                renderLibraryData(_libraryData);
                 return;
             }
-            
-            const listDiv = document.getElementById('library-list');
-            listDiv.innerHTML = renderSkeletonList(5);
-            
-            try {
-                const response = await fetch(`/api/library?search=${encodeURIComponent(searchText.trim())}`);
-                const data = await response.json();
-                
-                if (data.games && data.games.length > 0) {
-                    let html = '';
-                    const appIds = [];
-                    data.games.forEach(game => {
-                        appIds.push(game.app_id);
-                        const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
-                        const safeName = escAttr(game.name);
-                        html += `
-                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
-                                <div class="list-item-media">
-                                    ${renderGameListThumb(game.app_id, game.name)}
-                                    <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
-                                </div>
-                                <div style="display:flex; gap:8px; align-items:center;">
-                                    <span>${game.playtime_hours}h</span>
-                                    <span title="Favorite" style="cursor:pointer; font-size:1.2em; color: ${game.is_favorite ? '#ffc107' : 'inherit'};" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
-                                        ${game.is_favorite ? '⭐' : '☆'}
-                                    </span>
-                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
-                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
-                                    <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeName}')">🚫</span>
-                                </div>
-                            </div>
-                        `;
-                    });
-                    listDiv.innerHTML = html;
-                    
-                    // Pre-load details for all search results in background
-                    preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
-                } else {
-                    listDiv.innerHTML = '<div class="loading">No games found</div>';
-                }
-            } catch (error) {
-                listDiv.innerHTML = '<div class="error">Error searching library</div>';
+            if (window.loadLibrary) {
+                window.loadLibrary();
             }
         }, 300);
+
+        function applyLibraryFilters() {
+            if (_libraryData) {
+                renderLibraryData(_libraryData);
+                return;
+            }
+            if (window.loadLibrary) {
+                window.loadLibrary();
+            }
+        }
         
         function searchLibraryDebounced() {
             const searchText = document.getElementById('library-search').value;
@@ -1708,37 +1742,49 @@
             try {
                 const response = await fetch('/api/favorites');
                 const data = await response.json();
-                
-                if (data.favorites && data.favorites.length > 0) {
-                    let html = '';
-                    const appIds = [];
-                    data.favorites.forEach(game => {
-                        appIds.push(game.app_id);
-                        const safeName = escAttr(game.name || '');
-                        html += `
-                            <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
-                                <div class="list-item-media">
-                                    ${renderGameListThumb(game.app_id, game.name)}
-                                    <div><span class="favorite-icon">⭐</span><strong class="list-item-title">${game.name}</strong></div>
-                                </div>
-                                <div style="display:flex; gap:8px; align-items:center;">
-                                    <span>${game.playtime_hours}h</span>
-                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
-                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
-                                    <button class="btn btn-favorite" style="padding: 5px 10px; font-size:0.85em;"
-                                            onclick="event.stopPropagation(); removeFavorite(${game.app_id})">Remove</button>
-                                </div>
-                            </div>
-                        `;
-                    });
-                    listDiv.innerHTML = html;
-                    preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
-                } else {
-                    listDiv.innerHTML = '<div class="loading">No favorite games yet!</div>';
-                }
+                _favoritesData = data.favorites || [];
+                applyFavoritesFilters();
+                const appIds = _favoritesData.map(game => game.app_id).filter(Boolean);
+                preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading favorites</div>';
             }
+        }
+
+        function applyFavoritesFilters() {
+            const listDiv = document.getElementById('favorites-list');
+            const favorites = filterGamesByControls(_favoritesData, 'favorites-search', 'favorites-platform-filter');
+            if (!favorites.length) {
+                listDiv.innerHTML = _favoritesData.length
+                    ? '<div class="loading">No favorites match your current filters.</div>'
+                    : '<div class="loading">No favorite games yet!</div>';
+                return;
+            }
+
+            let html = '';
+            favorites.forEach(game => {
+                const safeName = escAttr(game.name || '');
+                const platformBadges = renderInlinePlatformBadges(game);
+                html += `
+                    <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeName}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
+                        <div class="list-item-media">
+                            ${renderGameListThumb(game.app_id, game.name)}
+                            <div>
+                                <span class="favorite-icon">⭐</span><strong class="list-item-title">${game.name}</strong>
+                                ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px;">${platformBadges}</div>` : ''}
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <span>${game.playtime_hours}h</span>
+                            <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id || game.app_id}', '${safeName}')">📋</span>
+                            <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || game.app_id}', '${safeName}')">📚</span>
+                            <button class="btn btn-favorite" style="padding: 5px 10px; font-size:0.85em;"
+                                    onclick="event.stopPropagation(); removeFavorite(${game.app_id})">Remove</button>
+                        </div>
+                    </div>
+                `;
+            });
+            listDiv.innerHTML = html;
         }
         
         async function removeFavorite(appId) {
@@ -3260,43 +3306,55 @@
                 const resp = await fetch(url);
                 if (!resp.ok) { list.innerHTML = '<div class="loading">Error loading backlog.</div>'; return; }
                 const data = await resp.json();
-                const games = data.games || [];
-                if (!games.length) {
-                    list.innerHTML = '<div class="loading">No backlog entries. Set a game\'s status from the Pick a Game tab.</div>';
-                    return;
-                }
-                
-                const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#ef4444'};
-                const BATCH_SIZE = 10; // Render 10 items at a time for backlog
-                let allHtml = '';
-                
-                const renderBatch = (startIdx) => {
-                    const endIdx = Math.min(startIdx + BATCH_SIZE, games.length);
-                    let batchHtml = '';
-                    
-                    for (let i = startIdx; i < endIdx; i++) {
-                        const g = games[i];
-                        const color = statusColors[g.backlog_status] || '#888';
-                        const label = (g.backlog_status || '').replace(/_/g,' ');
-                        batchHtml += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--card-border);">
-                            <span>${g.name || g.game_id}</span>
-                            <span style="background:${color}; color:white; padding:3px 10px; border-radius:var(--radius,12px); font-size:0.82em; font-weight:600;">${label}</span>
-                        </div>`;
-                    }
-                    
-                    allHtml += batchHtml;
-                    list.innerHTML = allHtml;
-                    
-                    // Schedule next batch
-                    if (endIdx < games.length) {
-                        requestAnimationFrame(() => renderBatch(endIdx));
-                    }
-                };
-                
-                renderBatch(0);
+                _backlogData = data.games || [];
+                renderBacklogList();
             } catch (e) {
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
             }
+        }
+
+        function renderBacklogList() {
+            const list = document.getElementById('backlog-list');
+            const games = filterGamesByControls(_backlogData, 'backlog-search', 'backlog-platform-filter');
+            if (!_backlogData.length) {
+                list.innerHTML = '<div class="loading">No backlog entries. Set a game\'s status from the Pick a Game tab.</div>';
+                return;
+            }
+            if (!games.length) {
+                list.innerHTML = '<div class="loading">No backlog entries match your current filters.</div>';
+                return;
+            }
+
+            const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#ef4444'};
+            const BATCH_SIZE = 10;
+            let allHtml = '';
+
+            const renderBatch = (startIdx) => {
+                const endIdx = Math.min(startIdx + BATCH_SIZE, games.length);
+                let batchHtml = '';
+
+                for (let i = startIdx; i < endIdx; i++) {
+                    const g = games[i];
+                    const color = statusColors[g.backlog_status] || '#888';
+                    const label = (g.backlog_status || '').replace(/_/g,' ');
+                    const platformBadges = renderInlinePlatformBadges(g);
+                    batchHtml += `<div style="display:flex; justify-content:space-between; align-items:center; gap:var(--space-10); padding:10px 14px; border-bottom:1px solid var(--card-border);">
+                        <div style="min-width:0;">
+                            <div style="font-weight:600;">${escapeHtml(g.name || g.game_id || 'Unknown game')}</div>
+                            ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px;">${platformBadges}</div>` : ''}
+                        </div>
+                        <span style="background:${color}; color:white; padding:3px 10px; border-radius:var(--radius,12px); font-size:0.82em; font-weight:600; white-space:nowrap;">${escapeHtml(label || 'unknown')}</span>
+                    </div>`;
+                }
+
+                allHtml += batchHtml;
+                list.innerHTML = allHtml;
+                if (endIdx < games.length) {
+                    requestAnimationFrame(() => renderBatch(endIdx));
+                }
+            };
+
+            renderBatch(0);
         }
         
         // ==============================================================================================
@@ -4434,70 +4492,85 @@
         // Recommendations Functions
         // ==============================================================================================
 
+        function renderRecommendationsList() {
+            const listDiv = document.getElementById('recommendations-list');
+            const recs = filterGamesByControls(_recommendationsData, 'rec-search', 'rec-platform');
+            if (!_recommendationsData.length) {
+                listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No recommendations yet. Play some games and come back!</div>';
+                return;
+            }
+            if (!recs.length) {
+                listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No recommendations match your current filters.</div>';
+                return;
+            }
+
+            let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${recs.length} recommendation${recs.length !== 1 ? 's' : ''}</p>`;
+            const appIds = [];
+            recs.forEach((game, idx) => {
+                const appId = game.appid || game.app_id || 0;
+                appIds.push(appId);
+                const safeName = escAttr(game.name);
+                const scoreStars = '⭐'.repeat(Math.min(Math.round(game.recommendation_score), 5));
+                const platformBadges = renderInlinePlatformBadges(game);
+                html += `
+                    <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:var(--radius,12px);"
+                         onclick="showGameDetails(${appId}, '${safeName}', ${game.playtime_hours || 0}, '')">
+                        <div style="display:flex; gap:12px; align-items:flex-start; flex:1; min-width:0;">
+                            ${renderGameListThumb(appId, game.name)}
+                            <div style="flex:1; min-width:0;">
+                            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                <span style="background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9em; flex-shrink:0;">${idx + 1}</span>
+                                <strong class="list-item-title">${game.name}</strong>
+                                <span style="font-size:0.85em; color:var(--text-secondary);">${game.playtime_hours > 0 ? game.playtime_hours + 'h played' : 'Never played'}</span>
+                                ${scoreStars ? `<span style="font-size:0.85em; color:#fbbf24;">${scoreStars}</span>` : ''}
+                            </div>
+                            ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px; padding-left:38px;">${platformBadges}</div>` : ''}
+                            <div style="margin-top:6px; font-size:0.85em; color:var(--text-secondary); padding-left:38px;">
+                                💡 ${game.recommendation_reason || 'Unplayed game'}
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
+                            <a href="https://store.steampowered.com/app/${appId}/" target="_blank" onclick="event.stopPropagation()" style="font-size:0.8em; color:var(--tab-active-color); text-decoration:none;">Steam →</a>
+                            <span onclick="event.stopPropagation(); toggleFavorite(${appId})" style="cursor:pointer; font-size:1.1em;" title="Add to favorites">☆</span>
+                            <span onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id || appId}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Playlist">📋</span>
+                            <span onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || appId}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Backlog">📚</span>
+                            <span onclick="event.stopPropagation(); quickIgnoreGame(${appId}, '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Ignore">🚫</span>
+                            </div>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+            listDiv.innerHTML = html;
+            preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
+        }
+
         async function loadRecommendations() {
             const listDiv = document.getElementById('recommendations-list');
             const count = document.getElementById('rec-count').value;
-                const platform = document.getElementById('rec-platform').value;
-                const budget = document.getElementById('rec-budget').value;
-                const includeNew = document.getElementById('rec-new-releases').checked;
+            const platform = document.getElementById('rec-platform').value;
+            const budget = document.getElementById('rec-budget').value;
+            const includeNew = document.getElementById('rec-new-releases').checked;
             
             listDiv.innerHTML = renderSkeletonList(parseInt(count) || 5);
             try {
-                    let url = `/api/recommendations?count=${count}`;
-                    if (platform) {
-                        url += `&platforms=${encodeURIComponent(platform)}`;
-                    }
-                    if (budget) {
-                        url += `&max_budget=${encodeURIComponent(budget)}`;
-                    }
-                    if (includeNew) {
-                        url += `&include_new=true`;
-                    }
+                let url = `/api/recommendations?count=${count}&refresh_seed=${Date.now()}`;
+                if (platform) {
+                    url += `&platforms=${encodeURIComponent(platform)}`;
+                }
+                if (budget) {
+                    url += `&max_budget=${encodeURIComponent(budget)}`;
+                }
+                if (includeNew) {
+                    url += `&include_new=true`;
+                }
                 
-                    const response = await fetch(url);
+                const response = await fetch(url);
                 const data = await response.json();
                 if (response.status === 400) {
                     listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Not initialized. Add your Steam ID in ⚙️ Settings.'}</div>`;
                     return;
                 }
-                const recs = data.recommendations || [];
-                if (recs.length === 0) {
-                    listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No recommendations yet. Play some games and come back!</div>';
-                    return;
-                }
-                let html = `<p style="color:var(--text-secondary); margin-bottom:15px;">${recs.length} recommendation${recs.length !== 1 ? 's' : ''}</p>`;
-                const appIds = [];
-                recs.forEach((game, idx) => {
-                    appIds.push(game.appid);
-                    const safeName = escAttr(game.name);
-                    const scoreStars = '⭐'.repeat(Math.min(Math.round(game.recommendation_score), 5));
-                    html += `
-                        <div class="list-item" style="cursor:pointer; padding:14px; margin-bottom:10px; background:var(--list-hover); border-radius:var(--radius,12px);"
-                             onclick="showGameDetails(${game.appid}, '${safeName}', ${game.playtime_hours || 0}, '')">
-                            <div style="display:flex; gap:12px; align-items:flex-start; flex:1; min-width:0;">
-                                ${renderGameListThumb(game.appid, game.name)}
-                                <div style="flex:1; min-width:0;">
-                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                                    <span style="background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9em; flex-shrink:0;">${idx + 1}</span>
-                                    <strong class="list-item-title">${game.name}</strong>
-                                    <span style="font-size:0.85em; color:var(--text-secondary);">${game.playtime_hours > 0 ? game.playtime_hours + 'h played' : 'Never played'}</span>
-                                </div>
-                                <div style="margin-top:6px; font-size:0.85em; color:var(--text-secondary); padding-left:38px;">
-                                    💡 ${game.recommendation_reason || 'Unplayed game'}
-                                </div>
-                                <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
-                                <a href="https://store.steampowered.com/app/${game.appid}/" target="_blank" onclick="event.stopPropagation()" style="font-size:0.8em; color:var(--tab-active-color); text-decoration:none;">Steam →</a>
-                                <span onclick="event.stopPropagation(); toggleFavorite(${game.appid})" style="cursor:pointer; font-size:1.1em;" title="Add to favorites">☆</span>
-                                <span onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id || game.appid}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Playlist">📋</span>
-                                <span onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || game.appid}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Backlog">📚</span>
-                                <span onclick="event.stopPropagation(); quickIgnoreGame(${game.appid}, '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Ignore">🚫</span>
-                                </div>
-                                </div>
-                            </div>
-                        </div>`;
-                });
-                listDiv.innerHTML = html;
-                preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
+                _recommendationsData = data.recommendations || [];
+                renderRecommendationsList();
             } catch (error) {
                 listDiv.innerHTML = `<div class="error">Error loading recommendations: ${error.message}</div>`;
             }
@@ -6823,6 +6896,9 @@
             const platforms = [];
             if (/epic/.test(sourceText)) platforms.push({ key: 'epic', label: 'Epic', shortLabel: 'E', className: 'platform-epic' });
             if (/\bgog\b|good old games/.test(sourceText)) platforms.push({ key: 'gog', label: 'GOG', shortLabel: 'GOG', className: 'platform-gog' });
+            if (/xbox/.test(sourceText)) platforms.push({ key: 'xbox', label: 'Xbox', shortLabel: 'XB', className: 'platform-steam' });
+            if (/playstation|\bpsn\b/.test(sourceText)) platforms.push({ key: 'playstation', label: 'PlayStation', shortLabel: 'PS', className: 'platform-gog' });
+            if (/nintendo|switch/.test(sourceText)) platforms.push({ key: 'nintendo', label: 'Nintendo', shortLabel: 'N', className: 'platform-epic' });
             if (/steam/.test(sourceText) || (!platforms.length && (game.app_id || game.appid))) {
                 platforms.unshift({ key: 'steam', label: 'Steam', shortLabel: 'S', className: 'platform-steam' });
             }
@@ -6895,16 +6971,21 @@
         function renderLibraryData(data) {
             _libraryData = data;
             const listDiv = document.getElementById('library-list');
+            const filteredGames = filterGamesByControls(data.games || [], 'library-search', 'library-platform-filter');
             if (!data.games || data.games.length === 0) {
                 listDiv.innerHTML = '<div class="loading">No games found</div>';
                 return;
             }
+            if (!filteredGames.length) {
+                listDiv.innerHTML = '<div class="loading">No games match your current filters.</div>';
+                return;
+            }
             if (_libraryView === 'grid') {
-                listDiv.innerHTML = `<div class="library-grid">${data.games.map(game => renderGameCard(game)).join('')}</div>`;
+                listDiv.innerHTML = `<div class="library-grid">${filteredGames.map(game => renderGameCard(game)).join('')}</div>`;
             } else {
                 // Original list view
                 let html = '';
-                data.games.forEach(game => {
+                filteredGames.forEach(game => {
                     const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
                     const safeNameJs = (game.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/`/g, '\\`');
                     const platformBadges = renderInlinePlatformBadges(game);
@@ -6931,7 +7012,7 @@
                 listDiv.innerHTML = html;
             }
             // Pre-load details for all games in background
-            const appIds = data.games.map(g => g.app_id);
+            const appIds = filteredGames.map(g => g.app_id);
             preloadGameDetails(appIds).catch(() => {});
         }
 
@@ -6947,6 +7028,7 @@
             try {
                 const response = await fetch('/api/library');
                 const data = await response.json();
+                _libraryData = data;
                 renderLibraryData(data);
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading library</div>';

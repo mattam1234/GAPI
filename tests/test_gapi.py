@@ -868,6 +868,19 @@ class TestGamePickerRecommendations(unittest.TestCase):
         # The important check: no exceptions raised.
         self.assertIsInstance(recs, list)
 
+    def test_refresh_seed_can_vary_recommendation_list(self):
+        self.picker.games = [
+            {'appid': 101, 'name': 'Alpha',   'playtime_forever': 0, 'platform': 'steam', 'game_id': 'steam:101'},
+            {'appid': 102, 'name': 'Bravo',   'playtime_forever': 0, 'platform': 'steam', 'game_id': 'steam:102'},
+            {'appid': 103, 'name': 'Charlie', 'playtime_forever': 0, 'platform': 'steam', 'game_id': 'steam:103'},
+            {'appid': 104, 'name': 'Delta',   'playtime_forever': 0, 'platform': 'steam', 'game_id': 'steam:104'},
+            {'appid': 105, 'name': 'Echo',    'playtime_forever': 0, 'platform': 'steam', 'game_id': 'steam:105'},
+            {'appid': 106, 'name': 'Foxtrot', 'playtime_forever': 0, 'platform': 'steam', 'game_id': 'steam:106'},
+        ]
+        first = [g['name'] for g in self.picker.get_recommendations(count=3, refresh_seed='1')]
+        second = [g['name'] for g in self.picker.get_recommendations(count=3, refresh_seed='2')]
+        self.assertNotEqual(first, second)
+
 
 
 # ===========================================================================

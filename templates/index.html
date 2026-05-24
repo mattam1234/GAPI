@@ -528,7 +528,18 @@
         <!-- Library Tab -->
         <div id="library-tab" class="tab-content">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:var(--space-10); margin-bottom:14px;">
-                <input type="text" id="library-search" class="search-input" placeholder="🔍 Search your library..." oninput="searchLibraryDebounced()" style="margin-bottom:0; flex:1; min-width:180px;">
+                <div style="display:flex; gap:var(--space-10); align-items:center; flex:1; flex-wrap:wrap;">
+                    <input type="text" id="library-search" class="search-input" placeholder="🔍 Search your library..." oninput="searchLibraryDebounced()" style="margin-bottom:0; flex:1; min-width:180px;">
+                    <select id="library-platform-filter" onchange="applyLibraryFilters()" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md); min-width:160px;">
+                        <option value="">All Platforms</option>
+                        <option value="steam">Steam</option>
+                        <option value="epic">Epic Games</option>
+                        <option value="gog">GOG</option>
+                        <option value="xbox">Xbox</option>
+                        <option value="playstation">PlayStation</option>
+                        <option value="nintendo">Nintendo</option>
+                    </select>
+                </div>
                 <div style="display:flex; gap:var(--space-sm); align-items:center;">
                     <button id="library-view-list-btn" onclick="setLibraryView('list')" title="List view"
                             style="padding:var(--space-sm) var(--space-md); border:1.5px solid var(--input-border); border-radius:50px; cursor:pointer; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; font-size:var(--font-base); font-family:inherit; transition:opacity 0.15s;">☰</button>
@@ -553,9 +564,21 @@
 
         <!-- Favorites Tab -->
         <div id="favorites-tab" class="tab-content">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:var(--space-10); flex-wrap:wrap;">
                 <h2 style="margin:0;">⭐ Your Favorite Games</h2>
                 <a href="/api/export/favorites" download="gapi_favorites.csv" style="padding:var(--space-9) var(--space-18); background:linear-gradient(135deg,#11998e,#38ef7d); color:white; text-decoration:none; border-radius:var(--radius-sm,8px); font-weight:600; font-size:var(--font-md); white-space:nowrap;">⬇️ Export CSV</a>
+            </div>
+            <div style="display:flex; gap:var(--space-10); margin-bottom:20px; flex-wrap:wrap; align-items:center;">
+                <input type="text" id="favorites-search" class="search-input" placeholder="🔍 Filter favorites..." oninput="applyFavoritesFilters()" style="margin-bottom:0; flex:1; min-width:180px;">
+                <select id="favorites-platform-filter" onchange="applyFavoritesFilters()" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md); min-width:160px;">
+                    <option value="">All Platforms</option>
+                    <option value="steam">Steam</option>
+                    <option value="epic">Epic Games</option>
+                    <option value="gog">GOG</option>
+                    <option value="xbox">Xbox</option>
+                    <option value="playstation">PlayStation</option>
+                    <option value="nintendo">Nintendo</option>
+                </select>
             </div>
             <div id="favorites-list" class="list-container">
                 <div class="loading">Loading favorites...</div>
@@ -899,6 +922,17 @@
         <div id="backlog-tab" class="tab-content">
             <h2>📚 Game Backlog</h2>
             <div style="display:flex; gap:var(--space-10); margin-bottom:20px; flex-wrap:wrap; align-items:center;">
+                <input type="text" id="backlog-search" class="search-input" placeholder="🔍 Filter backlog..." oninput="renderBacklogList()" style="margin-bottom:0; flex:1; min-width:180px;">
+                <select id="backlog-platform-filter" onchange="renderBacklogList()"
+                        style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md); min-width:160px;">
+                    <option value="">All Platforms</option>
+                    <option value="steam">Steam</option>
+                    <option value="epic">Epic Games</option>
+                    <option value="gog">GOG</option>
+                    <option value="xbox">Xbox</option>
+                    <option value="playstation">PlayStation</option>
+                    <option value="nintendo">Nintendo</option>
+                </select>
                 <label style="font-weight:600;">Filter by status:</label>
                 <select id="backlog-filter" onchange="loadBacklog()"
                         style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md);">
@@ -1013,6 +1047,7 @@
                     <option value="10" selected>10</option>
                     <option value="20">20</option>
                 </select>
+                    <input type="text" id="rec-search" class="search-input" placeholder="🔍 Filter recommendations..." oninput="renderRecommendationsList()" style="margin-bottom:0; flex:1; min-width:220px;">
                     <label style="font-weight:600; color:var(--text-primary);">Platform:</label>
                     <select id="rec-platform" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary);">
                         <option value="">All Platforms</option>
