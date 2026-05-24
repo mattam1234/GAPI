@@ -386,6 +386,41 @@ class TestScheduleService(TmpDirMixin):
         updated = svc.update_event(event['id'], duration_minutes=120)
         self.assertEqual(updated['duration_minutes'], 120)
 
+    def test_add_event_defaults_rsvp_statuses_for_attendees(self):
+        svc = self._make()
+        event = svc.add_event(
+            'RSVP Night',
+            '2026-03-01',
+            '19:00',
+            attendees=['alice', 'bob'],
+            attendee_ids=['alice-id', 'bob-id'],
+        )
+        self.assertEqual(event['attendee_ids'], ['alice-id', 'bob-id'])
+        self.assertEqual(event['rsvp_statuses'], {
+            'alice-id': 'pending',
+            'bob-id': 'pending',
+        })
+
+    def test_update_event_preserves_existing_rsvp_statuses(self):
+        svc = self._make()
+        event = svc.add_event(
+            'RSVP Night',
+            '2026-03-01',
+            '19:00',
+            attendees=['alice', 'bob'],
+            attendee_ids=['alice-id', 'bob-id'],
+            rsvp_statuses={'alice-id': 'accepted', 'bob-id': 'declined'},
+        )
+        updated = svc.update_event(
+            event['id'],
+            attendees=['alice', 'carol'],
+            attendee_ids=['alice-id', 'carol-id'],
+        )
+        self.assertEqual(updated['rsvp_statuses'], {
+            'alice-id': 'accepted',
+            'carol-id': 'pending',
+        })
+
     def test_remove_event(self):
         svc = self._make()
         event = svc.add_event('Test', '2026-03-01', '19:00')

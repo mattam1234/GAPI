@@ -1,13 +1,61 @@
 """Business logic for the game-night scheduler."""
 import datetime
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ..repositories.schedule_repository import ScheduleRepository
 
-_EDITABLE_FIELDS = ('title', 'date', 'time', 'duration_minutes', 'attendees', 'game_name', 'notes', 
+_EDITABLE_FIELDS = ('title', 'date', 'time', 'duration_minutes', 'attendees', 'game_name', 'notes',
                      'game_appid', 'attendee_ids', 'discord_event_id', 'discord_guild_id', 'game_image_url',
-                     'timezone_name', 'timezone_offset_minutes')
+                     'timezone_name', 'timezone_offset_minutes', 'rsvp_statuses')
+_VALID_RSVP_STATUSES = {'pending', 'accepted', 'maybe', 'declined'}
+
+
+def _clean_schedule_participants(attendees: Optional[List[str]],
+                                 attendee_ids: Optional[List[str]] = None) -> Tuple[List[str], List[str]]:
+    """Return de-duplicated attendee labels and identifiers in display order."""
+    clean_attendees: List[str] = []
+    clean_attendee_ids: List[str] = []
+    seen_keys = set()
+    ids = attendee_ids or []
+
+    for index, raw_name in enumerate(attendees or []):
+        name = str(raw_name or '').strip()
+        if not name:
+            continue
+        attendee_id = str(ids[index] if index < len(ids) else name).strip() or name
+        dedupe_key = attendee_id.lower() if attendee_id else name.lower()
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        clean_attendees.append(name)
+        clean_attendee_ids.append(attendee_id)
+
+    return clean_attendees, clean_attendee_ids
+
+
+def _normalize_rsvp_statuses(attendees: List[str],
+                             attendee_ids: List[str],
+                             rsvp_statuses: Optional[Dict[str, str]] = None,
+                             existing_statuses: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Return an RSVP mapping keyed by attendee identifier."""
+    provided = dict(rsvp_statuses or {})
+    existing = dict(existing_statuses or {})
+    normalized: Dict[str, str] = {}
+
+    for index, attendee_name in enumerate(attendees):
+        attendee_id = attendee_ids[index] if index < len(attendee_ids) else attendee_name
+        status = (
+            provided.get(attendee_id)
+            or provided.get(attendee_name)
+            or existing.get(attendee_id)
+            or existing.get(attendee_name)
+            or 'pending'
+        )
+        safe_status = str(status or 'pending').strip().lower()
+        normalized[attendee_id] = safe_status if safe_status in _VALID_RSVP_STATUSES else 'pending'
+
+    return normalized
 
 
 class ScheduleService:
@@ -28,6 +76,7 @@ class ScheduleService:
                   game_name: str = '', notes: str = '',
                   game_appid: Optional[str] = None,
                   attendee_ids: Optional[List[str]] = None,
+                  rsvp_statuses: Optional[Dict[str, str]] = None,
                   game_image_url: Optional[str] = None,
                   discord_guild_id: Optional[str] = None,
                   timezone_name: Optional[str] = None,
@@ -53,17 +102,19 @@ class ScheduleService:
             ``created_at`` timestamp.
         """
         event_id = str(uuid.uuid4())[:8]
+        clean_attendees, clean_attendee_ids = _clean_schedule_participants(attendees, attendee_ids)
         event: Dict = {
             'id': event_id,
             'title': title,
             'date': date,
             'time': time_str,
             'duration_minutes': duration_minutes,
-            'attendees': attendees or [],
+            'attendees': clean_attendees,
             'game_name': game_name,
             'notes': notes,
             'game_appid': game_appid,
-            'attendee_ids': attendee_ids or [],
+            'attendee_ids': clean_attendee_ids,
+            'rsvp_statuses': _normalize_rsvp_statuses(clean_attendees, clean_attendee_ids, rsvp_statuses),
             'game_image_url': game_image_url,
             'discord_event_id': None,  # Will be set when Discord event is created
             'discord_guild_id': discord_guild_id,
@@ -87,9 +138,21 @@ class ScheduleService:
         if event is None:
             return None
         event = dict(event)
+        previous_event = dict(event)
         for key in _EDITABLE_FIELDS:
-            if key in kwargs:
+            if key in kwargs and key not in ('attendees', 'attendee_ids', 'rsvp_statuses'):
                 event[key] = kwargs[key]
+        next_attendees = kwargs.get('attendees', event.get('attendees', []))
+        next_attendee_ids = kwargs.get('attendee_ids', event.get('attendee_ids', []))
+        clean_attendees, clean_attendee_ids = _clean_schedule_participants(next_attendees, next_attendee_ids)
+        event['attendees'] = clean_attendees
+        event['attendee_ids'] = clean_attendee_ids
+        event['rsvp_statuses'] = _normalize_rsvp_statuses(
+            clean_attendees,
+            clean_attendee_ids,
+            kwargs.get('rsvp_statuses'),
+            previous_event.get('rsvp_statuses'),
+        )
         event['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._repo.upsert(event_id, event)
         return event

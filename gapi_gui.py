@@ -4513,6 +4513,43 @@ def _schedule_local_to_utc(date_str: str,
         dt = dt.replace(tzinfo=local_tz)
     return dt.astimezone(timezone.utc)
 
+
+def _build_schedule_ical_token(username: str) -> str:
+    """Return a signed token for authenticated iCal feed access."""
+    from itsdangerous import URLSafeSerializer
+
+    serializer = URLSafeSerializer(app.secret_key or app.config.get('SECRET_KEY') or 'gapi-dev', salt='schedule-ical-feed')
+    return serializer.dumps({'username': str(username or '').strip()})
+
+
+def _resolve_schedule_ical_username(token: str) -> Optional[str]:
+    """Resolve a username from a signed iCal feed token."""
+    from itsdangerous import BadSignature, URLSafeSerializer
+
+    safe_token = str(token or '').strip()
+    if not safe_token:
+        return None
+    serializer = URLSafeSerializer(app.secret_key or app.config.get('SECRET_KEY') or 'gapi-dev', salt='schedule-ical-feed')
+    try:
+        payload = serializer.loads(safe_token)
+    except BadSignature:
+        return None
+    username = str((payload or {}).get('username') or '').strip()
+    return username or None
+
+
+def _build_schedule_ical_sync_urls(username: str) -> Dict[str, str]:
+    """Build absolute HTTPS and webcal feed URLs for the current user."""
+    token = _build_schedule_ical_token(username)
+    feed_url = f"{request.url_root.rstrip('/')}/api/schedule/export.ics?token={quote_plus(token)}&download=0"
+    scheme, _, remainder = feed_url.partition('://')
+    webcal_scheme = 'webcals' if scheme == 'https' else 'webcal'
+    return {
+        'feed_url': feed_url,
+        'webcal_url': f'{webcal_scheme}://{remainder}' if remainder else feed_url,
+        'token': token,
+    }
+
 @app.route('/api/schedule', methods=['GET'])
 @require_login
 def api_get_schedule():
@@ -4573,6 +4610,13 @@ def api_create_event():
         attendee_ids = [a.strip() for a in attendee_ids_raw.split(',') if a.strip()]
     else:
         attendee_ids = [str(a).strip() for a in (attendee_ids_raw or []) if str(a).strip()]
+    rsvp_statuses_raw = data.get('rsvp_statuses', {})
+    rsvp_statuses = {}
+    if isinstance(rsvp_statuses_raw, dict):
+        for key, value in rsvp_statuses_raw.items():
+            safe_key = str(key or '').strip()
+            if safe_key:
+                rsvp_statuses[safe_key] = str(value or 'pending').strip().lower()
     
     game_name = str(data.get('game_name', '')).strip()
     game_appid = str(data.get('game_appid', '')).strip() or None
@@ -4613,6 +4657,7 @@ def api_create_event():
             title, date, time_str, duration_minutes, attendees, game_name, notes,
             game_appid=game_appid,
             attendee_ids=attendee_ids,
+            rsvp_statuses=rsvp_statuses,
             game_image_url=game_image_url,
             discord_guild_id=str(discord_guild_id).strip() if discord_guild_id else None,
             timezone_name=timezone_name,
@@ -4749,6 +4794,12 @@ def api_update_event(event_id: str):
             safe['attendee_ids'] = [a.strip() for a in raw.split(',') if a.strip()]
         else:
             safe['attendee_ids'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
+    if 'rsvp_statuses' in data and isinstance(data.get('rsvp_statuses'), dict):
+        safe['rsvp_statuses'] = {
+            str(key).strip(): str(value or 'pending').strip().lower()
+            for key, value in (data.get('rsvp_statuses') or {}).items()
+            if str(key).strip()
+        }
     if 'timezone_offset_minutes' in data:
         try:
             safe['timezone_offset_minutes'] = int(data['timezone_offset_minutes']) if data['timezone_offset_minutes'] is not None else None
@@ -5005,6 +5056,80 @@ def api_search_attendees():
         })
     
     return jsonify({'results': clean_results, 'count': len(clean_results)})
+
+
+@app.route('/api/schedule/common-games', methods=['POST'])
+@require_login
+def api_schedule_common_games():
+    """Return common games for the provided invitee list."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+
+    data = request.json or {}
+    attendees_raw = data.get('attendees', [])
+    if isinstance(attendees_raw, str):
+        attendees = [value.strip() for value in attendees_raw.split(',') if value.strip()]
+    else:
+        attendees = [str(value).strip() for value in (attendees_raw or []) if str(value).strip()]
+    attendees = list(dict.fromkeys(attendees))
+    if not attendees:
+        return jsonify({'error': 'attendees are required'}), 400
+
+    schedule_multi_picker = getattr(p, 'multi_picker', None)
+    if not schedule_multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    with multi_picker_lock:
+        common_games = schedule_multi_picker.find_common_games(attendees)
+
+    games = []
+    for game in common_games[:100]:
+        app_id = str(game.get('appid') or game.get('app_id') or '').strip()
+        games.append({
+            'app_id': app_id,
+            'name': game.get('name', 'Unknown'),
+            'owners': game.get('owners', []),
+            'platform': game.get('platform', 'steam'),
+            'image_url': _resolve_schedule_game_image_url(
+                game=game,
+                game_appid=app_id,
+                existing_url=game.get('image_url'),
+            ),
+        })
+
+    return jsonify({'games': games, 'count': len(games), 'attendees': attendees})
+
+
+@app.route('/api/schedule/discord-guilds')
+@require_login
+def api_schedule_discord_guilds():
+    """List cached Discord guilds available to the current linked user."""
+    user = _get_current_user_record()
+    if not user or not user.get('discord_id'):
+        return jsonify({'guilds': [], 'error': 'Link your Discord ID in Settings before syncing schedule events to Discord.'})
+    if not DB_AVAILABLE or not ensure_db_available():
+        return jsonify({'guilds': [], 'error': 'Database unavailable'})
+
+    db = None
+    try:
+        db = database.SessionLocal()
+        guilds = database.list_discord_locations_for_user(db, user['discord_id'])
+        return jsonify({
+            'guilds': [
+                {
+                    'guild_id': guild.get('guild_id'),
+                    'guild_name': guild.get('guild_name'),
+                    'icon_url': guild.get('icon_url'),
+                }
+                for guild in guilds
+            ],
+            'discord_id': user['discord_id'],
+        })
+    finally:
+        if db:
+            db.close()
 
 
 @app.route('/api/schedule/<event_id>/create-discord-event', methods=['POST'])
@@ -5724,8 +5849,17 @@ def api_achievement_stats():
 # iCalendar export for the game-night schedule
 # ---------------------------------------------------------------------------
 
-@app.route('/api/schedule/export.ics')
+@app.route('/api/schedule/ical-sync-info')
 @require_login
+def api_schedule_ical_sync_info():
+    """Return private iCal subscription URLs for the current user."""
+    username = get_current_username()
+    if not username:
+        return jsonify({'error': 'Not logged in'}), 401
+    return jsonify(_build_schedule_ical_sync_urls(username))
+
+
+@app.route('/api/schedule/export.ics')
 def api_export_schedule_ics():
     """Download the game-night schedule as an iCalendar (.ics) file.
 
@@ -5737,6 +5871,13 @@ def api_export_schedule_ics():
     Response: ``text/calendar`` attachment named ``gapi_schedule.ics``.
     """
     username = get_current_username()
+    token = str(request.args.get('token', '') or '').strip()
+    if token:
+        username = _resolve_schedule_ical_username(token)
+        if not username:
+            return jsonify({'error': 'Invalid iCal token'}), 401
+    if not username:
+        return jsonify({'error': 'Not logged in'}), 401
     p = ensure_picker_initialized(username)
     if not p:
         return jsonify({'error': 'Not initialized'}), 400
@@ -5790,13 +5931,16 @@ def api_export_schedule_ics():
     ical_body = '\r\n'.join(lines) + '\r\n'
 
     from flask import Response as _Response
+    download = str(request.args.get('download', '1') or '1').strip() != '0'
+    response_headers = {
+        'Content-Type': 'text/calendar; charset=utf-8',
+    }
+    if download:
+        response_headers['Content-Disposition'] = 'attachment; filename="gapi_schedule.ics"'
     return _Response(
         ical_body,
         mimetype='text/calendar',
-        headers={
-            'Content-Disposition': 'attachment; filename="gapi_schedule.ics"',
-            'Content-Type': 'text/calendar; charset=utf-8',
-        },
+        headers=response_headers,
     )
 
 
