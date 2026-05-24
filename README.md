@@ -78,6 +78,7 @@ GAPI helps you discover what to play from your multi-platform game library. Pick
 - 🎮 Pick games with friends in Discord
 - 🗳️ Voting system for group decisions
 - 📊 Library statistics and common game finding
+- 🔗 Linked web sessions with Discord channel announcements and live join counts
 
 ### Screenshots
 
@@ -391,6 +392,13 @@ python3 discord_bot.py
 - `/stats` - Library statistics for all users
 
 Make sure `discord_bot_token` is set in `config.json` or `DISCORD_BOT_TOKEN` environment variable.
+
+**Linked web + Discord sessions:**
+- Add your Discord ID in **Settings** in the web UI
+- Open **🎯 Sessions** in the web UI and choose a Discord server/channel cached by the bot
+- Create the session from the web UI, then let Discord users react with ✅ on the bot's single status message to join
+- Unlinked Discord users receive a DM and get 5 minutes to create/link a GAPI account before the pending join expires
+- Final picks use a lootbox-style reveal in the web UI, while Discord receives plain message/embed updates to avoid channel spam
 
 ### CLI Mode - Interactive
 ```bash

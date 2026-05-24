@@ -18,7 +18,7 @@ requests>=2.28.0
 colorama>=0.4.6
 flask>=2.0.0
 python-dotenv>=1.0.0
-flask-limiter>=3.3.0          # API rate limiting (brute-force protection)
+flask-limiter>=4.1.1          # API rate limiting (brute-force protection)
 flask-compress>=1.14           # Automatic gzip/brotli compression of HTTP responses
 
 # Database (PostgreSQL — required for multi-user web GUI)
@@ -40,7 +40,7 @@ epicstore-api>=0.1.7          # Epic Games Store library sync
 # Optional — Extra features
 # -----------------------------------------------------------------------------
 howlongtobeatpy>=1.0.0        # How Long to Beat completion-time estimates
-pypresence>=4.3.0             # Discord Rich Presence (shows picked game in Discord)
 graphene>=3.4.3               # GraphQL API (POST /api/graphql)
+pypresence>=4.6.1             # Discord Rich Presence (shows picked game in Discord)
 numpy>=1.24.0                 # Machine-learning recommendation engine (MLRecommendationEngine)
 pywebpush>=2.3.0              # Web Push notifications (Phase 11 — VAPID browser push)

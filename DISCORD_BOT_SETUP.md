@@ -15,19 +15,17 @@ Complete guide to set up and use the GAPI Discord Bot with achievement tracking 
    - Server Members Intent
    - Guilds
    - Guild Messages
+   - Reactions / Read Message History so users can join linked sessions with ✅
 
-### 2. Create Discord Config
+### 2. Create App Config
 
-Create `discord_config.json` in your GAPI directory:
+Create or update `config.json` in your GAPI directory:
 
 ```json
 {
-    "token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+    "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
     "steam_api_key": "YOUR_STEAM_API_KEY_HERE",
-    "command_prefix": "!",
-    "steam_client": {
-        "api_key": "YOUR_STEAM_API_KEY_HERE"
-    }
+    "app_url": "http://localhost:5000"
 }
 ```
 
@@ -124,6 +122,27 @@ python discord_bot.py
 - View combined library statistics for all linked users
 - Shows total games per user and common games count
 
+## Linked Web Sessions
+
+You can create a session in the web UI and mirror it into a Discord server/channel:
+
+1. Start both `gapi_gui.py` and `discord_bot.py`
+2. Save your Discord ID in the web UI **Settings**
+3. Let the bot join your server so it can cache the guild, available channels, and your membership
+4. In the web UI **🎯 Sessions** tab, choose the Discord server/channel and create the session
+5. The bot posts one session status message in that channel and keeps editing it as users join, picks are made, and results finalize
+
+### Join flow for Discord friends
+
+- Linked users join or leave by reacting with ✅ on the session message
+- Unlinked users receive a DM with onboarding instructions and a 5-minute join window
+- When they finish linking their GAPI account and game-service IDs, the pending join is completed automatically
+
+### Result presentation
+
+- **Web UI:** lootbox-style final reveal animation
+- **Discord:** plain embed/message updates only, to avoid spam
+
 ## Multi-User Shared Rules
 
 When multiple users are linked to the bot:
@@ -180,12 +199,11 @@ Alice: /hunt progress
 
 ## Configuration Options
 
-Edit `discord_config.json` for:
+Edit `config.json` for:
 
-- `token`: Your Discord bot token (required)
+- `discord_bot_token`: Your Discord bot token (required)
 - `steam_api_key`: Your Steam API key (optional, for Steam data)
-- `command_prefix`: Prefix for commands (default: `!`, slash commands always available)
-- `steam_client`: Additional Steam client configuration
+- `app_url`: Base web URL used in Discord DMs and `/url`
 
 ## Troubleshooting
 
@@ -193,7 +211,7 @@ Edit `discord_config.json` for:
 - Check bot has "Applications.commands" scope
 - Verify bot is online in server member list
 - Ensure MESSAGE CONTENT INTENT is enabled
-- Verify your `discord_config.json` has valid token
+- Verify your `config.json` has a valid `discord_bot_token`
 
 ### "Failed to add game" error
 - Ensure your account is created/logged in on the web dashboard
@@ -223,20 +241,19 @@ The Discord bot connects to the Flask API:
   - `POST /api/pick` - Pick random game
   - `GET /api/multiuser/common` - Get common games
 
-## Advanced: Custom User Mapping
+## Advanced: User Mapping Storage
 
-The bot automatically saves user mappings in `discord_config.json`:
+The bot stores Discord account links in the main database on each user row:
 
 ```json
 {
-    "user_mappings": {
-        "123456789": "76561198000000000",
-        "987654321": "76561198000000001"
-    }
+    "username": "alice",
+    "steam_id": "76561198000000000",
+    "discord_id": "123456789"
 }
 ```
 
-This maps Discord user IDs to Steam IDs for quick lookups.
+This keeps mappings user-separated and shared safely between the web UI and the Discord bot.
 
 ## Support
 
