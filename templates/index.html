@@ -853,8 +853,9 @@
         <div id="schedule-tab" class="tab-content">
             <h2>📅 Game Night Scheduler</h2>
 
-            <!-- Create / Edit Form -->
-            <div id="schedule-form-panel" style="background:var(--list-hover); padding:var(--space-xl); border-radius:var(--radius,12px); margin-bottom:20px;">
+            <div class="schedule-agenda-shell">
+                <!-- Create / Edit Form -->
+                <div id="schedule-form-panel" style="background:var(--list-hover); padding:var(--space-xl); border-radius:var(--radius,12px); margin-bottom:20px;">
                 <h3 id="schedule-form-title">➕ New Event</h3>
                 <input type="hidden" id="schedule-edit-id" value="">
                 <input type="hidden" id="sch-game-appid" value="">
@@ -881,11 +882,16 @@
                         <label style="display:block; margin-bottom:5px; font-weight:600;">Time</label>
                         <input type="time" id="sch-time" class="search-input" style="margin-bottom:0;">
                     </div>
+                    <div>
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Duration (minutes)</label>
+                        <input type="number" id="sch-duration" class="search-input" min="30" step="30" value="60" style="margin-bottom:0;">
+                    </div>
                     <div style="grid-column:span 2;">
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Attendees (fuzzy search)</label>
+                        <label style="display:block; margin-bottom:5px; font-weight:600;">Invite attendees (fuzzy search)</label>
                         <div style="position:relative;">
                             <input type="text" id="sch-attendees" class="search-input" placeholder="Start typing to search friends…" 
                                    onkeyup="searchAttendees(this.value)" oninput="showAttendeeSearch()" style="margin-bottom:0;">
+                            <input type="hidden" id="sch-attendee-values" value="">
                             <div id="attendee-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card-bg); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); max-height:200px; overflow-y:auto; z-index:1000; margin-top:2px;">
                             </div>
                         </div>
@@ -912,12 +918,45 @@
                     <button onclick="submitScheduleForm()" style="padding:var(--space-10) var(--space-28); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">💾 Save Event</button>
                     <button onclick="clearScheduleForm()" style="padding:var(--space-10) var(--space-18); background:var(--card-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">✕ Clear</button>
                 </div>
-            </div>
+                </div>
 
-            <!-- Events List -->
-            <h3>Upcoming Events</h3>
-            <div id="schedule-list" class="list-container" style="margin-top:10px;">
-                <div class="loading">Loading schedule…</div>
+                <div class="schedule-agenda-panel">
+                    <div class="schedule-agenda-toolbar">
+                        <div>
+                            <div class="schedule-agenda-eyebrow">Agenda</div>
+                            <h3>Weekly agenda</h3>
+                        </div>
+                        <div class="schedule-agenda-controls">
+                            <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(-1)">← Prev</button>
+                            <button type="button" class="chat-room-secondary-btn" onclick="goToCurrentScheduleAgendaWeek()">Today</button>
+                            <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(1)">Next →</button>
+                        </div>
+                    </div>
+                    <div class="schedule-agenda-copy">Click a time slot to quick-create an event, drag across slots to pick a longer block, or drag an agenda card to move it to a different date and time.</div>
+                    <div id="schedule-agenda-range" class="schedule-agenda-range"></div>
+                    <div id="schedule-agenda-quick-create" class="schedule-agenda-quick-create" hidden>
+                        <div>
+                            <strong id="schedule-agenda-selection-label">New agenda event</strong>
+                            <div id="schedule-agenda-selection-meta" class="schedule-agenda-selection-meta"></div>
+                        </div>
+                        <input type="text" id="agenda-quick-title" class="search-input" placeholder="Quick event title" style="margin-bottom:0;">
+                        <input type="text" id="agenda-quick-attendees" class="search-input" placeholder="Invite friends (comma separated)" style="margin-bottom:0;">
+                        <div class="schedule-agenda-quick-create-actions">
+                            <button type="button" onclick="createAgendaEvent()" style="padding:var(--space-10) var(--space-22); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">➕ Create event</button>
+                            <button type="button" onclick="applyAgendaSelectionToForm()" style="padding:var(--space-10) var(--space-18); background:var(--card-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">Use full form</button>
+                            <button type="button" onclick="clearAgendaSelection()" style="padding:var(--space-10) var(--space-18); background:transparent; color:var(--text-secondary); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); cursor:pointer;">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="schedule-agenda" class="schedule-agenda">
+                        <div class="loading">Loading agenda…</div>
+                    </div>
+                </div>
+
+                <!-- Events List -->
+                <h3>Upcoming Events</h3>
+                <div id="schedule-list" class="list-container" style="margin-top:10px;">
+                    <div class="loading">Loading schedule…</div>
+                </div>
             </div>
         </div>
 
@@ -1089,7 +1128,6 @@
         <!-- Chat Tab -->
         <div id="chat-tab" class="tab-content">
             <h2>💬 Chat</h2>
-            <p style="color: var(--text-secondary); margin-bottom: 12px;">Real-time chat with other users.</p>
             <div id="pinned-messages-container" style="display:none; margin-bottom:12px; padding:var(--space-md); background:rgba(231,76,60,0.1); border:2px solid #ef4444; border-radius:var(--radius-sm,8px);">
                 <h3 style="margin-top:0; margin-bottom:8px; color:#ef4444;">📌 Pinned Messages</h3>
                 <div id="pinned-messages-list"></div>

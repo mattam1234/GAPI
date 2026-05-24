@@ -2746,23 +2746,174 @@
 
         // ---- Game Night Scheduler ----
 
+        const DEFAULT_SCHEDULE_DURATION_MINUTES = 60;
+        const SCHEDULE_SLOT_MINUTES = 30;
+        const SCHEDULE_SLOT_HEIGHT = 28;
+        let scheduleEventsCache = [];
+        let scheduleAgendaWeekStart = null;
+        let scheduleAgendaSelection = null;
+        let scheduleAgendaSelectionActive = false;
+        let scheduleAgendaDraggedEventId = null;
+
+        function normalizeScheduleDurationMinutes(value, fallback = DEFAULT_SCHEDULE_DURATION_MINUTES) {
+            const parsed = parseInt(value, 10);
+            if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+            return Math.max(SCHEDULE_SLOT_MINUTES, Math.round(parsed / SCHEDULE_SLOT_MINUTES) * SCHEDULE_SLOT_MINUTES);
+        }
+
+        function parseScheduleLocalDateTime(dateStr, timeStr = '00:00') {
+            const safeDate = String(dateStr || '').trim();
+            if (!safeDate) return null;
+            const dateParts = safeDate.split('-').map(Number);
+            if (dateParts.length !== 3 || dateParts.some(Number.isNaN)) return null;
+            const cleanTime = String(timeStr || '00:00').replace('.', ':');
+            const [hoursRaw, minutesRaw] = cleanTime.split(':');
+            const hours = Number(hoursRaw || 0);
+            const minutes = Number(minutesRaw || 0);
+            if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+            return new Date(dateParts[0], dateParts[1] - 1, dateParts[2], hours, minutes, 0, 0);
+        }
+
+        function formatScheduleDateKey(date) {
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        }
+
+        function scheduleSlotIndexToTime(slotIndex) {
+            const totalMinutes = slotIndex * SCHEDULE_SLOT_MINUTES;
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        }
+
+        function scheduleStartOfWeek(baseDate = new Date()) {
+            const date = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+            const day = date.getDay();
+            const diff = day === 0 ? -6 : 1 - day;
+            date.setDate(date.getDate() + diff);
+            date.setHours(0, 0, 0, 0);
+            return date;
+        }
+
+        function ensureScheduleAgendaWeek(events = []) {
+            if (scheduleAgendaWeekStart) return;
+            const firstEventDate = (events || [])
+                .map(ev => parseScheduleLocalDateTime(ev.date, ev.time))
+                .filter(Boolean)
+                .sort((a, b) => a - b)[0];
+            scheduleAgendaWeekStart = scheduleStartOfWeek(firstEventDate || new Date());
+        }
+
+        function getScheduleAgendaDays() {
+            ensureScheduleAgendaWeek(scheduleEventsCache);
+            return Array.from({ length: 7 }, (_, index) => {
+                const day = new Date(scheduleAgendaWeekStart);
+                day.setDate(scheduleAgendaWeekStart.getDate() + index);
+                return day;
+            });
+        }
+
+        function formatScheduleAgendaRange(days) {
+            if (!days || !days.length) return '';
+            const start = days[0].toLocaleDateString([], { month: 'short', day: 'numeric' });
+            const end = days[days.length - 1].toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+            return `${start} – ${end}`;
+        }
+
+        function getScheduleEventDurationMinutes(event) {
+            return normalizeScheduleDurationMinutes(event?.duration_minutes, DEFAULT_SCHEDULE_DURATION_MINUTES);
+        }
+
+        function buildScheduleEventListTimeText(event) {
+            const start = parseScheduleLocalDateTime(event?.date, event?.time);
+            if (!start) return `${event?.date || ''} ${event?.time || ''}`.trim() || 'Time TBD';
+            const end = new Date(start.getTime() + getScheduleEventDurationMinutes(event) * 60000);
+            return `${event.date || formatScheduleDateKey(start)} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}–${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+        }
+
+        function buildScheduleEventAgendaTimeText(event) {
+            const start = parseScheduleLocalDateTime(event?.date, event?.time);
+            if (!start) return event?.time || 'Time TBD';
+            const end = new Date(start.getTime() + getScheduleEventDurationMinutes(event) * 60000);
+            return `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}–${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+        }
+
+        function getScheduleEventAttendees() {
+            const field = document.getElementById('sch-attendee-values');
+            return (field?.value || '')
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+        }
+
+        function setScheduleEventAttendees(attendees) {
+            const field = document.getElementById('sch-attendee-values');
+            if (!field) return;
+            const uniqueAttendees = [];
+            (attendees || []).forEach(name => {
+                const clean = String(name || '').trim();
+                if (clean && !uniqueAttendees.includes(clean)) uniqueAttendees.push(clean);
+            });
+            field.value = uniqueAttendees.join(', ');
+            updateAttendeeTagsDisplay();
+        }
+
+        function getNormalizedAgendaSelection() {
+            if (!scheduleAgendaSelection) return null;
+            const startSlot = Math.min(scheduleAgendaSelection.startSlot, scheduleAgendaSelection.endSlot);
+            const endSlot = Math.max(scheduleAgendaSelection.startSlot, scheduleAgendaSelection.endSlot);
+            return { ...scheduleAgendaSelection, startSlot, endSlot };
+        }
+
+        function getAgendaSelectionSummary(selection = getNormalizedAgendaSelection()) {
+            if (!selection) return null;
+            const startTime = scheduleSlotIndexToTime(selection.startSlot);
+            const durationMinutes = (selection.endSlot - selection.startSlot + 1) * SCHEDULE_SLOT_MINUTES;
+            const startDate = parseScheduleLocalDateTime(selection.date, startTime);
+            if (!startDate) return null;
+            const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
+            return {
+                ...selection,
+                startTime,
+                durationMinutes,
+                label: startDate.toLocaleDateString([], {
+                    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+                }),
+                meta: `${startTime}–${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')} • ${durationMinutes} min`,
+            };
+        }
+
         async function loadSchedule() {
             const listDiv = document.getElementById('schedule-list');
-            if (!listDiv) return;
-            listDiv.innerHTML = renderSkeletonList(5);
+            const agendaDiv = document.getElementById('schedule-agenda');
+            if (listDiv) listDiv.innerHTML = renderSkeletonList(5);
+            if (agendaDiv) agendaDiv.innerHTML = '<div class="loading">Loading agenda…</div>';
             try {
                 const resp = await fetch('/api/schedule');
-                if (!resp.ok) { listDiv.innerHTML = '<div class="error">Could not load schedule</div>'; return; }
-                const data = await resp.json();
-                if (!data.events || data.events.length === 0) {
-                    listDiv.innerHTML = '<div style="color:var(--text-secondary);padding:20px;">No events scheduled yet. Add one above!</div>';
+                if (!resp.ok) {
+                    if (listDiv) listDiv.innerHTML = '<div class="error">Could not load schedule</div>';
+                    if (agendaDiv) agendaDiv.innerHTML = '<div class="error">Could not load agenda</div>';
                     return;
                 }
-                listDiv.innerHTML = data.events.map(ev => renderEventCard(ev)).join('');
-                hydrateScheduleEventDetails(data.events);
+                const data = await resp.json();
+                scheduleEventsCache = Array.isArray(data.events) ? data.events : [];
+                ensureScheduleAgendaWeek(scheduleEventsCache);
+                renderScheduleList(scheduleEventsCache);
+                renderScheduleAgenda(scheduleEventsCache);
+                hydrateScheduleEventDetails(scheduleEventsCache);
             } catch (e) {
-                listDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+                if (listDiv) listDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+                if (agendaDiv) agendaDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
             }
+        }
+
+        function renderScheduleList(events = []) {
+            const listDiv = document.getElementById('schedule-list');
+            if (!listDiv) return;
+            if (!events.length) {
+                listDiv.innerHTML = '<div style="color:var(--text-secondary);padding:20px;">No events scheduled yet. Use the agenda above or add one in the form.</div>';
+                return;
+            }
+            listDiv.innerHTML = events.map(ev => renderEventCard(ev)).join('');
         }
 
         function buildScheduleGameLinks(appId, gameName) {
@@ -2791,25 +2942,22 @@
         }
 
         function renderEventCard(ev) {
-            const attendees = (ev.attendees || []).join(', ') || '—';
-            const safeTitle = (ev.title||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            const safeGame  = (ev.game_name||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            const safeNotes = (ev.notes||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            const safeAttendees = attendees.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            const gameNameRaw = (ev.game_name || '').trim();
-            const links = buildScheduleGameLinks(ev.game_appid, gameNameRaw);
-            
-            // Build game image or use fallback
-            let gameImageHtml = '';
+            const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
+            const safeTitle = escapeHtml(ev.title || 'Untitled Event');
+            const safeGame = escapeHtml(ev.game_name || '');
+            const safeNotes = escapeHtml(ev.notes || '');
+            const safeAttendees = escapeHtml(attendees.join(', ') || 'No invitees yet');
+            const links = buildScheduleGameLinks(ev.game_appid, ev.game_name || '');
+            const timeLabel = escapeHtml(buildScheduleEventListTimeText(ev));
             const eventImageUrl = ev.game_image_url || (ev.game_appid ? `https://cdn.akamai.steamstatic.com/steam/apps/${ev.game_appid}/header.jpg` : '');
+            const safeGameJs = escAttr(ev.game_name || '');
+            let gameImageHtml = '';
             if (eventImageUrl) {
-                gameImageHtml = `<img src="${eventImageUrl}" alt="Game" style="max-width:100px; max-height:60px; border-radius:var(--radius-xs,6px); margin-right:10px; object-fit:cover;">`;
+                gameImageHtml = `<img src="${escAttr(eventImageUrl)}" alt="Game" style="max-width:100px; max-height:60px; border-radius:var(--radius-xs,6px); margin-right:10px; object-fit:cover;">`;
             }
-            
-            // Discord event indicator
             let discordBadge = '';
             if (ev.discord_event_id) {
-                discordBadge = `<span style="margin-left:8px; padding:4px 8px; background:#5865F2; color:white; border-radius:var(--radius-tag,4px); font-size:0.8em;">📢 Discord Event</span>`;
+                discordBadge = '<span style="margin-left:8px; padding:4px 8px; background:#5865F2; color:white; border-radius:var(--radius-tag,4px); font-size:0.8em;">📢 Discord Event</span>';
             }
 
             let discordLinkedInfo = '';
@@ -2824,22 +2972,23 @@
                     </div>
                 `;
             }
-            
+
             return `<div style="padding:15px 20px; border:1px solid var(--card-border); border-radius:var(--radius,12px); margin-bottom:10px; background:var(--card-bg);">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                     <div style="display:flex; align-items:center; flex:1; min-width:0;">
                         ${gameImageHtml}
-                        <div style="flex:1;">
+                        <div style="flex:1; min-width:0;">
                             <strong style="font-size:1.1em;">${safeTitle}</strong>
                             ${safeGame ? `<span style="margin-left:8px; padding:2px 8px; background:var(--list-hover); border-radius:10px; font-size:0.85em;">🎮 ${safeGame}</span>` : ''}
                             ${discordBadge}
                         </div>
                     </div>
-                    <div style="color:var(--text-secondary); font-size:0.9em; white-space:nowrap;">${ev.date||''} ${ev.time||''}</div>
+                    <div style="color:var(--text-secondary); font-size:0.9em; white-space:nowrap;">${timeLabel}</div>
                 </div>
-                <div style="margin-top:6px; color:var(--text-secondary); font-size:0.9em;">
-                    👥 ${safeAttendees}
-                    ${safeNotes ? `<span style="margin-left:12px;">📝 ${safeNotes}</span>` : ''}
+                <div style="margin-top:6px; color:var(--text-secondary); font-size:0.9em; display:flex; gap:12px; flex-wrap:wrap;">
+                    <span>👥 ${safeAttendees}</span>
+                    <span>⏱️ ${getScheduleEventDurationMinutes(ev)} min</span>
+                    ${safeNotes ? `<span>📝 ${safeNotes}</span>` : ''}
                 </div>
                 ${discordLinkedInfo}
                 ${ev.game_appid ? `
@@ -2855,10 +3004,316 @@
                 </div>` : ''}
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
                     <button onclick="editScheduleEvent('${ev.id}')" style="padding:5px 14px; background:#4f46e5; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">✏️ Edit</button>
-                    ${!ev.discord_event_id && ev.game_appid ? `<button onclick="createDiscordEventForSchedule('${ev.id}', '${safeGame}')" style="padding:5px 14px; background:#5865F2; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">📢 Create Discord Event</button>` : ''}
+                    <button onclick="focusScheduleInviteField('${ev.id}')" style="padding:5px 14px; background:#10b981; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">👥 Invite</button>
+                    ${!ev.discord_event_id && ev.game_appid ? `<button onclick="createDiscordEventForSchedule('${ev.id}', '${safeGameJs}')" style="padding:5px 14px; background:#5865F2; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">📢 Create Discord Event</button>` : ''}
                     <button onclick="deleteScheduleEvent('${ev.id}', ${ev.discord_event_id ? 'true' : 'false'}, '${escAttr(ev.discord_guild_id || '')}')" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:var(--radius-xs,6px); cursor:pointer; font-size:0.85em;">🗑️ Delete</button>
                 </div>
             </div>`;
+        }
+
+        function renderScheduleAgenda(events = []) {
+            const agenda = document.getElementById('schedule-agenda');
+            const range = document.getElementById('schedule-agenda-range');
+            if (!agenda) return;
+            const days = getScheduleAgendaDays();
+            const dayKeys = new Set(days.map(formatScheduleDateKey));
+            const eventsByDate = new Map(days.map(day => [formatScheduleDateKey(day), []]));
+            (events || []).forEach(event => {
+                const key = String(event?.date || '').trim();
+                if (dayKeys.has(key)) eventsByDate.get(key).push(event);
+            });
+            if (range) range.textContent = formatScheduleAgendaRange(days);
+            const timeLabels = Array.from({ length: 48 }, (_, slotIndex) => (
+                `<div class="schedule-agenda-time-label">${scheduleSlotIndexToTime(slotIndex)}</div>`
+            )).join('');
+            agenda.innerHTML = `
+                <div class="schedule-agenda-board">
+                    <div class="schedule-agenda-times">
+                        <div class="schedule-agenda-times-spacer"></div>
+                        ${timeLabels}
+                    </div>
+                    ${days.map(day => renderScheduleAgendaDay(day, eventsByDate.get(formatScheduleDateKey(day)) || [])).join('')}
+                </div>
+            `;
+            setupScheduleAgendaInteractions();
+            syncAgendaSelectionState();
+        }
+
+        function renderScheduleAgendaDay(day, dayEvents) {
+            const dateKey = formatScheduleDateKey(day);
+            const slots = Array.from({ length: 48 }, (_, slotIndex) => (
+                `<div class="schedule-agenda-slot" data-date="${dateKey}" data-slot-index="${slotIndex}" data-time="${scheduleSlotIndexToTime(slotIndex)}"></div>`
+            )).join('');
+            return `
+                <div class="schedule-agenda-day" data-date="${dateKey}">
+                    <div class="schedule-agenda-day-header">
+                        <strong>${day.toLocaleDateString([], { weekday: 'short' })}</strong>
+                        <span>${day.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                    </div>
+                    <div class="schedule-agenda-day-body">
+                        <div class="schedule-agenda-slot-grid">${slots}</div>
+                        <div class="schedule-agenda-item-layer">${dayEvents.map(renderScheduleAgendaEvent).join('')}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderScheduleAgendaEvent(event) {
+            const start = parseScheduleLocalDateTime(event?.date, event?.time);
+            if (!start) return '';
+            const slotIndex = Math.max(0, Math.min(47, Math.round((start.getHours() * 60 + start.getMinutes()) / SCHEDULE_SLOT_MINUTES)));
+            const duration = getScheduleEventDurationMinutes(event);
+            const top = slotIndex * SCHEDULE_SLOT_HEIGHT + 2;
+            const height = Math.max((duration / SCHEDULE_SLOT_MINUTES) * SCHEDULE_SLOT_HEIGHT - 4, SCHEDULE_SLOT_HEIGHT - 4);
+            const attendees = Array.isArray(event.attendees) ? event.attendees : [];
+            return `
+                <div class="schedule-agenda-item" draggable="true" data-event-id="${escAttr(event.id)}" style="top:${top}px; height:${height}px;" title="${escapeHtml(event.title || 'Event')} • ${escapeHtml(buildScheduleEventAgendaTimeText(event))}">
+                    <div class="schedule-agenda-item-time">${escapeHtml(buildScheduleEventAgendaTimeText(event))}</div>
+                    <div class="schedule-agenda-item-title">${escapeHtml(event.title || 'Untitled Event')}</div>
+                    <div class="schedule-agenda-item-meta">${escapeHtml((event.game_name || attendees.join(', ')) || 'Click to edit or invite people')}</div>
+                </div>
+            `;
+        }
+
+        function setupScheduleAgendaInteractions() {
+            const agenda = document.getElementById('schedule-agenda');
+            if (!agenda || agenda.dataset.bound === 'true') return;
+            agenda.dataset.bound = 'true';
+            agenda.addEventListener('pointerdown', handleScheduleAgendaPointerDown);
+            agenda.addEventListener('pointerover', handleScheduleAgendaPointerOver);
+            agenda.addEventListener('click', handleScheduleAgendaClick);
+            agenda.addEventListener('dragstart', handleScheduleAgendaDragStart);
+            agenda.addEventListener('dragover', handleScheduleAgendaDragOver);
+            agenda.addEventListener('drop', handleScheduleAgendaDrop);
+            agenda.addEventListener('dragend', handleScheduleAgendaDragEnd);
+        }
+
+        function syncAgendaSelectionState(resetQuickFields = false) {
+            const agenda = document.getElementById('schedule-agenda');
+            const quickCreate = document.getElementById('schedule-agenda-quick-create');
+            const titleField = document.getElementById('agenda-quick-title');
+            const attendeesField = document.getElementById('agenda-quick-attendees');
+            const summary = getAgendaSelectionSummary();
+            if (agenda) {
+                agenda.querySelectorAll('.schedule-agenda-slot').forEach(slot => {
+                    const matches = !!summary
+                        && slot.dataset.date === summary.date
+                        && Number(slot.dataset.slotIndex) >= summary.startSlot
+                        && Number(slot.dataset.slotIndex) <= summary.endSlot;
+                    slot.classList.toggle('schedule-agenda-slot-selection', matches);
+                });
+            }
+            if (!quickCreate) return;
+            if (!summary) {
+                quickCreate.hidden = true;
+                if (resetQuickFields) {
+                    if (titleField) titleField.value = '';
+                    if (attendeesField) attendeesField.value = '';
+                }
+                return;
+            }
+            quickCreate.hidden = false;
+            const label = document.getElementById('schedule-agenda-selection-label');
+            const meta = document.getElementById('schedule-agenda-selection-meta');
+            if (label) label.textContent = `New event for ${summary.label}`;
+            if (meta) meta.textContent = summary.meta;
+        }
+
+        function clearAgendaSelection(resetQuickFields = true) {
+            scheduleAgendaSelection = null;
+            scheduleAgendaSelectionActive = false;
+            syncAgendaSelectionState(resetQuickFields);
+        }
+
+        function handleScheduleAgendaPointerDown(event) {
+            if (event.target.closest('.schedule-agenda-item')) return;
+            const slot = event.target.closest('.schedule-agenda-slot');
+            if (!slot) return;
+            event.preventDefault();
+            scheduleAgendaSelectionActive = true;
+            scheduleAgendaSelection = {
+                date: slot.dataset.date,
+                startSlot: Number(slot.dataset.slotIndex),
+                endSlot: Number(slot.dataset.slotIndex),
+            };
+            syncAgendaSelectionState();
+            document.addEventListener('pointerup', finishScheduleAgendaSelection, { once: true });
+        }
+
+        function handleScheduleAgendaPointerOver(event) {
+            if (!scheduleAgendaSelectionActive || !scheduleAgendaSelection) return;
+            const slot = event.target.closest('.schedule-agenda-slot');
+            if (!slot || slot.dataset.date !== scheduleAgendaSelection.date) return;
+            scheduleAgendaSelection.endSlot = Number(slot.dataset.slotIndex);
+            syncAgendaSelectionState();
+        }
+
+        function finishScheduleAgendaSelection() {
+            if (!scheduleAgendaSelectionActive) return;
+            scheduleAgendaSelectionActive = false;
+            syncAgendaSelectionState();
+            const titleField = document.getElementById('agenda-quick-title');
+            if (titleField && !titleField.value) titleField.focus();
+        }
+
+        function handleScheduleAgendaClick(event) {
+            const item = event.target.closest('.schedule-agenda-item');
+            if (!item || scheduleAgendaDraggedEventId) return;
+            editScheduleEvent(item.dataset.eventId);
+        }
+
+        function clearScheduleAgendaDropTargets() {
+            const agenda = document.getElementById('schedule-agenda');
+            if (!agenda) return;
+            agenda.querySelectorAll('.schedule-agenda-slot-active').forEach(slot => slot.classList.remove('schedule-agenda-slot-active'));
+        }
+
+        function handleScheduleAgendaDragStart(event) {
+            const item = event.target.closest('.schedule-agenda-item');
+            if (!item) return;
+            scheduleAgendaDraggedEventId = item.dataset.eventId;
+            item.classList.add('dragging');
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', scheduleAgendaDraggedEventId);
+            }
+        }
+
+        function handleScheduleAgendaDragOver(event) {
+            const slot = event.target.closest('.schedule-agenda-slot');
+            if (!slot || !scheduleAgendaDraggedEventId) return;
+            event.preventDefault();
+            clearScheduleAgendaDropTargets();
+            slot.classList.add('schedule-agenda-slot-active');
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        }
+
+        async function handleScheduleAgendaDrop(event) {
+            const slot = event.target.closest('.schedule-agenda-slot');
+            if (!slot) return;
+            const eventId = scheduleAgendaDraggedEventId || event.dataTransfer?.getData('text/plain');
+            clearScheduleAgendaDropTargets();
+            if (!eventId) return;
+            event.preventDefault();
+            const existing = scheduleEventsCache.find(item => item.id === eventId);
+            if (!existing) return;
+            await updateScheduleEvent(eventId, {
+                date: slot.dataset.date,
+                time: slot.dataset.time,
+                duration_minutes: getScheduleEventDurationMinutes(existing),
+            }, 'Event moved on the agenda.');
+        }
+
+        function handleScheduleAgendaDragEnd(event) {
+            clearScheduleAgendaDropTargets();
+            const item = event.target.closest('.schedule-agenda-item');
+            if (item) item.classList.remove('dragging');
+            scheduleAgendaDraggedEventId = null;
+        }
+
+        function changeScheduleAgendaWeek(offset) {
+            ensureScheduleAgendaWeek(scheduleEventsCache);
+            const nextWeek = new Date(scheduleAgendaWeekStart);
+            nextWeek.setDate(nextWeek.getDate() + offset * 7);
+            scheduleAgendaWeekStart = scheduleStartOfWeek(nextWeek);
+            clearAgendaSelection(false);
+            renderScheduleAgenda(scheduleEventsCache);
+        }
+
+        function goToCurrentScheduleAgendaWeek() {
+            scheduleAgendaWeekStart = scheduleStartOfWeek(new Date());
+            clearAgendaSelection(false);
+            renderScheduleAgenda(scheduleEventsCache);
+        }
+
+        function applyAgendaSelectionToForm() {
+            const summary = getAgendaSelectionSummary();
+            if (!summary) return;
+            document.getElementById('sch-date').value = summary.date;
+            document.getElementById('sch-time').value = summary.startTime;
+            document.getElementById('sch-duration').value = summary.durationMinutes;
+            const quickTitle = document.getElementById('agenda-quick-title');
+            const quickAttendees = document.getElementById('agenda-quick-attendees');
+            if (quickTitle && quickTitle.value.trim()) {
+                document.getElementById('sch-title').value = quickTitle.value.trim();
+            }
+            if (quickAttendees && quickAttendees.value.trim()) {
+                setScheduleEventAttendees(quickAttendees.value.split(',').map(value => value.trim()).filter(Boolean));
+            }
+            document.getElementById('schedule-form-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            document.getElementById('sch-title').focus();
+            clearAgendaSelection(false);
+        }
+
+        async function createAgendaEvent() {
+            const summary = getAgendaSelectionSummary();
+            if (!summary) {
+                showMessage('Select a time on the agenda first.', 'warning');
+                return;
+            }
+            const title = document.getElementById('agenda-quick-title')?.value.trim();
+            if (!title) {
+                showMessage('Enter a title for the new event.', 'warning');
+                document.getElementById('agenda-quick-title')?.focus();
+                return;
+            }
+            const attendees = (document.getElementById('agenda-quick-attendees')?.value || '')
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+            try {
+                const resp = await safeFetch('/api/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title,
+                        date: summary.date,
+                        time: summary.startTime,
+                        duration_minutes: summary.durationMinutes,
+                        attendees,
+                        game_name: '',
+                        game_appid: '',
+                        game_image_url: '',
+                        notes: '',
+                        create_discord_event: false,
+                        discord_guild_id: null,
+                        timezone_name: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                        timezone_offset_minutes: new Date().getTimezoneOffset(),
+                    })
+                });
+                if (!resp.ok) {
+                    const errorData = await resp.json();
+                    showMessage(errorData.error || 'Failed to create event', 'error');
+                    return;
+                }
+                clearAgendaSelection(true);
+                await loadSchedule();
+                showMessage('Agenda event created.', 'success');
+            } catch (e) {
+                showMessage('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function updateScheduleEvent(eventId, payload, successMessage = 'Event updated.') {
+            try {
+                const resp = await safeFetch(`/api/schedule/${eventId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    showMessage(data.error || 'Failed to update event', 'error');
+                    return null;
+                }
+                const data = await resp.json();
+                await loadSchedule();
+                showMessage(successMessage, 'success');
+                return data;
+            } catch (e) {
+                showMessage('Error: ' + e.message, 'error');
+                return null;
+            }
         }
 
         function toggleDiscordGuildField() {
@@ -2875,21 +3330,18 @@
             const editId = document.getElementById('schedule-edit-id').value;
             const title = document.getElementById('sch-title').value.trim();
             if (!title) { alert('Title is required'); return; }
-            
             const createDiscord = document.getElementById('sch-create-discord').checked;
             const guildId = document.getElementById('sch-discord-guild-id').value.trim();
-            
-            // Validate guild_id if Discord event creation is enabled
             if (createDiscord && !guildId) {
                 alert('Please enter a Discord Server/Guild ID to create a Discord event');
                 return;
             }
-            
             const body = {
                 title,
                 date: document.getElementById('sch-date').value,
                 time: document.getElementById('sch-time').value,
-                attendees: document.getElementById('sch-attendees').value,
+                duration_minutes: normalizeScheduleDurationMinutes(document.getElementById('sch-duration').value),
+                attendees: getScheduleEventAttendees(),
                 game_name: document.getElementById('sch-game').value.trim(),
                 game_appid: document.getElementById('sch-game-appid').value,
                 game_image_url: document.getElementById('sch-game-image-url').value,
@@ -2903,13 +3355,14 @@
             try {
                 let resp;
                 if (editId) {
-                    resp = await safeFetch(`/api/schedule/${editId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                    resp = await safeFetch(`/api/schedule/${editId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 } else {
-                    resp = await safeFetch('/api/schedule', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                    resp = await safeFetch('/api/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 }
-                if (!resp.ok) { const d=await resp.json(); alert(d.error||'Failed to save event'); return; }
+                if (!resp.ok) { const d = await resp.json(); alert(d.error || 'Failed to save event'); return; }
                 clearScheduleForm();
-                loadSchedule();
+                await loadSchedule();
+                showMessage(editId ? 'Event updated.' : 'Event created.', 'success');
             } catch (e) { alert('Error: ' + e.message); }
         }
 
@@ -2939,12 +3392,12 @@
                         return;
                     }
                     dropdown.innerHTML = data.results.map(game => `
-                        <div class="game-search-result" data-appid="${game.appid}" data-name="${game.name}" data-image-url="${game.image_url}" 
+                        <div class="game-search-result" data-appid="${escAttr(game.appid || '')}" data-name="${escAttr(game.name || '')}" data-image-url="${escAttr(game.image_url || '')}" 
                              style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); display:flex; align-items:center; gap:8px; transition:background 0.2s;">
-                            ${game.image_url ? `<img src="${game.image_url}" alt="" style="width:40px; height:24px; object-fit:cover; border-radius:var(--radius-tag,4px);">` : ''}
+                            ${game.image_url ? `<img src="${escAttr(game.image_url)}" alt="" style="width:40px; height:24px; object-fit:cover; border-radius:var(--radius-tag,4px);">` : ''}
                             <div>
-                                <strong>${game.name}</strong>
-                                <span style="font-size:0.8em; color:var(--text-secondary); margin-left:8px;">App ID: ${game.appid}</span>
+                                <strong>${escapeHtml(game.name || '')}</strong>
+                                <span style="font-size:0.8em; color:var(--text-secondary); margin-left:8px;">App ID: ${escapeHtml(String(game.appid || ''))}</span>
                             </div>
                         </div>
                     `).join('');
@@ -3000,9 +3453,9 @@
                         return;
                     }
                     dropdown.innerHTML = data.results.map(user => `
-                        <div class="attendee-search-result" data-name="${user.name}" 
+                        <div class="attendee-search-result" data-name="${escAttr(user.name || '')}" 
                              style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); width:100%;">
-                            <strong>${user.name}</strong>
+                            <strong>${escapeHtml(user.name || '')}</strong>
                         </div>
                     `).join('');
                     // Add click event listeners
@@ -3024,36 +3477,41 @@
         }
 
         function addAttendee(name) {
-            const field = document.getElementById('sch-attendees');
-            const tags = document.getElementById('attendee-tags');
-            const existing = field.value.split(',').map(x => x.trim()).filter(x => x);
-            
-            if (!existing.includes(name)) {
-                existing.push(name);
-                field.value = existing.join(', ');
-                updateAttendeeTagsDisplay();
-            }
+            const current = getScheduleEventAttendees();
+            if (!current.includes(name)) current.push(name);
+            setScheduleEventAttendees(current);
             document.getElementById('attendee-search-dropdown').style.display = 'none';
-            document.getElementById('sch-attendees').value = '';
+            const searchField = document.getElementById('sch-attendees');
+            if (searchField) {
+                searchField.value = '';
+                searchField.focus();
+            }
         }
 
         function updateAttendeeTagsDisplay() {
-            const field = document.getElementById('sch-attendees');
             const tags = document.getElementById('attendee-tags');
-            const attendees = field.value.split(',').map(x => x.trim()).filter(x => x);
+            if (!tags) return;
+            const attendees = getScheduleEventAttendees();
             tags.innerHTML = attendees.map(name => `
-                <span style="padding:4px 10px; background:#4f46e5; color:white; border-radius:var(--radius-lg,16px); font-size:0.85em;">
+                <span style="padding:4px 10px; background:#4f46e5; color:white; border-radius:var(--radius-lg,16px); font-size:0.85em; display:inline-flex; align-items:center; gap:6px;">
                     ${escapeHtml(name)}
-                    <span onclick="removeAttendee('${escAttr(name)}'" style="margin-left:6px; cursor:pointer;">×</span>
+                    <button type="button" onclick="removeAttendee('${escAttr(name)}')" style="background:none; border:none; color:white; cursor:pointer; padding:0; font-size:1em; line-height:1;">×</button>
                 </span>
             `).join('');
         }
 
         function removeAttendee(name) {
-            const field = document.getElementById('sch-attendees');
-            const attendees = field.value.split(',').map(x => x.trim()).filter(x => x && x !== name);
-            field.value = attendees.join(', ');
-            updateAttendeeTagsDisplay();
+            setScheduleEventAttendees(getScheduleEventAttendees().filter(attendee => attendee !== name));
+        }
+
+        async function focusScheduleInviteField(id) {
+            const event = await editScheduleEvent(id);
+            if (!event) return;
+            const searchField = document.getElementById('sch-attendees');
+            if (searchField) {
+                searchField.focus();
+                showMessage('Search for friends to invite, then save the event.', 'info');
+            }
         }
 
         async function createDiscordEventForSchedule(eventId, gameName) {
@@ -3132,25 +3590,29 @@
 
         async function editScheduleEvent(id) {
             try {
-                const resp = await fetch('/api/schedule');
-                if (!resp.ok) return;
-                const data = await resp.json();
-                const ev = (data.events||[]).find(e => e.id === id);
-                if (!ev) return;
+                const ev = scheduleEventsCache.find(event => event.id === id);
+                if (!ev) return null;
                 document.getElementById('schedule-edit-id').value = ev.id;
                 document.getElementById('schedule-form-title').textContent = '✏️ Edit Event';
                 document.getElementById('sch-title').value = ev.title || '';
                 document.getElementById('sch-date').value = ev.date || '';
                 document.getElementById('sch-time').value = ev.time || '';
-                document.getElementById('sch-attendees').value = (ev.attendees||[]).join(', ');
+                document.getElementById('sch-duration').value = getScheduleEventDurationMinutes(ev);
+                document.getElementById('sch-attendees').value = '';
+                setScheduleEventAttendees(ev.attendees || []);
                 document.getElementById('sch-game').value = ev.game_name || '';
                 document.getElementById('sch-game-appid').value = ev.game_appid || '';
                 document.getElementById('sch-game-image-url').value = ev.game_image_url || '';
                 document.getElementById('sch-notes').value = ev.notes || '';
                 document.getElementById('sch-create-discord').checked = !!ev.discord_event_id;
-                updateAttendeeTagsDisplay();
+                document.getElementById('sch-discord-guild-id').value = ev.discord_guild_id || '';
+                toggleDiscordGuildField();
                 document.getElementById('schedule-form-panel').scrollIntoView({behavior:'smooth'});
-            } catch (e) { alert('Error: ' + e.message); }
+                return ev;
+            } catch (e) {
+                alert('Error: ' + e.message);
+                return null;
+            }
         }
 
         function clearScheduleForm() {
@@ -3159,6 +3621,10 @@
             ['sch-title','sch-date','sch-time','sch-attendees','sch-game','sch-notes',
              'sch-game-appid','sch-game-image-url','sch-discord-guild-id']
                 .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            const durationField = document.getElementById('sch-duration');
+            if (durationField) durationField.value = DEFAULT_SCHEDULE_DURATION_MINUTES;
+            const attendeeValuesField = document.getElementById('sch-attendee-values');
+            if (attendeeValuesField) attendeeValuesField.value = '';
             document.getElementById('sch-create-discord').checked = false;
             document.getElementById('discord-guild-field').style.display = 'none';
             document.getElementById('attendee-tags').innerHTML = '';

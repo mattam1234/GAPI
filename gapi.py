@@ -1061,7 +1061,14 @@ class GamePicker:
         Returns:
             The new event dict (includes generated ``id`` and ``created_at``).
         """
-        return self.schedule_service.add_event(title, date, time_str, attendees, game_name, notes)
+        return self.schedule_service.add_event(
+            title,
+            date,
+            time_str,
+            attendees=attendees,
+            game_name=game_name,
+            notes=notes,
+        )
 
     def update_event(self, event_id: str, **kwargs) -> Optional[Dict]:
         """Update an existing event's fields.
