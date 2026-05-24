@@ -141,9 +141,11 @@ except Exception as _e:
 
 try:
     from discord_presence import DiscordPresence as _DiscordPresence
-    _discord_presence = _DiscordPresence()
+    _discord_rpc = _DiscordPresence()
+    PRESENCE_AVAILABLE = True
 except Exception:
-    _discord_presence = None  # type: ignore[assignment]
+    _discord_rpc = None
+    PRESENCE_AVAILABLE = False
 
 # Initialize logging early so database module logs are captured
 log_level = os.getenv('GAPI_LOG_LEVEL', 'INFO')
@@ -2162,8 +2164,8 @@ def api_auth_logout():
         multi_picker = None
 
     # Clear Discord Rich Presence on logout (best-effort)
-    if _discord_presence:
-        _discord_presence.clear()
+    if _discord_rpc and _discord_rpc.enabled:
+        _discord_rpc.clear()
 
     return jsonify({'message': 'Logged out successfully'})
 
@@ -2528,9 +2530,9 @@ def api_pick_game():
                 playtime_minutes = game.get('playtime_forever', 0)
                 playtime_hours = playtime_minutes / 60
 
-                # Update Discord Rich Presence (non-blocking, best-effort)
-                if _discord_presence:
-                    _discord_presence.update(name, playtime_hours=round(playtime_hours, 1))
+                # Optionally update Discord Rich Presence (fire-and-forget)
+                if _discord_rpc and _discord_rpc.enabled:
+                    _discord_rpc.update(name, playtime_hours=playtime_hours)
 
                 is_favorite = app_id in p.favorites if app_id else False
                 review = p.review_service.get(game_id) if game_id else None
@@ -2644,6 +2646,35 @@ def api_pick_game():
     except Exception as e:
         gui_logger.exception(f"Unexpected error in pick endpoint: {e}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+
+@app.route('/api/presence/update', methods=['POST'])
+@require_login
+def api_presence_update():
+    """Update Discord Rich Presence for the current user's last-picked game."""
+    if not _discord_rpc or not _discord_rpc.enabled:
+        return jsonify({'ok': False, 'error': 'Discord Rich Presence not configured on server (DISCORD_CLIENT_ID not set)'}), 200
+    data = request.json or {}
+    game = data.get('game', '').strip()
+    if not game:
+        return jsonify({'ok': False, 'error': 'game name required'}), 400
+    playtime = data.get('playtime_hours')
+    try:
+        playtime_f = float(playtime) if playtime is not None else None
+    except (TypeError, ValueError):
+        playtime_f = None
+    updated = _discord_rpc.update(game, playtime_hours=playtime_f)
+    return jsonify({'ok': True, 'updated': updated})
+
+
+@app.route('/api/presence/clear', methods=['POST'])
+@require_login
+def api_presence_clear():
+    """Clear the Discord Rich Presence status."""
+    if not _discord_rpc or not _discord_rpc.enabled:
+        return jsonify({'ok': False, 'error': 'Discord Rich Presence not configured'}), 200
+    cleared = _discord_rpc.clear()
+    return jsonify({'ok': True, 'cleared': cleared})
 
 
 @app.route('/api/game/<int:app_id>/details')
