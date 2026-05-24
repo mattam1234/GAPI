@@ -854,72 +854,6 @@
             <h2>📅 Game Night Scheduler</h2>
 
             <div class="schedule-agenda-shell">
-                <!-- Create / Edit Form -->
-                <div id="schedule-form-panel" style="background:var(--list-hover); padding:var(--space-xl); border-radius:var(--radius,12px); margin-bottom:20px;">
-                <h3 id="schedule-form-title">➕ New Event</h3>
-                <input type="hidden" id="schedule-edit-id" value="">
-                <input type="hidden" id="sch-game-appid" value="">
-                <input type="hidden" id="sch-game-image-url" value="">
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--space-15); margin-top:15px;">
-                    <div>
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Title *</label>
-                        <input type="text" id="sch-title" class="search-input" placeholder="Game Night" style="margin-bottom:0;">
-                    </div>
-                    <div>
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Game (fuzzy search)</label>
-                        <div style="position:relative;">
-                            <input type="text" id="sch-game" class="search-input" placeholder="Search by title or App ID" 
-                                   onkeyup="searchGames(this.value)" oninput="showGameSearch()" style="margin-bottom:0;">
-                            <div id="game-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card-bg); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); max-height:200px; overflow-y:auto; z-index:1000; margin-top:2px;">
-                            </div>
-                        </div>
-                    </div>
-                    <div>
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Date</label>
-                        <input type="date" id="sch-date" class="search-input" style="margin-bottom:0;">
-                    </div>
-                    <div>
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Time</label>
-                        <input type="time" id="sch-time" class="search-input" style="margin-bottom:0;">
-                    </div>
-                    <div>
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Duration (minutes)</label>
-                        <input type="number" id="sch-duration" class="search-input" min="30" step="30" value="60" style="margin-bottom:0;">
-                    </div>
-                    <div style="grid-column:span 2;">
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Invite attendees (fuzzy search)</label>
-                        <div style="position:relative;">
-                            <input type="text" id="sch-attendees" class="search-input" placeholder="Start typing to search friends…" 
-                                   onkeyup="searchAttendees(this.value)" oninput="showAttendeeSearch()" style="margin-bottom:0;">
-                            <input type="hidden" id="sch-attendee-values" value="">
-                            <div id="attendee-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card-bg); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); max-height:200px; overflow-y:auto; z-index:1000; margin-top:2px;">
-                            </div>
-                        </div>
-                        <div id="attendee-tags" style="display:flex; flex-wrap:wrap; gap:var(--space-6); margin-top:8px;"></div>
-                    </div>
-                    <div style="grid-column:span 2;">
-                        <label style="display:block; margin-bottom:5px; font-weight:600;">Notes</label>
-                        <input type="text" id="sch-notes" class="search-input" placeholder="Optional notes…" style="margin-bottom:0;">
-                    </div>
-                    <div style="grid-column:span 2;">
-                        <label style="display:flex; align-items:center; gap:var(--space-10); cursor:pointer; margin-bottom:8px;">
-                            <input type="checkbox" id="sch-create-discord" onchange="toggleDiscordGuildField()" style="width:18px; height:18px; cursor:pointer;">
-                            <span style="font-weight:600;">🎮 Create Discord Server Scheduled Event</span>
-                        </label>
-                        <div id="discord-guild-field" style="display:none;">
-                            <input type="text" id="sch-discord-guild-id" class="search-input" placeholder="Discord Server/Guild ID (e.g., 123456789)" style="margin-bottom:0;">
-                            <div style="font-size:var(--font-sm); color:var(--text-secondary); margin-top:4px;">
-                                💡 How to get Guild ID: Enable Developer Mode in Discord → Right-click your server → Copy Server ID
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div style="display:flex; gap:var(--space-10); margin-top:15px; flex-wrap:wrap;">
-                    <button onclick="submitScheduleForm()" style="padding:var(--space-10) var(--space-28); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">💾 Save Event</button>
-                    <button onclick="clearScheduleForm()" style="padding:var(--space-10) var(--space-18); background:var(--card-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">✕ Clear</button>
-                </div>
-                </div>
-
                 <div class="schedule-agenda-panel">
                     <div class="schedule-agenda-toolbar">
                         <div>
@@ -930,9 +864,23 @@
                             <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(-1)">← Prev</button>
                             <button type="button" class="chat-room-secondary-btn" onclick="goToCurrentScheduleAgendaWeek()">Today</button>
                             <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(1)">Next →</button>
+                            <button type="button" class="chat-room-secondary-btn" onclick="openScheduleCreateModal()">➕ Create Event</button>
+                            <button type="button" class="chat-room-secondary-btn" onclick="openScheduleIcalSyncModal()">📆 iCal Sync</button>
                         </div>
                     </div>
-                    <div class="schedule-agenda-copy">Click a time slot to quick-create an event, drag across slots to pick a longer block, or drag an agenda card to move it to a different date and time.</div>
+                    <div class="schedule-agenda-copy">Click a time slot to quick-create an event, drag across slots to pick a longer block, or click an agenda card to edit it in a modal.</div>
+                    <div class="schedule-filter-toolbar">
+                        <label class="schedule-filter-group">
+                            <span>From</span>
+                            <input type="datetime-local" id="schedule-filter-start" class="search-input" onchange="applyScheduleFilters()" style="margin-bottom:0;">
+                        </label>
+                        <label class="schedule-filter-group">
+                            <span>Until</span>
+                            <input type="datetime-local" id="schedule-filter-end" class="search-input" onchange="applyScheduleFilters()" style="margin-bottom:0;">
+                        </label>
+                        <button type="button" class="chat-room-secondary-btn" onclick="clearScheduleFilters()">Reset filters</button>
+                        <div id="schedule-filter-summary" class="schedule-filter-summary"></div>
+                    </div>
                     <div id="schedule-agenda-range" class="schedule-agenda-range"></div>
                     <div id="schedule-agenda-quick-create" class="schedule-agenda-quick-create" hidden>
                         <div>
@@ -952,10 +900,123 @@
                     </div>
                 </div>
 
-                <!-- Events List -->
                 <h3>Upcoming Events</h3>
                 <div id="schedule-list" class="list-container" style="margin-top:10px;">
                     <div class="loading">Loading schedule…</div>
+                </div>
+            </div>
+
+            <div id="schedule-modal" class="schedule-modal" onclick="if(event.target.id==='schedule-modal')closeScheduleModal()" style="display:none;">
+                <div class="schedule-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="schedule-form-title">
+                    <div class="schedule-modal-header">
+                        <div>
+                            <div class="schedule-agenda-eyebrow">Event</div>
+                            <h3 id="schedule-form-title">➕ New Event</h3>
+                        </div>
+                        <button type="button" class="schedule-modal-close" onclick="closeScheduleModal()">✕</button>
+                    </div>
+                    <input type="hidden" id="schedule-edit-id" value="">
+                    <input type="hidden" id="sch-game-appid" value="">
+                    <input type="hidden" id="sch-game-image-url" value="">
+                    <input type="hidden" id="sch-attendee-values" value="">
+                    <input type="hidden" id="sch-attendee-ids" value="">
+                    <input type="hidden" id="sch-rsvp-values" value="{}">
+                    <input type="hidden" id="sch-discord-guild-id" value="">
+                    <div class="schedule-form-grid">
+                        <div>
+                            <label class="schedule-field-label">Title *</label>
+                            <input type="text" id="sch-title" class="search-input" placeholder="Game Night" style="margin-bottom:0;">
+                        </div>
+                        <div>
+                            <label class="schedule-field-label">Game</label>
+                            <div class="schedule-autocomplete">
+                                <input type="text" id="sch-game" class="search-input" placeholder="Search by title or App ID"
+                                       onkeyup="searchGames(this.value)" oninput="showGameSearch()" style="margin-bottom:0;">
+                                <div id="game-search-dropdown" class="schedule-autocomplete-dropdown" style="display:none;"></div>
+                            </div>
+                        </div>
+                        <div class="schedule-form-span-2 schedule-inline-actions">
+                            <button type="button" class="chat-room-secondary-btn" onclick="openScheduleCommonGamePicker()">🎮 Pick from invitees' libraries</button>
+                        </div>
+                        <div>
+                            <label class="schedule-field-label">Date</label>
+                            <input type="date" id="sch-date" class="search-input" style="margin-bottom:0;">
+                        </div>
+                        <div>
+                            <label class="schedule-field-label">Time</label>
+                            <input type="time" id="sch-time" class="search-input" style="margin-bottom:0;">
+                        </div>
+                        <div>
+                            <label class="schedule-field-label">Duration (minutes)</label>
+                            <input type="number" id="sch-duration" class="search-input" min="30" step="30" value="60" style="margin-bottom:0;">
+                        </div>
+                        <div class="schedule-form-span-2">
+                            <label class="schedule-field-label">Invite friends</label>
+                            <div class="schedule-autocomplete">
+                                <input type="text" id="sch-attendees" class="search-input" placeholder="Search friends to invite…"
+                                       onkeyup="searchAttendees(this.value)" oninput="showAttendeeSearch()" style="margin-bottom:0;">
+                                <div id="attendee-search-dropdown" class="schedule-autocomplete-dropdown" style="display:none;"></div>
+                            </div>
+                            <div id="attendee-tags" class="schedule-attendee-tag-list"></div>
+                            <div id="schedule-rsvp-list" class="schedule-rsvp-list"></div>
+                        </div>
+                        <div class="schedule-form-span-2">
+                            <label class="schedule-field-label">Notes</label>
+                            <input type="text" id="sch-notes" class="search-input" placeholder="Optional notes…" style="margin-bottom:0;">
+                        </div>
+                        <div class="schedule-form-span-2">
+                            <label class="schedule-discord-toggle">
+                                <input type="checkbox" id="sch-create-discord" onchange="toggleDiscordGuildField()" style="width:18px; height:18px; cursor:pointer;">
+                                <span>🎮 Create Discord Server Scheduled Event</span>
+                            </label>
+                            <div id="discord-guild-field" style="display:none;">
+                                <div class="schedule-autocomplete">
+                                    <input type="text" id="sch-discord-guild-search" class="search-input" placeholder="Search Discord servers…"
+                                           onfocus="showScheduleDiscordGuildSearch()" oninput="showScheduleDiscordGuildSearch()" style="margin-bottom:0;">
+                                    <div id="discord-guild-search-dropdown" class="schedule-autocomplete-dropdown" style="display:none;"></div>
+                                </div>
+                                <div id="schedule-discord-guild-meta" class="schedule-field-hint">Choose one of your cached Discord servers to sync this event.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="schedule-modal-actions">
+                        <button type="button" onclick="submitScheduleForm()" style="padding:var(--space-10) var(--space-28); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">💾 Save Event</button>
+                        <button type="button" onclick="closeScheduleModal()" style="padding:var(--space-10) var(--space-18); background:var(--card-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">Cancel</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="schedule-game-picker-modal" class="schedule-modal" onclick="if(event.target.id==='schedule-game-picker-modal')closeScheduleCommonGamePicker()" style="display:none;">
+                <div class="schedule-modal-dialog schedule-modal-dialog-narrow" role="dialog" aria-modal="true" aria-labelledby="schedule-common-games-title">
+                    <div class="schedule-modal-header">
+                        <div>
+                            <div class="schedule-agenda-eyebrow">Game picker</div>
+                            <h3 id="schedule-common-games-title">Pick from invited libraries</h3>
+                        </div>
+                        <button type="button" class="schedule-modal-close" onclick="closeScheduleCommonGamePicker()">✕</button>
+                    </div>
+                    <input type="text" id="schedule-common-games-search" class="search-input" placeholder="Filter common games…" oninput="filterScheduleCommonGames()" style="margin-bottom:12px;">
+                    <div id="schedule-common-games-status" class="schedule-field-hint">Choose an invitee first to load common games.</div>
+                    <div id="schedule-common-games-list" class="schedule-common-games-list"></div>
+                </div>
+            </div>
+
+            <div id="schedule-ical-modal" class="schedule-modal" onclick="if(event.target.id==='schedule-ical-modal')closeScheduleIcalSyncModal()" style="display:none;">
+                <div class="schedule-modal-dialog schedule-modal-dialog-narrow" role="dialog" aria-modal="true" aria-labelledby="schedule-ical-title">
+                    <div class="schedule-modal-header">
+                        <div>
+                            <div class="schedule-agenda-eyebrow">Calendar</div>
+                            <h3 id="schedule-ical-title">iCal sync</h3>
+                        </div>
+                        <button type="button" class="schedule-modal-close" onclick="closeScheduleIcalSyncModal()">✕</button>
+                    </div>
+                    <p class="schedule-field-hint" style="margin-top:0;">Subscribe with this private feed in Apple Calendar, Google Calendar, or Outlook.</p>
+                    <input type="text" id="schedule-ical-url" class="search-input" readonly style="margin-bottom:10px;">
+                    <div class="schedule-modal-actions schedule-modal-actions-inline">
+                        <button type="button" class="chat-room-secondary-btn" onclick="copyScheduleIcalUrl()">📋 Copy URL</button>
+                        <a id="schedule-ical-open-link" class="chat-room-secondary-btn" href="#" target="_blank" rel="noopener">↗ Open feed</a>
+                        <a id="schedule-ical-webcal-link" class="chat-room-secondary-btn" href="#">🔄 Open in calendar app</a>
+                    </div>
                 </div>
             </div>
         </div>

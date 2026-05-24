@@ -10,10 +10,14 @@ import json
 import os
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import database
+import gapi_gui
 from openapi_spec import build_spec
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -34,6 +38,12 @@ def _create_user(db, username='alice'):
     db.add(user)
     db.commit()
     return db.query(database.User).filter_by(username=username).first()
+
+
+def _read(*parts):
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, *parts), 'r', encoding='utf-8') as handle:
+        return handle.read()
 
 
 def _add_achievement(db, user, app_id='620', game_name='Portal 2',
@@ -349,6 +359,90 @@ class TestOpenAPINewPaths(unittest.TestCase):
     def test_total_paths_count(self):
         # Ensure we haven't accidentally removed paths — at least 85
         self.assertGreaterEqual(len(self.paths), 85)
+
+
+class TestScheduleEnhancementMarkup(unittest.TestCase):
+
+    def test_index_contains_schedule_modal_and_filters(self):
+        content = _read('templates', 'index.html')
+        for token in (
+            'schedule-modal',
+            'schedule-filter-start',
+            'schedule-rsvp-list',
+            'schedule-common-games-list',
+            'schedule-ical-modal',
+            'sch-discord-guild-search',
+        ):
+            self.assertIn(token, content)
+
+    def test_main_js_contains_schedule_modal_handlers(self):
+        content = _read('static', 'main.js')
+        for token in (
+            'openScheduleCreateModal',
+            'applyScheduleFilters',
+            'updateScheduleRsvpStatus',
+            'openScheduleCommonGamePicker',
+            'openScheduleIcalSyncModal',
+            'showScheduleDiscordGuildSearch',
+        ):
+            self.assertIn(token, content)
+
+    def test_style_contains_schedule_modal_and_rsvp_classes(self):
+        content = _read('static', 'style.css')
+        for token in (
+            '.schedule-modal',
+            '.schedule-form-grid',
+            '.schedule-rsvp-row',
+            '.schedule-filter-toolbar',
+            '.schedule-common-game-item',
+        ):
+            self.assertIn(token, content)
+
+
+class TestScheduleIcalSyncRoutes(unittest.TestCase):
+
+    def setUp(self):
+        gapi_gui.app.config['TESTING'] = True
+        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        self.client = gapi_gui.app.test_client()
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'alice'
+
+    def _fake_picker(self):
+        return SimpleNamespace(
+            schedule_service=SimpleNamespace(
+                get_events=lambda: [
+                    {
+                        'id': 'ev1',
+                        'title': 'Game Night',
+                        'date': '2026-03-15',
+                        'time': '20:00',
+                        'attendees': ['alice'],
+                        'attendee_ids': ['alice'],
+                        'rsvp_statuses': {'alice': 'accepted'},
+                        'game_name': 'Portal 2',
+                        'notes': 'Bring snacks',
+                    }
+                ]
+            )
+        )
+
+    def test_sync_info_returns_private_feed_urls(self):
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
+            resp = self.client.get('/api/schedule/ical-sync-info')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn('/api/schedule/export.ics?token=', data['feed_url'])
+        self.assertTrue(data['webcal_url'].startswith('webcal'))
+
+    def test_export_ical_accepts_signed_token(self):
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
+            info_resp = self.client.get('/api/schedule/ical-sync-info')
+            token = parse_qs(urlparse(info_resp.get_json()['feed_url']).query)['token'][0]
+            resp = self.client.get(f'/api/schedule/export.ics?token={token}&download=0')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('BEGIN:VCALENDAR', resp.get_data(as_text=True))
+        self.assertEqual(resp.headers['Content-Type'], 'text/calendar; charset=utf-8')
 
 
 if __name__ == '__main__':
