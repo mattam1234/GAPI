@@ -1,11 +1,9 @@
-// Debug: surface runtime errors to alert/console for easier diagnosis
+// Surface runtime errors to the console for easier diagnosis
         window.addEventListener('error', function (ev) {
             try { console.error('Runtime error caught:', ev && ev.error ? ev.error : ev.message); } catch(e){}
-            try { alert('JS runtime error: ' + (ev && ev.message ? ev.message : 'unknown')); } catch(e){}
         });
         window.addEventListener('unhandledrejection', function (ev) {
             try { console.error('Unhandled promise rejection:', ev.reason); } catch(e){}
-            try { alert('Unhandled promise rejection: ' + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason))); } catch(e){}
         });
 
         // CSRF disabled - safeFetch is now just an alias for fetch with credentials
@@ -34,10 +32,110 @@
             localStorage.setItem('gapi_theme', normalized);
             const btn = document.getElementById('dark-mode-btn');
             if (btn) btn.textContent = normalized === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+            const themeBtn = document.getElementById('theme-toggle-btn');
+            if (themeBtn) themeBtn.textContent = normalized === 'dark' ? '☀️' : '🌙';
         }
         function toggleDarkMode() {
             const current = document.documentElement.getAttribute('data-theme') || 'light';
             applyTheme(current === 'dark' ? 'light' : 'dark');
+        }
+        // ── Sidebar ──────────────────────────────────────────────────────────────
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const btn = sidebar ? sidebar.querySelector('.sidebar-toggle-btn') : null;
+            if (!sidebar) return;
+            const collapsed = sidebar.classList.toggle('collapsed');
+            localStorage.setItem('gapi_sidebar_collapsed', collapsed ? '1' : '0');
+            if (btn) btn.textContent = collapsed ? '›' : '‹';
+        }
+
+        (function initSidebar() {
+            document.addEventListener('DOMContentLoaded', function() {
+                const sidebar = document.getElementById('sidebar');
+                if (!sidebar) return;
+                const btn = sidebar.querySelector('.sidebar-toggle-btn');
+                if (localStorage.getItem('gapi_sidebar_collapsed') === '1') {
+                    sidebar.classList.add('collapsed');
+                    if (btn) btn.textContent = '›';
+                }
+            });
+        })();
+
+        // ── Discord Rich Presence ─────────────────────────────────────────────────
+        let _presenceEnabled = false;
+
+        function initPresenceToggle() {
+            const saved = localStorage.getItem('gapi_presence_enabled');
+            _presenceEnabled = saved === '1';
+            const toggle = document.getElementById('presence-enabled-toggle');
+            if (toggle) toggle.checked = _presenceEnabled;
+        }
+
+        function setPresenceEnabled(enabled) {
+            _presenceEnabled = !!enabled;
+            localStorage.setItem('gapi_presence_enabled', enabled ? '1' : '0');
+            const banner = document.getElementById('presence-status-banner');
+            if (banner) {
+                banner.style.display = '';
+                banner.style.background = enabled ? 'rgba(35,165,89,0.15)' : 'rgba(255,255,255,0.05)';
+                banner.style.color = enabled ? '#23A559' : 'var(--text-muted)';
+                banner.style.border = '1px solid ' + (enabled ? 'rgba(35,165,89,0.3)' : 'var(--border)');
+                banner.textContent = enabled ? '✅ Rich Presence is ON — your Discord status will update when you pick a game.' : 'Rich Presence is OFF.';
+                setTimeout(() => { if (banner) banner.style.display = 'none'; }, 3500);
+            }
+        }
+
+        async function updatePresence(gameName, playtimeHours) {
+            if (!_presenceEnabled) return;
+            try {
+                await safeFetch('/api/presence/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({game: gameName, playtime_hours: playtimeHours})
+                });
+            } catch(e) { /* silent */ }
+        }
+
+        async function clearPresence() {
+            try {
+                await safeFetch('/api/presence/clear', { method: 'POST' });
+                const banner = document.getElementById('presence-status-banner');
+                if (banner) {
+                    banner.style.display = '';
+                    banner.style.background = 'rgba(255,255,255,0.05)';
+                    banner.style.color = 'var(--text-muted)';
+                    banner.style.border = '1px solid var(--border)';
+                    banner.textContent = 'Discord status cleared.';
+                    setTimeout(() => { banner.style.display = 'none'; }, 2500);
+                }
+            } catch(e) { console.debug('clearPresence error', e); }
+        }
+
+        async function testPresence() {
+            try {
+                const r = await safeFetch('/api/presence/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({game: 'GameNight (test)', playtime_hours: 0})
+                });
+                const data = await r.json();
+                const banner = document.getElementById('presence-status-banner');
+                if (banner) {
+                    banner.style.display = '';
+                    if (data.ok || data.updated) {
+                        banner.style.background = 'rgba(35,165,89,0.15)';
+                        banner.style.color = '#23A559';
+                        banner.style.border = '1px solid rgba(35,165,89,0.3)';
+                        banner.textContent = '✅ Discord status updated! Check your Discord profile.';
+                    } else {
+                        banner.style.background = 'rgba(242,63,66,0.1)';
+                        banner.style.color = '#F23F42';
+                        banner.style.border = '1px solid rgba(242,63,66,0.3)';
+                        banner.textContent = '⚠️ ' + (data.error || 'Could not update presence. Is Discord running and DISCORD_CLIENT_ID set?');
+                    }
+                    setTimeout(() => { banner.style.display = 'none'; }, 4000);
+                }
+            } catch(e) { console.debug('testPresence error', e); }
         }
         // Restore saved theme on load
         (function() {
@@ -202,23 +300,47 @@
         }
         
         function switchTab(tabName, event) {
-            // Ensure we're working with a tab button even when called programmatically
+            // Sync sidebar active state
+            document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+            const navItem = document.getElementById('nav-' + tabName);
+            if (navItem) navItem.classList.add('active');
+
+            // Update topbar title
+            const titleMap = {
+                dashboard: 'Dashboard',
+                picker: 'Game Picker', library: 'Library', favorites: 'Favorites',
+                stats: 'Statistics', users: 'Users', multiuser: 'Multi-User',
+                schedule: 'Schedule', playlists: 'Playlists', backlog: 'Backlog',
+                ignored: 'No-Play List', achievements: 'Achievements', friends: 'Friends',
+                recommendations: 'For You', leaderboard: 'Leaderboard', chat: 'Chat',
+                sessions: 'Sessions', notifications: 'Notifications',
+                plugins: 'Plugins', settings: 'Settings', admin: 'Admin'
+            };
+            const titleEl = document.getElementById('topbar-page-title');
+            if (titleEl) titleEl.textContent = titleMap[tabName] || 'GameNight';
+
+            // Ensure we're working with a navigation trigger even when called programmatically
             let button = null;
             if (event && event.target) {
-                button = event.target.closest('.tab') || event.target;
+                button = event.target.closest('.sidebar-item, .tab') || event.target;
             }
             if (!button) {
-                button = document.querySelector(`.tab[onclick*=\"switchTab('${tabName}'\"]`);
+                button = document.querySelector(`.sidebar-item[onclick*="switchTab('${tabName}'"]`)
+                    || document.querySelector(`.tab[onclick*="switchTab('${tabName}'"]`);
             }
 
             if (tabName !== 'chat' && typeof stopChatPolling === 'function') stopChatPolling();
             if (tabName !== 'sessions' && typeof stopSessionsPolling === 'function') stopSessionsPolling();
-            
-            // Update tab buttons
-            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-            if (button && button.classList) button.classList.add('active');
-            
-            // Update tab content
+
+            document.querySelectorAll('.tab, .sidebar-item').forEach(tab => {
+                tab.classList.remove('active');
+                if (typeof tab.setAttribute === 'function') tab.setAttribute('aria-selected', 'false');
+            });
+            if (button && button.classList) {
+                button.classList.add('active');
+                if (typeof button.setAttribute === 'function') button.setAttribute('aria-selected', 'true');
+            }
+
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             const tabContent = document.getElementById(tabName + '-tab');
             if (tabContent) {
@@ -227,11 +349,7 @@
                 console.error('Tab content not found: ' + tabName + '-tab');
                 return;
             }
-            
-            // Reload data for the tab
-            if (tabName === 'picker') {
-                // Picker tab - no special loading needed
-            }
+
             if (tabName === 'library') loadLibrary();
             if (tabName === 'favorites') loadFavorites();
             if (tabName === 'stats') {
@@ -260,6 +378,7 @@
                 startChatPolling();
             }
             if (tabName === 'sessions') {
+                loadLiveSessionDiscordLocations();
                 loadLiveSessions();
                 if (activeLiveSessionId) {
                     openLiveSession(activeLiveSessionId);
@@ -269,8 +388,160 @@
             if (tabName === 'settings') {
                 loadSettings();
             }
+            if (tabName === 'dashboard') {
+                loadDashboard();
+            }
         }
-        
+
+        // ── Dashboard ─────────────────────────────────────────────────────────
+        async function loadDashboard() {
+            // Fetch data in parallel; fail gracefully
+            const [libRes, sessRes, schedRes] = await Promise.allSettled([
+                safeFetch('/api/library').then(r => r.json()),
+                safeFetch('/api/live-session/active').then(r => r.json()),
+                safeFetch('/api/schedule').then(r => r.json()),
+            ]);
+
+            const games    = libRes.status   === 'fulfilled' ? (libRes.value.games    || []) : [];
+            const sessions = sessRes.status  === 'fulfilled' ? (sessRes.value.sessions || []) : [];
+            const allEvs   = schedRes.status === 'fulfilled' ? (schedRes.value.events  || []) : [];
+
+            // Filter upcoming events
+            const now = Date.now();
+            const upcoming = allEvs.filter(e => {
+                if (!e.date) return false;
+                try { return new Date(e.date + (e.time ? 'T' + e.time : 'T00:00')).getTime() >= now - 3600000; }
+                catch (_) { return false; }
+            }).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            // ── Welcome banner ──────────────────────────────────────────────
+            const rawName = (document.getElementById('sidebar-username') || {}).textContent
+                         || (document.getElementById('current-username') || {}).textContent || '';
+            const firstName = rawName.trim().split(/\s+/)[0] || 'Gamer';
+            const greetEl = document.getElementById('dash-greeting');
+            const hintEl  = document.getElementById('dash-events-teaser');
+            if (greetEl) greetEl.textContent = firstName + ' 👋';
+            if (hintEl)  hintEl.textContent  = upcoming.length
+                ? `Ready for game night? You have ${upcoming.length} upcoming event${upcoming.length !== 1 ? 's' : ''}.`
+                : 'Ready for game night?';
+
+            // ── Stat cards ──────────────────────────────────────────────────
+            const _stat = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+            _stat('dash-stat-library',  games.length);
+            _stat('dash-stat-sessions', sessions.length);
+            _stat('dash-stat-events',   upcoming.length);
+            _stat('dash-stat-catalog',  games.length);
+
+            // ── Top games grid ──────────────────────────────────────────────
+            const topGames = [...games]
+                .sort((a, b) => (b.playtime_hours || 0) - (a.playtime_hours || 0))
+                .slice(0, 6);
+            const gridEl = document.getElementById('dash-games-grid');
+            if (gridEl) {
+                if (topGames.length === 0) {
+                    gridEl.innerHTML = '<div class="dash-empty" style="grid-column:1/-1; padding:24px;">No games yet — add some to your library.</div>';
+                } else {
+                    gridEl.innerHTML = topGames.map(g => {
+                        const appId = g.app_id || g.appid;
+                        const coverUrl = appId
+                            ? `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`
+                            : '';
+                        const fallback = appId
+                            ? `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`
+                            : '';
+                        const safeName = escapeHtml(g.name || 'Game');
+                        const hrs = g.playtime_hours != null ? `${g.playtime_hours}h` : '';
+                        return `<div class="dash-game-tile" onclick="showGameDetails(${appId || 0}, '${escAttr(g.name || '')}', ${g.playtime_hours || 0}, '')">
+                            <div class="dash-game-tile-cover">
+                                <img src="${coverUrl}" alt="${safeName}"
+                                     onerror="this.src='${fallback}'" loading="lazy">
+                            </div>
+                            <div class="dash-game-tile-name" title="${safeName}">${safeName}</div>
+                            ${hrs ? `<div class="dash-game-tile-hours">${hrs}</div>` : ''}
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ── Live sessions list ──────────────────────────────────────────
+            const sessListEl = document.getElementById('dash-sessions-list');
+            if (sessListEl) {
+                if (sessions.length === 0) {
+                    sessListEl.innerHTML = `<div class="dash-empty"><span style="opacity:0.4;">No active sessions right now.</span>
+                        <button class="dash-card-link" style="margin-top:6px;" onclick="switchTab('sessions',event)">Start one →</button></div>`;
+                } else {
+                    sessListEl.innerHTML = sessions.slice(0, 5).map(s => {
+                        const gameName = escapeHtml(s.game_title || s.game_name || 'Game TBD');
+                        const sessName = escapeHtml(s.name || 'Session');
+                        const appId    = s.game_appid || s.appid;
+                        const thumb    = appId
+                            ? `<img src="https://cdn.akamai.steamstatic.com/steam/apps/${appId}/capsule_sm_120.jpg" onerror="this.style.display='none'" loading="lazy">`
+                            : '🎮';
+                        return `<div class="dash-session-item">
+                            <div class="dash-session-thumb">${thumb}</div>
+                            <div class="dash-session-info">
+                                <div class="dash-session-name">${sessName}</div>
+                                <div class="dash-session-game">${gameName}</div>
+                            </div>
+                            <span class="dash-live-badge">Live</span>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ── Upcoming events ─────────────────────────────────────────────
+            const upcomingEl = document.getElementById('dash-upcoming-list');
+            if (upcomingEl) {
+                if (upcoming.length === 0) {
+                    upcomingEl.innerHTML = `<div class="dash-empty"><span style="opacity:0.4; font-size:0.85em;">No upcoming events.</span>
+                        <button class="dash-card-link" style="margin-top:6px;" onclick="switchTab('schedule',event)">Plan one →</button></div>`;
+                } else {
+                    upcomingEl.innerHTML = upcoming.slice(0, 4).map(ev => {
+                        let monthStr = '', dayStr = '';
+                        try {
+                            const d = new Date(ev.date + 'T00:00');
+                            monthStr = d.toLocaleDateString('en', { month: 'short' });
+                            dayStr   = d.getDate();
+                        } catch(_) {}
+                        return `<div class="dash-event-item">
+                            <div class="dash-event-date-box">
+                                <div class="dash-event-month">${monthStr}</div>
+                                <div class="dash-event-day">${dayStr}</div>
+                            </div>
+                            <div style="flex:1; min-width:0;">
+                                <div class="dash-event-title">${escapeHtml(ev.title || 'Event')}</div>
+                                <div class="dash-event-time">${escapeHtml(ev.time || 'Time TBD')}</div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ── Activity feed (most-played games as proxy for recent activity) ─
+            const actEl = document.getElementById('dash-activity-feed');
+            if (actEl) {
+                const recent = [...games]
+                    .filter(g => (g.playtime_hours || 0) > 0)
+                    .sort((a, b) => (b.playtime_hours || 0) - (a.playtime_hours || 0))
+                    .slice(0, 6);
+                if (recent.length === 0) {
+                    actEl.innerHTML = '<div class="dash-empty"><span style="opacity:0.4; font-size:0.85em;">No activity yet.</span></div>';
+                } else {
+                    actEl.innerHTML = recent.map(g => {
+                        const safeName = escapeHtml(g.name || 'Game');
+                        const hrs = g.playtime_hours != null ? `${g.playtime_hours}h played` : '';
+                        return `<div class="dash-activity-item">
+                            <div class="dash-activity-icon">🎮</div>
+                            <div class="dash-activity-text">
+                                <div class="dash-activity-msg">${safeName}</div>
+                                <div class="dash-activity-time">${hrs}</div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+            }
+        }
+
         async function pickGame() {
             const filterValue = document.querySelector('input[name="filter"]:checked').value;
             const genreValue = document.getElementById('genre-filter').value.trim();
@@ -317,6 +588,7 @@
                 const game = await response.json();
                 currentGame = game;
                 displayGame(game);
+                updatePresence(game.name, game.playtime_hours);
 
             } catch (error) {
                 alert('Error: ' + error.message);
@@ -962,8 +1234,8 @@
                                     <span title="Favorite" style="cursor:pointer; font-size:1.2em; color: ${game.is_favorite ? '#ffc107' : 'inherit'};" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
-                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeName}')">📋</span>
-                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeName}')">📚</span>
+                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
+                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
                                     <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeName}')">🚫</span>
                                 </div>
                             </div>
@@ -1142,8 +1414,8 @@
                                 </div>
                                 <div style="display:flex; gap:8px; align-items:center;">
                                     <span>${game.playtime_hours}h</span>
-                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeName}')">📋</span>
-                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeName}')">📚</span>
+                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
+                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
                                     <button class="btn btn-favorite" style="padding: 5px 10px; font-size:0.85em;"
                                             onclick="event.stopPropagation(); removeFavorite(${game.app_id})">Remove</button>
                                 </div>
@@ -1694,7 +1966,12 @@
         }
         
         function showMessage(message, type = 'info') {
-            // Create message element
+            // Delegate to the richer toast system when available
+            if (typeof showToast === 'function') {
+                showToast(message, type);
+                return;
+            }
+            // Fallback: simple fixed-position notification
             const messageDiv = document.createElement('div');
             messageDiv.style.cssText = `
                 position: fixed;
@@ -1711,8 +1988,6 @@
             `;
             messageDiv.textContent = message;
             document.body.appendChild(messageDiv);
-            
-            // Remove after 3 seconds
             setTimeout(() => {
                 messageDiv.style.animation = 'slideOut 0.3s ease-out';
                 setTimeout(() => messageDiv.remove(), 300);
@@ -2732,44 +3007,44 @@
         
         function setAuthenticatedUI(isAuthenticated, userRole, username = null) {
             console.log('🔐 setAuthenticatedUI called:', { isAuthenticated, userRole, username });
-            // Show/hide auth modal and user info
             const authModal = document.getElementById('auth-modal');
             const userInfo = document.getElementById('user-info');
-            
+            const topbarUserInfo = document.getElementById('topbar-user-info');
+            const topbarLoginBtn = document.getElementById('topbar-login-btn');
+            const currentUsernameEl = document.getElementById('current-username');
+            const sidebarAvatar = document.getElementById('sidebar-avatar');
+            const sidebarUsername = document.getElementById('sidebar-username');
+            const sidebarUserInfo = document.getElementById('sidebar-user-info');
+            const sidebarActionBtns = document.getElementById('sidebar-action-btns');
+            const sidebarStatusDot = document.getElementById('sidebar-status-dot');
+            const authTabs = [
+                document.getElementById('nav-sessions'),
+                document.getElementById('nav-chat'),
+                document.getElementById('nav-friends'),
+                document.getElementById('nav-recommendations'),
+                document.getElementById('nav-leaderboard'),
+                document.getElementById('nav-achievements')
+            ];
+            const adminTab = document.getElementById('nav-admin');
+
             if (isAuthenticated) {
                 if (authModal) authModal.style.display = 'none';
                 if (userInfo) userInfo.style.display = 'block';
-                
-                // Show all auth-required tabs by removing !important with inline style
-                const authTabs = [
-                    document.getElementById('sessions-tab-btn'),
-                    document.getElementById('chat-tab-btn'),
-                    document.getElementById('friends-tab-btn'),
-                    document.getElementById('recommendations-tab-btn'),
-                    document.getElementById('leaderboard-tab-btn'),
-                    document.getElementById('achievements-tab-btn')
-                ];
-                
-                console.log('🎯 Auth tabs found:', authTabs.map(t => t ? t.id || t.tagName : 'null'));
-                
-                authTabs.forEach((tab, index) => {
-                    if (tab) {
-                        // Use inline-block for buttons, inline-flex for links
-                        const displayValue = tab.tagName === 'A' ? 'inline-flex' : 'inline-block';
-                        tab.style.setProperty('display', displayValue, 'important');
-                        console.log(`✅ Showing tab ${index}:`, tab.id || tab.tagName, 'display:', displayValue);
-                    } else {
-                        console.warn(`❌ Tab ${index} not found`);
-                    }
+                if (currentUsernameEl) currentUsernameEl.textContent = username || '';
+
+                if (sidebarAvatar) sidebarAvatar.textContent = (username || '?')[0].toUpperCase();
+                if (sidebarUsername) sidebarUsername.textContent = username || '';
+                if (sidebarUserInfo) sidebarUserInfo.style.display = '';
+                if (sidebarActionBtns) sidebarActionBtns.style.display = '';
+                if (sidebarStatusDot) sidebarStatusDot.classList.remove('offline');
+                if (topbarUserInfo) topbarUserInfo.style.display = '';
+                if (topbarLoginBtn) topbarLoginBtn.style.display = 'none';
+
+                authTabs.forEach(tab => {
+                    if (tab) tab.style.setProperty('display', 'flex', 'important');
                 });
-                
-                // Handle admin tab
-                const adminTab = document.getElementById('admin-tab-btn');
-                if (adminTab) {
-                    adminTab.style.display = userRole === 'admin' ? 'inline-block' : 'none';
-                }
-                
-                // Start/restart realtime client
+                if (adminTab) adminTab.style.display = userRole === 'admin' ? 'flex' : 'none';
+
                 if (username && typeof initRealtime !== 'undefined') {
                     try {
                         if (window.realtimeClient) {
@@ -2784,25 +3059,22 @@
             } else {
                 if (authModal) authModal.style.display = 'flex';
                 if (userInfo) userInfo.style.display = 'none';
-                
-                // Hide all auth-protected tabs
-                const authTabs = [
-                    document.getElementById('sessions-tab-btn'),
-                    document.getElementById('chat-tab-btn'),
-                    document.getElementById('friends-tab-btn'),
-                    document.getElementById('recommendations-tab-btn'),
-                    document.getElementById('leaderboard-tab-btn'),
-                    document.getElementById('achievements-tab-btn'),
-                    document.getElementById('admin-tab-btn')
-                ];
-                
+                if (currentUsernameEl) currentUsernameEl.textContent = '';
+                if (sidebarAvatar) sidebarAvatar.textContent = '?';
+                if (sidebarUsername) sidebarUsername.textContent = '';
+                if (sidebarUserInfo) sidebarUserInfo.style.display = 'none';
+                if (sidebarActionBtns) sidebarActionBtns.style.display = 'none';
+                if (sidebarStatusDot) sidebarStatusDot.classList.add('offline');
+                if (topbarUserInfo) topbarUserInfo.style.display = 'none';
+                if (topbarLoginBtn) topbarLoginBtn.style.display = 'inline-block';
+                window.currentUser = null;
+                window.currentUserRole = null;
+
                 authTabs.forEach(tab => {
-                    if (tab) {
-                        tab.style.setProperty('display', 'none', 'important');
-                    }
+                    if (tab) tab.style.setProperty('display', 'none', 'important');
                 });
-                
-                // Stop realtime client
+                if (adminTab) adminTab.style.display = 'none';
+
                 if (window.realtimeClient) {
                     try {
                         window.realtimeClient.disconnect();
@@ -2812,7 +3084,7 @@
                 }
             }
         }
-        
+
         async function checkAuthStatus() {
             console.log('🔍 Checking auth status...');
             try {
@@ -3579,7 +3851,12 @@
         // Initialize auth status on page load
         document.addEventListener('DOMContentLoaded', () => {
             console.log('🚀 Page loaded, checking auth status...');
+            initPresenceToggle();
+            const topbarLoginBtn = document.getElementById('topbar-login-btn');
+            if (topbarLoginBtn) topbarLoginBtn.style.display = 'inline-block';
             checkAuthStatus();
+            // Load dashboard data for the default page
+            loadDashboard();
 
             const loginForm = document.getElementById('login-form');
             if (loginForm) loginForm.addEventListener('submit', handleLogin);
@@ -4218,6 +4495,9 @@
         let sessionsPollInterval = null;
         let activeLiveSessionId = null;
         let activeSessionEventSource = null;
+        let liveSessionDiscordGuilds = [];
+        let liveSessionLootboxTimer = null;
+        let liveSessionLootboxSessionId = null;
         let chatLastId = 0;
         let chatOldestId = null;
         let hasMoreOldMessages = true;
@@ -5049,8 +5329,7 @@
         }
 
         function openSessionsTab() {
-            const sessionsTabButton = Array.from(document.querySelectorAll('.tab'))
-                .find(btn => (btn.textContent || '').includes('Sessions'));
+            const sessionsTabButton = document.getElementById('nav-sessions');
             if (sessionsTabButton) {
                 switchTab('sessions', { target: sessionsTabButton });
             }
@@ -5061,15 +5340,73 @@
             return (el && el.textContent ? el.textContent.trim() : '');
         }
 
+        function populateLiveSessionDiscordChannels() {
+            const guildSelect = document.getElementById('session-discord-guild');
+            const channelSelect = document.getElementById('session-discord-channel');
+            if (!guildSelect || !channelSelect) return;
+            const guild = liveSessionDiscordGuilds.find(g => g.guild_id === guildSelect.value);
+            const channels = guild ? (guild.channels || []) : [];
+            channelSelect.innerHTML = '<option value="">Choose Discord channel</option>';
+            channels.forEach(channel => {
+                const option = document.createElement('option');
+                option.value = channel.channel_id;
+                option.textContent = `#${channel.channel_name}`;
+                channelSelect.appendChild(option);
+            });
+            channelSelect.disabled = !guild;
+        }
+
+        async function loadLiveSessionDiscordLocations() {
+            const guildSelect = document.getElementById('session-discord-guild');
+            const hintEl = document.getElementById('session-discord-hint');
+            if (!guildSelect) return;
+            try {
+                const resp = await fetch('/api/live-session/discord-locations');
+                const data = await resp.json();
+                const guilds = data.guilds || [];
+                liveSessionDiscordGuilds = guilds;
+                guildSelect.innerHTML = '<option value="">No Discord sync</option>';
+                guilds.forEach(guild => {
+                    const option = document.createElement('option');
+                    option.value = guild.guild_id;
+                    option.textContent = guild.guild_name;
+                    guildSelect.appendChild(option);
+                });
+                if (hintEl) {
+                    if (guilds.length) {
+                        hintEl.textContent = 'Choose a Discord server and channel to mirror the session through the bot.';
+                    } else {
+                        hintEl.textContent = data.error || 'Link your Discord ID in Settings, then talk to the bot in your server so it can cache your available channels.';
+                    }
+                }
+                populateLiveSessionDiscordChannels();
+            } catch (err) {
+                if (hintEl) hintEl.textContent = 'Could not load Discord channels right now.';
+            }
+        }
+
         async function createLiveSession() {
             const nameInput = document.getElementById('session-name-input');
             const coopOnly = document.getElementById('session-coop-only').checked;
+            const guildSelect = document.getElementById('session-discord-guild');
+            const channelSelect = document.getElementById('session-discord-channel');
             const name = (nameInput.value || '').trim();
+            const discordGuildId = (guildSelect && guildSelect.value) || '';
+            const discordChannelId = (channelSelect && channelSelect.value) || '';
+            if (discordGuildId && !discordChannelId) {
+                showMessage('Choose a Discord channel for the selected server', 'error');
+                return;
+            }
             try {
                 const resp = await safeFetch('/api/live-session/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name || undefined, coop_only: coopOnly }),
+                    body: JSON.stringify({
+                        name: name || undefined,
+                        coop_only: coopOnly,
+                        discord_guild_id: discordGuildId || undefined,
+                        discord_channel_id: discordChannelId || undefined,
+                    }),
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
@@ -5078,6 +5415,8 @@
                 }
                 showMessage('Session created!', 'success');
                 if (nameInput) nameInput.value = '';
+                if (guildSelect) guildSelect.value = '';
+                populateLiveSessionDiscordChannels();
                 activeLiveSessionId = data.session_id;
                 await loadLiveSessions();
                 renderLiveSessionDetails(data);
@@ -5116,6 +5455,9 @@
                 listDiv.innerHTML = sessions.map(s => {
                     const joined = (s.participants || []).includes(me);
                     const isHost = s.host === me;
+                    const discordSummary = s.discord && s.discord.guild_name && s.discord.channel_name
+                        ? `<div style="font-size:0.82em; color:var(--text-secondary); margin-top:4px;">Discord: ${s.discord.guild_name} / #${s.discord.channel_name}</div>`
+                        : '';
                     return `
                         <div style="border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); padding:10px; margin-bottom:10px; background:var(--list-hover);">
                             <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
@@ -5123,6 +5465,7 @@
                                 <span style="font-size:0.8em; color:var(--text-secondary);">${s.status}</span>
                             </div>
                             <div style="font-size:0.85em; color:var(--text-secondary); margin-top:4px;">Host: ${s.host} · Players: ${(s.participants || []).length}</div>
+                            ${discordSummary}
                             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
                                 <button onclick="openLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:var(--radius-xs,6px); background:#4f46e5; color:white; cursor:pointer;">Open</button>
                                 ${joined
@@ -5325,6 +5668,43 @@
             `;
         }
 
+        function playLiveSessionLootboxReveal(session) {
+            const revealEl = document.getElementById('live-session-lootbox');
+            if (!revealEl || !session || session.status !== 'completed' || !session.picked_game) return;
+            if (liveSessionLootboxSessionId === session.session_id) return;
+            liveSessionLootboxSessionId = session.session_id;
+            if (liveSessionLootboxTimer) {
+                clearInterval(liveSessionLootboxTimer);
+                liveSessionLootboxTimer = null;
+            }
+            const finalName = session.picked_game.name || 'Unknown game';
+            const tease = ['🎁', '🎲', '🎮', '⭐', '🔥', '💥', '✨'];
+            let step = 0;
+            revealEl.style.display = 'block';
+            revealEl.innerHTML = '<div style="font-size:0.9em; color:var(--text-secondary);">Rolling final pick…</div>';
+            liveSessionLootboxTimer = setInterval(() => {
+                step += 1;
+                if (step >= 10) {
+                    clearInterval(liveSessionLootboxTimer);
+                    liveSessionLootboxTimer = null;
+                    revealEl.innerHTML = `
+                        <div style="padding:14px; border:1px solid rgba(124,58,237,0.45); border-radius:12px; background:linear-gradient(135deg, rgba(79,70,229,0.18), rgba(124,58,237,0.25)); text-align:center;">
+                            <div style="font-size:0.82em; color:var(--text-secondary); margin-bottom:6px;">Lootbox reveal</div>
+                            <div style="font-size:1.3em; font-weight:700; color:var(--text-primary);">🎉 ${finalName}</div>
+                        </div>
+                    `;
+                    return;
+                }
+                const randomTag = tease[Math.floor(Math.random() * tease.length)];
+                revealEl.innerHTML = `
+                    <div style="padding:14px; border:1px solid rgba(124,58,237,0.25); border-radius:12px; background:linear-gradient(135deg, rgba(79,70,229,0.12), rgba(124,58,237,0.18)); text-align:center;">
+                        <div style="font-size:0.82em; color:var(--text-secondary); margin-bottom:6px;">Lootbox reveal</div>
+                        <div style="font-size:1.1em; font-weight:700; color:var(--text-primary); letter-spacing:1px;">${randomTag} ${finalName}</div>
+                    </div>
+                `;
+            }, 140);
+        }
+
         function renderLiveSessionDetails(session) {
             const detailsDiv = document.getElementById('session-details');
             if (!detailsDiv || !session) return;
@@ -5337,6 +5717,8 @@
             const yesCount = voteState.yes_count || 0;
             const noCount = voteState.no_count || 0;
             const canVote = joined && session.status === 'awaiting_vote' && !!session.picked_game;
+            const pendingJoins = session.pending_joins || [];
+            const discordInfo = session.discord || {};
 
             detailsDiv.innerHTML = `
                 <div style="display:grid; gap:10px;">
@@ -5346,6 +5728,9 @@
                     </div>
                     <div style="font-size:0.9em; color:var(--text-secondary);">Host: ${session.host} · Round: ${session.round || 0}</div>
                     <div style="font-size:0.9em; color:var(--text-secondary);">Players: ${participants.join(', ') || 'None'}</div>
+                    ${discordInfo.guild_name && discordInfo.channel_name
+                        ? `<div style="font-size:0.9em; color:var(--text-secondary);">Discord sync: ${discordInfo.guild_name} / #${discordInfo.channel_name} · Pending joins: ${session.pending_join_count || 0}</div>`
+                        : ''}
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         ${joined
                             ? `<button onclick="leaveLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#ef4444; color:white; cursor:pointer;">Leave</button>`
@@ -5355,7 +5740,18 @@
                                <button onclick="openInviteUsersModal('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#3b82f6; color:white; cursor:pointer;">Invite Users</button>`
                             : ''}
                     </div>
+                    <div id="live-session-lootbox" style="display:${session.status === 'completed' && session.picked_game ? 'block' : 'none'};"></div>
                     ${renderPickedGameCard(session.picked_game)}
+                    ${pendingJoins.length
+                        ? `<div style="border:1px dashed var(--input-border); border-radius:10px; padding:10px;">
+                               <div style="font-size:0.9em; font-weight:600; color:var(--text-primary); margin-bottom:6px;">Discord onboarding queue</div>
+                               <div style="display:grid; gap:6px;">${pendingJoins.map(join => `
+                                   <div style="font-size:0.85em; color:var(--text-secondary);">
+                                       Discord user <code>${join.discord_user_id}</code> — ${join.status}
+                                   </div>
+                               `).join('')}</div>
+                           </div>`
+                        : ''}
                     <div style="border-top:1px solid var(--input-border); padding-top:10px;">
                         <div style="font-size:0.9em; color:var(--text-primary); font-weight:600; margin-bottom:6px;">Majority Vote</div>
                         <div style="font-size:0.85em; color:var(--text-secondary); margin-bottom:8px;">Need ${required} votes · ✅ ${yesCount} · ❌ ${noCount}</div>
@@ -5368,6 +5764,11 @@
                     </div>
                 </div>
             `;
+            if (session.status === 'completed' && session.picked_game) {
+                playLiveSessionLootboxReveal(session);
+            } else {
+                liveSessionLootboxSessionId = null;
+            }
         }
 
         function subscribeToLiveSession(sessionId) {
@@ -5653,8 +6054,8 @@
         checkIfAdmin(isAdmin => {
             const adminSend = document.getElementById('admin-send-notification');
             if (adminSend) adminSend.style.display = isAdmin ? 'block' : 'none';
-            const adminTabBtn = document.getElementById('admin-tab-btn');
-            if (adminTabBtn) adminTabBtn.style.display = isAdmin ? 'inline-block' : 'none';
+            const adminTabBtn = document.getElementById('nav-admin');
+            if (adminTabBtn) adminTabBtn.style.display = isAdmin ? 'flex' : 'none';
         });
 
         // Load and show site announcement banner
@@ -6045,7 +6446,7 @@
                 const configEl = document.getElementById('diag-config-files');
                 if (configEl) {
                     const config = data.config_file_exists ? '✅ config.json' : '❌ config.json';
-                    const discordConfig = data.discord_config_exists ? '✅ discord_config.json' : '❌ discord_config.json';
+                    const discordConfig = data.discord_config_exists ? '✅ Discord links DB' : '❌ Discord links DB';
                     configEl.innerHTML = `${config} | ${discordConfig}`;
                 }
 

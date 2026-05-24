@@ -24,6 +24,7 @@ services:
       FLASK_DEBUG: "1"
     volumes:
       - .:/app                 # live-reload source edits
+    working_dir: /app          # builder stage WORKDIR is /build; override to where source is mounted
     ports:
       - "127.0.0.1:5000:5000"  # loopback only for dev — change to 0.0.0.0 only if needed for LAN testing
     command: python gapi_gui.py --host 127.0.0.1 --port 5000 --debug

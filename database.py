@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from datetime import datetime, timedelta, timezone
 import logging
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger('gapi.database')
 
@@ -659,6 +660,87 @@ class ExperimentAssignment(Base):
     __table_args__ = (UniqueConstraint('experiment_id', 'username', name='uq_exp_user'),)
 
 
+class DiscordGuildCache(Base):
+    """Cached Discord guild metadata mirrored by the bot for web UI use."""
+    __tablename__ = "discord_guild_cache"
+
+    guild_id = Column(String(50), primary_key=True)
+    name = Column(String(255), nullable=False)
+    icon_url = Column(String(500), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    channels = relationship("DiscordChannelCache", back_populates="guild", cascade="all, delete-orphan")
+
+
+class DiscordChannelCache(Base):
+    """Cached Discord channel metadata mirrored by the bot for web UI use."""
+    __tablename__ = "discord_channel_cache"
+
+    channel_id = Column(String(50), primary_key=True)
+    guild_id = Column(String(50), ForeignKey("discord_guild_cache.guild_id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    channel_type = Column(String(50), default='text')
+    can_send = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    guild = relationship("DiscordGuildCache", back_populates="channels")
+
+
+class DiscordGuildMemberCache(Base):
+    """Cached Discord guild membership for validating web-side session targets."""
+    __tablename__ = "discord_guild_member_cache"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(String(50), nullable=False, index=True)
+    discord_user_id = Column(String(50), nullable=False, index=True)
+    display_name = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('guild_id', 'discord_user_id', name='uq_discord_guild_member'),)
+
+
+class LinkedPickSession(Base):
+    """Persistent web/Discord linked pick session state."""
+    __tablename__ = "linked_pick_sessions"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(String(64), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    host_username = Column(String(255), nullable=False, index=True)
+    host_discord_id = Column(String(50), nullable=False, index=True)
+    status = Column(String(50), default='waiting', index=True)
+    coop_only = Column(Boolean, default=False)
+    round = Column(Integer, default=0)
+    participants_json = Column(Text, default='[]')
+    picked_game_json = Column(Text, default='null')
+    vote_state_json = Column(Text, default='{}')
+    rejected_game_ids_json = Column(Text, default='[]')
+    discord_guild_id = Column(String(50), nullable=False, index=True)
+    discord_guild_name = Column(String(255), nullable=False)
+    discord_channel_id = Column(String(50), nullable=False, index=True)
+    discord_channel_name = Column(String(255), nullable=False)
+    discord_message_id = Column(String(50), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PendingDiscordSessionJoin(Base):
+    """Pending Discord join requests waiting for the user to link an account."""
+    __tablename__ = "pending_discord_session_joins"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(String(64), ForeignKey("linked_pick_sessions.session_id"), nullable=False, index=True)
+    discord_user_id = Column(String(50), nullable=False, index=True)
+    status = Column(String(32), default='pending', index=True)
+    invite_message = Column(Text, nullable=True)
+    linked_username = Column(String(255), nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (UniqueConstraint('session_id', 'discord_user_id', name='uq_pending_discord_session_join'),)
+
+
 def get_db():
     """Get database session."""
     if SessionLocal:
@@ -729,6 +811,470 @@ def get_user_by_username(db, username: str):
     except Exception as e:
         logger.error(f"Error getting user: {e}")
         return None
+
+
+def get_user_by_discord_id(db, discord_id: str):
+    """Get a user by linked Discord ID."""
+    if not db or not discord_id:
+        return None
+    try:
+        return db.query(User).filter(User.discord_id == str(discord_id)).first()
+    except Exception as e:
+        logger.error("Error getting user by discord_id: %s", e)
+        return None
+
+
+def _json_dumps(value: Any, fallback: str) -> str:
+    """Serialize data for text-backed JSON columns."""
+    try:
+        return json.dumps(value)
+    except Exception:
+        return fallback
+
+
+def _json_loads(value: Optional[str], default: Any):
+    """Parse JSON from text-backed columns with a safe default."""
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
+def refresh_discord_location_cache(db, guild_payloads: List[Dict]) -> bool:
+    """Replace the cached guild/channel/member view mirrored from Discord."""
+    if not db:
+        return False
+    try:
+        seen_guild_ids = set()
+        seen_channel_ids = set()
+        seen_memberships = set()
+
+        for payload in guild_payloads or []:
+            guild_id = str(payload.get('guild_id') or '').strip()
+            if not guild_id:
+                continue
+            seen_guild_ids.add(guild_id)
+            guild = db.query(DiscordGuildCache).filter(DiscordGuildCache.guild_id == guild_id).first()
+            if not guild:
+                guild = DiscordGuildCache(guild_id=guild_id)
+                db.add(guild)
+            guild.name = str(payload.get('name') or guild_id)
+            guild.icon_url = payload.get('icon_url') or None
+            guild.updated_at = datetime.utcnow()
+
+            for channel_payload in payload.get('channels', []) or []:
+                channel_id = str(channel_payload.get('channel_id') or '').strip()
+                if not channel_id:
+                    continue
+                seen_channel_ids.add(channel_id)
+                channel = db.query(DiscordChannelCache).filter(DiscordChannelCache.channel_id == channel_id).first()
+                if not channel:
+                    channel = DiscordChannelCache(channel_id=channel_id, guild_id=guild_id)
+                    db.add(channel)
+                channel.guild_id = guild_id
+                channel.name = str(channel_payload.get('name') or channel_id)
+                channel.channel_type = str(channel_payload.get('channel_type') or 'text')
+                channel.can_send = bool(channel_payload.get('can_send', True))
+                channel.updated_at = datetime.utcnow()
+
+            for member_payload in payload.get('members', []) or []:
+                discord_user_id = str(member_payload.get('discord_user_id') or '').strip()
+                if not discord_user_id:
+                    continue
+                key = (guild_id, discord_user_id)
+                seen_memberships.add(key)
+                membership = db.query(DiscordGuildMemberCache).filter(
+                    DiscordGuildMemberCache.guild_id == guild_id,
+                    DiscordGuildMemberCache.discord_user_id == discord_user_id,
+                ).first()
+                if not membership:
+                    membership = DiscordGuildMemberCache(
+                        guild_id=guild_id,
+                        discord_user_id=discord_user_id,
+                    )
+                    db.add(membership)
+                membership.display_name = (member_payload.get('display_name') or '').strip() or None
+                membership.updated_at = datetime.utcnow()
+
+        if seen_guild_ids:
+            for guild in db.query(DiscordGuildCache).all():
+                if guild.guild_id not in seen_guild_ids:
+                    db.delete(guild)
+            for channel in db.query(DiscordChannelCache).all():
+                if channel.channel_id not in seen_channel_ids:
+                    db.delete(channel)
+            for membership in db.query(DiscordGuildMemberCache).all():
+                if (membership.guild_id, membership.discord_user_id) not in seen_memberships:
+                    db.delete(membership)
+
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error("refresh_discord_location_cache error: %s", e)
+        db.rollback()
+        return False
+
+
+def list_discord_locations_for_user(db, discord_user_id: str) -> List[Dict]:
+    """Return guilds/channels the linked Discord user can host sessions in."""
+    if not db or not discord_user_id:
+        return []
+    try:
+        memberships = db.query(DiscordGuildMemberCache).filter(
+            DiscordGuildMemberCache.discord_user_id == str(discord_user_id)
+        ).all()
+        guild_ids = sorted({m.guild_id for m in memberships if m.guild_id})
+        locations = []
+        for guild_id in guild_ids:
+            guild = db.query(DiscordGuildCache).filter(DiscordGuildCache.guild_id == guild_id).first()
+            if not guild:
+                continue
+            channels = db.query(DiscordChannelCache).filter(
+                DiscordChannelCache.guild_id == guild_id,
+                DiscordChannelCache.can_send.is_(True),
+            ).order_by(DiscordChannelCache.name.asc()).all()
+            locations.append({
+                'guild_id': guild.guild_id,
+                'guild_name': guild.name,
+                'icon_url': guild.icon_url or '',
+                'channels': [
+                    {
+                        'channel_id': channel.channel_id,
+                        'channel_name': channel.name,
+                        'channel_type': channel.channel_type,
+                        'can_send': bool(channel.can_send),
+                    }
+                    for channel in channels
+                ],
+            })
+        return locations
+    except Exception as e:
+        logger.error("list_discord_locations_for_user error: %s", e)
+        return []
+
+
+def get_discord_channel_for_user(db, discord_user_id: str, guild_id: str, channel_id: str) -> Optional[Dict]:
+    """Return a validated guild/channel tuple for a linked Discord user."""
+    for guild in list_discord_locations_for_user(db, discord_user_id):
+        if str(guild.get('guild_id')) != str(guild_id):
+            continue
+        for channel in guild.get('channels', []):
+            if str(channel.get('channel_id')) == str(channel_id):
+                return {
+                    'guild_id': str(guild.get('guild_id')),
+                    'guild_name': str(guild.get('guild_name')),
+                    'channel_id': str(channel.get('channel_id')),
+                    'channel_name': str(channel.get('channel_name')),
+                }
+    return None
+
+
+def create_linked_pick_session(
+    db,
+    session_id: str,
+    host_username: str,
+    host_discord_id: str,
+    name: str,
+    discord_location: Dict,
+    coop_only: bool = False,
+):
+    """Create a persistent linked pick session."""
+    if not db or not session_id or not host_username or not host_discord_id:
+        return None
+    try:
+        session = LinkedPickSession(
+            session_id=session_id,
+            host_username=host_username,
+            host_discord_id=str(host_discord_id),
+            name=name or f"{host_username}'s session",
+            status='waiting',
+            coop_only=bool(coop_only),
+            round=0,
+            participants_json=_json_dumps([host_username], '[]'),
+            picked_game_json='null',
+            vote_state_json=_json_dumps({
+                'round': 0,
+                'required_for_majority': 1,
+                'votes_by_user': {},
+                'result': 'pending',
+            }, '{}'),
+            rejected_game_ids_json='[]',
+            discord_guild_id=str(discord_location.get('guild_id') or ''),
+            discord_guild_name=str(discord_location.get('guild_name') or ''),
+            discord_channel_id=str(discord_location.get('channel_id') or ''),
+            discord_channel_name=str(discord_location.get('channel_name') or ''),
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session
+    except Exception as e:
+        logger.error("create_linked_pick_session error: %s", e)
+        db.rollback()
+        return None
+
+
+def get_linked_pick_session(db, session_id: str):
+    """Get a linked pick session by public session ID."""
+    if not db or not session_id:
+        return None
+    try:
+        return db.query(LinkedPickSession).filter(LinkedPickSession.session_id == session_id).first()
+    except Exception as e:
+        logger.error("get_linked_pick_session error: %s", e)
+        return None
+
+
+def get_linked_pick_session_by_message_id(db, message_id: str):
+    """Get a linked pick session by Discord announcement message ID."""
+    if not db or not message_id:
+        return None
+    try:
+        return db.query(LinkedPickSession).filter(
+            LinkedPickSession.discord_message_id == str(message_id)
+        ).first()
+    except Exception as e:
+        logger.error("get_linked_pick_session_by_message_id error: %s", e)
+        return None
+
+
+def list_active_linked_pick_sessions(db) -> List[LinkedPickSession]:
+    """List active linked pick sessions."""
+    if not db:
+        return []
+    try:
+        expire_pending_discord_session_joins(db)
+        return db.query(LinkedPickSession).filter(
+            LinkedPickSession.status.notin_(['completed', 'closed'])
+        ).order_by(LinkedPickSession.created_at.desc()).all()
+    except Exception as e:
+        logger.error("list_active_linked_pick_sessions error: %s", e)
+        return []
+
+
+def get_linked_session_participants(session) -> List[str]:
+    """Return the session participant list."""
+    return list(_json_loads(getattr(session, 'participants_json', None), []))
+
+
+def get_linked_session_vote_state(session) -> Dict:
+    """Return the session vote state."""
+    return dict(_json_loads(getattr(session, 'vote_state_json', None), {}))
+
+
+def get_linked_session_picked_game(session) -> Optional[Dict]:
+    """Return the currently picked game, if any."""
+    game = _json_loads(getattr(session, 'picked_game_json', None), None)
+    return game if isinstance(game, dict) else None
+
+
+def get_linked_session_rejected_game_ids(session) -> List[str]:
+    """Return rejected game IDs for the session."""
+    values = _json_loads(getattr(session, 'rejected_game_ids_json', None), [])
+    return [str(v) for v in values if str(v).strip()]
+
+
+def save_linked_session_state(
+    db,
+    session,
+    *,
+    participants: Optional[List[str]] = None,
+    picked_game: Any = ...,
+    vote_state: Optional[Dict] = None,
+    rejected_game_ids: Optional[List[str]] = None,
+    round: Optional[int] = None,
+    status: Optional[str] = None,
+    coop_only: Optional[bool] = None,
+    host_username: Optional[str] = None,
+    discord_message_id: Optional[str] = None,
+):
+    """Persist linked session state updates."""
+    if not db or not session:
+        return None
+    try:
+        if participants is not None:
+            session.participants_json = _json_dumps(participants, '[]')
+        if picked_game is not ...:
+            session.picked_game_json = _json_dumps(picked_game, 'null') if picked_game is not None else 'null'
+        if vote_state is not None:
+            session.vote_state_json = _json_dumps(vote_state, '{}')
+        if rejected_game_ids is not None:
+            session.rejected_game_ids_json = _json_dumps(rejected_game_ids, '[]')
+        if round is not None:
+            session.round = int(round)
+        if status is not None:
+            session.status = str(status)
+        if coop_only is not None:
+            session.coop_only = bool(coop_only)
+        if host_username is not None:
+            session.host_username = str(host_username)
+        if discord_message_id is not None:
+            session.discord_message_id = str(discord_message_id)
+        session.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(session)
+        return session
+    except Exception as e:
+        logger.error("save_linked_session_state error: %s", e)
+        db.rollback()
+        return None
+
+
+def upsert_pending_discord_session_join(
+    db,
+    session_id: str,
+    discord_user_id: str,
+    invite_message: str = '',
+    expires_in_minutes: int = 5,
+):
+    """Create or refresh a pending Discord join request."""
+    if not db or not session_id or not discord_user_id:
+        return None
+    try:
+        pending = db.query(PendingDiscordSessionJoin).filter(
+            PendingDiscordSessionJoin.session_id == session_id,
+            PendingDiscordSessionJoin.discord_user_id == str(discord_user_id),
+        ).first()
+        if not pending:
+            pending = PendingDiscordSessionJoin(
+                session_id=session_id,
+                discord_user_id=str(discord_user_id),
+            )
+            db.add(pending)
+        pending.status = 'pending'
+        pending.invite_message = invite_message or None
+        pending.linked_username = None
+        pending.completed_at = None
+        pending.expires_at = datetime.utcnow() + timedelta(minutes=max(1, expires_in_minutes))
+        db.commit()
+        db.refresh(pending)
+        return pending
+    except Exception as e:
+        logger.error("upsert_pending_discord_session_join error: %s", e)
+        db.rollback()
+        return None
+
+
+def expire_pending_discord_session_joins(db) -> int:
+    """Expire pending Discord join requests that passed their deadline."""
+    if not db:
+        return 0
+    try:
+        now = datetime.utcnow()
+        pending_rows = db.query(PendingDiscordSessionJoin).filter(
+            PendingDiscordSessionJoin.status == 'pending',
+            PendingDiscordSessionJoin.expires_at < now,
+        ).all()
+        for pending in pending_rows:
+            pending.status = 'expired'
+        if pending_rows:
+            db.commit()
+        return len(pending_rows)
+    except Exception as e:
+        logger.error("expire_pending_discord_session_joins error: %s", e)
+        db.rollback()
+        return 0
+
+
+def list_pending_discord_session_joins(db, session_id: str, active_only: bool = False) -> List[PendingDiscordSessionJoin]:
+    """List pending Discord join rows for a session."""
+    if not db or not session_id:
+        return []
+    try:
+        expire_pending_discord_session_joins(db)
+        query = db.query(PendingDiscordSessionJoin).filter(PendingDiscordSessionJoin.session_id == session_id)
+        if active_only:
+            query = query.filter(PendingDiscordSessionJoin.status == 'pending')
+        return query.order_by(PendingDiscordSessionJoin.created_at.asc()).all()
+    except Exception as e:
+        logger.error("list_pending_discord_session_joins error: %s", e)
+        return []
+
+
+def complete_pending_discord_session_joins_for_user(db, discord_user_id: str, username: str) -> List[str]:
+    """Convert pending Discord joins into real participants after linking."""
+    if not db or not discord_user_id or not username:
+        return []
+    joined_sessions = []
+    try:
+        expire_pending_discord_session_joins(db)
+        pending_rows = db.query(PendingDiscordSessionJoin).filter(
+            PendingDiscordSessionJoin.discord_user_id == str(discord_user_id),
+            PendingDiscordSessionJoin.status == 'pending',
+            PendingDiscordSessionJoin.expires_at >= datetime.utcnow(),
+        ).all()
+        for pending in pending_rows:
+            session = get_linked_pick_session(db, pending.session_id)
+            if not session or session.status in ('completed', 'closed'):
+                pending.status = 'expired'
+                continue
+            participants = get_linked_session_participants(session)
+            if username not in participants:
+                participants.append(username)
+            session.participants_json = _json_dumps(participants, '[]')
+            session.updated_at = datetime.utcnow()
+            pending.status = 'completed'
+            pending.linked_username = username
+            pending.completed_at = datetime.utcnow()
+            joined_sessions.append(session.session_id)
+        if pending_rows:
+            db.commit()
+        return joined_sessions
+    except Exception as e:
+        logger.error("complete_pending_discord_session_joins_for_user error: %s", e)
+        db.rollback()
+        return []
+
+
+def linked_pick_session_to_dict(db, session) -> Dict:
+    """Serialize a linked pick session for API responses and bot updates."""
+    if not session:
+        return {}
+    participants = get_linked_session_participants(session)
+    vote_state = get_linked_session_vote_state(session)
+    votes_by_user = vote_state.get('votes_by_user') or {}
+    pending_rows = list_pending_discord_session_joins(db, session.session_id)
+    pending = [
+        {
+            'discord_user_id': row.discord_user_id,
+            'status': row.status,
+            'linked_username': row.linked_username or '',
+            'expires_at': row.expires_at.isoformat() if row.expires_at else None,
+            'invite_message': row.invite_message or '',
+        }
+        for row in pending_rows
+    ]
+    return {
+        'session_id': session.session_id,
+        'name': session.name,
+        'host': session.host_username,
+        'participants': participants,
+        'status': session.status,
+        'created_at': session.created_at.isoformat() if session.created_at else '',
+        'updated_at': session.updated_at.isoformat() if session.updated_at else '',
+        'picked_game': get_linked_session_picked_game(session),
+        'round': int(session.round or 0),
+        'coop_only': bool(session.coop_only),
+        'vote_state': {
+            'round': int(vote_state.get('round', 0)),
+            'required_for_majority': int(vote_state.get('required_for_majority', 0)),
+            'yes_count': sum(1 for v in votes_by_user.values() if bool(v)),
+            'no_count': sum(1 for v in votes_by_user.values() if not bool(v)),
+            'votes_by_user': votes_by_user,
+            'result': vote_state.get('result', 'pending'),
+        },
+        'discord': {
+            'guild_id': session.discord_guild_id,
+            'guild_name': session.discord_guild_name,
+            'channel_id': session.discord_channel_id,
+            'channel_name': session.discord_channel_name,
+            'message_id': session.discord_message_id or '',
+        },
+        'pending_joins': pending,
+        'pending_join_count': len([row for row in pending if row.get('status') == 'pending']),
+    }
 
 
 def user_exists(db, username: str) -> bool:
