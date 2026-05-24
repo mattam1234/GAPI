@@ -15,6 +15,9 @@
         let currentGame = null;
         let activeVoteSession = null;
         let voteTimerInterval = null;
+        let libraryLoadPromise = Promise.resolve();
+        const PRESENCE_CACHE_TTL_MS = 5 * 60 * 1000;
+        let presenceCache = { friends: [], fetchedAt: 0, error: null };
 
         // ---- Spinner helpers ----
         function showSpinner(label) {
@@ -26,12 +29,18 @@
         }
 
         function handleTopbarSearch(query) {
-            if (!query.trim()) return;
-            const q = query.toLowerCase();
-            void q;
             switchTab('library', null);
             const input = document.getElementById('library-search');
-            if (input) { input.value = query; searchLibraryDebounced(); }
+            if (input) { input.value = query; }
+
+            const trimmed = query.trim();
+            if (!trimmed) {
+                return;
+            }
+
+            libraryLoadPromise
+                .catch(() => {})
+                .then(() => searchLibraryDebounced());
         }
 
         // ---- Dark Mode ----
@@ -146,6 +155,180 @@
                 }
             } catch(e) { console.debug('testPresence error', e); }
         }
+
+        function normalizePresenceFriends(friends) {
+            return Array.isArray(friends) ? friends : [];
+        }
+
+        function updatePresenceCache(friends, error = null) {
+            presenceCache = {
+                friends: normalizePresenceFriends(friends),
+                fetchedAt: Date.now(),
+                error: error || null,
+            };
+        }
+
+        function resetPresenceCache() {
+            presenceCache = { friends: [], fetchedAt: 0, error: null };
+        }
+
+        function getPresenceStatusLabel(friend) {
+            const state = Number(friend && friend.personastate || 0);
+            if (friend && friend.current_game) return 'Playing';
+            return PERSONA_STATE[state] || 'Offline';
+        }
+
+        function getPresenceStatusClass(friend) {
+            const state = Number(friend && friend.personastate || 0);
+            if (friend && friend.current_game) return 'presence-status-online';
+            if (state === 2) return 'presence-status-dnd';
+            if (state === 3 || state === 4) return 'presence-status-idle';
+            if (state > 0) return 'presence-status-online';
+            return 'presence-status-offline';
+        }
+
+        function getPresenceInitials(name) {
+            return String(name || 'G')
+                .trim()
+                .split(/\s+/)
+                .slice(0, 2)
+                .map(part => part ? part[0] : '')
+                .join('')
+                .toUpperCase() || 'G';
+        }
+
+        function getPresenceActivitySummary(friend) {
+            if (friend && friend.current_game) {
+                return `Playing ${friend.current_game}`;
+            }
+            if (friend && friend.recently_played && friend.recently_played.length > 0) {
+                const recent = friend.recently_played[0];
+                const hours = recent.playtime_2weeks ? ` · ${(recent.playtime_2weeks / 60).toFixed(1)}h this week` : '';
+                return `Recently active: ${recent.name || 'Game'}${hours}`;
+            }
+            const state = Number(friend && friend.personastate || 0);
+            return PERSONA_STATE[state] || 'Online now';
+        }
+
+        function renderPresenceEmpty(containerClass, message, detail = '') {
+            return `<div class="${containerClass}">
+                <span>${escapeHtml(message || 'No friends online right now.')}</span>
+                ${detail ? `<span style="font-size:0.85em;">${escapeHtml(detail)}</span>` : ''}
+            </div>`;
+        }
+
+        function renderPresenceAvatarItem(friend) {
+            const name = friend.personaname || 'Friend';
+            const statusClass = getPresenceStatusClass(friend);
+            const avatarMarkup = friend.avatarfull
+                ? `<img src="${escAttr(friend.avatarfull)}" alt="${escapeHtml(name)}" loading="lazy">`
+                : `<span>${escapeHtml(getPresenceInitials(name))}</span>`;
+            return `<div class="presence-avatar-item" title="${escapeHtml(name)} — ${escapeHtml(getPresenceActivitySummary(friend))}">
+                <div class="presence-avatar">
+                    ${avatarMarkup}
+                    <span class="presence-avatar-status ${statusClass}"></span>
+                </div>
+                <div class="presence-avatar-name">${escapeHtml(name)}</div>
+            </div>`;
+        }
+
+        function renderPresenceFriendRow(friend) {
+            const name = friend.personaname || 'Friend';
+            const statusClass = getPresenceStatusClass(friend);
+            const avatarMarkup = friend.avatarfull
+                ? `<img src="${escAttr(friend.avatarfull)}" alt="${escapeHtml(name)}" loading="lazy">`
+                : `<span>${escapeHtml(getPresenceInitials(name))}</span>`;
+            return `<div class="online-friend-row">
+                <div class="online-friend-avatar">
+                    ${avatarMarkup}
+                    <span class="presence-avatar-status ${statusClass}"></span>
+                </div>
+                <div class="online-friend-info">
+                    <div class="online-friend-name-row">
+                        <div class="online-friend-name">${escapeHtml(name)}</div>
+                        <div class="online-friend-status">${escapeHtml(getPresenceStatusLabel(friend))}</div>
+                    </div>
+                    <div class="online-friend-game">${escapeHtml(getPresenceActivitySummary(friend))}</div>
+                </div>
+            </div>`;
+        }
+
+        function renderPresenceContainers(friends, options = {}) {
+            const activeFriends = normalizePresenceFriends(friends)
+                .filter(friend => Number(friend && friend.personastate || 0) > 0 || !!(friend && friend.current_game))
+                .sort((a, b) => {
+                    const aPlaying = !!(a && a.current_game);
+                    const bPlaying = !!(b && b.current_game);
+                    if (aPlaying !== bPlaying) return aPlaying ? -1 : 1;
+                    return Number(b && b.personastate || 0) - Number(a && a.personastate || 0);
+                });
+
+            const stripEl = document.getElementById('presence-avatars');
+            const panelEl = document.getElementById('dash-online-list');
+            const countEl = document.getElementById('presence-count');
+            const emptyTitle = options.emptyTitle || 'No friends online right now.';
+            const emptyDetail = options.emptyDetail || '';
+
+            if (countEl) {
+                countEl.textContent = activeFriends.length ? `${activeFriends.length} online` : '';
+            }
+            if (stripEl) {
+                stripEl.innerHTML = activeFriends.length
+                    ? activeFriends.map(renderPresenceAvatarItem).join('')
+                    : renderPresenceEmpty('presence-empty', emptyTitle, emptyDetail);
+            }
+            if (panelEl) {
+                panelEl.innerHTML = activeFriends.length
+                    ? activeFriends.map(renderPresenceFriendRow).join('')
+                    : renderPresenceEmpty('dash-empty', emptyTitle, emptyDetail);
+            }
+
+            return activeFriends;
+        }
+
+        async function updatePresenceStrip(force = false) {
+            const stripEl = document.getElementById('presence-avatars');
+            const panelEl = document.getElementById('dash-online-list');
+            if (!stripEl && !panelEl) return [];
+
+            const cacheAge = Date.now() - (presenceCache.fetchedAt || 0);
+            const hasFreshCache = Array.isArray(presenceCache.friends)
+                && presenceCache.fetchedAt
+                && cacheAge < PRESENCE_CACHE_TTL_MS;
+
+            let friends = hasFreshCache ? presenceCache.friends : [];
+            let emptyTitle = 'No friends online right now.';
+            let emptyDetail = presenceCache.error || '';
+
+            if (force || !hasFreshCache) {
+                try {
+                    const response = await safeFetch('/api/friends');
+                    if (response.status === 503) {
+                        const data = await response.json();
+                        emptyTitle = 'Friend activity is unavailable.';
+                        emptyDetail = data.error || 'Steam is not configured, or the profile is private.';
+                        updatePresenceCache([], emptyDetail);
+                        friends = [];
+                    } else if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    } else {
+                        const data = await response.json();
+                        friends = normalizePresenceFriends(data.friends);
+                        updatePresenceCache(friends, null);
+                        emptyDetail = '';
+                    }
+                } catch (error) {
+                    if (!friends.length) {
+                        emptyTitle = 'Friend activity could not be loaded.';
+                        emptyDetail = error.message || 'Please try again later.';
+                        presenceCache.error = emptyDetail;
+                    }
+                }
+            }
+
+            renderPresenceContainers(friends, { emptyTitle, emptyDetail });
+            return friends;
+        }
         // Restore saved theme on load
         (function() {
             const saved = localStorage.getItem('gapi_theme') || 'light';
@@ -205,6 +388,13 @@
             if (statsContent) statsContent.innerHTML = '';
             // Clear game details cache so no cross-user data leaks
             clearGameDetailsCache();
+            resetPresenceCache();
+            const presenceCount = document.getElementById('presence-count');
+            if (presenceCount) presenceCount.textContent = '';
+            const topbarSearch = document.getElementById('topbar-search');
+            if (topbarSearch) topbarSearch.value = '';
+            const librarySearch = document.getElementById('library-search');
+            if (librarySearch) librarySearch.value = '';
             // Reset status bar
             const statusEl = document.getElementById('status');
             if (statusEl) statusEl.textContent = 'Please sign in';
@@ -359,7 +549,7 @@
                 return;
             }
 
-            if (tabName === 'library') loadLibrary();
+            if (tabName === 'library') libraryLoadPromise = Promise.resolve(loadLibrary());
             if (tabName === 'favorites') loadFavorites();
             if (tabName === 'stats') {
                 loadStats();
@@ -3928,12 +4118,16 @@
                 const response = await fetch('/api/friends');
                 if (response.status === 503) {
                     const data = await response.json();
+                    updatePresenceCache([], data.error || 'Steam is not configured.');
+                    renderPresenceContainers([], {
+                        emptyTitle: 'Friend activity is unavailable.',
+                        emptyDetail: data.error || 'Steam is not configured.'
+                    });
                     listDiv.innerHTML = `<div style="padding:20px; color:var(--text-secondary);">⚠️ ${data.error || 'Steam not configured. Add your Steam ID in ⚙️ Settings.'}</div>`;
                     return;
                 }
                 const data = await response.json();
-                presenceCache.friends = data.friends || [];
-                presenceCache.timestamp = Date.now();
+                updatePresenceCache(data.friends || []);
                 void updatePresenceStrip();
                 if (!data.friends || data.friends.length === 0) {
                     listDiv.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No friends found, or your friend list is private.</div>';
@@ -6598,39 +6792,22 @@
                 return;
             }
             if (_libraryView === 'grid') {
-                let html = '<div class="library-grid">';
-                data.games.forEach(game => {
-                    const safeName = escapeHtml(game.name || '');
-                    const safeNameJs = (game.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/`/g, '\\`');
-                    const coverSrc = getGameThumbUrl(game.app_id);
-                    const favIcon = game.is_favorite ? '⭐' : '☆';
-                    html += `
-                        <div class="game-card" onclick="showGameDetails(${game.app_id}, '${safeNameJs}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
-                            <img class="game-card-cover" src="${coverSrc}"
-                                 onerror="handleMissingCover(this)"
-                                 alt="${safeName}" loading="lazy">
-                            <div class="game-card-body">
-                                <div class="game-card-title" title="${safeName}">${safeName}</div>
-                                <div class="game-card-meta">
-                                    <span>${game.playtime_hours || 0}h</span>
-                                    <span onclick="event.stopPropagation(); toggleFavorite(${game.app_id})" style="cursor:pointer;">${favIcon}</span>
-                                </div>
-                            </div>
-                        </div>`;
-                });
-                html += '</div>';
-                listDiv.innerHTML = html;
+                listDiv.innerHTML = `<div class="library-grid">${data.games.map(game => renderGameCard(game)).join('')}</div>`;
             } else {
                 // Original list view
                 let html = '';
                 data.games.forEach(game => {
                     const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
                     const safeNameJs = (game.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/`/g, '\\`');
+                    const platformBadges = renderInlinePlatformBadges(game);
                     html += `
                         <div class="list-item" style="cursor:pointer;" onclick="showGameDetails(${game.app_id}, '${safeNameJs}', ${game.playtime_hours || 0}, '${(game.tags || []).join(', ')}')">
                             <div class="list-item-media">
                                 ${renderGameListThumb(game.app_id, game.name)}
-                                <div>${favoriteIcon}<strong class="list-item-title">${game.name}</strong></div>
+                                <div>
+                                    ${favoriteIcon}<strong class="list-item-title">${game.name}</strong>
+                                    ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px;">${platformBadges}</div>` : ''}
+                                </div>
                             </div>
                             <div style="display:flex; gap:8px; align-items:center;">
                                 <span>${game.playtime_hours}h</span>
