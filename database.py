@@ -1341,13 +1341,19 @@ def ensure_role(db, role_name: str) -> Role:
     """Ensure a role exists and return it."""
     if not db:
         return None
-    role = db.query(Role).filter(Role.name == role_name).first()
-    if role:
+    try:
+        with db.no_autoflush:
+            role = db.query(Role).filter(Role.name == role_name).first()
+            if role:
+                return role
+            role = Role(name=role_name)
+            db.add(role)
+        db.flush()
         return role
-    role = Role(name=role_name)
-    db.add(role)
-    db.commit()
-    return role
+    except Exception as e:
+        logger.error(f"Error ensuring role {role_name}: {e}")
+        db.rollback()
+        return None
 
 
 def get_user_roles(db, username: str) -> list:
@@ -1369,6 +1375,7 @@ def get_roles(db) -> list:
         return [r.name for r in roles]
     except Exception as e:
         logger.error(f"Error getting roles: {e}")
+        db.rollback()
         return []
 
 
@@ -1589,6 +1596,7 @@ def get_user_count(db) -> int:
         return db.query(User).count()
     except Exception as e:
         logger.error(f"Error getting user count: {e}")
+        db.rollback()
         return 0
 
 
