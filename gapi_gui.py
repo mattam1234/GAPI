@@ -11206,7 +11206,8 @@ def _start_managed_discord_bot(config_path: str) -> Tuple[bool, Optional[subproc
             _discord_bot_process = proc
             _discord_bot_log_lines.clear()
         except OSError as exc:
-            return False, None, f'Failed to start bot: {exc}'
+            gui_logger.warning('Failed to start managed Discord bot: %s', exc)
+            return False, None, 'Failed to start bot'
 
     t = threading.Thread(target=_capture_bot_output, args=(proc,), daemon=True)
     t.start()
@@ -11431,6 +11432,7 @@ def api_discord_bot_restart():
     Expects optional JSON body with ``config_path``.
     Returns ``{'restarted': True, 'pid': <pid>}`` on success.
     """
+    global _discord_bot_process
     data = request.get_json(silent=True) or {}
     try:
         config_path = _validate_repo_config_path(data.get('config_path', DEFAULT_CONFIG_PATH))

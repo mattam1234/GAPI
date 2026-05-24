@@ -84,3 +84,5 @@ history_export.json
 *.log
 test_results.txt
 discord_bot_changes.txt
+.coverage
+coverage.xml
