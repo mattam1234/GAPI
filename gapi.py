@@ -1262,7 +1262,8 @@ class GamePicker:
         count: int = 10,
         platforms: Optional[List[str]] = None,
         max_budget: Optional[float] = None,
-        include_new_releases: bool = False
+        include_new_releases: bool = False,
+        refresh_seed: Optional[str] = None
     ) -> List[Dict]:
         """Recommend games from the user's library based on playtime and genre patterns.
 
@@ -1284,6 +1285,7 @@ class GamePicker:
             platforms: List of platforms to filter by. If None, includes all platforms.
             max_budget: Maximum game price to consider. If None, no budget filtering.
             include_new_releases: If True, boost scores for recently released games.
+            refresh_seed: Optional refresh token used to vary the returned list.
 
         Returns:
             List of game dicts enriched with ``recommendation_score`` (float) and
@@ -1443,6 +1445,20 @@ class GamePicker:
             })
 
         scored.sort(key=lambda x: x['score'], reverse=True)
+
+        if refresh_seed is not None and len(scored) > count:
+            rng = random.Random(str(refresh_seed))
+            pool_size = min(len(scored), max(count * 3, count + 5))
+            pool = scored[:pool_size]
+            selected: List[Dict] = []
+            available = list(pool)
+            while available and len(selected) < count:
+                weights = [max(item['score'], 0.0) + 1.0 for item in available]
+                choice_idx = rng.choices(range(len(available)), weights=weights, k=1)[0]
+                selected.append(available.pop(choice_idx))
+            selected.sort(key=lambda x: x['score'], reverse=True)
+            picked_ids = {id(item) for item in selected}
+            scored = selected + [item for item in scored if id(item) not in picked_ids]
 
         # ------------------------------------------------------------------
         # Step 4: build return list

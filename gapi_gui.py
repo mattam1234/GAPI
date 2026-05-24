@@ -3153,14 +3153,20 @@ def api_favorites():
             if game:
                 favorites.append({
                     'app_id': app_id,
+                    'game_id': game.get('game_id') or f"steam:{app_id}",
                     'name': game.get('name', 'Unknown'),
-                    'playtime_hours': round(game.get('playtime_hours', 0), 1)
+                    'playtime_hours': round(game.get('playtime_hours', 0), 1),
+                    'platform': game.get('platform', 'steam'),
+                    'tags': game.get('tags', []),
                 })
             else:
                 favorites.append({
                     'app_id': app_id,
+                    'game_id': f"steam:{app_id}",
                     'name': f'App ID {app_id} (Not in library)',
-                    'playtime_hours': 0
+                    'playtime_hours': 0,
+                    'platform': 'steam',
+                    'tags': [],
                 })
 
         return jsonify({'favorites': favorites})
@@ -6111,6 +6117,7 @@ def api_get_recommendations():
 
     # Parse new releases flag
     include_new = request.args.get('include_new', '').lower() in ('true', '1', 'yes')
+    refresh_seed = request.args.get('refresh_seed', '').strip() or None
 
     try:
         with picker_lock:
@@ -6118,7 +6125,8 @@ def api_get_recommendations():
                 count=count,
                 platforms=platforms,
                 max_budget=max_budget,
-                include_new_releases=include_new
+                include_new_releases=include_new,
+                refresh_seed=refresh_seed
             )
     except TypeError as e:
         # Fallback: try calling without new parameters for backward compatibility
