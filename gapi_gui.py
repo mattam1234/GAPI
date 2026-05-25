@@ -5478,6 +5478,7 @@ def api_schedule_common_games():
 
     data = request.json or {}
     attendees_raw = data.get('attendees', [])
+    collection_id = str(data.get('collection_id') or data.get('list_id') or '').strip()
     if isinstance(attendees_raw, str):
         attendees = [value.strip() for value in attendees_raw.split(',') if value.strip()]
     else:
@@ -5519,6 +5520,15 @@ def api_schedule_common_games():
                 ) in current_ids
             ]
 
+    if collection_id:
+        service = _get_shared_backlog_service()
+        resolved_collection_id = service.resolve_collection_for_user(collection_id, username)
+        candidate_games = service.get_games(
+            candidate_games,
+            username=username,
+            collection_id=resolved_collection_id,
+        )
+
     games = []
     for game in candidate_games[:100]:
         app_id = str(game.get('appid') or game.get('app_id') or '').strip()
@@ -5534,7 +5544,12 @@ def api_schedule_common_games():
             ),
         })
 
-    return jsonify({'games': games, 'count': len(games), 'attendees': attendees})
+    return jsonify({
+        'games': games,
+        'count': len(games),
+        'attendees': attendees,
+        'collection_id': collection_id,
+    })
 
 
 @app.route('/api/schedule/common-games/random', methods=['POST'])
@@ -5552,6 +5567,7 @@ def api_schedule_random_common_game():
 
     data = request.json or {}
     attendees_raw = data.get('attendees', [])
+    collection_id = str(data.get('collection_id') or data.get('list_id') or '').strip()
     if isinstance(attendees_raw, str):
         attendees = [value.strip() for value in attendees_raw.split(',') if value.strip()]
     else:
@@ -5589,6 +5605,15 @@ def api_schedule_random_common_game():
                 ) in current_ids
             ]
 
+    if collection_id:
+        service = _get_shared_backlog_service()
+        resolved_collection_id = service.resolve_collection_for_user(collection_id, username)
+        candidate_games = service.get_games(
+            candidate_games,
+            username=username,
+            collection_id=resolved_collection_id,
+        )
+
     if not candidate_games:
         return jsonify({'error': 'No games found in your library'}), 404
 
@@ -5608,6 +5633,7 @@ def api_schedule_random_common_game():
             ),
         },
         'attendees': attendees,
+        'collection_id': collection_id,
     })
 
 

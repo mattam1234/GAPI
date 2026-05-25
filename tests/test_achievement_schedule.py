@@ -458,5 +458,65 @@ class TestScheduleIcalSyncRoutes(unittest.TestCase):
         self.assertEqual(resp.headers['Content-Type'], 'text/calendar; charset=utf-8')
 
 
+class TestScheduleCommonGamePickerRoutes(unittest.TestCase):
+
+    def setUp(self):
+        gapi_gui.app.config['TESTING'] = True
+        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        self.client = gapi_gui.app.test_client()
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'alice'
+
+    @staticmethod
+    def _fake_picker_with_games():
+        return SimpleNamespace(games=[
+            {'appid': '620', 'name': 'Portal 2', 'platform': 'steam', 'owners': ['alice']},
+            {'appid': '440', 'name': 'Team Fortress 2', 'platform': 'steam', 'owners': ['alice']},
+        ])
+
+    def test_common_games_uses_selected_list_when_no_attendees(self):
+        class FakeBacklogService:
+            def resolve_collection_for_user(self, requested_collection_id, username):
+                return requested_collection_id
+
+            def get_games(self, all_games, status=None, username=None, collection_id=None):
+                if collection_id == 'list-coop':
+                    return [all_games[1]]
+                return all_games
+
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker_with_games()):
+            with patch.object(gapi_gui, '_get_shared_backlog_service', return_value=FakeBacklogService()):
+                resp = self.client.post('/api/schedule/common-games', json={
+                    'attendees': [],
+                    'collection_id': 'list-coop',
+                })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(data['games'][0]['app_id'], '440')
+        self.assertEqual(data['collection_id'], 'list-coop')
+
+    def test_random_common_game_uses_selected_list_when_no_attendees(self):
+        class FakeBacklogService:
+            def resolve_collection_for_user(self, requested_collection_id, username):
+                return requested_collection_id
+
+            def get_games(self, all_games, status=None, username=None, collection_id=None):
+                if collection_id == 'list-coop':
+                    return [all_games[0]]
+                return all_games
+
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker_with_games()):
+            with patch.object(gapi_gui, '_get_shared_backlog_service', return_value=FakeBacklogService()):
+                resp = self.client.post('/api/schedule/common-games/random', json={
+                    'attendees': [],
+                    'collection_id': 'list-coop',
+                })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data['game']['app_id'], '620')
+        self.assertEqual(data['collection_id'], 'list-coop')
+
+
 if __name__ == '__main__':
     unittest.main()
