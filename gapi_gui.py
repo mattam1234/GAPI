@@ -4681,6 +4681,32 @@ def api_update_schedule(schedule_id: str):
     return jsonify(schedule)
 
 
+@app.route('/api/schedules/<schedule_id>', methods=['DELETE'])
+@require_login
+def api_delete_schedule(schedule_id: str):
+    """Delete a schedule collection owned by the current user."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+    safe_schedule_id = str(schedule_id or '').strip()
+    if not safe_schedule_id:
+        return jsonify({'error': 'Schedule not found'}), 404
+    default_schedule_id = f'personal:{str(username or "").strip().lower()}'
+    with picker_lock:
+        schedule = p.schedule_service.get_schedule(safe_schedule_id)
+        if not schedule or not p.schedule_service._can_access_schedule(schedule, username):
+            return jsonify({'error': 'Schedule not found'}), 404
+        if str(schedule.get('owner') or '').strip().lower() != str(username or '').strip().lower():
+            return jsonify({'error': 'Only the schedule owner can delete it'}), 403
+        if safe_schedule_id == default_schedule_id:
+            return jsonify({'error': 'Your personal schedule cannot be deleted'}), 400
+        deleted = p.schedule_service.remove_schedule(safe_schedule_id, username=username)
+    if not deleted:
+        return jsonify({'error': 'Schedule not found'}), 404
+    return jsonify({'success': True})
+
+
 @app.route('/api/schedule', methods=['POST'])
 @require_login
 def api_create_event():
@@ -5124,6 +5150,8 @@ def api_search_games():
             'appid': str(game.get('appid') or game.get('app_id', '')),
             'image_url': image_url,
             'platform': game.get('platform', 'steam'),
+            'playtime_hours': round((game.get('playtime_hours') or (game.get('playtime_forever', 0) / 60) or 0), 1),
+            'genres': game.get('genres', []) if isinstance(game.get('genres', []), list) else [],
         })
     
     gui_logger.debug(f'Game search for "{query}" returned {len(clean_results)} results')

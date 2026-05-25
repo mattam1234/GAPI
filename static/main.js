@@ -594,7 +594,6 @@
             }
             if (tabName === 'schedule') loadSchedule();
             if (tabName === 'backlog') {
-                loadPlaylists();
                 loadBacklog();
             }
             if (tabName === 'ignored') loadIgnoredGames();
@@ -1227,6 +1226,7 @@
                 if (!status) {
                     const query = safeCollectionId ? `?collection_id=${encodeURIComponent(safeCollectionId)}` : '';
                     await safeFetch(`/api/backlog/${gameId}${query}`, {method:'DELETE'});
+                    scheduleGameFilterCacheReady = false;
                     return true;
                 } else {
                     await safeFetch(`/api/backlog/${gameId}`, {
@@ -1234,6 +1234,7 @@
                         headers: {'Content-Type':'application/json'},
                         body: JSON.stringify({status, collection_id: safeCollectionId || null})
                     });
+                    scheduleGameFilterCacheReady = false;
                     return true;
                 }
             } catch (e) {
@@ -1463,8 +1464,7 @@
                                     <span title="Favorite" style="cursor:pointer; font-size:1.2em;" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                         ${game.is_favorite ? '⭐' : '☆'}
                                     </span>
-                                    <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id}', '${safeName}')">📋</span>
-                                    <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
+                                    <span title="Add to List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id}', '${safeName}')">📚</span>
                                     <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeName}')">🚫</span>
                                 </div>
                             </div>
@@ -1796,8 +1796,7 @@
                         </div>
                         <div style="display:flex; gap:8px; align-items:center;">
                             <span>${game.playtime_hours}h</span>
-                            <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id || game.app_id}', '${safeName}')">📋</span>
-                            <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || game.app_id}', '${safeName}')">📚</span>
+                            <span title="Add to List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || game.app_id}', '${safeName}')">📚</span>
                             <button class="btn btn-favorite" style="padding: 5px 10px; font-size:0.85em;"
                                     onclick="event.stopPropagation(); removeFavorite(${game.app_id})">Remove</button>
                         </div>
@@ -2796,6 +2795,15 @@
         let scheduleCommonGamesCache = [];
         let scheduleIcalSyncInfo = null;
         let scheduleMemberSearchTimeout;
+        let scheduleGameSearchCache = [];
+        let scheduleGameLibraryCache = [];
+        let scheduleGameLibraryById = new Map();
+        let scheduleGameFavoriteIds = new Set();
+        let scheduleGameBacklogIndex = new Map();
+        let scheduleBacklogCollectionChoices = [];
+        let scheduleGameFilterCacheReady = false;
+        let backlogLibraryQuickAddData = [];
+        let backlogLibraryQuickAddSelectedGameId = '';
 
         function normalizeScheduleDurationMinutes(value, fallback = DEFAULT_SCHEDULE_DURATION_MINUTES) {
             const parsed = parseInt(value, 10);
@@ -3079,6 +3087,24 @@
             return scheduleCollectionsCache.find(schedule => schedule.id === activeScheduleId) || null;
         }
 
+        function getScheduleCurrentUsername() {
+            const raw = document.getElementById('current-username')?.textContent
+                || document.getElementById('sidebar-username')?.textContent
+                || '';
+            return raw.trim();
+        }
+
+        function isOwnedSchedule(schedule) {
+            if (!schedule) return false;
+            return String(schedule.owner || '').trim().toLowerCase() === getScheduleCurrentUsername().toLowerCase();
+        }
+
+        function isDefaultSchedule(schedule) {
+            const currentUsername = getScheduleCurrentUsername().toLowerCase();
+            if (!schedule || !currentUsername) return false;
+            return String(schedule.id || '').trim().toLowerCase() === `personal:${currentUsername}`;
+        }
+
         function getFilteredScheduleCollections() {
             const query = getFilterValue('schedule-selector-search').trim().toLowerCase();
             if (!query) return scheduleCollectionsCache;
@@ -3196,6 +3222,7 @@
 
         function openScheduleCreateModal() {
             clearScheduleForm();
+            void ensureScheduleGameFilterData();
             const modal = document.getElementById('schedule-modal');
             if (modal) modal.style.display = 'flex';
             setScheduleBodyLock();
@@ -3275,6 +3302,7 @@
         function renderScheduleSelector() {
             const selector = document.getElementById('schedule-selector');
             const renameButton = document.getElementById('schedule-rename-btn');
+            const deleteButton = document.getElementById('schedule-delete-btn');
             const visibleSchedules = getFilteredScheduleCollections();
             if (!selector) return;
             if (!scheduleCollectionsCache.length) {
@@ -3282,6 +3310,7 @@
                 selector.value = '';
                 activeScheduleId = '';
                 if (renameButton) renameButton.disabled = true;
+                 if (deleteButton) deleteButton.disabled = true;
                 updateScheduleSidebarMeta([]);
                 return;
             }
@@ -3289,6 +3318,7 @@
                 selector.innerHTML = '<option value="">No matching schedules</option>';
                 selector.value = '';
                 if (renameButton) renameButton.disabled = !activeScheduleId;
+                if (deleteButton) deleteButton.disabled = !activeScheduleId;
                 updateScheduleSidebarMeta([]);
                 return;
             }
@@ -3303,7 +3333,9 @@
                 activeScheduleId = scheduleCollectionsCache[0].id || '';
             }
             selector.value = visibleSchedules.some(schedule => schedule.id === activeScheduleId) ? (activeScheduleId || '') : '';
-            if (renameButton) renameButton.disabled = !activeScheduleId;
+            const active = getActiveSchedule();
+            if (renameButton) renameButton.disabled = !active || !isOwnedSchedule(active);
+            if (deleteButton) deleteButton.disabled = !active || !isOwnedSchedule(active) || isDefaultSchedule(active);
             updateScheduleSidebarMeta(visibleSchedules);
         }
 
@@ -3783,6 +3815,210 @@
             }
         }
 
+        async function deleteActiveSchedule() {
+            const active = getActiveSchedule();
+            if (!active) return;
+            if (isDefaultSchedule(active)) {
+                showMessage('Your personal schedule cannot be deleted.', 'warning');
+                return;
+            }
+            if (!isOwnedSchedule(active)) {
+                showMessage('Only the schedule owner can delete it.', 'warning');
+                return;
+            }
+            if (!confirm(`Delete schedule "${active.name}" and all of its events?`)) return;
+            try {
+                const resp = await safeFetch(`/api/schedules/${encodeURIComponent(active.id)}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to delete schedule.', 'error');
+                    return;
+                }
+                activeScheduleId = '';
+                await loadSchedule();
+                showMessage('Schedule deleted.', 'success');
+            } catch (error) {
+                showMessage(`Error deleting schedule: ${error.message}`, 'error');
+            }
+        }
+
+        function buildScheduleGameLookupKeys(game) {
+            const keys = [];
+            const appId = String(game?.appid || game?.app_id || '').trim();
+            const gameId = String(game?.game_id || '').trim().toLowerCase();
+            if (appId) keys.push(appId);
+            if (gameId) keys.push(gameId);
+            return keys;
+        }
+
+        function getScheduleGameFromLibrary(game) {
+            const keys = buildScheduleGameLookupKeys(game);
+            for (const key of keys) {
+                if (scheduleGameLibraryById.has(key)) return scheduleGameLibraryById.get(key);
+            }
+            return null;
+        }
+
+        function getScheduleGameBacklogCollectionIds(game) {
+            const keys = buildScheduleGameLookupKeys(game);
+            const ids = new Set();
+            keys.forEach(key => {
+                const values = scheduleGameBacklogIndex.get(key) || [];
+                values.forEach(value => ids.add(value));
+            });
+            return Array.from(ids);
+        }
+
+        async function ensureScheduleGameLibraryCache(force = false) {
+            if (!force && scheduleGameLibraryCache.length) return scheduleGameLibraryCache;
+            const resp = await safeFetch('/api/library');
+            const data = await resp.json();
+            scheduleGameLibraryCache = Array.isArray(data.games) ? data.games : [];
+            scheduleGameLibraryById = new Map();
+            scheduleGameFavoriteIds = new Set();
+            scheduleGameLibraryCache.forEach(game => {
+                const appId = String(game.app_id || game.appid || '').trim();
+                const gameId = String(game.game_id || '').trim().toLowerCase();
+                if (appId) scheduleGameLibraryById.set(appId, game);
+                if (gameId) scheduleGameLibraryById.set(gameId, game);
+                if (game.is_favorite && appId) scheduleGameFavoriteIds.add(appId);
+            });
+            return scheduleGameLibraryCache;
+        }
+
+        async function ensureScheduleGameBacklogFilterCache(force = false) {
+            if (!force && scheduleGameFilterCacheReady) {
+                return scheduleBacklogCollectionChoices;
+            }
+            const collectionsResp = await safeFetch('/api/backlogs');
+            const collectionsData = await collectionsResp.json();
+            scheduleBacklogCollectionChoices = Array.isArray(collectionsData.backlogs) ? collectionsData.backlogs : [];
+            scheduleGameBacklogIndex = new Map();
+            await Promise.all(scheduleBacklogCollectionChoices.map(async backlog => {
+                const collectionId = String(backlog.id || '').trim();
+                if (!collectionId) return;
+                try {
+                    const resp = await safeFetch(`/api/backlog?collection_id=${encodeURIComponent(collectionId)}`);
+                    const data = await resp.json();
+                    const games = Array.isArray(data.games) ? data.games : [];
+                    games.forEach(game => {
+                        buildScheduleGameLookupKeys(game).forEach(key => {
+                            if (!key) return;
+                            const current = scheduleGameBacklogIndex.get(key) || [];
+                            if (!current.includes(collectionId)) current.push(collectionId);
+                            scheduleGameBacklogIndex.set(key, current);
+                        });
+                    });
+                } catch (error) {
+                    console.warn('Schedule backlog filter cache failed:', error.message);
+                }
+            }));
+            scheduleGameFilterCacheReady = true;
+            return scheduleBacklogCollectionChoices;
+        }
+
+        async function ensureScheduleGameFilterData(force = false) {
+            await Promise.all([
+                ensureScheduleGameLibraryCache(force),
+                ensureScheduleGameBacklogFilterCache(force),
+            ]);
+            const listSelect = document.getElementById('sch-game-list-filter');
+            if (listSelect) {
+                const currentValue = listSelect.value || '';
+                listSelect.innerHTML = `<option value="">Any list</option>${scheduleBacklogCollectionChoices.map(backlog => `
+                    <option value="${escAttr(backlog.id || '')}">${escapeHtml(backlog.name || 'List')}</option>
+                `).join('')}`;
+                listSelect.value = scheduleBacklogCollectionChoices.some(backlog => String(backlog.id || '') === currentValue) ? currentValue : '';
+            }
+            const platformSelect = document.getElementById('sch-game-platform-filter');
+            if (platformSelect) {
+                const currentValue = platformSelect.value || '';
+                const platforms = Array.from(new Set(scheduleGameLibraryCache
+                    .map(game => normalisePlatformKey(game.platform))
+                    .filter(Boolean))).sort();
+                platformSelect.innerHTML = `<option value="">Any platform</option>${platforms.map(platform => `
+                    <option value="${escAttr(platform)}">${escapeHtml(platform.charAt(0).toUpperCase() + platform.slice(1))}</option>
+                `).join('')}`;
+                platformSelect.value = platforms.includes(currentValue) ? currentValue : '';
+            }
+        }
+
+        function filterScheduleSearchResults(results) {
+            const listFilter = String(document.getElementById('sch-game-list-filter')?.value || '').trim();
+            const platformFilter = normalisePlatformKey(document.getElementById('sch-game-platform-filter')?.value || '');
+            const genreFilter = String(document.getElementById('sch-game-genre-filter')?.value || '').trim().toLowerCase();
+            const minPlaytimeValue = parseFloat(document.getElementById('sch-game-min-playtime')?.value || '');
+            const maxPlaytimeValue = parseFloat(document.getElementById('sch-game-max-playtime')?.value || '');
+            const favoritesOnly = !!document.getElementById('sch-game-favorites-only')?.checked;
+            return (results || []).filter(game => {
+                const collectionIds = Array.isArray(game.list_ids) ? game.list_ids : [];
+                if (listFilter && !collectionIds.includes(listFilter)) return false;
+                const platform = normalisePlatformKey(game.platform || '');
+                if (platformFilter && platform !== platformFilter) return false;
+                const genres = Array.isArray(game.genres) ? game.genres : [];
+                if (genreFilter && !genres.some(genre => String(genre || '').toLowerCase().includes(genreFilter))) return false;
+                const playtime = Number(game.playtime_hours || 0);
+                if (Number.isFinite(minPlaytimeValue) && playtime < minPlaytimeValue) return false;
+                if (Number.isFinite(maxPlaytimeValue) && playtime > maxPlaytimeValue) return false;
+                if (favoritesOnly && !game.is_favorite) return false;
+                return true;
+            });
+        }
+
+        function renderScheduleGameSearchResults(results) {
+            const dropdown = document.getElementById('game-search-dropdown');
+            if (!dropdown) return;
+            if (!results.length) {
+                dropdown.innerHTML = '<div style="padding:10px; color:var(--text-secondary);">No games match your filters</div>';
+                dropdown.style.display = 'block';
+                return;
+            }
+            dropdown.innerHTML = results.map(game => `
+                <div class="game-search-result" data-appid="${escAttr(game.appid || '')}" data-name="${escAttr(game.name || '')}" data-image-url="${escAttr(game.image_url || '')}"
+                     style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); display:flex; align-items:center; gap:8px; transition:background 0.2s;">
+                    ${game.image_url ? `<img src="${escAttr(game.image_url)}" alt="" style="width:40px; height:24px; object-fit:cover; border-radius:var(--radius-tag,4px);">` : ''}
+                    <div style="min-width:0;">
+                        <strong>${escapeHtml(game.name || '')}</strong>
+                        <div style="font-size:0.8em; color:var(--text-secondary); margin-top:2px;">
+                            <span>App ID: ${escapeHtml(String(game.appid || ''))}</span>
+                            ${game.playtime_hours ? `<span> · ${escapeHtml(String(game.playtime_hours))}h</span>` : ''}
+                            ${game.platform ? `<span> · ${escapeHtml(String(game.platform))}</span>` : ''}
+                            ${game.is_favorite ? '<span> · ⭐ favorite</span>' : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            dropdown.querySelectorAll('.game-search-result').forEach(el => {
+                el.onclick = () => selectGame(el.dataset.appid, el.dataset.name, el.dataset.imageUrl);
+            });
+            dropdown.style.display = 'block';
+        }
+
+        function applyScheduleGameFilters() {
+            const query = document.getElementById('sch-game')?.value.trim() || '';
+            const dropdown = document.getElementById('game-search-dropdown');
+            if (!query || query.length < 2 || !dropdown) return;
+            const filteredResults = filterScheduleSearchResults(scheduleGameSearchCache);
+            renderScheduleGameSearchResults(filteredResults);
+        }
+
+        function resetScheduleGameFilters() {
+            const ids = [
+                'sch-game-list-filter',
+                'sch-game-platform-filter',
+                'sch-game-genre-filter',
+                'sch-game-min-playtime',
+                'sch-game-max-playtime'
+            ];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            const favoritesOnly = document.getElementById('sch-game-favorites-only');
+            if (favoritesOnly) favoritesOnly.checked = false;
+            applyScheduleGameFilters();
+        }
+
         let gameSearchTimeout;
         async function searchGames(query) {
             clearTimeout(gameSearchTimeout);
@@ -3793,33 +4029,31 @@
 
             gameSearchTimeout = setTimeout(async () => {
                 try {
+                    await ensureScheduleGameFilterData();
                     const resp = await fetch('/api/schedule/search-games', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({query: query, limit: 10})
+                        body: JSON.stringify({query: query, limit: 25})
                     });
                     if (!resp.ok) return;
                     const data = await resp.json();
-                    const dropdown = document.getElementById('game-search-dropdown');
-                    if (!data.results || data.results.length === 0) {
-                        dropdown.innerHTML = '<div style="padding:10px; color:var(--text-secondary);">No games found</div>';
-                        dropdown.style.display = 'block';
-                        return;
-                    }
-                    dropdown.innerHTML = data.results.map(game => `
-                        <div class="game-search-result" data-appid="${escAttr(game.appid || '')}" data-name="${escAttr(game.name || '')}" data-image-url="${escAttr(game.image_url || '')}"
-                             style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); display:flex; align-items:center; gap:8px; transition:background 0.2s;">
-                            ${game.image_url ? `<img src="${escAttr(game.image_url)}" alt="" style="width:40px; height:24px; object-fit:cover; border-radius:var(--radius-tag,4px);">` : ''}
-                            <div>
-                                <strong>${escapeHtml(game.name || '')}</strong>
-                                <span style="font-size:0.8em; color:var(--text-secondary); margin-left:8px;">App ID: ${escapeHtml(String(game.appid || ''))}</span>
-                            </div>
-                        </div>
-                    `).join('');
-                    dropdown.querySelectorAll('.game-search-result').forEach(el => {
-                        el.onclick = () => selectGame(el.dataset.appid, el.dataset.name, el.dataset.imageUrl);
+                    const baseResults = Array.isArray(data.results) ? data.results : [];
+                    scheduleGameSearchCache = baseResults.map(game => {
+                        const libraryGame = getScheduleGameFromLibrary(game) || {};
+                        const listIds = getScheduleGameBacklogCollectionIds(game);
+                        const appId = String(game.appid || game.app_id || '').trim();
+                        return {
+                            ...game,
+                            appid: appId,
+                            platform: game.platform || libraryGame.platform || '',
+                            playtime_hours: game.playtime_hours ?? libraryGame.playtime_hours ?? 0,
+                            genres: Array.isArray(game.genres) ? game.genres : [],
+                            is_favorite: Boolean(game.is_favorite ?? libraryGame.is_favorite ?? (appId ? scheduleGameFavoriteIds.has(appId) : false)),
+                            list_ids: listIds,
+                        };
                     });
-                    dropdown.style.display = 'block';
+                    const filteredResults = filterScheduleSearchResults(scheduleGameSearchCache);
+                    renderScheduleGameSearchResults(filteredResults);
                 } catch (e) {
                     console.error('Game search error:', e);
                 }
@@ -4166,6 +4400,7 @@ Event ID: ${result.discord_event_id}`);
                 const guilds = await loadScheduleDiscordGuilds();
                 const guild = guilds.find(item => item.guild_id === (ev.discord_guild_id || ''));
                 document.getElementById('sch-discord-guild-search').value = guild?.guild_name || ev.discord_guild_id || '';
+                await ensureScheduleGameFilterData();
                 toggleDiscordGuildField();
                 const modal = document.getElementById('schedule-modal');
                 if (modal) modal.style.display = 'flex';
@@ -4197,6 +4432,8 @@ Event ID: ${result.discord_event_id}`);
             document.getElementById('schedule-rsvp-list').innerHTML = '<div class="schedule-field-hint">Add invitees to track each RSVP.</div>';
             document.getElementById('game-search-dropdown').style.display = 'none';
             document.getElementById('attendee-search-dropdown').style.display = 'none';
+            scheduleGameSearchCache = [];
+            resetScheduleGameFilters();
             const discordDropdown = document.getElementById('discord-guild-search-dropdown');
             if (discordDropdown) discordDropdown.style.display = 'none';
             updateScheduleDiscordGuildMeta();
@@ -4544,7 +4781,7 @@ Event ID: ${result.discord_event_id}`);
             const visibleBacklogs = getFilteredBacklogCollections();
             if (!selector) return;
             if (!backlogCollectionsCache.length) {
-                selector.innerHTML = '<option value="">No backlogs yet</option>';
+                selector.innerHTML = '<option value="">No lists yet</option>';
                 selector.value = '';
                 activeBacklogId = '';
                 updateBacklogSidebarMeta();
@@ -4560,7 +4797,7 @@ Event ID: ${result.discord_event_id}`);
                 const memberCount = Array.isArray(backlog.members) ? Math.max(backlog.members.length - 1, 0) : 0;
                 const ownerSuffix = isOwnedBacklog(backlog) ? '' : ` • ${escapeHtml(backlog.owner || '')}`;
                 const sharedSuffix = backlog.is_shared ? ` • shared ${memberCount}` : '';
-                return `<option value="${escAttr(backlog.id || '')}">${escapeHtml(backlog.name || 'Backlog')}${escapeHtml(sharedSuffix)}${ownerSuffix}</option>`;
+                return `<option value="${escAttr(backlog.id || '')}">${escapeHtml(backlog.name || 'List')}${escapeHtml(sharedSuffix)}${ownerSuffix}</option>`;
             }).join('');
             if (!activeBacklogId || !backlogCollectionsCache.some(backlog => backlog.id === activeBacklogId)) {
                 activeBacklogId = backlogCollectionsCache[0].id || '';
@@ -4587,19 +4824,71 @@ Event ID: ${result.discord_event_id}`);
             const selector = document.getElementById('backlog-modal-collection');
             if (!selector) return;
             if (!backlogCollectionsCache.length) {
-                selector.innerHTML = '<option value="">No backlogs available</option>';
+                selector.innerHTML = '<option value="">No lists available</option>';
                 selector.value = '';
                 return;
             }
             selector.innerHTML = backlogCollectionsCache.map(backlog => `
                 <option value="${escAttr(backlog.id || '')}">
-                    ${escapeHtml(backlog.name || 'Backlog')}
+                    ${escapeHtml(backlog.name || 'List')}
                 </option>
             `).join('');
             const safeSelected = String(selectedId || '').trim();
             selector.value = backlogCollectionsCache.some(backlog => backlog.id === safeSelected)
                 ? safeSelected
                 : (backlogCollectionsCache[0].id || '');
+        }
+
+        async function ensureBacklogLibraryQuickAddData(force = false) {
+            if (!force && backlogLibraryQuickAddData.length) return backlogLibraryQuickAddData;
+            const resp = await safeFetch('/api/library');
+            const data = await resp.json();
+            backlogLibraryQuickAddData = Array.isArray(data.games) ? data.games : [];
+            return backlogLibraryQuickAddData;
+        }
+
+        function setBacklogLibraryQuickAddSelection(gameId) {
+            backlogLibraryQuickAddSelectedGameId = String(gameId || '').trim();
+        }
+
+        function filterBacklogLibraryQuickAdd() {
+            const select = document.getElementById('backlog-library-add-select');
+            if (!select) return;
+            const query = String(document.getElementById('backlog-library-search')?.value || '').trim().toLowerCase();
+            const visibleGames = backlogLibraryQuickAddData
+                .filter(game => !query || String(game.name || '').toLowerCase().includes(query))
+                .slice(0, 250);
+            if (!visibleGames.length) {
+                select.innerHTML = '<option value="">No matching games</option>';
+                backlogLibraryQuickAddSelectedGameId = '';
+                return;
+            }
+            select.innerHTML = visibleGames.map(game => {
+                const gameId = String(game.game_id || game.app_id || game.appid || '').trim();
+                const playtime = Number(game.playtime_hours || 0);
+                const platform = normalisePlatformKey(game.platform || '');
+                return `<option value="${escAttr(gameId)}">${escapeHtml(game.name || 'Unknown game')} • ${escapeHtml(platform || 'platform?')} • ${escapeHtml(String(playtime))}h</option>`;
+            }).join('');
+            const currentSelectionStillVisible = visibleGames.some(game => {
+                const gameId = String(game.game_id || game.app_id || game.appid || '').trim();
+                return gameId && gameId === backlogLibraryQuickAddSelectedGameId;
+            });
+            if (!currentSelectionStillVisible) {
+                const firstId = String(visibleGames[0].game_id || visibleGames[0].app_id || visibleGames[0].appid || '').trim();
+                backlogLibraryQuickAddSelectedGameId = firstId;
+            }
+            select.value = backlogLibraryQuickAddSelectedGameId || '';
+        }
+
+        async function quickAddSelectedLibraryGameToBacklog() {
+            const select = document.getElementById('backlog-library-add-select');
+            const selectedGameId = String(select?.value || backlogLibraryQuickAddSelectedGameId || '').trim();
+            if (!selectedGameId) {
+                showMessage('Select a game from your library first.', 'warning');
+                return;
+            }
+            const selectedGame = backlogLibraryQuickAddData.find(game => String(game.game_id || game.app_id || game.appid || '').trim() === selectedGameId);
+            await quickAddToBacklog(selectedGameId, selectedGame?.name || 'Selected game');
         }
 
         async function loadBacklog() {
@@ -4612,14 +4901,15 @@ Event ID: ${result.discord_event_id}`);
             const url = `/api/backlog${params.toString() ? `?${params.toString()}` : ''}`;
             try {
                 const resp = await safeFetch(url);
-                if (!resp.ok) { list.innerHTML = '<div class="loading">Error loading backlog.</div>'; return; }
+                if (!resp.ok) { list.innerHTML = '<div class="loading">Error loading list.</div>'; return; }
                 const data = await resp.json();
                 backlogCollectionsCache = data.backlogs || backlogCollectionsCache;
                 activeBacklogId = String(data.active_backlog_id || activeBacklogId || '').trim();
                 renderBacklogSelector();
                 _backlogData = data.games || [];
                 populateBacklogModalCollections(activeBacklogId);
-                void loadPlaylists();
+                await ensureBacklogLibraryQuickAddData();
+                filterBacklogLibraryQuickAdd();
                 renderBacklogList();
             } catch (e) {
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
@@ -4637,15 +4927,15 @@ Event ID: ${result.discord_event_id}`);
             const activeBacklog = getActiveBacklog();
             updateBacklogSidebarMeta();
             if (!activeBacklog) {
-                list.innerHTML = '<div class="loading">No backlog selected yet. Create one from the sidebar to get started.</div>';
+                list.innerHTML = '<div class="loading">No list selected yet. Create one from the sidebar to get started.</div>';
                 return;
             }
             if (!_backlogData.length) {
-                list.innerHTML = '<div class="loading">No backlog entries yet. Add games from the library, recommendations, or picker views.</div>';
+                list.innerHTML = '<div class="loading">No list entries yet. Add games from your library using the panel on the right.</div>';
                 return;
             }
             if (!games.length) {
-                list.innerHTML = '<div class="loading">No backlog entries match your current filters.</div>';
+                list.innerHTML = '<div class="loading">No list entries match your current filters.</div>';
                 return;
             }
 
@@ -4712,11 +5002,11 @@ Event ID: ${result.discord_event_id}`);
         async function openBacklogCollectionModal(editMode = false) {
             const active = getActiveBacklog();
             if (editMode && (!active || !isOwnedBacklog(active))) {
-                showMessage('Only the backlog owner can rename or re-share it.', 'warning');
+                showMessage('Only the list owner can rename or re-share it.', 'warning');
                 return;
             }
             document.getElementById('backlog-collection-edit-id').value = editMode ? (active.id || '') : '';
-            document.getElementById('backlog-collection-title').textContent = editMode ? '✏️ Edit Backlog' : '📚 New Backlog';
+            document.getElementById('backlog-collection-title').textContent = editMode ? '✏️ Edit List' : '📚 New List';
             document.getElementById('backlog-collection-name').value = editMode ? (active.name || '') : '';
             document.getElementById('backlog-collection-modal').style.display = 'flex';
             try {
@@ -4743,7 +5033,7 @@ Event ID: ${result.discord_event_id}`);
             const editId = document.getElementById('backlog-collection-edit-id').value.trim();
             const name = document.getElementById('backlog-collection-name').value.trim();
             if (!name) {
-                showMessage('Please enter a backlog name.', 'warning');
+                showMessage('Please enter a list name.', 'warning');
                 document.getElementById('backlog-collection-name')?.focus();
                 return;
             }
@@ -4760,16 +5050,17 @@ Event ID: ${result.discord_event_id}`);
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showMessage(data.error || 'Failed to save backlog', 'error');
+                    showMessage(data.error || 'Failed to save list', 'error');
                     return;
                 }
                 activeBacklogId = String(data.id || activeBacklogId || '').trim();
+                scheduleGameFilterCacheReady = false;
                 closeBacklogCollectionModal();
                 await ensureBacklogCollectionsLoaded(true);
                 await loadBacklog();
-                showMessage(editId ? 'Backlog updated.' : 'Backlog created.', 'success');
+                showMessage(editId ? 'List updated.' : 'List created.', 'success');
             } catch (error) {
-                showMessage(`Error saving backlog: ${error.message}`, 'error');
+                showMessage(`Error saving list: ${error.message}`, 'error');
             }
         }
 
@@ -4777,27 +5068,28 @@ Event ID: ${result.discord_event_id}`);
             const active = getActiveBacklog();
             if (!active) return;
             if (isDefaultBacklog(active)) {
-                showMessage('Your personal backlog cannot be deleted.', 'warning');
+                showMessage('Your personal list cannot be deleted.', 'warning');
                 return;
             }
             if (!isOwnedBacklog(active)) {
-                showMessage('Only the backlog owner can delete it.', 'warning');
+                showMessage('Only the list owner can delete it.', 'warning');
                 return;
             }
-            if (!confirm(`Delete backlog "${active.name}"?`)) return;
+            if (!confirm(`Delete list "${active.name}"?`)) return;
             try {
                 const resp = await safeFetch(`/api/backlogs/${encodeURIComponent(active.id)}`, { method: 'DELETE' });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showMessage(data.error || 'Failed to delete backlog', 'error');
+                    showMessage(data.error || 'Failed to delete list', 'error');
                     return;
                 }
                 activeBacklogId = '';
+                scheduleGameFilterCacheReady = false;
                 await ensureBacklogCollectionsLoaded(true);
                 await loadBacklog();
-                showMessage('Backlog deleted.', 'success');
+                showMessage('List deleted.', 'success');
             } catch (error) {
-                showMessage(`Error deleting backlog: ${error.message}`, 'error');
+                showMessage(`Error deleting list: ${error.message}`, 'error');
             }
         }
 
@@ -4805,23 +5097,24 @@ Event ID: ${result.discord_event_id}`);
             const active = getActiveBacklog();
             if (!active) return;
             if (isOwnedBacklog(active)) {
-                showMessage('Owners delete shared backlogs instead of leaving them.', 'warning');
+                showMessage('Owners delete shared lists instead of leaving them.', 'warning');
                 return;
             }
-            if (!confirm(`Leave backlog "${active.name}"?`)) return;
+            if (!confirm(`Leave list "${active.name}"?`)) return;
             try {
                 const resp = await safeFetch(`/api/backlogs/${encodeURIComponent(active.id)}/leave`, { method: 'POST' });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showMessage(data.error || 'Failed to leave backlog', 'error');
+                    showMessage(data.error || 'Failed to leave list', 'error');
                     return;
                 }
                 activeBacklogId = '';
+                scheduleGameFilterCacheReady = false;
                 await ensureBacklogCollectionsLoaded(true);
                 await loadBacklog();
-                showMessage('You left the backlog.', 'success');
+                showMessage('You left the list.', 'success');
             } catch (error) {
-                showMessage(`Error leaving backlog: ${error.message}`, 'error');
+                showMessage(`Error leaving list: ${error.message}`, 'error');
             }
         }
         
@@ -5922,11 +6215,11 @@ Event ID: ${result.discord_event_id}`);
         async function quickAddToBacklog(gameId, gameName) {
             currentBacklogGameId = gameId;
             currentBacklogGameName = gameName;
-            document.getElementById('backlog-modal-title').textContent = `📚 Add "${gameName}" to Backlog`;
+            document.getElementById('backlog-modal-title').textContent = `📚 Add "${gameName}" to List`;
             try {
                 await ensureBacklogCollectionsLoaded();
             } catch (error) {
-                showMessage(`Failed to load backlogs: ${error.message}`, 'error');
+                showMessage(`Failed to load lists: ${error.message}`, 'error');
             }
             populateBacklogModalCollections(activeBacklogId);
             document.getElementById('backlog-modal').style.display = 'flex';
@@ -5942,16 +6235,16 @@ Event ID: ${result.discord_event_id}`);
                 if (updated) {
                     const statusLabel = status.replace(/_/g, ' ').charAt(0).toUpperCase() + status.replace(/_/g, ' ').slice(1);
                     const backlogLabel = collection?.name ? ` in "${collection.name}"` : '';
-                    showMessage(`✅ Added "${currentBacklogGameName}" to backlog${backlogLabel} as "${statusLabel}"!`, 'success');
+                    showMessage(`✅ Added "${currentBacklogGameName}" to list${backlogLabel} as "${statusLabel}"!`, 'success');
                     closeBacklogModal();
                     if (activeBacklogId && collectionId === activeBacklogId && document.getElementById('backlog-tab')?.classList.contains('active')) {
                         await loadBacklog();
                     }
                 } else {
-                    showMessage('Failed to add to backlog', 'error');
+                    showMessage('Failed to add to list', 'error');
                 }
             } catch (error) {
-                console.error('Add to backlog error:', error);
+                console.error('Add to list error:', error);
                 showMessage('Error: ' + error.message, 'error');
             }
         }
@@ -6006,8 +6299,7 @@ Event ID: ${result.discord_event_id}`);
                             <div style="display:flex; gap:8px; align-items:center; margin-top:4px; padding-left:38px;">
                             <a href="https://store.steampowered.com/app/${appId}/" target="_blank" onclick="event.stopPropagation()" style="font-size:0.8em; color:var(--tab-active-color); text-decoration:none;">Steam →</a>
                             <span onclick="event.stopPropagation(); toggleFavorite(${appId})" style="cursor:pointer; font-size:1.1em;" title="Add to favorites">☆</span>
-                            <span onclick="event.stopPropagation(); quickAddToPlaylist('${game.game_id || appId}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Playlist">📋</span>
-                            <span onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || appId}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to Backlog">📚</span>
+                            <span onclick="event.stopPropagation(); quickAddToBacklog('${game.game_id || appId}', '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Add to List">📚</span>
                             <span onclick="event.stopPropagation(); quickIgnoreGame(${appId}, '${safeName}')" style="cursor:pointer; font-size:1.0em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Ignore">🚫</span>
                             </div>
                             </div>
@@ -8548,8 +8840,7 @@ Event ID: ${result.discord_event_id}`);
                                 <span title="Favorite" style="cursor:pointer; font-size:1.2em; color: ${game.is_favorite ? '#ffc107' : 'inherit'};" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                     ${game.is_favorite ? '⭐' : '☆'}
                                 </span>
-                                <span title="Add to Playlist" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToPlaylist(${game.app_id}, '${safeNameJs}')">📋</span>
-                                <span title="Add to Backlog" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeNameJs}')">📚</span>
+                                <span title="Add to List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeNameJs}')">📚</span>
                                 <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeNameJs}')">🚫</span>
                             </div>
                         </div>`;
