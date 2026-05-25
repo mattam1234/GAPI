@@ -1417,22 +1417,70 @@
             }
         }
         
+        function parseFavoriteAppId(appId) {
+            const parsed = Number.parseInt(String(appId || '').trim(), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+        }
+
+        function getKnownFavoriteState(appId) {
+            if (!appId) return false;
+            const finder = (games) => (games || []).find(game => Number(game?.app_id || game?.appid || 0) === appId);
+            const fromLibrary = finder(_libraryData?.games);
+            if (fromLibrary) return Boolean(fromLibrary.is_favorite);
+            const fromBacklog = finder(_backlogData);
+            if (fromBacklog) return Boolean(fromBacklog.is_favorite || fromBacklog.backlog_status === 'favorite');
+            const fromFavorites = finder(_favoritesData);
+            if (fromFavorites) return true;
+            const fromRecs = finder(_recommendationsData);
+            if (fromRecs) return Boolean(fromRecs.is_favorite);
+            if (currentGame && Number(currentGame.app_id || currentGame.appid || 0) === appId) {
+                return Boolean(currentGame.is_favorite);
+            }
+            return false;
+        }
+
+        function updateFavoriteFlagInCaches(appId, isFavorite) {
+            const apply = (games) => {
+                (games || []).forEach(game => {
+                    const gameAppId = Number(game?.app_id || game?.appid || 0);
+                    if (gameAppId === appId) game.is_favorite = isFavorite;
+                });
+            };
+            apply(_libraryData?.games);
+            apply(_recommendationsData);
+            apply(_backlogData);
+            if (currentGame && Number(currentGame.app_id || currentGame.appid || 0) === appId) {
+                currentGame.is_favorite = isFavorite;
+            }
+        }
+
         async function toggleFavorite(appId) {
-            const isFavorite = currentGame && currentGame.is_favorite;
+            const safeAppId = parseFavoriteAppId(appId);
+            if (!safeAppId) {
+                showMessage('This game cannot be favorited because it has no Steam App ID.', 'warning');
+                return;
+            }
+            const isFavorite = getKnownFavoriteState(safeAppId);
             const method = isFavorite ? 'DELETE' : 'POST';
             
             try {
-                const response = await fetch(`/api/favorite/${appId}`, {method});
+                const response = await fetch(`/api/favorite/${safeAppId}`, {method});
                 const data = await response.json();
                 
                 if (data.success) {
-                    if (currentGame) {
-                        currentGame.is_favorite = !isFavorite;
+                    const nextFavoriteState = !isFavorite;
+                    updateFavoriteFlagInCaches(safeAppId, nextFavoriteState);
+                    if (currentGame && Number(currentGame.app_id || currentGame.appid || 0) === safeAppId) {
                         displayGame(currentGame);
                     }
                     await updateStatus();
-                    loadFavorites();
-                    loadLibrary();  // Refresh library list to update star color
+                    await Promise.all([
+                        loadFavorites(),
+                        loadLibrary(),
+                    ]);
+                    if (document.getElementById('dashboard-tab')?.classList.contains('active')) {
+                        loadDashboard();
+                    }
                 }
             } catch (error) {
                 alert('Error updating favorite: ' + error.message);
@@ -4905,7 +4953,6 @@ Event ID: ${result.discord_event_id}`);
             const data = await resp.json();
             backlogLibraryQuickAddData = Array.isArray(data.games) ? data.games : [];
             updateBacklogLibrarySearchSuggestions();
-            updateBacklogLibraryGenreSuggestions();
             return backlogLibraryQuickAddData;
         }
 
@@ -4932,13 +4979,6 @@ Event ID: ${result.discord_event_id}`);
             });
             const unique = Array.from(new Set(options.filter(Boolean).filter(value => !queryLower || value.toLowerCase().includes(queryLower)))).slice(0, 20);
             datalist.innerHTML = unique.map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
-        }
-
-        function updateBacklogLibraryGenreSuggestions() {
-            const datalist = document.getElementById('backlog-library-genre-suggestions');
-            if (!datalist) return;
-            const uniqueGenres = Array.from(new Set(backlogLibraryQuickAddData.flatMap(getBacklogGameGenres))).slice(0, 50);
-            datalist.innerHTML = uniqueGenres.map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
         }
 
         function renderBacklogLibraryQuickAddPreview(game) {
@@ -4972,11 +5012,55 @@ Event ID: ${result.discord_event_id}`);
             renderBacklogLibraryQuickAddPreview(selectedGame || null);
         }
 
+        function renderBacklogLibraryAutocompleteResults(visibleGames = []) {
+            const results = document.getElementById('backlog-library-search-results');
+            if (!results) return;
+            if (!visibleGames.length) {
+                results.innerHTML = '';
+                results.style.display = 'none';
+                return;
+            }
+            const topMatches = visibleGames.slice(0, 8);
+            results.innerHTML = topMatches.map(game => {
+                const gameId = getBacklogLibraryGameId(game);
+                const appId = String(game.app_id || game.appid || '').trim();
+                const platformLabel = getGamePlatforms(game)[0]?.label || (game.platform || 'Unknown');
+                const playtime = Number(game.playtime_hours || 0);
+                const genres = getBacklogGameGenres(game);
+                const thumb = appId
+                    ? renderGameListThumb(appId, game.name)
+                    : '<div class="backlog-list-thumb-placeholder">🎮</div>';
+                return `
+                    <button type="button" class="backlog-library-search-result" onclick="event.preventDefault(); chooseBacklogLibrarySearchResult('${escAttr(gameId)}')">
+                        <span class="backlog-library-search-result-thumb">${thumb}</span>
+                        <span style="min-width:0; text-align:left;">
+                            <span class="backlog-library-search-result-title">${escapeHtml(game.name || gameId || 'Unknown game')}</span>
+                            <span class="backlog-library-search-result-meta">${escapeHtml(platformLabel)} • ${escapeHtml(String(playtime))}h${genres.length ? ` • ${escapeHtml(genres[0])}` : ''}</span>
+                        </span>
+                    </button>
+                `;
+            }).join('');
+            results.style.display = 'grid';
+        }
+
+        function chooseBacklogLibrarySearchResult(gameId) {
+            const safeGameId = String(gameId || '').trim();
+            if (!safeGameId) return;
+            const selectedGame = backlogLibraryQuickAddData.find(game => getBacklogLibraryGameId(game) === safeGameId);
+            if (!selectedGame) return;
+            const searchInput = document.getElementById('backlog-library-search');
+            if (searchInput) searchInput.value = String(selectedGame.name || '').trim();
+            const select = document.getElementById('backlog-library-add-select');
+            backlogLibraryQuickAddSelectedGameId = safeGameId;
+            if (select) select.value = safeGameId;
+            renderBacklogLibraryQuickAddPreview(selectedGame);
+            renderBacklogLibraryAutocompleteResults([]);
+        }
+
         function filterBacklogLibraryQuickAdd() {
             const select = document.getElementById('backlog-library-add-select');
             if (!select) return;
             const queryRaw = String(document.getElementById('backlog-library-search')?.value || '').trim().toLowerCase();
-            const genreQuery = String(document.getElementById('backlog-library-genre-filter')?.value || '').trim().toLowerCase();
             const queryTerms = queryRaw.split(/\s+/).filter(Boolean);
             updateBacklogLibrarySearchSuggestions(queryRaw);
             const visibleGames = backlogLibraryQuickAddData
@@ -4992,11 +5076,11 @@ Event ID: ${result.discord_event_id}`);
                         platformText,
                         ...genres,
                     ].filter(Boolean).join(' ').toLowerCase();
-                    const genreMatch = !genreQuery || genres.some(genre => genre.toLowerCase().includes(genreQuery));
                     const queryMatch = !queryTerms.length || queryTerms.every(term => searchable.includes(term));
-                    return genreMatch && queryMatch;
+                    return queryMatch;
                 })
                 .slice(0, 250);
+            renderBacklogLibraryAutocompleteResults(queryRaw ? visibleGames : []);
             if (!visibleGames.length) {
                 select.innerHTML = '<option value="">No matching games</option>';
                 backlogLibraryQuickAddSelectedGameId = '';
@@ -9023,7 +9107,7 @@ Event ID: ${result.discord_event_id}`);
                                 <span title="Favorite" style="cursor:pointer; font-size:1.2em; color: ${game.is_favorite ? '#ffc107' : 'inherit'};" onclick="event.stopPropagation(); toggleFavorite(${game.app_id})">
                                     ${game.is_favorite ? '⭐' : '☆'}
                                 </span>
-                                <span title="Add to List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog(${game.app_id}, '${safeNameJs}')">📚</span>
+                                <span title="Add to List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickAddToBacklog('${escAttr(game.game_id || game.app_id || game.appid || '')}', '${safeNameJs}')">📚</span>
                                 <span title="Add to No-Play List" style="cursor:pointer; font-size:1.1em; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" onclick="event.stopPropagation(); quickIgnoreGame(${game.app_id}, '${safeNameJs}')">🚫</span>
                             </div>
                         </div>`;

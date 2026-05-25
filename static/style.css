@@ -1217,6 +1217,59 @@ a.auth-required,
 
 .backlog-list-item {
   gap: 14px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.backlog-library-search-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.backlog-library-search-result {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.backlog-library-search-result:hover {
+  background: var(--list-hover);
+}
+
+.backlog-library-search-result-thumb .list-thumb,
+.backlog-library-search-result-thumb .backlog-list-thumb-placeholder {
+  width: 72px;
+  height: 40px;
+  border-radius: 6px;
+}
+
+.backlog-library-search-result-title {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.backlog-library-search-result-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .backlog-list-thumb-placeholder {

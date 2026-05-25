@@ -349,9 +349,24 @@ class BacklogService:
         id_set = set(id_to_status)
         result = []
         for game in all_games:
-            gid = game.get('game_id')
-            if gid in id_set:
+            candidate_ids = []
+            gid = str(game.get('game_id') or '').strip()
+            if gid:
+                candidate_ids.append(gid)
+                if ':' in gid:
+                    suffix = gid.rsplit(':', 1)[-1].strip()
+                    if suffix:
+                        candidate_ids.append(suffix)
+            app_id = str(game.get('app_id') or game.get('appid') or '').strip()
+            if app_id:
+                candidate_ids.append(app_id)
+                if ':' not in gid:
+                    platform = str(game.get('platform') or 'steam').strip().lower()
+                    candidate_ids.append(f'{platform}:{app_id}')
+                    candidate_ids.append(f'steam:{app_id}')
+            matched_id = next((candidate for candidate in candidate_ids if candidate in id_set), None)
+            if matched_id:
                 entry = dict(game)
-                entry['backlog_status'] = id_to_status[gid]
+                entry['backlog_status'] = id_to_status[matched_id]
                 result.append(entry)
         return result
