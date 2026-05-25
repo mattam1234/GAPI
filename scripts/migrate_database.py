@@ -47,7 +47,7 @@ def add_password_column():
         # Add the password column
         with database.engine.connect() as conn:
             conn.execute(text(
-                "ALTER TABLE users ADD COLUMN password VARCHAR(64)"
+                "ALTER TABLE users ADD COLUMN password VARCHAR(255)"
             ))
             conn.commit()
         
