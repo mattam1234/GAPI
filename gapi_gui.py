@@ -8,6 +8,7 @@ import logging
 import argparse
 import uuid
 import secrets
+import random
 from flask import Flask, render_template, jsonify, request, session, Response, redirect as flask_redirect
 from flask import has_request_context
 import threading
@@ -1993,6 +1994,166 @@ def api_status():
     })
 
 
+def _resolve_pick_filter_type(payload: Dict) -> str:
+    """Resolve canonical pick filter from request payload.
+
+    Supports both modern ``filter`` values and client-facing ``mode`` values.
+    """
+    data = payload if isinstance(payload, dict) else {}
+    raw_filter = str(data.get('filter', '') or '').strip().lower()
+    if raw_filter:
+        return raw_filter
+
+    mode = str(data.get('mode', '') or '').strip().lower()
+    mode_to_filter = {
+        'random': 'all',
+        'all': 'all',
+        'unplayed': 'unplayed',
+        'barely_played': 'barely',
+        'barely': 'barely',
+        'well_played': 'well',
+        'well': 'well',
+        'favorites': 'favorites',
+    }
+    return mode_to_filter.get(mode, 'all')
+
+
+def _legacy_pick_payload(game: Dict) -> Dict:
+    """Return game payload compatible with extension/mobile clients."""
+    platform = str(game.get('platform', 'steam') or 'steam')
+    app_id = game.get('appid', game.get('app_id'))
+    game_id = game.get('game_id')
+    if not game_id and app_id is not None:
+        game_id = f'{platform}:{app_id}'
+
+    playtime_forever = game.get('playtime_forever')
+    if playtime_forever is None:
+        try:
+            playtime_forever = int(round(float(game.get('playtime_hours', 0)) * 60))
+        except Exception:
+            playtime_forever = 0
+
+    payload = {
+        'name': game.get('name', 'Unknown Game'),
+        'platform': platform,
+        'appid': app_id,
+        'app_id': app_id,
+        'game_id': game_id,
+        'playtime_forever': int(playtime_forever or 0),
+        'playtime_hours': round((int(playtime_forever or 0) / 60), 1),
+    }
+    return payload
+
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    """Public lightweight health endpoint for external clients."""
+    username = get_current_username()
+    return jsonify({
+        'ok': True,
+        'status': 'healthy',
+        'authenticated': bool(username),
+        'current_user': username if username else None,
+    })
+
+
+@app.route('/api/random-game', methods=['GET'])
+def api_random_game_legacy():
+    """Legacy random-game endpoint for browser extension compatibility."""
+    mode = request.args.get('mode', 'random')
+    filter_type = _resolve_pick_filter_type({'mode': mode})
+    username = _resolve_current_username_str()
+
+    game = None
+    if username:
+        p = ensure_picker_initialized(username)
+        if p is None:
+            return jsonify({'error': 'Failed to load games'}), 500
+        if not p.games:
+            return jsonify({'error': 'No games available in your library'}), 400
+
+        with picker_lock:
+            filtered_games = None
+            if filter_type == 'unplayed':
+                filtered_games = p.filter_games(max_playtime=0)
+            elif filter_type == 'barely':
+                filtered_games = p.filter_games(
+                    max_playtime=p.BARELY_PLAYED_THRESHOLD_MINUTES
+                )
+            elif filter_type == 'well':
+                filtered_games = p.filter_games(
+                    min_playtime=p.WELL_PLAYED_THRESHOLD_MINUTES
+                )
+            elif filter_type == 'favorites':
+                filtered_games = p.filter_games(favorites_only=True)
+
+            if filtered_games is not None and len(filtered_games) == 0:
+                return jsonify({'error': 'No games match the selected filters'}), 400
+
+            game = p.pick_random_game(filtered_games)
+    else:
+        demo_games = list(DEMO_GAMES) if isinstance(DEMO_GAMES, list) else []
+        if filter_type == 'unplayed':
+            demo_games = [g for g in demo_games if int(g.get('playtime_forever', 0) or 0) <= 0]
+        elif filter_type == 'barely':
+            demo_games = [
+                g for g in demo_games
+                if int(g.get('playtime_forever', 0) or 0) <= gapi.GamePicker.BARELY_PLAYED_THRESHOLD_MINUTES
+            ]
+        elif filter_type == 'well':
+            demo_games = [
+                g for g in demo_games
+                if int(g.get('playtime_forever', 0) or 0) >= gapi.GamePicker.WELL_PLAYED_THRESHOLD_MINUTES
+            ]
+
+        if demo_games:
+            game = random.choice(demo_games)
+
+    if not game:
+        return jsonify({'error': 'Failed to pick a game'}), 500
+
+    return jsonify(_legacy_pick_payload(game))
+
+
+@app.route('/api/history', methods=['GET'])
+@require_login
+def api_history_legacy():
+    """Return recent pick history for mobile client compatibility."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if p is None:
+        return jsonify({'history': []})
+
+    games_by_id = {
+        str(g.get('game_id')): g
+        for g in (p.games or [])
+        if g.get('game_id')
+    }
+
+    entries = []
+    recent_ids = list(p.history[-50:]) if getattr(p, 'history', None) else []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for idx, game_id in enumerate(reversed(recent_ids), start=1):
+        game = games_by_id.get(str(game_id), {})
+        platform = game.get('platform', '')
+        app_id = game.get('appid')
+        if not platform and isinstance(game_id, str) and ':' in game_id:
+            platform = game_id.split(':', 1)[0]
+        if app_id is None and isinstance(game_id, str) and ':' in game_id:
+            app_id = game_id.split(':', 1)[1]
+        entries.append({
+            'id': idx,
+            'game_name': game.get('name') or str(game_id),
+            'game_id': str(game_id),
+            'platform': platform or 'steam',
+            'picked_at': now_iso,
+            'playtime_at_pick': int(game.get('playtime_forever', 0) or 0),
+            'app_id': app_id,
+        })
+
+    return jsonify({'history': entries})
+
+
 # ===========================================================================================
 # Authentication Endpoints
 # ===========================================================================================
@@ -2436,7 +2597,7 @@ def api_pick_game():
             return jsonify({'error': 'No games available in your library'}), 400
 
         data = request.json or {}
-        filter_type = data.get('filter', 'all')
+        filter_type = _resolve_pick_filter_type(data)
         genre_text = data.get('genre', '').strip()
         genres = [g.strip() for g in genre_text.split(',')] if genre_text else None
         min_metacritic = data.get('min_metacritic')
