@@ -3721,6 +3721,94 @@ def api_users_all():
     return jsonify({'users': users})
 
 
+# ---------------------------------------------------------------------------
+# Password-reset request endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/password-reset-request', methods=['POST'])
+def api_password_reset_request():
+    """Submit a password reset request (public, no authentication required)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+    try:
+        db = database.SessionLocal()
+        user = db.query(database.User).filter(database.User.username == username).first()
+        if not user:
+            db.close()
+            # Generic response to avoid username enumeration
+            return jsonify({'message': 'If that username exists, your request has been recorded.'}), 200
+        entry = database.PasswordResetRequest(username=username)
+        db.add(entry)
+        db.commit()
+        db.close()
+        gui_logger.info('Password reset requested for user: %s', username)
+        return jsonify({'message': 'Password reset request submitted. An admin will contact you.'}), 200
+    except Exception as e:
+        gui_logger.exception('Error creating password reset request: %s', e)
+        return jsonify({'error': 'Failed to submit request'}), 500
+
+
+@app.route('/api/admin/password-reset-requests', methods=['GET'])
+@require_admin
+def api_admin_password_reset_requests():
+    """List pending password reset requests (admin only)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        db = database.SessionLocal()
+        rows = (
+            db.query(database.PasswordResetRequest)
+            .order_by(database.PasswordResetRequest.requested_at.desc())
+            .all()
+        )
+        result = [
+            {
+                'id': r.id,
+                'username': r.username,
+                'requested_at': r.requested_at.isoformat() if r.requested_at else None,
+                'status': r.status,
+                'dismissed_by': r.dismissed_by,
+                'dismissed_at': r.dismissed_at.isoformat() if r.dismissed_at else None,
+            }
+            for r in rows
+        ]
+        db.close()
+        return jsonify({'requests': result})
+    except Exception as e:
+        gui_logger.exception('Error fetching password reset requests: %s', e)
+        return jsonify({'error': 'Failed to fetch requests'}), 500
+
+
+@app.route('/api/admin/password-reset-requests/<int:request_id>/dismiss', methods=['POST'])
+@require_admin
+def api_admin_password_reset_dismiss(request_id):
+    """Mark a password reset request as dismissed (admin only)."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    admin_user = get_current_username()
+    try:
+        db = database.SessionLocal()
+        entry = db.query(database.PasswordResetRequest).filter(
+            database.PasswordResetRequest.id == request_id
+        ).first()
+        if not entry:
+            db.close()
+            return jsonify({'error': 'Request not found'}), 404
+        entry.status = 'dismissed'
+        entry.dismissed_by = admin_user
+        entry.dismissed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+        db.close()
+        return jsonify({'message': 'Request dismissed'})
+    except Exception as e:
+        gui_logger.exception('Error dismissing password reset request: %s', e)
+        return jsonify({'error': 'Failed to dismiss request'}), 500
+
+
 @app.route('/api/users/delete/<username>', methods=['DELETE'])
 @require_admin
 def api_users_delete(username):

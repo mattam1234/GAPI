@@ -63,8 +63,22 @@
                     <button type="submit" class="auth-btn auth-btn-signin">Sign In</button>
                 </form>
                 <p class="auth-switch-text">Don't have an account? <a href="javascript:void(0)" id="show-register-link" onclick="switchAuthForm(false)" class="auth-switch-link">Create account</a></p>
+                <p class="auth-switch-text" style="margin-top:4px;">Forgot your password? <a href="javascript:void(0)" onclick="switchAuthForm('forgot')" class="auth-switch-link">Request reset</a></p>
             </div>
-            
+
+            <!-- Forgot Password Form -->
+            <div id="forgot-form-div" style="display: none;">
+                <p style="color: var(--text-secondary); font-size: var(--font-md); margin-bottom: 14px;">Enter your username and an admin will be notified to reset your password.</p>
+                <div class="auth-field-last">
+                    <label class="auth-label" for="forgot-username">Username</label>
+                    <input type="text" id="forgot-username" class="auth-input" placeholder="Enter your username" autocomplete="username">
+                </div>
+                <div id="forgot-error" class="auth-error"></div>
+                <div id="forgot-success" style="display:none; padding: var(--space-10); border-radius: var(--radius-sm,8px); background: rgba(16,185,129,0.12); color: #10b981; margin-bottom: 10px; font-size: var(--font-md);"></div>
+                <button type="button" class="auth-btn auth-btn-signin" onclick="submitForgotPassword()">🔑 Request Reset</button>
+                <p class="auth-switch-text" style="margin-top:8px;"><a href="javascript:void(0)" onclick="switchAuthForm(true)" class="auth-switch-link">← Back to Sign In</a></p>
+            </div>
+
             <!-- Register Form -->
             <div id="register-form-div" style="display: none;">
                 <form id="register-form">
@@ -619,6 +633,18 @@
             <h3>Registered Users</h3>
             <div id="users-list" class="list-container">
                 <div class="loading">Loading users...</div>
+            </div>
+
+            <!-- Password Reset Requests -->
+            <h3 style="margin-top: 30px;">🔑 Password Reset Requests</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 12px; font-size: var(--font-md);">
+                Users who clicked "Forgot password?" on the login screen. Reset their password via the server command and then dismiss the request.
+            </p>
+            <div style="margin-bottom: 10px;">
+                <button onclick="loadPasswordResetRequests()" style="padding: var(--space-6) var(--space-14); background: var(--card-border); color: var(--text-primary); border: none; border-radius: var(--radius-xs,6px); cursor: pointer; font-size: var(--font-md);">🔄 Refresh</button>
+            </div>
+            <div id="password-reset-requests-list" class="list-container">
+                <div class="loading">Loading requests...</div>
             </div>
         </div>
         

@@ -584,7 +584,7 @@
                 loadStats();
                 loadStatsUsers();
             }
-            if (tabName === 'users') loadUsers();
+            if (tabName === 'users') { loadUsers(); loadPasswordResetRequests(); }
             if (tabName === 'multiuser') {
                 loadUsersForMultiUser();
                 const commonGamesList = document.getElementById('common-games-list');
@@ -2422,7 +2422,64 @@
                 showMessage('Error deleting user: ' + error.message, 'error');
             }
         }
-        
+
+        async function loadPasswordResetRequests() {
+            const listDiv = document.getElementById('password-reset-requests-list');
+            if (!listDiv) return;
+            listDiv.innerHTML = renderSkeletonList(3);
+            try {
+                const resp = await fetch('/api/admin/password-reset-requests');
+                if (!resp.ok) {
+                    listDiv.innerHTML = '<div class="error">Failed to load password reset requests.</div>';
+                    return;
+                }
+                const data = await resp.json();
+                const requests = data.requests || [];
+                if (requests.length === 0) {
+                    listDiv.innerHTML = '<div style="color: var(--text-secondary); padding: 12px;">No password reset requests.</div>';
+                    return;
+                }
+                let html = '<div style="display: grid; gap: 8px;">';
+                requests.forEach(r => {
+                    const statusColor = r.status === 'pending' ? '#f59e0b' : '#6b7280';
+                    const statusIcon = r.status === 'pending' ? '⏳' : '✅';
+                    const date = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
+                    const dismissedInfo = r.dismissed_by ? ` · dismissed by ${r.dismissed_by}` : '';
+                    html += `
+                        <div style="display:flex; align-items:center; gap:12px; padding:12px 14px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px);">
+                            <span style="font-size:1.3em;">${statusIcon}</span>
+                            <div style="flex:1; min-width:0;">
+                                <strong>${r.username}</strong>
+                                <div style="font-size:var(--font-sm); color:var(--text-secondary);">${date}${dismissedInfo}</div>
+                            </div>
+                            <span style="padding:3px 10px; border-radius:10px; font-size:0.8em; font-weight:600; background:${statusColor}22; color:${statusColor};">${r.status}</span>
+                            ${r.status === 'pending' ? `<button onclick="dismissPasswordResetRequest(${r.id})" style="padding:5px 12px; background:#4f46e5; color:white; border:none; border-radius:50px; cursor:pointer; font-size:0.82em; font-weight:600; white-space:nowrap;">✔ Dismiss</button>` : ''}
+                        </div>`;
+                });
+                html += '</div>';
+                listDiv.innerHTML = html;
+            } catch (e) {
+                listDiv.innerHTML = '<div class="error">Error loading requests: ' + e.message + '</div>';
+            }
+        }
+        try { window.loadPasswordResetRequests = loadPasswordResetRequests; } catch(e) {}
+
+        async function dismissPasswordResetRequest(id) {
+            try {
+                const resp = await fetch(`/api/admin/password-reset-requests/${id}/dismiss`, { method: 'POST' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    showMessage('Request dismissed.', 'success');
+                    loadPasswordResetRequests();
+                } else {
+                    showMessage(data.error || 'Failed to dismiss request.', 'error');
+                }
+            } catch (e) {
+                showMessage('Error: ' + e.message, 'error');
+            }
+        }
+        try { window.dismissPasswordResetRequest = dismissPasswordResetRequest; } catch(e) {}
+
         function showMessage(message, type = 'info') {
             // Delegate to the richer toast system when available
             if (typeof showToast === 'function') {
@@ -5812,14 +5869,53 @@ Event ID: ${result.discord_event_id}`);
         }
         
         function switchAuthForm(showLogin) {
-            document.getElementById('login-form-div').style.display = showLogin ? 'block' : 'none';
-            document.getElementById('register-form-div').style.display = showLogin ? 'none' : 'block';
-            document.getElementById('login-error').style.display = 'none';
-            document.getElementById('register-error').style.display = 'none';
+            const isLogin = showLogin === true;
+            const isForgot = showLogin === 'forgot';
+            document.getElementById('login-form-div').style.display = isLogin ? 'block' : 'none';
+            document.getElementById('register-form-div').style.display = (!isLogin && !isForgot) ? 'block' : 'none';
+            document.getElementById('forgot-form-div').style.display = isForgot ? 'block' : 'none';
+            if (document.getElementById('login-error')) document.getElementById('login-error').style.display = 'none';
+            if (document.getElementById('register-error')) document.getElementById('register-error').style.display = 'none';
+            if (document.getElementById('forgot-error')) document.getElementById('forgot-error').style.display = 'none';
+            if (document.getElementById('forgot-success')) document.getElementById('forgot-success').style.display = 'none';
         }
         // Ensure inline onclick handlers can call this even if script is evaluated in a module/closure
         try { window.switchAuthForm = switchAuthForm; } catch (e) { /* ignore in non-browser tests */ }
-        
+
+        async function submitForgotPassword() {
+            const usernameEl = document.getElementById('forgot-username');
+            const errorDiv = document.getElementById('forgot-error');
+            const successDiv = document.getElementById('forgot-success');
+            errorDiv.style.display = 'none';
+            successDiv.style.display = 'none';
+            const username = (usernameEl ? usernameEl.value : '').trim();
+            if (!username) {
+                errorDiv.textContent = 'Please enter your username.';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            try {
+                const resp = await fetch('/api/password-reset-request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    successDiv.textContent = data.message || 'Request submitted. An admin will assist you.';
+                    successDiv.style.display = 'block';
+                    if (usernameEl) usernameEl.value = '';
+                } else {
+                    errorDiv.textContent = data.error || 'Failed to submit request.';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (err) {
+                errorDiv.textContent = 'Network error. Please try again.';
+                errorDiv.style.display = 'block';
+            }
+        }
+        try { window.submitForgotPassword = submitForgotPassword; } catch (e) { /* ignore in non-browser tests */ }
+
         async function handleLogin(event) {
             if (event && event.preventDefault) event.preventDefault();
             const username = document.getElementById('login-username').value.trim();
