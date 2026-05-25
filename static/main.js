@@ -536,7 +536,7 @@
             // Update topbar title
             const titleMap = {
                 dashboard: 'Dashboard',
-                picker: 'Game Picker', library: 'Library', favorites: 'Favorites',
+                picker: 'Game Picker', library: 'Library',
                 stats: 'Statistics', users: 'Users', multiuser: 'Multi-User',
                 schedule: 'Schedule', playlists: 'Playlists', backlog: 'Lists',
                 ignored: 'No-Play List', achievements: 'Achievements', friends: 'Friends',
@@ -579,7 +579,6 @@
             }
 
             if (tabName === 'library') libraryLoadPromise = Promise.resolve(loadLibrary());
-            if (tabName === 'favorites') loadFavorites();
             if (tabName === 'stats') {
                 loadStats();
                 loadStatsUsers();
@@ -1534,6 +1533,7 @@
         let activeBacklogId = '';
         let backlogShareCandidatesCache = [];
         let _recommendationsData = [];
+        const FAVORITES_BACKLOG_ID = '__favorites__';
 
         function normalisePlatformKey(value) {
             const key = String(value || '').trim().toLowerCase();
@@ -1757,22 +1757,31 @@
         
         async function loadFavorites() {
             const listDiv = document.getElementById('favorites-list');
-            listDiv.innerHTML = renderSkeletonList(4);
+            if (listDiv) listDiv.innerHTML = renderSkeletonList(4);
             
             try {
                 const response = await fetch('/api/favorites');
                 const data = await response.json();
                 _favoritesData = data.favorites || [];
-                applyFavoritesFilters();
+                if (listDiv) applyFavoritesFilters();
+                if (document.getElementById('backlog-tab')?.classList.contains('active') && isFavoritesBacklog(activeBacklogId)) {
+                    _backlogData = _favoritesData.map(game => ({
+                        ...game,
+                        game_id: String(game.game_id || game.app_id || '').trim(),
+                        backlog_status: 'favorite',
+                    }));
+                    renderBacklogList();
+                }
                 const appIds = _favoritesData.map(game => game.app_id).filter(Boolean);
                 preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
             } catch (error) {
-                listDiv.innerHTML = '<div class="error">Error loading favorites</div>';
+                if (listDiv) listDiv.innerHTML = '<div class="error">Error loading favorites</div>';
             }
         }
 
         function applyFavoritesFilters() {
             const listDiv = document.getElementById('favorites-list');
+            if (!listDiv) return;
             const favorites = filterGamesByControls(_favoritesData, 'favorites-search', 'favorites-platform-filter');
             if (!favorites.length) {
                 listDiv.innerHTML = _favoritesData.length
@@ -4720,14 +4729,31 @@ Event ID: ${result.discord_event_id}`);
             return raw.trim();
         }
 
+        function isFavoritesBacklog(backlogId) {
+            return String(backlogId || '').trim() === FAVORITES_BACKLOG_ID;
+        }
+
+        function getBacklogCollectionsForSelector() {
+            const me = getBacklogCurrentUsername() || 'You';
+            return [{
+                id: FAVORITES_BACKLOG_ID,
+                name: '⭐ Favorites',
+                owner: me,
+                members: [me],
+                is_shared: false,
+                is_virtual: true,
+            }, ...backlogCollectionsCache];
+        }
+
         function getActiveBacklog() {
-            return backlogCollectionsCache.find(backlog => backlog.id === activeBacklogId) || null;
+            return getBacklogCollectionsForSelector().find(backlog => backlog.id === activeBacklogId) || null;
         }
 
         function getFilteredBacklogCollections() {
             const query = getFilterValue('backlog-selector-search').trim().toLowerCase();
-            if (!query) return backlogCollectionsCache;
-            return backlogCollectionsCache.filter(backlog => {
+            const allBacklogs = getBacklogCollectionsForSelector();
+            if (!query) return allBacklogs;
+            return allBacklogs.filter(backlog => {
                 const searchText = [
                     backlog.name,
                     backlog.owner,
@@ -4758,35 +4784,35 @@ Event ID: ${result.discord_event_id}`);
             const renameBtn = document.getElementById('backlog-rename-btn');
             const deleteBtn = document.getElementById('backlog-delete-btn');
             const leaveBtn = document.getElementById('backlog-leave-btn');
+            const quickAddBtn = document.getElementById('backlog-library-add-btn');
             const active = getActiveBacklog();
+            const isFavorites = isFavoritesBacklog(active?.id);
             const owned = isOwnedBacklog(active);
             const sharedCount = Math.max(((active?.members || []).length || 1) - 1, 0);
             if (meta) {
                 meta.textContent = active
-                    ? `${active.name || 'List'} • ${owned ? 'You own this list' : `Owned by ${active.owner || 'someone else'}`}`
+                    ? (isFavorites
+                        ? 'Favorites from your library.'
+                        : `${active.name || 'List'} • ${owned ? 'You own this list' : `Owned by ${active.owner || 'someone else'}`}`)
                     : 'Choose a list to preview, edit, share, or leave.';
             }
             if (copy) {
                 copy.textContent = active
-                    ? `${active.is_shared ? `Shared with ${sharedCount} other${sharedCount === 1 ? '' : 's'}` : 'Personal list'}`
+                    ? (isFavorites
+                        ? 'Favorites are managed from your game picker and library.'
+                        : `${active.is_shared ? `Shared with ${sharedCount} other${sharedCount === 1 ? '' : 's'}` : 'Personal list'}`)
                     : '';
             }
-            if (renameBtn) renameBtn.disabled = !active || !owned;
-            if (deleteBtn) deleteBtn.disabled = !active || !owned || isDefaultBacklog(active);
-            if (leaveBtn) leaveBtn.disabled = !active || owned || !active.is_shared;
+            if (renameBtn) renameBtn.disabled = !active || !owned || isFavorites;
+            if (deleteBtn) deleteBtn.disabled = !active || !owned || isDefaultBacklog(active) || isFavorites;
+            if (leaveBtn) leaveBtn.disabled = !active || owned || !active.is_shared || isFavorites;
+            if (quickAddBtn) quickAddBtn.disabled = !active || isFavorites;
         }
 
         function renderBacklogSelector() {
             const selector = document.getElementById('backlog-selector');
             const visibleBacklogs = getFilteredBacklogCollections();
             if (!selector) return;
-            if (!backlogCollectionsCache.length) {
-                selector.innerHTML = '<option value="">No lists yet</option>';
-                selector.value = '';
-                activeBacklogId = '';
-                updateBacklogSidebarMeta();
-                return;
-            }
             if (!visibleBacklogs.length) {
                 selector.innerHTML = '<option value="">No matching lists</option>';
                 selector.value = '';
@@ -4799,10 +4825,14 @@ Event ID: ${result.discord_event_id}`);
                 const sharedSuffix = backlog.is_shared ? ` • shared ${memberCount}` : '';
                 return `<option value="${escAttr(backlog.id || '')}">${escapeHtml(backlog.name || 'List')}${escapeHtml(sharedSuffix)}${ownerSuffix}</option>`;
             }).join('');
-            if (!activeBacklogId || !backlogCollectionsCache.some(backlog => backlog.id === activeBacklogId)) {
-                activeBacklogId = backlogCollectionsCache[0].id || '';
+            if (!activeBacklogId || !getBacklogCollectionsForSelector().some(backlog => backlog.id === activeBacklogId)) {
+                activeBacklogId = backlogCollectionsCache[0]?.id || FAVORITES_BACKLOG_ID;
             }
             selector.value = visibleBacklogs.some(backlog => backlog.id === activeBacklogId) ? (activeBacklogId || '') : '';
+            if (!selector.value && visibleBacklogs.length) {
+                activeBacklogId = visibleBacklogs[0].id || '';
+                selector.value = activeBacklogId;
+            }
             updateBacklogSidebarMeta();
         }
 
@@ -4811,7 +4841,9 @@ Event ID: ${result.discord_event_id}`);
                 renderBacklogSelector();
                 return backlogCollectionsCache;
             }
-            const query = activeBacklogId ? `?collection_id=${encodeURIComponent(activeBacklogId)}` : '';
+            const query = activeBacklogId && !isFavoritesBacklog(activeBacklogId)
+                ? `?collection_id=${encodeURIComponent(activeBacklogId)}`
+                : '';
             const resp = await safeFetch(`/api/backlogs${query}`);
             const data = await resp.json();
             backlogCollectionsCache = data.backlogs || [];
@@ -4895,6 +4927,22 @@ Event ID: ${result.discord_event_id}`);
             const list = document.getElementById('backlog-list');
             const statusFilter = document.getElementById('backlog-filter').value;
             list.innerHTML = renderSkeletonList(5);
+            if (isFavoritesBacklog(activeBacklogId)) {
+                try {
+                    if (!_favoritesData.length) await loadFavorites();
+                    const favorites = _favoritesData.map(game => ({
+                        ...game,
+                        game_id: String(game.game_id || game.app_id || '').trim(),
+                        backlog_status: 'favorite',
+                    }));
+                    _backlogData = favorites;
+                    renderBacklogSelector();
+                    renderBacklogList();
+                } catch (e) {
+                    list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+                }
+                return;
+            }
             const params = new URLSearchParams();
             if (statusFilter) params.set('status', statusFilter);
             if (activeBacklogId) params.set('collection_id', activeBacklogId);
@@ -4939,7 +4987,7 @@ Event ID: ${result.discord_event_id}`);
                 return;
             }
 
-            const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#ef4444'};
+            const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#ef4444', favorite:'#f59e0b'};
             const BATCH_SIZE = 10;
             let allHtml = '';
 
@@ -4952,10 +5000,17 @@ Event ID: ${result.discord_event_id}`);
                     const color = statusColors[g.backlog_status] || '#888';
                     const label = (g.backlog_status || '').replace(/_/g,' ');
                     const platformBadges = renderInlinePlatformBadges(g);
-                    batchHtml += `<div style="display:flex; justify-content:space-between; align-items:center; gap:var(--space-10); padding:10px 14px; border-bottom:1px solid var(--card-border);">
-                        <div style="min-width:0;">
-                            <div style="font-weight:600;">${escapeHtml(g.name || g.game_id || 'Unknown game')}</div>
-                            ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px;">${platformBadges}</div>` : ''}
+                    const appId = String(g.app_id || g.appid || '').trim();
+                    const thumb = appId
+                        ? renderGameListThumb(appId, g.name)
+                        : '<div class="backlog-list-thumb-placeholder">🎮</div>';
+                    batchHtml += `<div class="list-item backlog-list-item">
+                        <div class="list-item-media">
+                            ${thumb}
+                            <div style="min-width:0;">
+                                <div style="font-weight:600;">${escapeHtml(g.name || g.game_id || 'Unknown game')}</div>
+                                ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px;">${platformBadges}</div>` : ''}
+                            </div>
                         </div>
                         <span style="background:${color}; color:white; padding:3px 10px; border-radius:var(--radius,12px); font-size:0.82em; font-weight:600; white-space:nowrap;">${escapeHtml(label || 'unknown')}</span>
                     </div>`;
@@ -7663,7 +7718,7 @@ Event ID: ${result.discord_event_id}`);
                 const data = await resp.json();
                 const sessions = data.sessions || [];
                 if (!sessions.length) {
-                    listDiv.innerHTML = '<div style="color:var(--text-secondary);">No active sessions yet.</div>';
+                    listDiv.innerHTML = '<div class="schedule-agenda-copy">No active sessions yet.</div>';
                     return;
                 }
 
@@ -7671,24 +7726,33 @@ Event ID: ${result.discord_event_id}`);
                 listDiv.innerHTML = sessions.map(s => {
                     const joined = (s.participants || []).includes(me);
                     const isHost = s.host === me;
+                    const pickedGame = s.picked_game || {};
+                    const appId = String(pickedGame.appid || pickedGame.app_id || '').trim();
                     const discordSummary = s.discord && s.discord.guild_name && s.discord.channel_name
-                        ? `<div style="font-size:0.82em; color:var(--text-secondary); margin-top:4px;">Discord: ${s.discord.guild_name} / #${s.discord.channel_name}</div>`
+                        ? `<div class="schedule-agenda-copy" style="margin-top:4px;">Discord: ${s.discord.guild_name} / #${s.discord.channel_name}</div>`
                         : '';
                     return `
-                        <div style="border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); padding:10px; margin-bottom:10px; background:var(--list-hover);">
-                            <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-                                <strong style="color:var(--text-primary);">${s.name || s.session_id}</strong>
-                                <span style="font-size:0.8em; color:var(--text-secondary);">${s.status}</span>
+                        <div class="session-list-item">
+                            <div class="session-list-item-main">
+                                <div class="session-list-thumb">
+                                    ${appId ? renderGameListThumb(appId, pickedGame.name || s.name || 'Session') : '<span>🎯</span>'}
+                                </div>
+                                <div style="min-width:0; flex:1;">
+                                    <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+                                        <strong class="list-item-title" style="max-width:100%;">${s.name || s.session_id}</strong>
+                                        <span class="schedule-field-hint">${s.status}</span>
+                                    </div>
+                                    <div class="schedule-agenda-copy" style="margin-top:4px;">Host: ${s.host} · Players: ${(s.participants || []).length}</div>
+                                    ${discordSummary}
+                                </div>
                             </div>
-                            <div style="font-size:0.85em; color:var(--text-secondary); margin-top:4px;">Host: ${s.host} · Players: ${(s.participants || []).length}</div>
-                            ${discordSummary}
-                            <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-                                <button onclick="openLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:var(--radius-xs,6px); background:#4f46e5; color:white; cursor:pointer;">Open</button>
+                            <div class="session-list-actions">
+                                <button onclick="openLiveSession('${s.session_id}')" class="chat-room-secondary-btn">Open</button>
                                 ${joined
-                                    ? `<button onclick="leaveLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:var(--radius-xs,6px); background:#ef4444; color:white; cursor:pointer;">Leave</button>`
-                                    : `<button onclick="joinLiveSession('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit;">Join</button>`}
+                                    ? `<button onclick="leaveLiveSession('${s.session_id}')" class="session-danger-btn">Leave</button>`
+                                    : `<button onclick="joinLiveSession('${s.session_id}')" class="chat-room-create-btn">Join</button>`}
                                 ${isHost
-                                    ? `<button onclick="pickLiveSessionGame('${s.session_id}')" style="padding:6px 10px; border:none; border-radius:var(--radius-xs,6px); background:#7c3aed; color:white; cursor:pointer;">Pick</button>`
+                                    ? `<button onclick="pickLiveSessionGame('${s.session_id}')" class="chat-room-secondary-btn">Pick</button>`
                                     : ''}
                             </div>
                         </div>
@@ -7863,7 +7927,7 @@ Event ID: ${result.discord_event_id}`);
         }
 
         function renderPickedGameCard(game) {
-            if (!game) return '<div style="color:var(--text-secondary);">No game picked yet.</div>';
+            if (!game) return '<div class="schedule-agenda-copy">No game picked yet.</div>';
             const appId = game.appid || game.app_id || game.game_id || '';
             const name = game.name || 'Unknown game';
             const playtimeMinutes = Number(game.playtime_forever || 0);
@@ -7872,13 +7936,20 @@ Event ID: ${result.discord_event_id}`);
             const steamUrl = appId ? `https://store.steampowered.com/app/${appId}/` : null;
             const steamDbUrl = appId ? `https://steamdb.info/app/${appId}/` : null;
             return `
-                <div style="border:1px solid var(--input-border); border-radius:var(--radius,12px); padding:12px; background:var(--list-hover);">
-                    <div style="font-size:1.08em; font-weight:700; color:var(--text-primary);">🎮 ${name}</div>
-                    <div style="font-size:0.9em; color:var(--text-secondary); margin-top:4px;">Playtime: ${playtimeHours}h</div>
+                <div class="session-picked-card">
+                    <div class="session-picked-header">
+                        <div class="session-picked-thumb">
+                            ${appId ? renderGameListThumb(appId, name) : '<span>🎮</span>'}
+                        </div>
+                        <div>
+                            <div style="font-size:1.08em; font-weight:700; color:var(--text-primary);">🎮 ${name}</div>
+                            <div class="schedule-agenda-copy" style="margin-top:4px;">Playtime: ${playtimeHours}h</div>
+                        </div>
+                    </div>
                     ${owners ? `<div style="font-size:0.85em; color:var(--text-secondary); margin-top:4px;">Owners: ${owners}</div>` : ''}
-                    <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-                        ${steamUrl ? `<a href="${steamUrl}" target="_blank" style="padding:5px 10px; border-radius:var(--radius-xs,6px); background:#1b2838; color:#c7d5e0; text-decoration:none; font-size:0.85em;">Steam</a>` : ''}
-                        ${steamDbUrl ? `<a href="${steamDbUrl}" target="_blank" style="padding:5px 10px; border-radius:var(--radius-xs,6px); background:#2c3e50; color:#ecf0f1; text-decoration:none; font-size:0.85em;">SteamDB</a>` : ''}
+                    <div class="session-list-actions" style="margin-top:10px;">
+                        ${steamUrl ? `<a href="${steamUrl}" target="_blank" class="chat-room-secondary-btn">Steam</a>` : ''}
+                        ${steamDbUrl ? `<a href="${steamDbUrl}" target="_blank" class="chat-room-secondary-btn">SteamDB</a>` : ''}
                     </div>
                 </div>
             `;
@@ -7937,46 +8008,46 @@ Event ID: ${result.discord_event_id}`);
             const discordInfo = session.discord || {};
 
             detailsDiv.innerHTML = `
-                <div style="display:grid; gap:10px;">
+                <div class="session-detail-grid">
                     <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
                         <strong style="font-size:1.05em; color:var(--text-primary);">${session.name || session.session_id}</strong>
-                        <span style="font-size:0.82em; color:var(--text-secondary);">${session.status}</span>
+                        <span class="schedule-field-hint">${session.status}</span>
                     </div>
-                    <div style="font-size:0.9em; color:var(--text-secondary);">Host: ${session.host} · Round: ${session.round || 0}</div>
-                    <div style="font-size:0.9em; color:var(--text-secondary);">Players: ${participants.join(', ') || 'None'}</div>
+                    <div class="schedule-agenda-copy">Host: ${session.host} · Round: ${session.round || 0}</div>
+                    <div class="schedule-agenda-copy">Players: ${participants.join(', ') || 'None'}</div>
                     ${discordInfo.guild_name && discordInfo.channel_name
-                        ? `<div style="font-size:0.9em; color:var(--text-secondary);">Discord sync: ${discordInfo.guild_name} / #${discordInfo.channel_name} · Pending joins: ${session.pending_join_count || 0}</div>`
+                        ? `<div class="schedule-agenda-copy">Discord sync: ${discordInfo.guild_name} / #${discordInfo.channel_name} · Pending joins: ${session.pending_join_count || 0}</div>`
                         : ''}
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <div class="session-list-actions">
                         ${joined
-                            ? `<button onclick="leaveLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#ef4444; color:white; cursor:pointer;">Leave</button>`
-                            : `<button onclick="joinLiveSession('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit;">Join</button>`}
+                            ? `<button onclick="leaveLiveSession('${session.session_id}')" class="session-danger-btn">Leave</button>`
+                            : `<button onclick="joinLiveSession('${session.session_id}')" class="chat-room-create-btn">Join</button>`}
                         ${isHost
-                            ? `<button onclick="pickLiveSessionGame('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#7c3aed; color:white; cursor:pointer;">Pick Game</button>
-                               <button onclick="openInviteUsersModal('${session.session_id}')" style="padding:7px 12px; border:none; border-radius:7px; background:#3b82f6; color:white; cursor:pointer;">Invite Users</button>`
+                            ? `<button onclick="pickLiveSessionGame('${session.session_id}')" class="chat-room-secondary-btn">Pick Game</button>
+                               <button onclick="openInviteUsersModal('${session.session_id}')" class="chat-room-secondary-btn">Invite Users</button>`
                             : ''}
                     </div>
                     <div id="live-session-lootbox" style="display:${session.status === 'completed' && session.picked_game ? 'block' : 'none'};"></div>
                     ${renderPickedGameCard(session.picked_game)}
                     ${pendingJoins.length
-                        ? `<div style="border:1px dashed var(--input-border); border-radius:10px; padding:10px;">
+                        ? `<div class="session-queue-card">
                                <div style="font-size:0.9em; font-weight:600; color:var(--text-primary); margin-bottom:6px;">Discord onboarding queue</div>
                                <div style="display:grid; gap:6px;">${pendingJoins.map(join => `
-                                   <div style="font-size:0.85em; color:var(--text-secondary);">
+                                   <div class="schedule-agenda-copy">
                                        Discord user <code>${join.discord_user_id}</code> — ${join.status}
                                    </div>
                                `).join('')}</div>
                            </div>`
                         : ''}
-                    <div style="border-top:1px solid var(--input-border); padding-top:10px;">
+                    <div class="session-vote-panel">
                         <div style="font-size:0.9em; color:var(--text-primary); font-weight:600; margin-bottom:6px;">Majority Vote</div>
-                        <div style="font-size:0.85em; color:var(--text-secondary); margin-bottom:8px;">Need ${required} votes · ✅ ${yesCount} · ❌ ${noCount}</div>
+                        <div class="schedule-agenda-copy" style="margin-bottom:8px;">Need ${required} votes · ✅ ${yesCount} · ❌ ${noCount}</div>
                         ${canVote
-                            ? `<div style="display:flex; gap:8px;">
-                                   <button onclick="voteLiveSession(true)" style="padding:8px 12px; border:none; border-radius:50px; background:#10b981; color:white; cursor:pointer; font-family:inherit; font-weight:600;">✅ Accept</button>
-                                   <button onclick="voteLiveSession(false)" style="padding:8px 12px; border:none; border-radius:7px; background:#ef4444; color:white; cursor:pointer; font-weight:600;">❌ Reject</button>
+                            ? `<div class="session-list-actions">
+                                   <button onclick="voteLiveSession(true)" class="chat-room-create-btn">✅ Accept</button>
+                                   <button onclick="voteLiveSession(false)" class="session-danger-btn">❌ Reject</button>
                                </div>`
-                            : `<div style="font-size:0.85em; color:var(--text-secondary);">${session.status === 'awaiting_vote' ? 'Join this session to vote.' : 'Vote starts after a game is picked.'}</div>`}
+                            : `<div class="schedule-agenda-copy">${session.status === 'awaiting_vote' ? 'Join this session to vote.' : 'Vote starts after a game is picked.'}</div>`}
                     </div>
                 </div>
             `;
