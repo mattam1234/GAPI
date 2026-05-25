@@ -627,7 +627,7 @@
                 safeFetch('/api/library').then(r => r.json()),
                 safeFetch('/api/live-session/active').then(r => r.json()),
                 safeFetch('/api/schedule').then(r => r.json()),
-                safeFetch('/api/recommendations?count=4').then(r => r.json()),
+                safeFetch(`/api/recommendations?count=4&refresh_seed=${Date.now()}`).then(r => r.json()),
                 safeFetch('/api/notifications?unread_only=false').then(r => r.json()),
             ]);
 
