@@ -619,6 +619,37 @@ class TestBacklogService(TmpDirMixin):
         for status in ('want_to_play', 'playing', 'completed', 'dropped'):
             self.assertTrue(svc.set_status('steam:620', status))
 
+    def test_create_shared_collection_and_filter_games_for_member(self):
+        svc = self._make()
+        shared = svc.create_collection(
+            name='Weekend Picks',
+            owner_username='alice',
+            members=['bob'],
+            is_shared=True,
+        )
+        self.assertTrue(
+            svc.set_status('steam:620', 'playing', username='alice', collection_id=shared['id'])
+        )
+        result = svc.get_games(FAKE_GAMES, username='bob', collection_id=shared['id'])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['backlog_status'], 'playing')
+
+    def test_leave_collection_removes_member_access(self):
+        svc = self._make()
+        shared = svc.create_collection(
+            name='Weekend Picks',
+            owner_username='alice',
+            members=['bob'],
+            is_shared=True,
+        )
+        self.assertTrue(svc.leave_collection(shared['id'], 'bob'))
+        self.assertEqual(svc.resolve_collection_for_user(shared['id'], 'bob'), 'personal:bob')
+
+    def test_delete_collection_rejects_default_backlog(self):
+        svc = self._make()
+        default_backlog = svc.ensure_default_collection('alice')
+        self.assertFalse(svc.delete_collection(default_backlog['id'], 'alice'))
+
 
 class TestBudgetService(TmpDirMixin):
 

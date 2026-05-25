@@ -527,6 +527,7 @@
         }
         
         function switchTab(tabName, event) {
+            if (tabName === 'playlists') tabName = 'backlog';
             // Sync sidebar active state
             document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
             const navItem = document.getElementById('nav-' + tabName);
@@ -537,7 +538,7 @@
                 dashboard: 'Dashboard',
                 picker: 'Game Picker', library: 'Library', favorites: 'Favorites',
                 stats: 'Statistics', users: 'Users', multiuser: 'Multi-User',
-                schedule: 'Schedule', playlists: 'Playlists', backlog: 'Backlog',
+                schedule: 'Schedule', playlists: 'Playlists', backlog: 'Lists',
                 ignored: 'No-Play List', achievements: 'Achievements', friends: 'Friends',
                 recommendations: 'For You', chat: 'Chat',
                 sessions: 'Sessions', notifications: 'Notifications',
@@ -592,8 +593,10 @@
                 }
             }
             if (tabName === 'schedule') loadSchedule();
-            if (tabName === 'playlists') loadPlaylists();
-            if (tabName === 'backlog') loadBacklog();
+            if (tabName === 'backlog') {
+                loadPlaylists();
+                loadBacklog();
+            }
             if (tabName === 'ignored') loadIgnoredGames();
             if (tabName === 'achievements') loadAchievements();
             if (tabName === 'friends') loadFriends();
@@ -1218,20 +1221,31 @@
             modal.style.display = 'flex';
         }
 
-        async function setBacklogStatus(gameId, status) {
+        async function updateBacklogEntryStatus(gameId, status, collectionId = activeBacklogId) {
             try {
+                const safeCollectionId = String(collectionId || '').trim();
                 if (!status) {
-                    await safeFetch(`/api/backlog/${gameId}`, {method:'DELETE'});
-                    if (currentGame) currentGame.backlog_status = null;
+                    const query = safeCollectionId ? `?collection_id=${encodeURIComponent(safeCollectionId)}` : '';
+                    await safeFetch(`/api/backlog/${gameId}${query}`, {method:'DELETE'});
+                    return true;
                 } else {
                     await safeFetch(`/api/backlog/${gameId}`, {
                         method: 'POST',
                         headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({status})
+                        body: JSON.stringify({status, collection_id: safeCollectionId || null})
                     });
-                    if (currentGame) currentGame.backlog_status = status;
+                    return true;
                 }
-            } catch (e) { alert('Failed to update backlog: ' + e.message); }
+            } catch (e) {
+                alert('Failed to update backlog: ' + e.message);
+                return false;
+            }
+        }
+
+        async function setBacklogStatus(gameId, status) {
+            const updated = await updateBacklogEntryStatus(gameId, status, activeBacklogId);
+            if (!updated) return;
+            if (currentGame) currentGame.backlog_status = status || null;
         }
 
         function shareGame() {
@@ -1516,6 +1530,9 @@
 
         let _favoritesData = [];
         let _backlogData = [];
+        let backlogCollectionsCache = [];
+        let activeBacklogId = '';
+        let backlogShareCandidatesCache = [];
         let _recommendationsData = [];
 
         function normalisePlatformKey(value) {
@@ -4355,6 +4372,7 @@ Event ID: ${result.discord_event_id}`);
 
         async function loadPlaylists() {
             const container = document.getElementById('playlists-container');
+            if (!container) return;
             try {
                 const resp = await fetch('/api/playlists');
                 if (!resp.ok) { container.innerHTML = '<div class="loading">Error loading playlists.</div>'; return; }
@@ -4483,27 +4501,148 @@ Event ID: ${result.discord_event_id}`);
         // Backlog
         // =====================================================================
 
+        function getBacklogCurrentUsername() {
+            const raw = document.getElementById('current-username')?.textContent
+                || document.getElementById('sidebar-username')?.textContent
+                || '';
+            return raw.trim();
+        }
+
+        function getActiveBacklog() {
+            return backlogCollectionsCache.find(backlog => backlog.id === activeBacklogId) || null;
+        }
+
+        function isDefaultBacklog(backlog) {
+            const currentUsername = getBacklogCurrentUsername().toLowerCase();
+            if (!backlog || !currentUsername) return false;
+            return String(backlog.id || '').trim().toLowerCase() === `personal:${currentUsername}`;
+        }
+
+        function isOwnedBacklog(backlog) {
+            if (!backlog) return false;
+            return String(backlog.owner || '').trim().toLowerCase() === getBacklogCurrentUsername().toLowerCase();
+        }
+
+        function updateBacklogSidebarMeta() {
+            const meta = document.getElementById('backlog-sidebar-meta');
+            const copy = document.getElementById('backlog-active-copy');
+            const renameBtn = document.getElementById('backlog-rename-btn');
+            const deleteBtn = document.getElementById('backlog-delete-btn');
+            const leaveBtn = document.getElementById('backlog-leave-btn');
+            const active = getActiveBacklog();
+            const owned = isOwnedBacklog(active);
+            const sharedCount = Math.max(((active?.members || []).length || 1) - 1, 0);
+            if (meta) {
+                meta.textContent = active
+                    ? `${active.name || 'Backlog'} • ${owned ? 'You own this backlog' : `Owned by ${active.owner || 'someone else'}`}`
+                    : 'Choose a backlog to view, share, or leave.';
+            }
+            if (copy) {
+                copy.textContent = active
+                    ? `${active.is_shared ? `Shared with ${sharedCount} other${sharedCount === 1 ? '' : 's'}` : 'Personal backlog'}`
+                    : '';
+            }
+            if (renameBtn) renameBtn.disabled = !active || !owned;
+            if (deleteBtn) deleteBtn.disabled = !active || !owned || isDefaultBacklog(active);
+            if (leaveBtn) leaveBtn.disabled = !active || owned || !active.is_shared;
+        }
+
+        function renderBacklogSelector() {
+            const selector = document.getElementById('backlog-selector');
+            if (!selector) return;
+            if (!backlogCollectionsCache.length) {
+                selector.innerHTML = '<option value="">No backlogs yet</option>';
+                selector.value = '';
+                activeBacklogId = '';
+                updateBacklogSidebarMeta();
+                return;
+            }
+            selector.innerHTML = backlogCollectionsCache.map(backlog => {
+                const memberCount = Array.isArray(backlog.members) ? Math.max(backlog.members.length - 1, 0) : 0;
+                const ownerSuffix = isOwnedBacklog(backlog) ? '' : ` • ${escapeHtml(backlog.owner || '')}`;
+                const sharedSuffix = backlog.is_shared ? ` • shared ${memberCount}` : '';
+                return `<option value="${escAttr(backlog.id || '')}">${escapeHtml(backlog.name || 'Backlog')}${escapeHtml(sharedSuffix)}${ownerSuffix}</option>`;
+            }).join('');
+            if (!activeBacklogId || !backlogCollectionsCache.some(backlog => backlog.id === activeBacklogId)) {
+                activeBacklogId = backlogCollectionsCache[0].id || '';
+            }
+            selector.value = activeBacklogId || '';
+            updateBacklogSidebarMeta();
+        }
+
+        async function ensureBacklogCollectionsLoaded(force = false) {
+            if (!force && backlogCollectionsCache.length) {
+                renderBacklogSelector();
+                return backlogCollectionsCache;
+            }
+            const query = activeBacklogId ? `?collection_id=${encodeURIComponent(activeBacklogId)}` : '';
+            const resp = await safeFetch(`/api/backlogs${query}`);
+            const data = await resp.json();
+            backlogCollectionsCache = data.backlogs || [];
+            activeBacklogId = String(data.active_backlog_id || activeBacklogId || '').trim();
+            renderBacklogSelector();
+            return backlogCollectionsCache;
+        }
+
+        function populateBacklogModalCollections(selectedId = activeBacklogId) {
+            const selector = document.getElementById('backlog-modal-collection');
+            if (!selector) return;
+            if (!backlogCollectionsCache.length) {
+                selector.innerHTML = '<option value="">No backlogs available</option>';
+                selector.value = '';
+                return;
+            }
+            selector.innerHTML = backlogCollectionsCache.map(backlog => `
+                <option value="${escAttr(backlog.id || '')}">
+                    ${escapeHtml(backlog.name || 'Backlog')}
+                </option>
+            `).join('');
+            const safeSelected = String(selectedId || '').trim();
+            selector.value = backlogCollectionsCache.some(backlog => backlog.id === safeSelected)
+                ? safeSelected
+                : (backlogCollectionsCache[0].id || '');
+        }
+
         async function loadBacklog() {
             const list = document.getElementById('backlog-list');
             const statusFilter = document.getElementById('backlog-filter').value;
             list.innerHTML = renderSkeletonList(5);
-            const url = '/api/backlog' + (statusFilter ? `?status=${statusFilter}` : '');
+            const params = new URLSearchParams();
+            if (statusFilter) params.set('status', statusFilter);
+            if (activeBacklogId) params.set('collection_id', activeBacklogId);
+            const url = `/api/backlog${params.toString() ? `?${params.toString()}` : ''}`;
             try {
-                const resp = await fetch(url);
+                const resp = await safeFetch(url);
                 if (!resp.ok) { list.innerHTML = '<div class="loading">Error loading backlog.</div>'; return; }
                 const data = await resp.json();
+                backlogCollectionsCache = data.backlogs || backlogCollectionsCache;
+                activeBacklogId = String(data.active_backlog_id || activeBacklogId || '').trim();
+                renderBacklogSelector();
                 _backlogData = data.games || [];
+                populateBacklogModalCollections(activeBacklogId);
+                void loadPlaylists();
                 renderBacklogList();
             } catch (e) {
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
             }
         }
 
+        function changeActiveBacklog(backlogId) {
+            activeBacklogId = String(backlogId || '').trim();
+            loadBacklog();
+        }
+
         function renderBacklogList() {
             const list = document.getElementById('backlog-list');
             const games = filterGamesByControls(_backlogData, 'backlog-search', 'backlog-platform-filter');
+            const activeBacklog = getActiveBacklog();
+            updateBacklogSidebarMeta();
+            if (!activeBacklog) {
+                list.innerHTML = '<div class="loading">No backlog selected yet. Create one from the sidebar to get started.</div>';
+                return;
+            }
             if (!_backlogData.length) {
-                list.innerHTML = '<div class="loading">No backlog entries. Set a game\'s status from the Pick a Game tab.</div>';
+                list.innerHTML = '<div class="loading">No backlog entries yet. Add games from the library, recommendations, or picker views.</div>';
                 return;
             }
             if (!games.length) {
@@ -4541,6 +4680,150 @@ Event ID: ${result.discord_event_id}`);
             };
 
             renderBatch(0);
+        }
+
+        async function loadBacklogShareCandidates(force = false) {
+            if (!force && backlogShareCandidatesCache.length) return backlogShareCandidatesCache;
+            const resp = await safeFetch('/api/users/list');
+            const data = await resp.json();
+            const currentUsername = getBacklogCurrentUsername().toLowerCase();
+            backlogShareCandidatesCache = (data.users || [])
+                .map(user => String(user.username || '').trim())
+                .filter(Boolean)
+                .filter(name => name.toLowerCase() !== currentUsername);
+            return backlogShareCandidatesCache;
+        }
+
+        function renderBacklogShareList(selectedMembers = []) {
+            const list = document.getElementById('backlog-collection-share-list');
+            if (!list) return;
+            const selected = new Set((selectedMembers || []).map(member => String(member || '').trim().toLowerCase()));
+            if (!backlogShareCandidatesCache.length) {
+                list.innerHTML = '<div class="loading">No other users available to share with.</div>';
+                return;
+            }
+            list.innerHTML = backlogShareCandidatesCache.map(name => `
+                <label class="backlog-share-option">
+                    <input type="checkbox" class="backlog-share-checkbox" value="${escAttr(name)}" ${selected.has(name.toLowerCase()) ? 'checked' : ''}>
+                    <span>${escapeHtml(name)}</span>
+                </label>
+            `).join('');
+        }
+
+        async function openBacklogCollectionModal(editMode = false) {
+            const active = getActiveBacklog();
+            if (editMode && (!active || !isOwnedBacklog(active))) {
+                showMessage('Only the backlog owner can rename or re-share it.', 'warning');
+                return;
+            }
+            document.getElementById('backlog-collection-edit-id').value = editMode ? (active.id || '') : '';
+            document.getElementById('backlog-collection-title').textContent = editMode ? '✏️ Edit Backlog' : '📚 New Backlog';
+            document.getElementById('backlog-collection-name').value = editMode ? (active.name || '') : '';
+            document.getElementById('backlog-collection-modal').style.display = 'flex';
+            try {
+                await loadBacklogShareCandidates(editMode || !backlogShareCandidatesCache.length);
+                renderBacklogShareList(editMode ? (active.members || []).filter(member => String(member || '').trim().toLowerCase() !== String(active.owner || '').trim().toLowerCase()) : []);
+            } catch (error) {
+                document.getElementById('backlog-collection-share-list').innerHTML = `<div class="error">Error loading users: ${error.message}</div>`;
+            }
+            setTimeout(() => document.getElementById('backlog-collection-name')?.focus(), 0);
+        }
+
+        function closeBacklogCollectionModal() {
+            const modal = document.getElementById('backlog-collection-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function getSelectedBacklogCollectionMembers() {
+            return Array.from(document.querySelectorAll('.backlog-share-checkbox:checked'))
+                .map(input => String(input.value || '').trim())
+                .filter(Boolean);
+        }
+
+        async function submitBacklogCollectionForm() {
+            const editId = document.getElementById('backlog-collection-edit-id').value.trim();
+            const name = document.getElementById('backlog-collection-name').value.trim();
+            if (!name) {
+                showMessage('Please enter a backlog name.', 'warning');
+                document.getElementById('backlog-collection-name')?.focus();
+                return;
+            }
+            const payload = {
+                name,
+                members: getSelectedBacklogCollectionMembers(),
+                is_shared: getSelectedBacklogCollectionMembers().length > 0,
+            };
+            try {
+                const resp = await safeFetch(editId ? `/api/backlogs/${encodeURIComponent(editId)}` : '/api/backlogs', {
+                    method: editId ? 'PUT' : 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to save backlog', 'error');
+                    return;
+                }
+                activeBacklogId = String(data.id || activeBacklogId || '').trim();
+                closeBacklogCollectionModal();
+                await ensureBacklogCollectionsLoaded(true);
+                await loadBacklog();
+                showMessage(editId ? 'Backlog updated.' : 'Backlog created.', 'success');
+            } catch (error) {
+                showMessage(`Error saving backlog: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteActiveBacklog() {
+            const active = getActiveBacklog();
+            if (!active) return;
+            if (isDefaultBacklog(active)) {
+                showMessage('Your personal backlog cannot be deleted.', 'warning');
+                return;
+            }
+            if (!isOwnedBacklog(active)) {
+                showMessage('Only the backlog owner can delete it.', 'warning');
+                return;
+            }
+            if (!confirm(`Delete backlog "${active.name}"?`)) return;
+            try {
+                const resp = await safeFetch(`/api/backlogs/${encodeURIComponent(active.id)}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to delete backlog', 'error');
+                    return;
+                }
+                activeBacklogId = '';
+                await ensureBacklogCollectionsLoaded(true);
+                await loadBacklog();
+                showMessage('Backlog deleted.', 'success');
+            } catch (error) {
+                showMessage(`Error deleting backlog: ${error.message}`, 'error');
+            }
+        }
+
+        async function leaveActiveBacklog() {
+            const active = getActiveBacklog();
+            if (!active) return;
+            if (isOwnedBacklog(active)) {
+                showMessage('Owners delete shared backlogs instead of leaving them.', 'warning');
+                return;
+            }
+            if (!confirm(`Leave backlog "${active.name}"?`)) return;
+            try {
+                const resp = await safeFetch(`/api/backlogs/${encodeURIComponent(active.id)}/leave`, { method: 'POST' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to leave backlog', 'error');
+                    return;
+                }
+                activeBacklogId = '';
+                await ensureBacklogCollectionsLoaded(true);
+                await loadBacklog();
+                showMessage('You left the backlog.', 'success');
+            } catch (error) {
+                showMessage(`Error leaving backlog: ${error.message}`, 'error');
+            }
         }
         
         // ==============================================================================================
@@ -5641,25 +5924,32 @@ Event ID: ${result.discord_event_id}`);
             currentBacklogGameId = gameId;
             currentBacklogGameName = gameName;
             document.getElementById('backlog-modal-title').textContent = `📚 Add "${gameName}" to Backlog`;
+            try {
+                await ensureBacklogCollectionsLoaded();
+            } catch (error) {
+                showMessage(`Failed to load backlogs: ${error.message}`, 'error');
+            }
+            populateBacklogModalCollections(activeBacklogId);
             document.getElementById('backlog-modal').style.display = 'flex';
         }
 
         async function selectBacklogStatus(status) {
             if (!currentBacklogGameId) return;
+            const collectionId = document.getElementById('backlog-modal-collection')?.value || activeBacklogId;
+            const collection = backlogCollectionsCache.find(backlog => backlog.id === collectionId) || null;
             
             try {
-                const response = await fetch(`/api/backlog/${currentBacklogGameId}`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({status: status})
-                });
-                const data = await response.json();
-                if (response.ok) {
+                const updated = await updateBacklogEntryStatus(currentBacklogGameId, status, collectionId);
+                if (updated) {
                     const statusLabel = status.replace(/_/g, ' ').charAt(0).toUpperCase() + status.replace(/_/g, ' ').slice(1);
-                    showMessage(`✅ Added "${currentBacklogGameName}" to backlog as "${statusLabel}"!`, 'success');
+                    const backlogLabel = collection?.name ? ` in "${collection.name}"` : '';
+                    showMessage(`✅ Added "${currentBacklogGameName}" to backlog${backlogLabel} as "${statusLabel}"!`, 'success');
                     closeBacklogModal();
+                    if (activeBacklogId && collectionId === activeBacklogId && document.getElementById('backlog-tab')?.classList.contains('active')) {
+                        await loadBacklog();
+                    }
                 } else {
-                    showMessage(data.error || 'Failed to add to backlog', 'error');
+                    showMessage('Failed to add to backlog', 'error');
                 }
             } catch (error) {
                 console.error('Add to backlog error:', error);
@@ -5671,6 +5961,7 @@ Event ID: ${result.discord_event_id}`);
             document.getElementById('backlog-modal').style.display = 'none';
             currentBacklogGameId = null;
             currentBacklogGameName = null;
+            populateBacklogModalCollections(activeBacklogId);
         }
 
         // ==============================================================================================
