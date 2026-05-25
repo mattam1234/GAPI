@@ -34,6 +34,7 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'backlog-library-preview',
             'backlog-library-add-select',
             'backlog-entry-preview',
+            'game-details-backlog-notes',
         ):
             self.assertIn(token, content)
         self.assertNotIn('Playlists &amp; Backlogs', content)
@@ -49,6 +50,8 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'filterBacklogCollections',
             'openBacklogCollectionModal',
             'leaveActiveBacklog',
+            'loadPreviewBacklogNotes',
+            'savePreviewBacklogNotes',
             'loadPlaylists();',
             'loadBacklog();',
         ):

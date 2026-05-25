@@ -1100,6 +1100,7 @@
                         ${backlogOptions}
                     </select>
                 </div>
+                <div id="game-preview-backlog-notes" style="margin-top:12px; padding:12px; background:var(--list-hover); border-radius:var(--radius-sm,8px);"></div>
                 <!-- Inline review editor (hidden by default) -->
                 <div id="review-editor" style="display:none; margin-top:12px; padding:14px; background:rgba(245,158,11,0.06); border-radius:var(--radius-sm,8px); border:1px solid rgba(245,158,11,0.3);">
                     <strong>Write a Review</strong>
@@ -1137,6 +1138,10 @@
 
             resultDiv.innerHTML = html;
             resultDiv.style.display = 'block';
+            loadPreviewBacklogNotes('game-preview-backlog-notes', game.game_id || `steam:${game.app_id}`, {
+                collectionId: getPreviewNotesCollectionId(),
+                emptyMessage: 'Choose a backlog status to start saving notes for this game.',
+            });
 
             // Load details and achievements in parallel
             loadGameDetails(game.app_id);
@@ -1189,6 +1194,7 @@
                     <div style="margin-top: 8px;">${multiplayerBadges}</div>
                 </div>
                 <div id="game-details">Loading details...</div>
+                <div id="multiuser-backlog-notes" style="margin-top:12px; padding:12px; background:var(--list-hover); border-radius:var(--radius-sm,8px);"></div>
                 <div class="action-buttons" style="margin-top:12px;">
                     <button class="btn btn-link" onclick="window.open('${game.steam_url}', '_blank')">
                         🔗 Open in Steam
@@ -1204,6 +1210,9 @@
 
             resultDiv.innerHTML = html;
             resultDiv.style.display = 'block';
+            loadPreviewBacklogNotes('multiuser-backlog-notes', game.game_id || `steam:${game.app_id}`, {
+                emptyMessage: 'Add this game to your backlog to save notes here.',
+            });
 
             // Load game details
             loadGameDetails(game.app_id);
@@ -1247,7 +1256,14 @@
         async function setBacklogStatus(gameId, status) {
             const updated = await updateBacklogEntryStatus(gameId, status, activeBacklogId);
             if (!updated) return;
-            if (currentGame) currentGame.backlog_status = status || null;
+            if (currentGame) {
+                currentGame.backlog_status = status || null;
+                if (!status) currentGame.backlog_notes = '';
+            }
+            loadPreviewBacklogNotes('game-preview-backlog-notes', gameId, {
+                collectionId: getPreviewNotesCollectionId(),
+                emptyMessage: 'Choose a backlog status to start saving notes for this game.',
+            });
         }
 
         function shareGame() {
@@ -1582,6 +1598,7 @@
         let backlogCollectionsCache = [];
         let activeBacklogId = '';
         let activeBacklogEntryGameId = '';
+        let activeGameDetailsModalGameId = '';
         let backlogShareCandidatesCache = [];
         let _recommendationsData = [];
         const FAVORITES_BACKLOG_ID = '__favorites__';
@@ -1672,8 +1689,9 @@
             debouncedSearch(searchText);
         }
 
-        function showGameDetails(appId, gameName, playtimeHours, tags) {
+        function showGameDetails(appId, gameName, playtimeHours, tags, explicitGameId = '') {
             const modal = document.getElementById('game-details-modal');
+            activeGameDetailsModalGameId = String(explicitGameId || findKnownGameIdByAppId(appId) || '').trim();
             document.getElementById('game-details-name').textContent = gameName;
             document.getElementById('game-details-playtime').textContent = `${playtimeHours} hours`;
             
@@ -1699,6 +1717,10 @@
             
             // Show loading state
             document.getElementById('game-details-description').innerHTML = `<em>Loading details...</em>`;
+            loadPreviewBacklogNotes('game-details-backlog-notes', activeGameDetailsModalGameId, {
+                emptyMessage: 'Add this game to your backlog to save notes in the details modal.',
+                saveLabel: '💾 Save modal notes',
+            });
             
             modal.style.display = 'flex';
             
@@ -1783,6 +1805,7 @@
 
         function closeGameDetailsModal() {
             document.getElementById('game-details-modal').style.display = 'none';
+            activeGameDetailsModalGameId = '';
         }
 
         async function toggleFavoriteLibraryLibrary(appId) {
@@ -4981,6 +5004,127 @@ Event ID: ${result.discord_event_id}`);
 
         function getBacklogStatusLabel(status) {
             return String(status || '').replace(/_/g, ' ').trim() || 'unknown';
+        }
+
+        function getPreviewNotesCollectionId() {
+            return isFavoritesBacklog(activeBacklogId) ? '' : String(activeBacklogId || '').trim();
+        }
+
+        function findKnownGameIdByAppId(appId) {
+            const safeAppId = Number.parseInt(String(appId || '').trim(), 10);
+            if (!Number.isFinite(safeAppId) || safeAppId <= 0) return '';
+            const pools = [
+                Array.isArray(_libraryData?.games) ? _libraryData.games : [],
+                Array.isArray(_favoritesData) ? _favoritesData : [],
+                Array.isArray(_backlogData) ? _backlogData : [],
+                Array.isArray(_recommendationsData) ? _recommendationsData : [],
+                currentGame ? [currentGame] : [],
+            ];
+            for (const pool of pools) {
+                const match = pool.find(game => Number.parseInt(String(game?.app_id || game?.appid || '').trim(), 10) === safeAppId);
+                const gameId = getBacklogEntryGameId(match);
+                if (gameId) return gameId;
+            }
+            return `steam:${safeAppId}`;
+        }
+
+        function renderPreviewNotesState(containerId, options = {}) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const {
+                gameId = '',
+                status = '',
+                notes = '',
+                collectionId = '',
+                emptyMessage = 'Add this game to a list to save notes here.',
+                saveLabel = '💾 Save notes',
+            } = options;
+            container.dataset.gameId = String(gameId || '').trim();
+            container.dataset.status = String(status || '').trim();
+            container.dataset.collectionId = String(collectionId || '').trim();
+            container.dataset.saveLabel = String(saveLabel || '💾 Save notes');
+            if (!container.dataset.gameId || !container.dataset.status) {
+                container.innerHTML = `<div class="schedule-field-hint">${escapeHtml(emptyMessage)}</div>`;
+                return;
+            }
+            const inputId = `${containerId}-input`;
+            container.innerHTML = `
+                <div class="backlog-entry-preview-notes" style="margin-top:0;">
+                    <label for="${inputId}" class="schedule-field-hint">Notes for this list entry</label>
+                    <textarea id="${inputId}" class="search-input" placeholder="Write a reminder for later…" style="margin-bottom:0;">${escapeHtml(String(notes || '').trim())}</textarea>
+                    <div class="schedule-modal-actions schedule-modal-actions-inline" style="margin-top:0;">
+                        <button type="button" class="chat-room-secondary-btn" onclick="savePreviewBacklogNotes('${escAttr(containerId)}')">${escapeHtml(saveLabel)}</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadPreviewBacklogNotes(containerId, gameId, options = {}) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const safeGameId = String(gameId || '').trim();
+            if (!safeGameId) {
+                renderPreviewNotesState(containerId, {emptyMessage: options.emptyMessage});
+                return;
+            }
+            const collectionId = String(options.collectionId || '').trim();
+            const query = collectionId ? `?collection_id=${encodeURIComponent(collectionId)}` : '';
+            container.innerHTML = '<div class="loading">Loading notes…</div>';
+            try {
+                const resp = await safeFetch(`/api/backlog/${encodeURIComponent(safeGameId)}${query}`);
+                const data = resp.ok ? await resp.json() : {};
+                renderPreviewNotesState(containerId, {
+                    gameId: safeGameId,
+                    status: data.status || '',
+                    notes: data.notes || '',
+                    collectionId,
+                    emptyMessage: options.emptyMessage,
+                    saveLabel: options.saveLabel,
+                });
+            } catch (_) {
+                renderPreviewNotesState(containerId, {
+                    emptyMessage: options.emptyMessage || 'Unable to load notes for this game right now.',
+                });
+            }
+        }
+
+        async function savePreviewBacklogNotes(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const gameId = String(container.dataset.gameId || '').trim();
+            const status = String(container.dataset.status || '').trim();
+            const collectionId = String(container.dataset.collectionId || '').trim();
+            const input = document.getElementById(`${containerId}-input`);
+            if (!gameId || !status || !input) {
+                showMessage('Add this game to a list before saving notes.', 'warning');
+                return;
+            }
+            const notes = String(input.value || '').trim();
+            const updated = await updateBacklogEntryStatus(gameId, status, collectionId, notes);
+            if (!updated) {
+                showMessage('Failed to save notes for this game.', 'error');
+                return;
+            }
+            if (currentGame && getBacklogEntryGameId(currentGame) === gameId) {
+                currentGame.backlog_status = status;
+                currentGame.backlog_notes = notes;
+            }
+            const matchingBacklogGame = _backlogData.find(game => getBacklogEntryGameId(game) === gameId);
+            if (matchingBacklogGame) matchingBacklogGame.backlog_notes = notes;
+            container.dataset.status = status;
+            showMessage('✅ Notes saved.', 'success');
+            if (containerId === 'backlog-entry-preview') {
+                renderBacklogEntryPreview();
+                return;
+            }
+            renderPreviewNotesState(containerId, {
+                gameId,
+                status,
+                notes,
+                collectionId,
+                emptyMessage: 'Add this game to a list to save notes here.',
+                saveLabel: container.dataset.saveLabel || '💾 Save notes',
+            });
         }
 
         function getBacklogGameGenres(game) {
