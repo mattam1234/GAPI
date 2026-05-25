@@ -597,7 +597,7 @@
                 loadBacklog();
             }
             if (tabName === 'ignored') loadIgnoredGames();
-            if (tabName === 'achievements') loadAchievements();
+            if (tabName === 'achievements') loadUserAchievements();
             if (tabName === 'friends') loadFriends();
             if (tabName === 'recommendations') loadRecommendations();
             if (tabName === 'chat') {
@@ -6559,63 +6559,175 @@ Event ID: ${result.discord_event_id}`);
         // Achievements Functions
         // ==============================================================================================
         
-        async function loadUserAchievements() {
-            const listDiv = document.getElementById('achievements-list');
-            listDiv.innerHTML = renderSkeletonList(4);
-            
+        let achievementGamesData = [];
+        let achievementBacklogCollections = [];
+        let achievementCollectionGameIds = {};
+        let achievementsLibrarySyncAttempted = false;
+
+        function getAchievementAppIdToken(item) {
+            const appId = item?.app_id ?? item?.appid;
+            if (appId !== undefined && appId !== null && String(appId).trim()) {
+                return String(appId).trim();
+            }
+            const gameId = String(item?.game_id || '').trim();
+            if (!gameId) return '';
+            if (gameId.includes(':')) {
+                return gameId.split(':').pop()?.trim() || '';
+            }
+            return gameId;
+        }
+
+        function populateAchievementListFilterOptions(backlogs) {
+            const listFilterEl = document.getElementById('achievements-list-filter');
+            if (!listFilterEl) return;
+            const existingValue = listFilterEl.value;
+            const options = ['<option value="all">All library games</option>'];
+            (backlogs || []).forEach(backlog => {
+                const id = String(backlog?.id || '').trim();
+                if (!id) return;
+                const name = String(backlog?.name || 'Unnamed list').trim() || 'Unnamed list';
+                options.push(`<option value="${id}">${name}</option>`);
+            });
+            listFilterEl.innerHTML = options.join('');
+            if (existingValue && options.some(option => option.includes(`value="${existingValue}"`))) {
+                listFilterEl.value = existingValue;
+            }
+        }
+
+        async function loadAchievementBacklogFilters() {
             try {
-                const response = await fetch('/api/achievements');
+                const response = await safeFetch('/api/backlogs');
+                if (!response.ok) return;
                 const data = await response.json();
-                
-                if (data.achievements && data.achievements.length > 0) {
-                    const achievements = data.achievements;
-                    const BATCH_SIZE = 5; // Render 5 items at a time
-                    let allHtml = '';
-                    
-                    const renderBatch = (startIdx) => {
-                        const endIdx = Math.min(startIdx + BATCH_SIZE, achievements.length);
-                        let batchHtml = '';
-                        
-                        for (let i = startIdx; i < endIdx; i++) {
-                            const game = achievements[i];
-                            const unlockedCount = (game.achievements || []).filter(a => a.unlocked).length;
-                            const totalCount = (game.achievements || []).length;
-                            
-                            batchHtml += `
-                                <div style="padding: 15px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-sm, 8px); margin-bottom: 10px;">
-                                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 10px;">
-                                        <div>
-                                            <strong>${game.game_name}</strong><br>
-                                            <small style="color: var(--text-secondary);">App ID: ${game.app_id}</small>
-                                        </div>
-                                        <div>
-                                            <small style="color: var(--text-secondary);">Progress:</small><br>
-                                            <div style="background: var(--list-hover); border-radius: var(--radius-sm, 8px); height: 20px; overflow: hidden; margin-top: 5px;">
-                                                <div style="background: linear-gradient(90deg, #4f46e5, #7c3aed); height: 100%; width: ${totalCount > 0 ? (unlockedCount / totalCount * 100) : 0}%; transition: width 0.3s;"></div>
-                                            </div>
-                                        </div>
-                                        <div style="text-align: center;">
-                                            <strong style="font-size: 1.2em; color: #4f46e5;">${unlockedCount}/${totalCount}</strong><br>
-                                            <small style="color: var(--text-secondary);">Unlocked</small>
-                                        </div>
+                achievementBacklogCollections = Array.isArray(data.backlogs) ? data.backlogs : [];
+                populateAchievementListFilterOptions(achievementBacklogCollections);
+            } catch (_error) {
+                achievementBacklogCollections = [];
+                populateAchievementListFilterOptions([]);
+            }
+        }
+
+        async function getAchievementGameIdsForCollection(collectionId) {
+            const safeCollectionId = String(collectionId || '').trim();
+            if (!safeCollectionId) return null;
+            if (achievementCollectionGameIds[safeCollectionId]) {
+                return achievementCollectionGameIds[safeCollectionId];
+            }
+            try {
+                const response = await safeFetch(`/api/backlog?collection_id=${encodeURIComponent(safeCollectionId)}`);
+                if (!response.ok) return null;
+                const data = await response.json();
+                const games = Array.isArray(data.games) ? data.games : [];
+                const gameIds = new Set(
+                    games
+                        .map(item => getAchievementAppIdToken(item))
+                        .filter(Boolean)
+                );
+                achievementCollectionGameIds[safeCollectionId] = gameIds;
+                return gameIds;
+            } catch (_error) {
+                return null;
+            }
+        }
+
+        async function renderUserAchievements() {
+            const listDiv = document.getElementById('achievements-list');
+            if (!listDiv) return;
+
+            const searchEl = document.getElementById('achievements-search');
+            const listFilterEl = document.getElementById('achievements-list-filter');
+            const query = String(searchEl?.value || '').trim().toLowerCase();
+            const listFilter = String(listFilterEl?.value || 'all').trim();
+
+            let achievements = Array.isArray(achievementGamesData) ? [...achievementGamesData] : [];
+            if (query) {
+                achievements = achievements.filter(game => {
+                    const name = String(game?.game_name || '').toLowerCase();
+                    const appId = String(game?.app_id || '');
+                    return name.includes(query) || appId.includes(query);
+                });
+            }
+
+            if (listFilter && listFilter !== 'all') {
+                const collectionGameIds = await getAchievementGameIdsForCollection(listFilter);
+                if (collectionGameIds instanceof Set) {
+                    achievements = achievements.filter(game => collectionGameIds.has(String(game?.app_id || '').trim()));
+                } else {
+                    achievements = [];
+                }
+            }
+
+            if (!achievements.length) {
+                listDiv.innerHTML = '<div style="padding: 20px; color: var(--text-secondary);">No achievements found for the selected filters.</div>';
+                return;
+            }
+
+            const BATCH_SIZE = 5;
+            let allHtml = '';
+            const renderBatch = (startIdx) => {
+                const endIdx = Math.min(startIdx + BATCH_SIZE, achievements.length);
+                let batchHtml = '';
+                for (let i = startIdx; i < endIdx; i++) {
+                    const game = achievements[i];
+                    const unlockedCount = (game.achievements || []).filter(a => a.unlocked).length;
+                    const totalCount = (game.achievements || []).length;
+                    const progressPercent = totalCount > 0 ? (unlockedCount / totalCount * 100) : 0;
+                    batchHtml += `
+                        <div style="padding: 15px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-sm, 8px); margin-bottom: 10px;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 10px;">
+                                <div>
+                                    <strong>${game.game_name}</strong><br>
+                                    <small style="color: var(--text-secondary);">App ID: ${game.app_id}</small>
+                                </div>
+                                <div>
+                                    <small style="color: var(--text-secondary);">Progress:</small><br>
+                                    <div style="background: var(--list-hover); border-radius: var(--radius-sm, 8px); height: 20px; overflow: hidden; margin-top: 5px;">
+                                        <div style="background: linear-gradient(90deg, #4f46e5, #7c3aed); height: 100%; width: ${progressPercent}%; transition: width 0.3s;"></div>
                                     </div>
                                 </div>
-                            `;
-                        }
-
-                        allHtml += batchHtml;
-                        listDiv.innerHTML = allHtml;
-
-                        // Schedule next batch
-                        if (endIdx < achievements.length) {
-                            requestAnimationFrame(() => renderBatch(endIdx));
-                        }
-                    };
-
-                    renderBatch(0);
-                } else {
-                    listDiv.innerHTML = '<div style="padding: 20px; color: var(--text-secondary);">No achievement hunts yet. Start one above!</div>';
+                                <div style="text-align: center;">
+                                    <strong style="font-size: 1.2em; color: #4f46e5;">${unlockedCount}/${totalCount}</strong><br>
+                                    <small style="color: var(--text-secondary);">Unlocked</small>
+                                </div>
+                            </div>
+                        </div>
+                    `;
                 }
+                allHtml += batchHtml;
+                listDiv.innerHTML = allHtml;
+                if (endIdx < achievements.length) {
+                    requestAnimationFrame(() => renderBatch(endIdx));
+                }
+            };
+            renderBatch(0);
+        }
+
+        async function loadUserAchievements(forceSync = false) {
+            const listDiv = document.getElementById('achievements-list');
+            if (!listDiv) return;
+            listDiv.innerHTML = renderSkeletonList(4);
+
+            await loadAchievementBacklogFilters();
+
+            if (forceSync || !achievementsLibrarySyncAttempted) {
+                try {
+                    const syncResp = await safeFetch('/api/achievements/sync', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    });
+                    if (syncResp.ok) achievementCollectionGameIds = {};
+                } catch (_error) {
+                    // Best effort: keep rendering cached achievements if sync fails.
+                }
+                achievementsLibrarySyncAttempted = true;
+            }
+
+            try {
+                const response = await safeFetch('/api/achievements');
+                const data = await response.json();
+                achievementGamesData = Array.isArray(data.achievements) ? data.achievements : [];
+                await renderUserAchievements();
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading achievements: ' + error.message + '</div>';
             }
@@ -6651,7 +6763,7 @@ Event ID: ${result.discord_event_id}`);
                     document.getElementById('hunt-game-name').value = '';
                     document.getElementById('hunt-targets').value = '';
                     alert('Achievement hunt started!');
-                    loadAchievements();
+                    loadUserAchievements(true);
                 } else {
                     alert(data.error || 'Failed to start hunt');
                 }

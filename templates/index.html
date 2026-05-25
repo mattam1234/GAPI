@@ -1274,6 +1274,19 @@
                     <button onclick="startAchievementHunt()" style="padding: var(--space-10) var(--space-xl); background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer;">Start Hunt</button>
                 </div>
             </div>
+
+            <div style="background: var(--card-bg); padding: var(--space-lg); border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
+                <div style="display:grid; grid-template-columns: 1fr minmax(180px, 260px) auto; gap: var(--space-10);">
+                    <input id="achievements-search" type="text" placeholder="Search games..."
+                           oninput="renderUserAchievements()"
+                           style="padding: var(--space-10); border: 1.5px solid var(--input-border); border-radius: var(--radius-sm, 8px); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                    <select id="achievements-list-filter" onchange="renderUserAchievements()"
+                            style="padding: var(--space-10); border: 1.5px solid var(--input-border); border-radius: var(--radius-sm, 8px); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
+                        <option value="all">All library games</option>
+                    </select>
+                    <button onclick="loadUserAchievements(true)" style="padding: var(--space-10) var(--space-xl); background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer;">Refresh Library Sync</button>
+                </div>
+            </div>
             
             <div id="achievements-list" style="background: var(--card-bg); padding: var(--space-xl); border-radius: var(--radius, 12px); border: 1px solid var(--card-border);">
                 <div class="loading">Loading achievements...</div>
