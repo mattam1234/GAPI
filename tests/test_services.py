@@ -477,6 +477,43 @@ class TestScheduleService(TmpDirMixin):
         self.assertEqual(svc.resolve_schedule_for_user(shared['id'], 'bob'), shared['id'])
         self.assertEqual(svc.resolve_schedule_for_user(shared['id'], 'carol'), 'personal:carol')
 
+    def test_update_schedule_renames_and_updates_members(self):
+        svc = self._make()
+        shared = svc.create_schedule(
+            name='Raid Team',
+            owner_username='alice',
+            members=['bob'],
+            is_shared=True,
+        )
+        updated = svc.update_schedule(
+            shared['id'],
+            username='alice',
+            name='Weekend Squad',
+            members=['carol'],
+            is_shared=True,
+        )
+        self.assertEqual(updated['name'], 'Weekend Squad')
+        self.assertEqual(updated['members'], ['alice', 'carol'])
+        self.assertTrue(updated['is_shared'])
+
+    def test_update_schedule_rejects_non_owner(self):
+        svc = self._make()
+        shared = svc.create_schedule(
+            name='Raid Team',
+            owner_username='alice',
+            members=['bob'],
+            is_shared=True,
+        )
+        self.assertIsNone(
+            svc.update_schedule(
+                shared['id'],
+                username='bob',
+                name='Weekend Squad',
+                members=['bob'],
+                is_shared=True,
+            )
+        )
+
 
 class TestPlaylistService(TmpDirMixin):
 

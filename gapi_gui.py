@@ -4624,6 +4624,37 @@ def api_create_schedule():
     return jsonify(schedule), 201
 
 
+@app.route('/api/schedules/<schedule_id>', methods=['PUT'])
+@require_login
+def api_update_schedule(schedule_id: str):
+    """Rename or update sharing for a schedule collection."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    raw_members = data.get('members', [])
+    if isinstance(raw_members, str):
+        members = [value.strip() for value in raw_members.split(',') if value.strip()]
+    else:
+        members = [str(value).strip() for value in (raw_members or []) if str(value).strip()]
+    is_shared = data.get('is_shared')
+    with picker_lock:
+        schedule = p.schedule_service.update_schedule(
+            schedule_id=schedule_id,
+            username=username,
+            name=name,
+            members=members,
+            is_shared=bool(is_shared) if is_shared is not None else None,
+        )
+    if schedule is None:
+        return jsonify({'error': 'Schedule not found'}), 404
+    return jsonify(schedule)
+
+
 @app.route('/api/schedule', methods=['POST'])
 @require_login
 def api_create_event():
