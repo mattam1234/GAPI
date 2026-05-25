@@ -1094,6 +1094,19 @@
 
         <!-- Backlog Tab -->
         <div id="backlog-tab" class="tab-content">
+            <div id="favorites-compat" style="display:none;">
+                <input type="text" id="favorites-search" value="">
+                <select id="favorites-platform-filter">
+                    <option value="">All Platforms</option>
+                    <option value="steam">Steam</option>
+                    <option value="epic">Epic Games</option>
+                    <option value="gog">GOG</option>
+                    <option value="xbox">Xbox</option>
+                    <option value="playstation">PlayStation</option>
+                    <option value="nintendo">Nintendo</option>
+                </select>
+                <div id="favorites-list"></div>
+            </div>
             <div class="backlog-shell">
                 <div class="backlog-sidebar">
                     <div class="backlog-sidebar-card">
