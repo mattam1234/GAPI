@@ -34,7 +34,7 @@ discord.py>=2.3.0
 # -----------------------------------------------------------------------------
 # Optional — Platform integrations
 # -----------------------------------------------------------------------------
-epicstore-api>=0.1.7          # Epic Games Store library sync
+epicstore-api>=0.2.0          # Epic Games Store library sync
 # galaxy.plugin.api>=0.69,<0.70  # GOG Galaxy (uncomment if GOG integration needed)
 
 # -----------------------------------------------------------------------------
