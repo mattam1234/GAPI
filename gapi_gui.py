@@ -5446,9 +5446,9 @@ def api_search_attendees():
     if not query:
         return jsonify({'error': 'query is required'}), 400
     
-    with picker_lock:
-        # Get list of users (friends)
-        users_list = p.multi_picker.users if hasattr(p, 'multi_picker') else []
+    _ensure_multi_picker()
+    with multi_picker_lock:
+        users_list = multi_picker.users if multi_picker else []
         results = _fuzzy_search_users(query, users_list, limit=limit)
     
     # Clean up user data for response
@@ -5466,7 +5466,11 @@ def api_search_attendees():
 @app.route('/api/schedule/common-games', methods=['POST'])
 @require_login
 def api_schedule_common_games():
-    """Return common games for the provided invitee list."""
+    """Return games available for the schedule event game picker.
+
+    Always includes the current user's library.  When invitees are provided
+    only games that the current user *and* all invitees share are returned.
+    """
     username = get_current_username()
     p = ensure_picker_initialized(username)
     if not p:
@@ -5478,19 +5482,45 @@ def api_schedule_common_games():
         attendees = [value.strip() for value in attendees_raw.split(',') if value.strip()]
     else:
         attendees = [str(value).strip() for value in (attendees_raw or []) if str(value).strip()]
-    attendees = list(dict.fromkeys(attendees))
+    # Deduplicate and exclude the current user (they are always included via p.games)
+    attendees = list(dict.fromkeys(
+        a for a in attendees if a.lower() != (username or '').lower()
+    ))
+
+    current_user_games = list(p.games or [])
+
     if not attendees:
-        return jsonify({'error': 'attendees are required'}), 400
+        # No invitees – use the current user's full library
+        candidate_games = current_user_games
+    else:
+        # With invitees – intersect invitees' common games with current user's library
+        _ensure_multi_picker()
+        if multi_picker:
+            with multi_picker_lock:
+                invitee_common = multi_picker.find_common_games(attendees)
+        else:
+            invitee_common = []
 
-    schedule_multi_picker = getattr(p, 'multi_picker', None)
-    if not schedule_multi_picker:
-        return jsonify({'error': 'Multi-user picker not initialized'}), 400
-
-    with multi_picker_lock:
-        common_games = schedule_multi_picker.find_common_games(attendees)
+        if not invitee_common:
+            candidate_games = []
+        else:
+            # Build a (platform, appid) lookup for the current user's games
+            current_ids: set = set()
+            for g in current_user_games:
+                appid = str(g.get('appid') or g.get('app_id') or '').strip()
+                platform = str(g.get('platform') or 'steam').lower()
+                if appid:
+                    current_ids.add((platform, appid.lower()))
+            candidate_games = [
+                g for g in invitee_common
+                if (
+                    str(g.get('platform') or 'steam').lower(),
+                    str(g.get('appid') or g.get('app_id') or '').strip().lower(),
+                ) in current_ids
+            ]
 
     games = []
-    for game in common_games[:100]:
+    for game in candidate_games[:100]:
         app_id = str(game.get('appid') or game.get('app_id') or '').strip()
         games.append({
             'app_id': app_id,
@@ -5510,7 +5540,11 @@ def api_schedule_common_games():
 @app.route('/api/schedule/common-games/random', methods=['POST'])
 @require_login
 def api_schedule_random_common_game():
-    """Pick a random game shared by all provided attendees."""
+    """Pick a random game from the available pool for this schedule event.
+
+    Always includes the current user's library.  When invitees are provided
+    only games shared by the current user and all invitees are eligible.
+    """
     username = get_current_username()
     p = ensure_picker_initialized(username)
     if not p:
@@ -5522,22 +5556,44 @@ def api_schedule_random_common_game():
         attendees = [value.strip() for value in attendees_raw.split(',') if value.strip()]
     else:
         attendees = [str(value).strip() for value in (attendees_raw or []) if str(value).strip()]
-    attendees = list(dict.fromkeys(attendees))
+    attendees = list(dict.fromkeys(
+        a for a in attendees if a.lower() != (username or '').lower()
+    ))
+
+    current_user_games = list(p.games or [])
+
     if not attendees:
-        return jsonify({'error': 'attendees are required'}), 400
+        candidate_games = current_user_games
+    else:
+        _ensure_multi_picker()
+        if multi_picker:
+            with multi_picker_lock:
+                invitee_common = multi_picker.find_common_games(attendees)
+        else:
+            invitee_common = []
 
-    schedule_multi_picker = getattr(p, 'multi_picker', None)
-    if not schedule_multi_picker:
-        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+        if not invitee_common:
+            candidate_games = []
+        else:
+            current_ids: set = set()
+            for g in current_user_games:
+                appid = str(g.get('appid') or g.get('app_id') or '').strip()
+                platform = str(g.get('platform') or 'steam').lower()
+                if appid:
+                    current_ids.add((platform, appid.lower()))
+            candidate_games = [
+                g for g in invitee_common
+                if (
+                    str(g.get('platform') or 'steam').lower(),
+                    str(g.get('appid') or g.get('app_id') or '').strip().lower(),
+                ) in current_ids
+            ]
 
-    with multi_picker_lock:
-        common_games = schedule_multi_picker.find_common_games(attendees)
-
-    if not common_games:
-        return jsonify({'error': 'No shared games found for selected attendees'}), 404
+    if not candidate_games:
+        return jsonify({'error': 'No games found in your library'}), 404
 
     import random as _random
-    game = _random.choice(common_games)
+    game = _random.choice(candidate_games)
     app_id = str(game.get('appid') or game.get('app_id') or '').strip()
     return jsonify({
         'game': {

@@ -1029,7 +1029,7 @@
                             </div>
                         </div>
                         <div class="schedule-form-span-2 schedule-inline-actions">
-                            <button type="button" class="chat-room-secondary-btn" onclick="openScheduleCommonGamePicker()">🎮 Pick from invitees' libraries</button>
+                            <button type="button" class="chat-room-secondary-btn" onclick="openScheduleCommonGamePicker()">🎮 Pick from libraries</button>
                             <button type="button" class="chat-room-secondary-btn" onclick="resetScheduleGameFilters()">Reset game filters</button>
                         </div>
                         <div>
@@ -1085,7 +1085,7 @@
                     <div class="schedule-modal-header">
                         <div>
                             <div class="schedule-agenda-eyebrow">Game picker</div>
-                            <h3 id="schedule-common-games-title">Pick from invited libraries</h3>
+                            <h3 id="schedule-common-games-title">Pick a game</h3>
                         </div>
                         <button type="button" class="schedule-modal-close" onclick="closeScheduleCommonGamePicker()">✕</button>
                     </div>
@@ -1093,7 +1093,7 @@
                     <div class="schedule-modal-actions schedule-modal-actions-inline" style="margin-top:0; margin-bottom:12px;">
                         <button type="button" class="chat-room-secondary-btn" onclick="pickRandomScheduleCommonGame()">🎲 Pick random shared game</button>
                     </div>
-                    <div id="schedule-common-games-status" class="schedule-field-hint">Choose an invitee first to load common games.</div>
+                    <div id="schedule-common-games-status" class="schedule-field-hint">Click open to pick a game from your library or shared libraries.</div>
                     <div id="schedule-common-games-list" class="schedule-common-games-list"></div>
                 </div>
             </div>
@@ -1148,6 +1148,7 @@
                         <div class="schedule-sidebar-actions">
                             <button type="button" class="chat-room-create-btn" onclick="openBacklogCollectionModal()">➕ Create List</button>
                             <button type="button" class="chat-room-secondary-btn" id="backlog-rename-btn" onclick="openBacklogCollectionModal(true)" disabled>✏️ Rename</button>
+                            <button type="button" class="chat-room-secondary-btn" id="backlog-invite-btn" onclick="openBacklogCollectionModal(true)" disabled>👥 Invite</button>
                             <button type="button" class="chat-room-secondary-btn" id="backlog-delete-btn" onclick="deleteActiveBacklog()" disabled>🗑️ Delete</button>
                             <button type="button" class="chat-room-secondary-btn" id="backlog-leave-btn" onclick="leaveActiveBacklog()" disabled>↩️ Leave</button>
                         </div>
@@ -1180,49 +1181,53 @@
                 </div>
                 <div class="backlog-side-panel">
                     <div class="backlog-sidebar-card backlog-filter-panel">
-                        <div class="schedule-agenda-eyebrow">Filters</div>
-                        <h3>Refine entries &amp; quick add</h3>
-                        <input type="text" id="backlog-search" class="search-input" placeholder="🔍 Filter backlog..." oninput="renderBacklogList()" style="margin-bottom:0;">
-                        <div class="backlog-control-grid">
-                            <label class="schedule-filter-group">
-                                <span>Platform</span>
-                                <select id="backlog-platform-filter" onchange="renderBacklogList()" class="search-input" style="margin-bottom:0;">
-                                    <option value="">All Platforms</option>
-                                    <option value="steam">Steam</option>
-                                    <option value="epic">Epic Games</option>
-                                    <option value="gog">GOG</option>
-                                    <option value="xbox">Xbox</option>
-                                    <option value="playstation">PlayStation</option>
-                                    <option value="nintendo">Nintendo</option>
-                                </select>
-                            </label>
-                            <label class="schedule-filter-group">
-                                <span>Status</span>
-                                <select id="backlog-filter" onchange="loadBacklog()" class="search-input" style="margin-bottom:0;">
-                                    <option value="">All</option>
-                                    <option value="want_to_play">Want to Play</option>
-                                    <option value="playing">Playing</option>
-                                    <option value="completed">Completed</option>
-                                    <option value="dropped">Dropped</option>
-                                </select>
-                            </label>
+                        <div class="backlog-filter-section">
+                            <div class="schedule-agenda-eyebrow">Filters</div>
+                            <h3>Refine entries &amp; quick add</h3>
+                            <input type="text" id="backlog-search" class="search-input" placeholder="🔍 Filter backlog..." oninput="renderBacklogList()" style="margin-bottom:0;">
+                            <div class="backlog-control-grid">
+                                <label class="schedule-filter-group">
+                                    <span>Platform</span>
+                                    <select id="backlog-platform-filter" onchange="renderBacklogList()" class="search-input" style="margin-bottom:0;">
+                                        <option value="">All Platforms</option>
+                                        <option value="steam">Steam</option>
+                                        <option value="epic">Epic Games</option>
+                                        <option value="gog">GOG</option>
+                                        <option value="xbox">Xbox</option>
+                                        <option value="playstation">PlayStation</option>
+                                        <option value="nintendo">Nintendo</option>
+                                    </select>
+                                </label>
+                                <label class="schedule-filter-group">
+                                    <span>Status</span>
+                                    <select id="backlog-filter" onchange="loadBacklog()" class="search-input" style="margin-bottom:0;">
+                                        <option value="">All</option>
+                                        <option value="want_to_play">Want to Play</option>
+                                        <option value="playing">Playing</option>
+                                        <option value="completed">Completed</option>
+                                        <option value="dropped">Dropped</option>
+                                    </select>
+                                </label>
+                            </div>
                         </div>
-                        <div class="schedule-agenda-eyebrow">Library</div>
-                        <h3>Quick add</h3>
-                        <label for="backlog-library-search" class="schedule-field-hint">Add game from library</label>
-                        <div class="schedule-autocomplete backlog-library-autocomplete">
-                            <input type="text" id="backlog-library-search" class="search-input" placeholder="Search by title, platform, genre..." onfocus="filterBacklogLibraryQuickAdd()" oninput="filterBacklogLibraryQuickAdd()" list="backlog-library-search-suggestions" style="margin-bottom:0;">
-                            <div id="backlog-library-search-results" class="schedule-autocomplete-dropdown backlog-library-search-results" style="display:none;"></div>
-                        </div>
-                        <datalist id="backlog-library-search-suggestions"></datalist>
-                        <div id="backlog-library-add-list" class="backlog-list-widget backlog-library-add-list">
-                            <div class="loading">Loading library…</div>
-                        </div>
-                        <div id="backlog-library-preview" class="backlog-library-preview">
-                            Select a game to preview playtime and platform.
-                        </div>
-                        <div class="schedule-sidebar-actions">
-                            <button type="button" class="chat-room-create-btn" id="backlog-library-add-btn" onclick="quickAddSelectedLibraryGameToBacklog()">➕ Add selected game</button>
+                        <div class="backlog-library-section">
+                            <div class="schedule-agenda-eyebrow">Library</div>
+                            <h3>Quick add</h3>
+                            <label for="backlog-library-search" class="schedule-field-hint">Add game from library</label>
+                            <div class="schedule-autocomplete backlog-library-autocomplete">
+                                <input type="text" id="backlog-library-search" class="search-input" placeholder="Search by title, platform, genre..." onfocus="filterBacklogLibraryQuickAdd()" oninput="filterBacklogLibraryQuickAdd()" list="backlog-library-search-suggestions" style="margin-bottom:0;">
+                                <div id="backlog-library-search-results" class="schedule-autocomplete-dropdown backlog-library-search-results" style="display:none;"></div>
+                            </div>
+                            <datalist id="backlog-library-search-suggestions"></datalist>
+                            <div id="backlog-library-add-list" class="backlog-list-widget backlog-library-add-list">
+                                <div class="loading">Loading library…</div>
+                            </div>
+                            <div id="backlog-library-preview" class="backlog-library-preview">
+                                Select a game to preview playtime and platform.
+                            </div>
+                            <div class="schedule-sidebar-actions">
+                                <button type="button" class="chat-room-create-btn" id="backlog-library-add-btn" onclick="quickAddSelectedLibraryGameToBacklog()">➕ Add selected game</button>
+                            </div>
                         </div>
                     </div>
                 </div>

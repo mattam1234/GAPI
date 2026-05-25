@@ -1648,7 +1648,7 @@ a.auth-required,
   inset: 0;
   background: rgba(15, 23, 42, 0.74);
   z-index: 2200;
-  padding: 20px;
+  padding: 48px 20px 20px;
   align-items: center;
   justify-content: center;
   overflow-y: auto;
@@ -1853,9 +1853,8 @@ a.auth-required,
 
 .schedule-agenda-board {
   display: grid;
-  grid-template-columns: 72px repeat(7, minmax(150px, 1fr));
+  grid-template-columns: 72px repeat(7, minmax(80px, 1fr));
   gap: 0;
-  min-width: 1080px;
   border: 1px solid var(--border);
   border-radius: 14px;
   overflow: hidden;
@@ -2033,8 +2032,23 @@ a.auth-required,
   justify-content: flex-end;
 }
 
+.backlog-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.backlog-filter-section,
+.backlog-library-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .backlog-library-add-list {
-  min-height: 240px;
+  min-height: 160px;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .backlog-library-preview {
@@ -2093,6 +2107,22 @@ a.auth-required,
     grid-column: 1 / -1;
   }
 
+  /* When the quick-add panel spans full width, lay filter + library side by side */
+  .backlog-filter-panel {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 24px;
+  }
+
+  .backlog-filter-section {
+    flex: 0 0 260px;
+  }
+
+  .backlog-library-section {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
   .backlog-shell {
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   }
@@ -2102,7 +2132,7 @@ a.auth-required,
   }
 
   .schedule-agenda-board {
-    min-width: 900px;
+    grid-template-columns: 60px repeat(7, minmax(64px, 1fr));
   }
 }
 
@@ -2141,6 +2171,14 @@ a.auth-required,
 
   .backlog-shell {
     grid-template-columns: 1fr;
+  }
+
+  .backlog-filter-panel {
+    flex-direction: column;
+  }
+
+  .backlog-filter-section {
+    flex: unset;
   }
 
   .session-shell {
@@ -2189,8 +2227,7 @@ a.auth-required,
   }
 
   .schedule-agenda-board {
-    min-width: 760px;
-    grid-template-columns: 60px repeat(7, minmax(118px, 1fr));
+    grid-template-columns: 52px repeat(7, minmax(52px, 1fr));
   }
 }
 
@@ -2238,8 +2275,7 @@ a.auth-required,
   }
 
   .schedule-agenda-board {
-    min-width: 640px;
-    grid-template-columns: 52px repeat(7, minmax(84px, 1fr));
+    grid-template-columns: 44px repeat(7, minmax(44px, 1fr));
   }
 
   .schedule-agenda-item {

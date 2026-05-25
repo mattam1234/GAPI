@@ -3370,6 +3370,18 @@
 
         function openScheduleCreateModal() {
             clearScheduleForm();
+            // Pre-fill today's date and the next 30-minute slot
+            const now = new Date();
+            const dateField = document.getElementById('sch-date');
+            if (dateField && !dateField.value) {
+                dateField.value = formatScheduleDateKey(now);
+            }
+            const timeField = document.getElementById('sch-time');
+            if (timeField && !timeField.value) {
+                const next = new Date(now);
+                next.setMinutes(Math.ceil(next.getMinutes() / SCHEDULE_SLOT_MINUTES) * SCHEDULE_SLOT_MINUTES, 0, 0);
+                timeField.value = `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`;
+            }
             void ensureScheduleGameFilterData();
             const modal = document.getElementById('schedule-modal');
             if (modal) modal.style.display = 'flex';
@@ -3923,6 +3935,11 @@
                     resp = await safeFetch('/api/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 }
                 if (!resp.ok) { const d = await resp.json(); alert(d.error || 'Failed to save event'); return; }
+                // Navigate the agenda to the week containing the saved event
+                if (body.date) {
+                    const eventDate = parseScheduleLocalDateTime(body.date);
+                    if (eventDate) scheduleAgendaWeekStart = scheduleStartOfWeek(eventDate);
+                }
                 closeScheduleModal(true);
                 await loadSchedule();
                 showMessage(editId ? 'Event updated.' : 'Event created.', 'success');
@@ -4589,10 +4606,6 @@ Event ID: ${result.discord_event_id}`);
 
         async function openScheduleCommonGamePicker() {
             const attendees = getScheduleEventAttendees();
-            if (!attendees.length) {
-                showMessage('Invite at least one person before opening the common-game picker.', 'warning');
-                return;
-            }
             const modal = document.getElementById('schedule-game-picker-modal');
             if (modal) modal.style.display = 'flex';
             setScheduleBodyLock();
@@ -4600,8 +4613,11 @@ Event ID: ${result.discord_event_id}`);
             const search = document.getElementById('schedule-common-games-search');
             const list = document.getElementById('schedule-common-games-list');
             if (search) search.value = '';
-            if (status) status.textContent = 'Loading common games from invited libraries…';
-            if (list) list.innerHTML = '<div class="loading">Loading common games…</div>';
+            const loadingMsg = attendees.length
+                ? 'Loading games shared by you and your invitees…'
+                : 'Loading your library…';
+            if (status) status.textContent = loadingMsg;
+            if (list) list.innerHTML = '<div class="loading">Loading games…</div>';
             try {
                 const resp = await safeFetch('/api/schedule/common-games', {
                     method: 'POST',
@@ -4611,16 +4627,19 @@ Event ID: ${result.discord_event_id}`);
                 const data = await resp.json();
                 if (!resp.ok) {
                     scheduleCommonGamesCache = [];
-                    if (status) status.textContent = data.error || 'Could not load common games.';
-                    if (list) list.innerHTML = '<div class="error">No common games found.</div>';
+                    if (status) status.textContent = data.error || 'Could not load games.';
+                    if (list) list.innerHTML = '<div class="error">No games found.</div>';
                     return;
                 }
                 scheduleCommonGamesCache = Array.isArray(data.games) ? data.games : [];
-                if (status) status.textContent = `${scheduleCommonGamesCache.length} common game${scheduleCommonGamesCache.length === 1 ? '' : 's'} available for ${attendees.join(', ')}`;
+                const countLabel = `${scheduleCommonGamesCache.length} game${scheduleCommonGamesCache.length === 1 ? '' : 's'}`;
+                if (status) status.textContent = attendees.length
+                    ? `${countLabel} shared by you and ${attendees.join(', ')}`
+                    : `${countLabel} in your library`;
                 filterScheduleCommonGames();
             } catch (error) {
                 scheduleCommonGamesCache = [];
-                if (status) status.textContent = 'Could not load common games right now.';
+                if (status) status.textContent = 'Could not load games right now.';
                 if (list) list.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
             }
         }
@@ -4661,10 +4680,6 @@ Event ID: ${result.discord_event_id}`);
 
         async function pickRandomScheduleCommonGame() {
             const attendees = getScheduleEventAttendees();
-            if (!attendees.length) {
-                showMessage('Invite at least one person before picking a random shared game.', 'warning');
-                return;
-            }
             try {
                 const resp = await safeFetch('/api/schedule/common-games/random', {
                     method: 'POST',
@@ -4673,7 +4688,7 @@ Event ID: ${result.discord_event_id}`);
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showMessage(data.error || 'Could not pick a random shared game.', 'error');
+                    showMessage(data.error || 'Could not pick a random game.', 'error');
                     return;
                 }
                 const game = data.game || {};
@@ -4926,6 +4941,7 @@ Event ID: ${result.discord_event_id}`);
             const renameBtn = document.getElementById('backlog-rename-btn');
             const deleteBtn = document.getElementById('backlog-delete-btn');
             const leaveBtn = document.getElementById('backlog-leave-btn');
+            const inviteBtn = document.getElementById('backlog-invite-btn');
             const quickAddBtn = document.getElementById('backlog-library-add-btn');
             const active = getActiveBacklog();
             const isFavorites = isFavoritesBacklog(active?.id);
@@ -4949,6 +4965,10 @@ Event ID: ${result.discord_event_id}`);
             const enableDelete = Boolean(showDelete && !isDefaultBacklog(active));
             const showLeave = Boolean(active && !owned && active.is_shared && !isFavorites);
             if (renameBtn) renameBtn.disabled = !active || !owned || isFavorites;
+            if (inviteBtn) {
+                inviteBtn.style.display = owned && !isFavorites ? '' : 'none';
+                inviteBtn.disabled = !active || !owned || isFavorites;
+            }
             if (deleteBtn) {
                 deleteBtn.style.display = showDelete ? '' : 'none';
                 deleteBtn.disabled = !enableDelete;
