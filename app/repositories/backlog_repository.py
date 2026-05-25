@@ -20,7 +20,11 @@ class BacklogRepository(BaseRepository):
             },
             "__entries__": {
                 "<collection_id>": {
-                    "<game_id>": "<status>"
+                    "<game_id>": {
+                        "status": "<status>",
+                        "notes": "<optional note>",
+                        "updated_at": "<iso timestamp>"
+                    }
                 }
             }
         }

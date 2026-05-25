@@ -614,6 +614,15 @@ class TestBacklogService(TmpDirMixin):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]['game_id'], 'steam:440')
 
+    def test_set_status_stores_and_updates_notes(self):
+        svc = self._make()
+        self.assertTrue(svc.set_status('steam:620', 'playing', notes='Find the hidden room'))
+        self.assertEqual(svc.get_entry('steam:620')['notes'], 'Find the hidden room')
+        self.assertTrue(svc.set_status('steam:620', 'playing', notes='Use the blue portal first'))
+        self.assertEqual(svc.get_entry('steam:620')['notes'], 'Use the blue portal first')
+        result = svc.get_games(FAKE_GAMES)
+        self.assertEqual(result[0]['backlog_notes'], 'Use the blue portal first')
+
     def test_all_valid_statuses(self):
         svc = self._make()
         for status in ('want_to_play', 'playing', 'completed', 'dropped'):

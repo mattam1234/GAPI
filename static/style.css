@@ -1222,12 +1222,72 @@ a.auth-required,
   margin-bottom: 8px;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.backlog-list-item:hover {
+  background: var(--list-hover);
+  border-color: rgba(79, 70, 229, 0.45);
+}
+
+.backlog-list-item.is-active {
+  border-color: var(--brand-primary, #4f46e5);
+  background: rgba(79, 70, 229, 0.12);
+}
+
+.backlog-entry-preview {
+  min-height: 140px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  padding: 14px;
+}
+
+.backlog-entry-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.backlog-entry-preview-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.backlog-entry-preview-meta {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.backlog-entry-preview-desc {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.backlog-entry-preview-notes {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.backlog-entry-preview-notes textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.backlog-library-autocomplete {
+  z-index: 25;
 }
 
 .backlog-library-search-results {
-  display: grid;
+  display: none;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 0;
+  z-index: 30;
 }
 
 .backlog-library-search-result {

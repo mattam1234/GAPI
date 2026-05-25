@@ -1,7 +1,7 @@
 """Business logic for backlog collections and per-game statuses."""
 import datetime
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..repositories.backlog_repository import BacklogRepository
 
@@ -92,11 +92,32 @@ class BacklogService:
     def _get_collections(self) -> Dict[str, Dict]:
         return self._repo.data.setdefault(_COLLECTIONS_KEY, {})
 
-    def _get_entries(self) -> Dict[str, Dict[str, str]]:
+    def _get_entries(self) -> Dict[str, Dict[str, Any]]:
         return self._repo.data.setdefault(_ENTRIES_KEY, {})
 
-    def _get_collection_entries(self, collection_id: str) -> Dict[str, str]:
+    def _get_collection_entries(self, collection_id: str) -> Dict[str, Any]:
         return self._get_entries().setdefault(collection_id, {})
+
+    def _normalize_entry_payload(self, payload: Any) -> Optional[Dict[str, str]]:
+        if isinstance(payload, str):
+            status = payload.strip()
+            if not status:
+                return None
+            return {
+                'status': status,
+                'notes': '',
+                'updated_at': '',
+            }
+        if not isinstance(payload, dict):
+            return None
+        status = str(payload.get('status') or '').strip()
+        if not status:
+            return None
+        return {
+            'status': status,
+            'notes': str(payload.get('notes') or ''),
+            'updated_at': str(payload.get('updated_at') or ''),
+        }
 
     def get_collection_entry_count(self, collection_id: Optional[str]) -> int:
         """Return number of stored entries for ``collection_id``."""
@@ -303,14 +324,23 @@ class BacklogService:
         return resolved_collection_id, self.get_collection(resolved_collection_id)
 
     def set_status(self, game_id: str, status: str, username: Optional[str] = None,
-                   collection_id: Optional[str] = None) -> bool:
+                   collection_id: Optional[str] = None,
+                   notes: Optional[str] = None) -> bool:
         """Set the backlog status for *game_id* within a collection."""
         if status not in VALID_STATUSES:
             return False
         resolved_collection_id, _ = self._resolve_context(username=username, collection_id=collection_id)
         if not resolved_collection_id:
             return False
-        self._get_collection_entries(resolved_collection_id)[str(game_id)] = status
+        entries = self._get_collection_entries(resolved_collection_id)
+        safe_game_id = str(game_id)
+        existing = self._normalize_entry_payload(entries.get(safe_game_id))
+        safe_notes = str(notes if notes is not None else (existing.get('notes') if existing else ''))
+        entries[safe_game_id] = {
+            'status': status,
+            'notes': safe_notes.strip(),
+            'updated_at': self._now_iso(),
+        }
         self._repo.save()
         return True
 
@@ -334,7 +364,18 @@ class BacklogService:
         resolved_collection_id, _ = self._resolve_context(username=username, collection_id=collection_id)
         if not resolved_collection_id:
             return None
-        return self._get_collection_entries(resolved_collection_id).get(str(game_id))
+        entry = self._normalize_entry_payload(self._get_collection_entries(resolved_collection_id).get(str(game_id)))
+        if not entry:
+            return None
+        return entry['status']
+
+    def get_entry(self, game_id: str, username: Optional[str] = None,
+                  collection_id: Optional[str] = None) -> Optional[Dict[str, str]]:
+        """Return status and notes for *game_id* in the resolved collection."""
+        resolved_collection_id, _ = self._resolve_context(username=username, collection_id=collection_id)
+        if not resolved_collection_id:
+            return None
+        return self._normalize_entry_payload(self._get_collection_entries(resolved_collection_id).get(str(game_id)))
 
     def get_games(self, all_games: List[Dict], status: Optional[str] = None,
                   username: Optional[str] = None,
@@ -343,10 +384,15 @@ class BacklogService:
         resolved_collection_id, _ = self._resolve_context(username=username, collection_id=collection_id)
         if not resolved_collection_id:
             return []
-        id_to_status = dict(self._get_collection_entries(resolved_collection_id))
+        id_to_entry = {
+            str(key): value for key, value in self._get_collection_entries(resolved_collection_id).items()
+        }
         if status:
-            id_to_status = {key: value for key, value in id_to_status.items() if value == status}
-        id_set = set(id_to_status)
+            id_to_entry = {
+                key: value for key, value in id_to_entry.items()
+                if (self._normalize_entry_payload(value) or {}).get('status') == status
+            }
+        id_set = set(id_to_entry)
         result = []
         for game in all_games:
             candidate_ids = []
@@ -366,7 +412,11 @@ class BacklogService:
                     candidate_ids.append(f'steam:{app_id}')
             matched_id = next((candidate for candidate in candidate_ids if candidate in id_set), None)
             if matched_id:
+                payload = self._normalize_entry_payload(id_to_entry.get(matched_id))
+                if not payload:
+                    continue
                 entry = dict(game)
-                entry['backlog_status'] = id_to_status[matched_id]
+                entry['backlog_status'] = payload['status']
+                entry['backlog_notes'] = payload['notes']
                 result.append(entry)
         return result
