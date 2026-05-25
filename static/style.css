@@ -1819,6 +1819,30 @@ a.auth-required,
   min-height: 180px;
 }
 
+.backlog-library-preview {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.backlog-library-preview .list-thumb,
+.backlog-library-preview .backlog-list-thumb-placeholder {
+  width: 72px;
+  height: 40px;
+}
+
+.backlog-library-preview-media {
+  display: inline-flex;
+}
+
 .dash-leaderboard-controls {
   display: flex;
   align-items: center;

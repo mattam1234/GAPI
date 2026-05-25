@@ -30,6 +30,8 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'backlog-collection-modal',
             'backlog-modal-collection',
             'backlog-library-search',
+            'backlog-library-genre-filter',
+            'backlog-library-preview',
             'backlog-library-add-select',
         ):
             self.assertIn(token, content)
@@ -132,6 +134,40 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
             list_resp = self.client.get('/api/backlogs')
             data = list_resp.get_json()
             self.assertNotIn(shared['id'], [backlog['id'] for backlog in data['backlogs']])
+
+    def test_backlog_listing_includes_entry_and_invited_counts(self):
+        service = self._service()
+        with patch.object(gapi_gui, '_shared_backlog_service', service), \
+                patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
+            create_resp = self.client.post('/api/backlogs', json={
+                'name': 'Weekend Picks',
+                'members': ['bob'],
+                'is_shared': True,
+            })
+            self.assertEqual(create_resp.status_code, 201)
+            backlog_id = create_resp.get_json()['id']
+            status_resp = self.client.post('/api/backlog/steam:620', json={
+                'status': 'want_to_play',
+                'collection_id': backlog_id,
+            })
+            self.assertEqual(status_resp.status_code, 200)
+
+            list_resp = self.client.get('/api/backlogs')
+            self.assertEqual(list_resp.status_code, 200)
+            payload = list_resp.get_json()
+            shared = next(item for item in payload['backlogs'] if item['id'] == backlog_id)
+            self.assertEqual(shared['entry_count'], 1)
+            self.assertEqual(shared['invited_count'], 1)
+
+    def test_library_demo_payload_includes_composite_game_id(self):
+        with patch.object(gapi_gui, 'ensure_db_available', return_value=False):
+            response = self.client.get('/api/library')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['games'])
+        first = data['games'][0]
+        self.assertIn('game_id', first)
+        self.assertTrue(str(first['game_id']).startswith('steam:'))
 
 
 if __name__ == '__main__':

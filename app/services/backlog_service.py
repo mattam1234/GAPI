@@ -98,6 +98,13 @@ class BacklogService:
     def _get_collection_entries(self, collection_id: str) -> Dict[str, str]:
         return self._get_entries().setdefault(collection_id, {})
 
+    def get_collection_entry_count(self, collection_id: Optional[str]) -> int:
+        """Return number of stored entries for ``collection_id``."""
+        safe_collection_id = str(collection_id or '').strip()
+        if not safe_collection_id:
+            return 0
+        return len(self._get_entries().get(safe_collection_id, {}))
+
     def _ensure_legacy_collection(self) -> str:
         collections = self._get_collections()
         if _LEGACY_COLLECTION_ID not in collections:
