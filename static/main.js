@@ -4904,12 +4904,17 @@ Event ID: ${result.discord_event_id}`);
         }
 
         function renderBacklogSelector() {
-            const selector = document.getElementById('backlog-selector');
+            const selectorList = document.getElementById('backlog-selector-list');
             const visibleBacklogs = getFilteredBacklogCollections();
-            if (!selector) return;
+            if (!selectorList) return;
+            if (!activeBacklogId || !getBacklogCollectionsForSelector().some(backlog => backlog.id === activeBacklogId)) {
+                activeBacklogId = backlogCollectionsCache[0]?.id || FAVORITES_BACKLOG_ID;
+            }
+            if (!visibleBacklogs.some(backlog => backlog.id === activeBacklogId) && visibleBacklogs.length) {
+                activeBacklogId = visibleBacklogs[0].id || '';
+            }
             if (!visibleBacklogs.length) {
-                selector.innerHTML = '<option value="">No matching lists</option>';
-                selector.value = '';
+                selectorList.innerHTML = '<div class="backlog-list-widget-empty">No matching lists</div>';
                 updateBacklogSidebarMeta();
                 return;
             }
@@ -4927,31 +4932,34 @@ Event ID: ${result.discord_event_id}`);
                     groups.shared.push(backlog);
                 }
             });
-            const formatOption = (backlog) => {
+            const formatItem = (backlog) => {
                 const entryCount = Number(backlog.entry_count || 0);
                 const invitedCount = Number(backlog.invited_count || Math.max(((backlog.members || []).length || 1) - 1, 0));
-                const ownerSuffix = isOwnedBacklog(backlog) || isFavoritesBacklog(backlog.id) ? '' : ` • ${escapeHtml(backlog.owner || '')}`;
-                return `<option value="${escAttr(backlog.id || '')}">${escapeHtml(backlog.name || 'List')} • ${entryCount} item${entryCount === 1 ? '' : 's'} • ${invitedCount} invited${ownerSuffix}</option>`;
+                const isActive = backlog.id === activeBacklogId;
+                const isFav = isFavoritesBacklog(backlog.id);
+                const icon = isFav ? '⭐' : (backlog.is_shared ? '🔗' : '📋');
+                const ownerSuffix = isOwnedBacklog(backlog) || isFav ? '' : ` • ${escapeHtml(backlog.owner || '')}`;
+                const meta = `${entryCount} item${entryCount === 1 ? '' : 's'} • ${invitedCount} invited${ownerSuffix}`;
+                return `<button type="button" class="backlog-list-widget-item${isActive ? ' active' : ''}" data-backlog-id="${escAttr(backlog.id || '')}" onclick="changeActiveBacklog('${escAttr(backlog.id || '')}')">
+                    <span class="backlog-list-widget-item-prefix">${icon}</span>
+                    <span class="backlog-list-widget-item-text">
+                        <span class="backlog-list-widget-item-name">${escapeHtml(backlog.name || 'List')}</span>
+                        <span class="backlog-list-widget-item-meta">${meta}</span>
+                    </span>
+                </button>`;
             };
-            const htmlGroups = [
+            const htmlParts = [
                 { key: 'favorites', label: 'Favorites' },
                 { key: 'mine', label: 'My lists' },
                 { key: 'shared', label: 'Shared with me' },
             ].map(group => {
                 if (!groups[group.key].length) return '';
-                return `<optgroup label="${group.label}">
-                    ${groups[group.key].map(formatOption).join('')}
-                </optgroup>`;
-            }).filter(Boolean);
-            selector.innerHTML = htmlGroups.join('');
-            if (!activeBacklogId || !getBacklogCollectionsForSelector().some(backlog => backlog.id === activeBacklogId)) {
-                activeBacklogId = backlogCollectionsCache[0]?.id || FAVORITES_BACKLOG_ID;
-            }
-            selector.value = visibleBacklogs.some(backlog => backlog.id === activeBacklogId) ? (activeBacklogId || '') : '';
-            if (!selector.value && visibleBacklogs.length) {
-                activeBacklogId = visibleBacklogs[0].id || '';
-                selector.value = activeBacklogId;
-            }
+                return `<div class="backlog-list-widget-group">
+                    <div class="backlog-list-widget-group-label">${group.label}</div>
+                    ${groups[group.key].map(formatItem).join('')}
+                </div>`;
+            }).filter(Boolean).join('');
+            selectorList.innerHTML = htmlParts;
             updateBacklogSidebarMeta();
         }
 
@@ -5185,6 +5193,12 @@ Event ID: ${result.discord_event_id}`);
 
         function setBacklogLibraryQuickAddSelection(gameId) {
             backlogLibraryQuickAddSelectedGameId = String(gameId || '').trim();
+            const libList = document.getElementById('backlog-library-add-list');
+            if (libList) {
+                libList.querySelectorAll('.backlog-list-widget-item[data-game-id]').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.gameId === backlogLibraryQuickAddSelectedGameId);
+                });
+            }
             const selectedGame = backlogLibraryQuickAddData.find(game => getBacklogLibraryGameId(game) === backlogLibraryQuickAddSelectedGameId);
             renderBacklogLibraryQuickAddPreview(selectedGame || null);
         }
@@ -5227,10 +5241,7 @@ Event ID: ${result.discord_event_id}`);
             if (!selectedGame) return;
             const searchInput = document.getElementById('backlog-library-search');
             if (searchInput) searchInput.value = String(selectedGame.name || '').trim();
-            const select = document.getElementById('backlog-library-add-select');
-            backlogLibraryQuickAddSelectedGameId = safeGameId;
-            if (select) select.value = safeGameId;
-            renderBacklogLibraryQuickAddPreview(selectedGame);
+            setBacklogLibraryQuickAddSelection(safeGameId);
             renderBacklogLibraryAutocompleteResults([]);
         }
 
@@ -5351,8 +5362,8 @@ Event ID: ${result.discord_event_id}`);
         }
 
         function filterBacklogLibraryQuickAdd() {
-            const select = document.getElementById('backlog-library-add-select');
-            if (!select) return;
+            const libList = document.getElementById('backlog-library-add-list');
+            if (!libList) return;
             const queryRaw = String(document.getElementById('backlog-library-search')?.value || '').trim().toLowerCase();
             const queryTerms = queryRaw.split(/\s+/).filter(Boolean);
             updateBacklogLibrarySearchSuggestions(queryRaw);
@@ -5375,35 +5386,37 @@ Event ID: ${result.discord_event_id}`);
                 .slice(0, 250);
             renderBacklogLibraryAutocompleteResults(queryRaw ? visibleGames : []);
             if (!visibleGames.length) {
-                select.innerHTML = '<option value="">No matching games</option>';
+                libList.innerHTML = '<div class="backlog-list-widget-empty">No matching games</div>';
                 backlogLibraryQuickAddSelectedGameId = '';
                 renderBacklogLibraryQuickAddPreview(null);
                 return;
             }
-            select.innerHTML = visibleGames.map(game => {
-                const gameId = getBacklogLibraryGameId(game);
-                const playtime = Number(game.playtime_hours || 0);
-                const platform = getGamePlatforms(game)[0]?.label || normalisePlatformKey(game.platform || '') || 'platform?';
-                const genres = getBacklogGameGenres(game);
-                const genreSuffix = genres.length ? ` • ${genres[0]}` : '';
-                return `<option value="${escAttr(gameId)}">${escapeHtml(game.name || 'Unknown game')} • ${escapeHtml(platform)} • ${escapeHtml(String(playtime))}h${escapeHtml(genreSuffix)}</option>`;
-            }).join('');
             const currentSelectionStillVisible = visibleGames.some(game => {
                 const gameId = getBacklogLibraryGameId(game);
                 return gameId && gameId === backlogLibraryQuickAddSelectedGameId;
             });
             if (!currentSelectionStillVisible) {
-                const firstId = getBacklogLibraryGameId(visibleGames[0]);
-                backlogLibraryQuickAddSelectedGameId = firstId;
+                backlogLibraryQuickAddSelectedGameId = getBacklogLibraryGameId(visibleGames[0]);
             }
-            select.value = backlogLibraryQuickAddSelectedGameId || '';
+            libList.innerHTML = visibleGames.map(game => {
+                const gameId = getBacklogLibraryGameId(game);
+                const playtime = Number(game.playtime_hours || 0);
+                const platform = getGamePlatforms(game)[0]?.label || normalisePlatformKey(game.platform || '') || 'platform?';
+                const genres = getBacklogGameGenres(game);
+                const isActive = gameId === backlogLibraryQuickAddSelectedGameId;
+                return `<button type="button" class="backlog-list-widget-item${isActive ? ' active' : ''}" data-game-id="${escAttr(gameId)}" onclick="setBacklogLibraryQuickAddSelection('${escAttr(gameId)}')">
+                    <span class="backlog-list-widget-item-text">
+                        <span class="backlog-list-widget-item-name">${escapeHtml(game.name || 'Unknown game')}</span>
+                        <span class="backlog-list-widget-item-meta">${escapeHtml(platform)} • ${escapeHtml(String(playtime))}h${genres.length ? ` • ${escapeHtml(genres[0])}` : ''}</span>
+                    </span>
+                </button>`;
+            }).join('');
             const selectedGame = visibleGames.find(game => getBacklogLibraryGameId(game) === backlogLibraryQuickAddSelectedGameId) || visibleGames[0];
             renderBacklogLibraryQuickAddPreview(selectedGame || null);
         }
 
         async function quickAddSelectedLibraryGameToBacklog() {
-            const select = document.getElementById('backlog-library-add-select');
-            const selectedGameId = String(select?.value || backlogLibraryQuickAddSelectedGameId || '').trim();
+            const selectedGameId = String(backlogLibraryQuickAddSelectedGameId || '').trim();
             if (!selectedGameId) {
                 showMessage('Select a game from your library first.', 'warning');
                 return;

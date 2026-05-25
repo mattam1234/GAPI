@@ -1114,10 +1114,10 @@
                         <h3>Collections</h3>
                         <label for="backlog-selector-search" class="schedule-field-hint">Find a list</label>
                         <input type="search" id="backlog-selector-search" class="search-input backlog-selector-search" placeholder="Search lists…" oninput="filterBacklogCollections()" style="margin-bottom:0;">
-                        <label for="backlog-selector" class="schedule-field-hint">Available lists</label>
-                        <select id="backlog-selector" class="backlog-selector" size="10" onchange="changeActiveBacklog(this.value)">
-                            <option value="">Loading lists…</option>
-                        </select>
+                        <label class="schedule-field-hint">Available lists</label>
+                        <div id="backlog-selector-list" class="backlog-selector backlog-list-widget">
+                            <div class="loading">Loading lists…</div>
+                        </div>
                         <div id="backlog-sidebar-meta" class="schedule-agenda-copy">Choose a list to view, share, or leave.</div>
                         <div class="schedule-sidebar-actions">
                             <button type="button" class="chat-room-create-btn" onclick="openBacklogCollectionModal()">➕ Create List</button>
@@ -1189,9 +1189,9 @@
                             <div id="backlog-library-search-results" class="schedule-autocomplete-dropdown backlog-library-search-results" style="display:none;"></div>
                         </div>
                         <datalist id="backlog-library-search-suggestions"></datalist>
-                        <select id="backlog-library-add-select" class="backlog-selector" size="6" onchange="setBacklogLibraryQuickAddSelection(this.value)">
-                            <option value="">Loading library…</option>
-                        </select>
+                        <div id="backlog-library-add-list" class="backlog-list-widget backlog-library-add-list">
+                            <div class="loading">Loading library…</div>
+                        </div>
                         <div id="backlog-library-preview" class="backlog-library-preview">
                             Select a game to preview playtime and platform.
                         </div>

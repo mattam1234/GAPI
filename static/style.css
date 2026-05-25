@@ -1033,6 +1033,91 @@ a.auth-required,
   font-family: inherit;
 }
 
+.backlog-list-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 360px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.backlog-list-widget-empty {
+  padding: 12px 10px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.backlog-list-widget-group {
+  display: contents;
+}
+
+.backlog-list-widget-group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 6px 10px 2px;
+}
+
+.backlog-list-widget-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-normal);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.backlog-list-widget-item:hover {
+  background: var(--tab-surface-hover, var(--list-hover));
+}
+
+.backlog-list-widget-item.active {
+  background: var(--tab-active-surface, rgba(79, 70, 229, 0.12));
+  border-color: var(--tab-active-border, rgba(79, 70, 229, 0.45));
+  color: var(--text-header);
+}
+
+.backlog-list-widget-item-prefix {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.backlog-list-widget-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.backlog-list-widget-item-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.backlog-list-widget-item-meta {
+  font-size: 0.77rem;
+  color: var(--text-muted);
+}
+
 .schedule-agenda-panel {
   padding: 16px;
 }
@@ -1125,7 +1210,7 @@ a.auth-required,
 
 .backlog-shell {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1.4fr) minmax(240px, 320px);
+  grid-template-columns: minmax(220px, 280px) minmax(0, 2fr) minmax(240px, 320px);
   gap: 20px;
   align-items: stretch;
   min-height: calc(100vh - 150px);
@@ -1948,8 +2033,8 @@ a.auth-required,
   justify-content: flex-end;
 }
 
-#backlog-library-add-select {
-  min-height: 180px;
+.backlog-library-add-list {
+  min-height: 240px;
 }
 
 .backlog-library-preview {
