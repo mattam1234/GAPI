@@ -4558,15 +4558,70 @@ def api_get_schedule():
     p = ensure_picker_initialized(username)
     if not p:
         return jsonify({'error': 'Not initialized'}), 400
+    requested_schedule_id = request.args.get('schedule_id')
     with picker_lock:
-        events = p.schedule_service.get_events()
+        schedules = p.schedule_service.list_schedules(username=username)
+        active_schedule_id = p.schedule_service.resolve_schedule_for_user(requested_schedule_id, username)
+        events = p.schedule_service.get_events(schedule_id=active_schedule_id, username=username)
     for event in events:
         if not event.get('game_image_url'):
             event['game_image_url'] = _resolve_schedule_game_image_url(
                 game_appid=event.get('game_appid'),
                 existing_url=event.get('game_image_url')
             )
-    return jsonify({'events': events, 'count': len(events)})
+    return jsonify({
+        'events': events,
+        'count': len(events),
+        'schedules': schedules,
+        'active_schedule_id': active_schedule_id,
+    })
+
+
+@app.route('/api/schedules', methods=['GET'])
+@require_login
+def api_list_schedules():
+    """List schedule collections available to the current user."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+    requested_schedule_id = request.args.get('schedule_id')
+    with picker_lock:
+        schedules = p.schedule_service.list_schedules(username=username)
+        active_schedule_id = p.schedule_service.resolve_schedule_for_user(requested_schedule_id, username)
+    return jsonify({
+        'schedules': schedules,
+        'count': len(schedules),
+        'active_schedule_id': active_schedule_id,
+    })
+
+
+@app.route('/api/schedules', methods=['POST'])
+@require_login
+def api_create_schedule():
+    """Create a personal or shared schedule collection."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    raw_members = data.get('members', [])
+    if isinstance(raw_members, str):
+        members = [value.strip() for value in raw_members.split(',') if value.strip()]
+    else:
+        members = [str(value).strip() for value in (raw_members or []) if str(value).strip()]
+    is_shared = bool(data.get('is_shared', True))
+    with picker_lock:
+        schedule = p.schedule_service.create_schedule(
+            name=name,
+            owner_username=username,
+            members=members,
+            is_shared=is_shared,
+        )
+    return jsonify(schedule), 201
 
 
 @app.route('/api/schedule', methods=['POST'])
@@ -4643,6 +4698,7 @@ def api_create_event():
         duration_minutes = None
     create_discord_event = data.get('create_discord_event', False)
     discord_guild_id = data.get('discord_guild_id')
+    schedule_id = str(data.get('schedule_id', '')).strip() or None
     timezone_name = str(data.get('timezone_name', '')).strip() or None
     timezone_offset_minutes_raw = data.get('timezone_offset_minutes')
     try:
@@ -4659,6 +4715,8 @@ def api_create_event():
             attendee_ids=attendee_ids,
             rsvp_statuses=rsvp_statuses,
             game_image_url=game_image_url,
+            schedule_id=schedule_id,
+            owner_username=username,
             discord_guild_id=str(discord_guild_id).strip() if discord_guild_id else None,
             timezone_name=timezone_name,
             timezone_offset_minutes=timezone_offset_minutes
@@ -4774,7 +4832,7 @@ def api_update_event(event_id: str):
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
     safe: Dict = {}
-    for k in ('title', 'date', 'time', 'game_name', 'notes', 'game_appid', 'game_image_url', 'discord_guild_id', 'timezone_name'):
+    for k in ('title', 'date', 'time', 'game_name', 'notes', 'game_appid', 'game_image_url', 'discord_guild_id', 'timezone_name', 'schedule_id'):
         if k in data:
             safe[k] = str(data[k]).strip()
     if 'duration_minutes' in data:
@@ -4806,7 +4864,7 @@ def api_update_event(event_id: str):
         except (TypeError, ValueError):
             safe['timezone_offset_minutes'] = None
     with picker_lock:
-        event = p.schedule_service.update_event(event_id, **safe)
+        event = p.schedule_service.update_event(event_id, username=username, **safe)
     if event is None:
         return jsonify({'error': 'Event not found'}), 404
     return jsonify(event)
@@ -4824,7 +4882,7 @@ def api_delete_event(event_id: str):
     override_guild_id = str(data.get('guild_id', '')).strip()
 
     with picker_lock:
-        event = p.schedule_service._repo.find(event_id)
+        event = p.schedule_service.get_event(event_id)
 
     if not event:
         return jsonify({'error': 'Event not found'}), 404
@@ -5102,6 +5160,54 @@ def api_schedule_common_games():
     return jsonify({'games': games, 'count': len(games), 'attendees': attendees})
 
 
+@app.route('/api/schedule/common-games/random', methods=['POST'])
+@require_login
+def api_schedule_random_common_game():
+    """Pick a random game shared by all provided attendees."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+
+    data = request.json or {}
+    attendees_raw = data.get('attendees', [])
+    if isinstance(attendees_raw, str):
+        attendees = [value.strip() for value in attendees_raw.split(',') if value.strip()]
+    else:
+        attendees = [str(value).strip() for value in (attendees_raw or []) if str(value).strip()]
+    attendees = list(dict.fromkeys(attendees))
+    if not attendees:
+        return jsonify({'error': 'attendees are required'}), 400
+
+    schedule_multi_picker = getattr(p, 'multi_picker', None)
+    if not schedule_multi_picker:
+        return jsonify({'error': 'Multi-user picker not initialized'}), 400
+
+    with multi_picker_lock:
+        common_games = schedule_multi_picker.find_common_games(attendees)
+
+    if not common_games:
+        return jsonify({'error': 'No shared games found for selected attendees'}), 404
+
+    import random as _random
+    game = _random.choice(common_games)
+    app_id = str(game.get('appid') or game.get('app_id') or '').strip()
+    return jsonify({
+        'game': {
+            'app_id': app_id,
+            'name': game.get('name', 'Unknown'),
+            'owners': game.get('owners', []),
+            'platform': game.get('platform', 'steam'),
+            'image_url': _resolve_schedule_game_image_url(
+                game=game,
+                game_appid=app_id,
+                existing_url=game.get('image_url'),
+            ),
+        },
+        'attendees': attendees,
+    })
+
+
 @app.route('/api/schedule/discord-guilds')
 @require_login
 def api_schedule_discord_guilds():
@@ -5160,7 +5266,7 @@ def api_create_discord_event_for_schedule(event_id: str):
         return jsonify({'error': 'guild_id is required'}), 400
     
     with picker_lock:
-        event = p.schedule_service._repo.find(event_id)
+        event = p.schedule_service.get_event(event_id)
     
     if not event:
         return jsonify({'error': 'Event not found'}), 404

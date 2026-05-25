@@ -861,6 +861,11 @@
                             <h3>Weekly agenda</h3>
                         </div>
                         <div class="schedule-agenda-controls">
+                            <label for="schedule-selector" class="schedule-field-hint" style="margin-right:4px;">Schedule</label>
+                            <select id="schedule-selector" class="search-input" onchange="changeActiveSchedule(this.value)" style="margin-bottom:0; min-width:190px; max-width:260px; padding:8px 12px;">
+                                <option value="">Loading schedules…</option>
+                            </select>
+                            <button type="button" class="chat-room-secondary-btn" onclick="openCreateSchedulePrompt()">🗂️ New schedule</button>
                             <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(-1)">← Prev</button>
                             <button type="button" class="chat-room-secondary-btn" onclick="goToCurrentScheduleAgendaWeek()">Today</button>
                             <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(1)">Next →</button>
@@ -996,6 +1001,9 @@
                         <button type="button" class="schedule-modal-close" onclick="closeScheduleCommonGamePicker()">✕</button>
                     </div>
                     <input type="text" id="schedule-common-games-search" class="search-input" placeholder="Filter common games…" oninput="filterScheduleCommonGames()" style="margin-bottom:12px;">
+                    <div class="schedule-modal-actions schedule-modal-actions-inline" style="margin-top:0; margin-bottom:12px;">
+                        <button type="button" class="chat-room-secondary-btn" onclick="pickRandomScheduleCommonGame()">🎲 Pick random shared game</button>
+                    </div>
                     <div id="schedule-common-games-status" class="schedule-field-hint">Choose an invitee first to load common games.</div>
                     <div id="schedule-common-games-list" class="schedule-common-games-list"></div>
                 </div>

@@ -438,6 +438,45 @@ class TestScheduleService(TmpDirMixin):
         events = svc.get_events()
         self.assertEqual(events[0]['date'], '2026-03-01')
 
+    def test_default_schedule_created_for_user(self):
+        svc = self._make()
+        schedules = svc.list_schedules(username='alice')
+        self.assertEqual(len(schedules), 1)
+        self.assertEqual(schedules[0]['id'], 'personal:alice')
+        self.assertEqual(schedules[0]['owner'], 'alice')
+
+    def test_create_shared_schedule_and_filter_events(self):
+        svc = self._make()
+        shared = svc.create_schedule(
+            name='Weekend Squad',
+            owner_username='alice',
+            members=['bob', 'carol'],
+            is_shared=True,
+        )
+        personal_event = svc.add_event('Solo Session', '2026-03-02', '20:00', owner_username='alice')
+        shared_event = svc.add_event(
+            'Shared Session',
+            '2026-03-01',
+            '20:00',
+            schedule_id=shared['id'],
+            owner_username='alice',
+        )
+        filtered = svc.get_events(schedule_id=shared['id'], username='alice')
+        self.assertEqual([event['id'] for event in filtered], [shared_event['id']])
+        all_events = svc.get_events(username='alice')
+        self.assertEqual({event['id'] for event in all_events}, {personal_event['id'], shared_event['id']})
+
+    def test_resolve_schedule_for_member(self):
+        svc = self._make()
+        shared = svc.create_schedule(
+            name='Raid Team',
+            owner_username='alice',
+            members=['bob'],
+            is_shared=True,
+        )
+        self.assertEqual(svc.resolve_schedule_for_user(shared['id'], 'bob'), shared['id'])
+        self.assertEqual(svc.resolve_schedule_for_user(shared['id'], 'carol'), 'personal:carol')
+
 
 class TestPlaylistService(TmpDirMixin):
 
