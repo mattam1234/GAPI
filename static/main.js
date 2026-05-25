@@ -6733,35 +6733,79 @@ Event ID: ${result.discord_event_id}`);
             }
         }
         
-        async function startAchievementHunt() {
-            const appId = document.getElementById('hunt-app-id').value.trim();
-            const gameName = document.getElementById('hunt-game-name').value.trim();
-            const difficulty = document.getElementById('hunt-difficulty').value;
-            const targets = document.getElementById('hunt-targets').value.trim();
-            
-            if (!appId || !gameName) {
-                alert('App ID and game name are required');
+        async function openAchievementHuntModal() {
+            const modal = document.getElementById('achievement-hunt-modal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            if (!achievementGamesData.length) {
+                await loadUserAchievements();
+            }
+            renderAchievementHuntLibrary();
+        }
+
+        function closeAchievementHuntModal() {
+            const modal = document.getElementById('achievement-hunt-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function renderAchievementHuntLibrary() {
+            const listEl = document.getElementById('achievement-hunt-library');
+            if (!listEl) return;
+            const searchEl = document.getElementById('achievement-hunt-search');
+            const query = String(searchEl?.value || '').trim().toLowerCase();
+
+            let games = Array.isArray(achievementGamesData) ? [...achievementGamesData] : [];
+            if (query) {
+                games = games.filter(game => {
+                    const name = String(game?.game_name || '').toLowerCase();
+                    const appId = String(game?.app_id || '');
+                    return name.includes(query) || appId.includes(query);
+                });
+            }
+
+            if (!games.length) {
+                listEl.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); border:1px solid var(--card-border); border-radius: var(--radius-sm, 8px);">No games found in your synced library.</div>';
                 return;
             }
-            
+
+            listEl.innerHTML = games.map(game => {
+                const appId = parseInt(game?.app_id, 10);
+                const gameName = String(game?.game_name || `App ${game?.app_id || ''}`);
+                if (!Number.isInteger(appId)) return '';
+                return `
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); padding:12px; background:var(--card-bg);">
+                        <div>
+                            <strong>${escapeHtml(gameName)}</strong><br>
+                            <small style="color:var(--text-secondary);">App ID: ${appId}</small>
+                        </div>
+                        <button onclick="startAchievementHunt(${appId}, '${escAttr(gameName)}')" style="padding: var(--space-8) var(--space-lg); background:#4f46e5; color:white; border:none; border-radius:50px; cursor:pointer; white-space:nowrap;">Start Hunt</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function startAchievementHunt(appId, gameName) {
+            if (!appId || !gameName) {
+                alert('Please choose a game from your library.');
+                return;
+            }
+
             try {
                 const response = await fetch('/api/achievement-hunt', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        app_id: parseInt(appId),
+                        app_id: parseInt(appId, 10),
                         game_name: gameName,
-                        difficulty: difficulty,
-                        target_achievements: targets ? parseInt(targets) : 0
+                        difficulty: 'medium',
+                        target_achievements: 0
                     })
                 });
                 
                 const data = await response.json();
                 
                 if (response.ok) {
-                    document.getElementById('hunt-app-id').value = '';
-                    document.getElementById('hunt-game-name').value = '';
-                    document.getElementById('hunt-targets').value = '';
+                    closeAchievementHuntModal();
                     alert('Achievement hunt started!');
                     loadUserAchievements(true);
                 } else {
