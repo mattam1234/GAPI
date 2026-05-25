@@ -52,6 +52,9 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'leaveActiveBacklog',
             'loadPreviewBacklogNotes',
             'savePreviewBacklogNotes',
+            "name: '💖 Favorites'",
+            'deleteBtn.style.display = showDelete ? \'\' : \'none\';',
+            'leaveBtn.style.display = showLeave ? \'\' : \'none\';',
             'loadPlaylists();',
             'loadBacklog();',
         ):

@@ -4819,7 +4819,7 @@ Event ID: ${result.discord_event_id}`);
             const favoritesCount = Array.isArray(_favoritesData) ? _favoritesData.length : 0;
             return [{
                 id: FAVORITES_BACKLOG_ID,
-                name: '⭐ Favorites',
+                name: '💖 Favorites',
                 owner: me,
                 members: [me],
                 is_shared: false,
@@ -4887,9 +4887,18 @@ Event ID: ${result.discord_event_id}`);
                         : `${active.is_shared ? `Shared with ${sharedCount} other${sharedCount === 1 ? '' : 's'}` : 'Personal list'}`)
                     : '';
             }
+            const showDelete = Boolean(active && owned && !isFavorites);
+            const enableDelete = Boolean(showDelete && !isDefaultBacklog(active));
+            const showLeave = Boolean(active && !owned && active.is_shared && !isFavorites);
             if (renameBtn) renameBtn.disabled = !active || !owned || isFavorites;
-            if (deleteBtn) deleteBtn.disabled = !active || !owned || isDefaultBacklog(active) || isFavorites;
-            if (leaveBtn) leaveBtn.disabled = !active || owned || !active.is_shared || isFavorites;
+            if (deleteBtn) {
+                deleteBtn.style.display = showDelete ? '' : 'none';
+                deleteBtn.disabled = !enableDelete;
+            }
+            if (leaveBtn) {
+                leaveBtn.style.display = showLeave ? '' : 'none';
+                leaveBtn.disabled = !showLeave;
+            }
             if (quickAddBtn) quickAddBtn.disabled = !active || isFavorites;
         }
 
