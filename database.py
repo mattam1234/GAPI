@@ -801,6 +801,18 @@ class PendingDiscordSessionJoin(Base):
     __table_args__ = (UniqueConstraint('session_id', 'discord_user_id', name='uq_pending_discord_session_join'),)
 
 
+class PasswordResetRequest(Base):
+    """Tracks user-initiated password reset requests so admins can action them."""
+    __tablename__ = "password_reset_requests"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(255), nullable=False, index=True)
+    requested_at = Column(DateTime, default=datetime.utcnow, index=True)
+    status = Column(String(32), default='pending', index=True)  # pending | dismissed
+    dismissed_by = Column(String(255), nullable=True)
+    dismissed_at = Column(DateTime, nullable=True)
+
+
 def get_db():
     """Get database session."""
     if SessionLocal:
