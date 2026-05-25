@@ -4606,6 +4606,7 @@ Event ID: ${result.discord_event_id}`);
 
         async function openScheduleCommonGamePicker() {
             const attendees = getScheduleEventAttendees();
+            const collectionId = String(document.getElementById('sch-game-list-filter')?.value || '').trim();
             const modal = document.getElementById('schedule-game-picker-modal');
             if (modal) modal.style.display = 'flex';
             setScheduleBodyLock();
@@ -4615,14 +4616,14 @@ Event ID: ${result.discord_event_id}`);
             if (search) search.value = '';
             const loadingMsg = attendees.length
                 ? 'Loading games shared by you and your invitees…'
-                : 'Loading your library…';
+                : (collectionId ? 'Loading games from your selected list…' : 'Loading your library…');
             if (status) status.textContent = loadingMsg;
             if (list) list.innerHTML = '<div class="loading">Loading games…</div>';
             try {
                 const resp = await safeFetch('/api/schedule/common-games', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ attendees })
+                    body: JSON.stringify({ attendees, collection_id: collectionId })
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
@@ -4635,7 +4636,7 @@ Event ID: ${result.discord_event_id}`);
                 const countLabel = `${scheduleCommonGamesCache.length} game${scheduleCommonGamesCache.length === 1 ? '' : 's'}`;
                 if (status) status.textContent = attendees.length
                     ? `${countLabel} shared by you and ${attendees.join(', ')}`
-                    : `${countLabel} in your library`;
+                    : (collectionId ? `${countLabel} in your selected list` : `${countLabel} in your library`);
                 filterScheduleCommonGames();
             } catch (error) {
                 scheduleCommonGamesCache = [];
@@ -4680,11 +4681,12 @@ Event ID: ${result.discord_event_id}`);
 
         async function pickRandomScheduleCommonGame() {
             const attendees = getScheduleEventAttendees();
+            const collectionId = String(document.getElementById('sch-game-list-filter')?.value || '').trim();
             try {
                 const resp = await safeFetch('/api/schedule/common-games/random', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ attendees }),
+                    body: JSON.stringify({ attendees, collection_id: collectionId }),
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
