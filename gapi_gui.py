@@ -2916,9 +2916,12 @@ def api_library():
         # Fallback to demo games if DB not available
         return jsonify({'games': [{
             'app_id': g.get('appid'),
+            'game_id': f"steam:{g.get('appid')}" if g.get('appid') else '',
             'name': g.get('name', 'Unknown'),
             'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
-            'is_favorite': False
+            'is_favorite': False,
+            'platform': 'steam',
+            'genres': g.get('genres', []) if isinstance(g.get('genres', []), list) else [],
         } for g in DEMO_GAMES]})
 
     try:
@@ -2968,6 +2971,7 @@ def api_library():
                     continue
 
                 app_id = game.get('app_id')
+                safe_app_token = str(app_id).strip() if app_id is not None else ''
                 try:
                     app_id_int = int(app_id) if app_id else None
                 except (ValueError, TypeError):
@@ -2975,11 +2979,14 @@ def api_library():
 
                 games.append({
                     'app_id': app_id_int,
+                    'game_id': game.get('game_id') or (f"{str(game.get('platform') or 'steam').strip().lower()}:{safe_app_token}" if safe_app_token else ''),
                     'name': name,
                     'playtime_hours': round(game.get('playtime_hours', 0), 1),
                     'is_favorite': str(app_id) in favorite_ids if app_id else False,
                     'platform': game.get('platform', 'steam'),
-                    'last_played': game.get('last_played').isoformat() if game.get('last_played') else None
+                    'last_played': game.get('last_played').isoformat() if game.get('last_played') else None,
+                    'genres': game.get('genres', []) if isinstance(game.get('genres', []), list) else [],
+                    'tags': game.get('tags', []) if isinstance(game.get('tags', []), list) else [],
                 })
         finally:
             db.close()
@@ -2994,9 +3001,12 @@ def api_library():
         # Fallback to demo games on error
         return jsonify({'games': [{
             'app_id': g.get('appid'),
+            'game_id': f"steam:{g.get('appid')}" if g.get('appid') else '',
             'name': g.get('name', 'Unknown'),
             'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
-            'is_favorite': False
+            'is_favorite': False,
+            'platform': 'steam',
+            'genres': g.get('genres', []) if isinstance(g.get('genres', []), list) else [],
         } for g in DEMO_GAMES]})
 
 
@@ -5595,6 +5605,20 @@ def _parse_shared_member_usernames(raw_members) -> List[str]:
     return [str(value).strip() for value in (raw_members or []) if str(value).strip()]
 
 
+def _serialize_backlog_summaries(backlogs: List[Dict], service, current_username: Optional[str]) -> List[Dict]:
+    """Attach UI summary fields to backlog collections."""
+    current_user_key = str(current_username or '').strip().lower()
+    enriched = []
+    for backlog in backlogs or []:
+        item = dict(backlog or {})
+        members = [str(member).strip() for member in (item.get('members') or []) if str(member).strip()]
+        invited_count = len([member for member in members if member.lower() != current_user_key])
+        item['entry_count'] = service.get_collection_entry_count(item.get('id'))
+        item['invited_count'] = max(invited_count, 0)
+        enriched.append(item)
+    return enriched
+
+
 @app.route('/api/backlogs', methods=['GET'])
 @require_login
 def api_list_backlog_collections():
@@ -5605,6 +5629,7 @@ def api_list_backlog_collections():
     with picker_lock:
         backlogs = service.list_collections(username=username)
         active_backlog_id = service.resolve_collection_for_user(requested_collection_id, username)
+        backlogs = _serialize_backlog_summaries(backlogs, service, username)
     return jsonify({
         'backlogs': backlogs,
         'count': len(backlogs),
@@ -5720,6 +5745,7 @@ def api_list_backlog():
             collection_id=active_backlog_id,
         )
         active_backlog = service.get_collection(active_backlog_id)
+        backlogs = _serialize_backlog_summaries(backlogs, service, username)
     return jsonify({
         'games': games,
         'count': len(games),

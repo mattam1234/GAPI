@@ -1179,10 +1179,17 @@
                         <div class="schedule-agenda-eyebrow">Library</div>
                         <h3>Quick add</h3>
                         <label for="backlog-library-search" class="schedule-field-hint">Add game from library</label>
-                        <input type="text" id="backlog-library-search" class="search-input" placeholder="Search your library..." oninput="filterBacklogLibraryQuickAdd()" style="margin-bottom:0;">
+                        <input type="text" id="backlog-library-search" class="search-input" placeholder="Search by title, platform, genre..." oninput="filterBacklogLibraryQuickAdd()" list="backlog-library-search-suggestions" style="margin-bottom:0;">
+                        <datalist id="backlog-library-search-suggestions"></datalist>
+                        <label for="backlog-library-genre-filter" class="schedule-field-hint">Genre</label>
+                        <input type="text" id="backlog-library-genre-filter" class="search-input" placeholder="Any genre..." oninput="filterBacklogLibraryQuickAdd()" list="backlog-library-genre-suggestions" style="margin-bottom:0;">
+                        <datalist id="backlog-library-genre-suggestions"></datalist>
                         <select id="backlog-library-add-select" class="backlog-selector" size="6" onchange="setBacklogLibraryQuickAddSelection(this.value)">
                             <option value="">Loading library…</option>
                         </select>
+                        <div id="backlog-library-preview" class="backlog-library-preview">
+                            Select a game to preview playtime and platform.
+                        </div>
                         <div class="schedule-sidebar-actions">
                             <button type="button" class="chat-room-create-btn" id="backlog-library-add-btn" onclick="quickAddSelectedLibraryGameToBacklog()">➕ Add selected game</button>
                         </div>
