@@ -19,7 +19,7 @@ class TestDashboardChatLayout(unittest.TestCase):
         self.assertIn('id="chat-room-list"', template)
         self.assertNotIn('<p style="color: var(--text-secondary); margin-bottom: 12px;">Real-time chat with other users.</p>', template)
         self.assertIn('id="schedule-agenda"', template)
-        self.assertIn('id="agenda-quick-title"', template)
+        self.assertIn('id="schedule-agenda-create-btn"', template)
         self.assertIn('id="sch-duration"', template)
         self.assertIn('id="sch-attendee-values"', template)
 
@@ -30,7 +30,7 @@ class TestDashboardChatLayout(unittest.TestCase):
         self.assertIn('function updateChatRoomHeader()', script)
         self.assertNotIn("if (tabName === 'leaderboard') loadLeaderboard();", script)
         self.assertIn('function renderScheduleAgenda(', script)
-        self.assertIn('function createAgendaEvent()', script)
+        self.assertNotIn('function createAgendaEvent()', script)
         self.assertIn('function handleScheduleAgendaDrop(', script)
         self.assertIn('function focusScheduleInviteField(', script)
 
@@ -43,6 +43,7 @@ class TestDashboardChatLayout(unittest.TestCase):
         self.assertIn('-webkit-line-clamp: 2;', styles)
         self.assertIn('.schedule-agenda-board {', styles)
         self.assertIn('.schedule-agenda-item {', styles)
+        self.assertIn('.schedule-event-card {', styles)
 
 
 if __name__ == '__main__':

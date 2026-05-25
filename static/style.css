@@ -976,12 +976,20 @@ a.auth-required,
 
 .schedule-sidebar,
 .schedule-sidebar-card,
-.schedule-upcoming-panel {
+.schedule-upcoming-panel,
+.schedule-right-rail {
   display: flex;
   flex-direction: column;
 }
 
 .schedule-sidebar {
+  gap: 16px;
+}
+
+.schedule-right-rail,
+.backlog-side-panel {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 
@@ -997,6 +1005,16 @@ a.auth-required,
 .schedule-sidebar-card,
 .schedule-upcoming-panel {
   padding: 16px;
+}
+
+.schedule-selector-search,
+.backlog-selector-search {
+  margin: 8px 0 12px;
+}
+
+.schedule-selector-list,
+.backlog-selector {
+  min-height: 320px;
 }
 
 .schedule-agenda-panel {
@@ -1023,6 +1041,12 @@ a.auth-required,
 
 .schedule-sidebar-actions {
   margin-top: 14px;
+}
+
+.schedule-right-card-section + .schedule-right-card-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
 }
 
 .schedule-sidebar-actions .chat-room-secondary-btn,
@@ -1080,14 +1104,15 @@ a.auth-required,
 
 .backlog-shell {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1.4fr) minmax(240px, 320px);
   gap: 20px;
   align-items: start;
 }
 
 .backlog-sidebar,
 .backlog-sidebar-card,
-.backlog-main-panel {
+.backlog-main-panel,
+.backlog-preview-card {
   display: flex;
   flex-direction: column;
 }
@@ -1098,7 +1123,8 @@ a.auth-required,
 
 .backlog-sidebar-card,
 .backlog-main-panel,
-.backlog-list-panel {
+.backlog-list-panel,
+.backlog-preview-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1106,12 +1132,12 @@ a.auth-required,
 }
 
 .backlog-sidebar-card,
-.backlog-main-panel {
+.backlog-main-panel,
+.backlog-preview-card {
   padding: 16px;
 }
 
 .backlog-selector {
-  min-height: 240px;
   width: 100%;
   border-radius: 14px;
   border: 1px solid var(--border);
@@ -1128,11 +1154,50 @@ a.auth-required,
   align-items: center;
 }
 
+.backlog-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.backlog-panel-header h3,
+.backlog-preview-card h3 {
+  margin: 4px 0 0;
+}
+
+.backlog-preview-grid {
+  display: grid;
+  gap: 16px;
+}
+
 .backlog-list-panel {
   margin-top: 12px;
   min-height: 360px;
   padding: 0;
   overflow: hidden;
+}
+
+.backlog-control-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.backlog-playlist-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.backlog-playlist-card,
+.schedule-event-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
 }
 
 .backlog-share-list {
@@ -1344,10 +1409,11 @@ a.auth-required,
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(180px, 220px)) auto;
+  display: flex;
+  justify-content: space-between;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .schedule-agenda {
@@ -1418,6 +1484,16 @@ a.auth-required,
   max-height: min(72vh, 980px);
   overflow-y: auto;
   padding-right: 4px;
+}
+
+.schedule-event-card {
+  padding: 15px 20px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.schedule-event-card:last-child {
+  margin-bottom: 0;
 }
 
 .schedule-agenda-time-label {
@@ -1524,16 +1600,17 @@ a.auth-required,
     grid-column: 1 / -1;
   }
 
-  .schedule-agenda-quick-create {
-    grid-template-columns: 1fr;
-  }
-
   .schedule-agenda-shell {
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   }
 
-  .schedule-upcoming-panel {
+  .schedule-right-rail,
+  .backlog-side-panel {
     grid-column: 1 / -1;
+  }
+
+  .backlog-shell {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   }
 
   .schedule-agenda-board {
@@ -1585,6 +1662,11 @@ a.auth-required,
 
   .schedule-filter-summary {
     width: 100%;
+  }
+
+  .schedule-agenda-quick-create,
+  .backlog-panel-header {
+    align-items: flex-start;
   }
 
   .schedule-form-grid {

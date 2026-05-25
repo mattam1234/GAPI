@@ -368,7 +368,9 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
         for token in (
             'schedule-modal',
             'schedule-collection-modal',
+            'schedule-selector-search',
             'schedule-filter-start',
+            'schedule-right-rail',
             'schedule-rename-btn',
             'schedule-rsvp-list',
             'schedule-common-games-list',
@@ -380,6 +382,7 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
     def test_main_js_contains_schedule_modal_handlers(self):
         content = _read('static', 'main.js')
         for token in (
+            'filterScheduleCollections',
             'openScheduleCreateModal',
             'openScheduleCollectionModal',
             'openRenameScheduleModal',
@@ -391,12 +394,15 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
             'showScheduleDiscordGuildSearch',
         ):
             self.assertIn(token, content)
+        self.assertNotIn('function createAgendaEvent()', content)
 
     def test_style_contains_schedule_modal_and_rsvp_classes(self):
         content = _read('static', 'style.css')
         for token in (
             '.schedule-modal',
             '.schedule-sidebar',
+            '.schedule-right-rail',
+            '.schedule-selector-list',
             '.schedule-form-grid',
             '.schedule-rsvp-row',
             '.schedule-filter-toolbar',

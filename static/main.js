@@ -3079,6 +3079,38 @@
             return scheduleCollectionsCache.find(schedule => schedule.id === activeScheduleId) || null;
         }
 
+        function getFilteredScheduleCollections() {
+            const query = getFilterValue('schedule-selector-search').trim().toLowerCase();
+            if (!query) return scheduleCollectionsCache;
+            return scheduleCollectionsCache.filter(schedule => {
+                const searchText = [
+                    schedule.name,
+                    schedule.owner,
+                    ...(Array.isArray(schedule.members) ? schedule.members : [])
+                ].filter(Boolean).join(' ').toLowerCase();
+                return searchText.includes(query);
+            });
+        }
+
+        function updateScheduleSidebarMeta(visibleSchedules = getFilteredScheduleCollections()) {
+            const meta = document.getElementById('schedule-sidebar-meta');
+            const active = getActiveSchedule();
+            if (!meta) return;
+            if (!scheduleCollectionsCache.length) {
+                meta.textContent = 'Create a schedule to start planning events.';
+                return;
+            }
+            const sharedCount = Math.max(((active?.members || []).length || 1) - 1, 0);
+            const visibleCount = visibleSchedules.length;
+            meta.textContent = active
+                ? `${active.name || 'Schedule'}${active.is_shared ? ` • shared with ${sharedCount}` : ' • personal'}${visibleCount !== scheduleCollectionsCache.length ? ` • ${visibleCount} shown` : ''}`
+                : 'Choose a schedule to review your week.';
+        }
+
+        function filterScheduleCollections() {
+            renderScheduleSelector();
+        }
+
         function getScheduleCollectionMembers() {
             return (document.getElementById('schedule-collection-member-tags')?.dataset.members || '')
                 .split(',')
@@ -3243,15 +3275,24 @@
         function renderScheduleSelector() {
             const selector = document.getElementById('schedule-selector');
             const renameButton = document.getElementById('schedule-rename-btn');
+            const visibleSchedules = getFilteredScheduleCollections();
             if (!selector) return;
             if (!scheduleCollectionsCache.length) {
                 selector.innerHTML = '<option value="">No schedules yet</option>';
                 selector.value = '';
                 activeScheduleId = '';
                 if (renameButton) renameButton.disabled = true;
+                updateScheduleSidebarMeta([]);
                 return;
             }
-            selector.innerHTML = scheduleCollectionsCache.map(schedule => {
+            if (!visibleSchedules.length) {
+                selector.innerHTML = '<option value="">No matching schedules</option>';
+                selector.value = '';
+                if (renameButton) renameButton.disabled = !activeScheduleId;
+                updateScheduleSidebarMeta([]);
+                return;
+            }
+            selector.innerHTML = visibleSchedules.map(schedule => {
                 const members = Array.isArray(schedule.members) ? schedule.members : [];
                 const memberSuffix = schedule.is_shared
                     ? ` · shared with ${Math.max(members.length - 1, 0)}`
@@ -3261,8 +3302,9 @@
             if (!activeScheduleId || !scheduleCollectionsCache.some(schedule => schedule.id === activeScheduleId)) {
                 activeScheduleId = scheduleCollectionsCache[0].id || '';
             }
-            selector.value = activeScheduleId || '';
+            selector.value = visibleSchedules.some(schedule => schedule.id === activeScheduleId) ? (activeScheduleId || '') : '';
             if (renameButton) renameButton.disabled = !activeScheduleId;
+            updateScheduleSidebarMeta(visibleSchedules);
         }
 
         function changeActiveSchedule(scheduleId) {
@@ -3370,7 +3412,7 @@
                 `;
             }
 
-            return `<div class="schedule-event-card" onclick="editScheduleEvent('${ev.id}')" style="padding:15px 20px; border:1px solid var(--card-border); border-radius:var(--radius,12px); margin-bottom:10px; background:var(--card-bg); cursor:pointer;">
+            return `<div class="schedule-event-card" onclick="editScheduleEvent('${ev.id}')">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                     <div style="display:flex; align-items:center; flex:1; min-width:0;">
                         ${gameImageHtml}
@@ -3489,8 +3531,6 @@
         function syncAgendaSelectionState(resetQuickFields = false) {
             const agenda = document.getElementById('schedule-agenda');
             const quickCreate = document.getElementById('schedule-agenda-quick-create');
-            const titleField = document.getElementById('agenda-quick-title');
-            const attendeesField = document.getElementById('agenda-quick-attendees');
             const summary = getAgendaSelectionSummary();
             if (agenda) {
                 agenda.querySelectorAll('.schedule-agenda-slot').forEach(slot => {
@@ -3504,10 +3544,6 @@
             if (!quickCreate) return;
             if (!summary) {
                 quickCreate.hidden = true;
-                if (resetQuickFields) {
-                    if (titleField) titleField.value = '';
-                    if (attendeesField) attendeesField.value = '';
-                }
                 return;
             }
             quickCreate.hidden = false;
@@ -3550,8 +3586,7 @@
             if (!scheduleAgendaSelectionActive) return;
             scheduleAgendaSelectionActive = false;
             syncAgendaSelectionState();
-            const titleField = document.getElementById('agenda-quick-title');
-            if (titleField && !titleField.value) titleField.focus();
+            document.getElementById('schedule-agenda-create-btn')?.focus();
         }
 
         function handleScheduleAgendaClick(event) {
@@ -3633,68 +3668,8 @@
             document.getElementById('sch-date').value = summary.date;
             document.getElementById('sch-time').value = summary.startTime;
             document.getElementById('sch-duration').value = summary.durationMinutes;
-            const quickTitle = document.getElementById('agenda-quick-title');
-            const quickAttendees = document.getElementById('agenda-quick-attendees');
-            if (quickTitle && quickTitle.value.trim()) {
-                document.getElementById('sch-title').value = quickTitle.value.trim();
-            }
-            if (quickAttendees && quickAttendees.value.trim()) {
-                setScheduleSelectedAttendees(quickAttendees.value.split(',').map(value => ({ name: value.trim(), id: value.trim() })).filter(attendee => attendee.name));
-            }
             document.getElementById('sch-title').focus();
             clearAgendaSelection(false);
-        }
-
-        async function createAgendaEvent() {
-            const summary = getAgendaSelectionSummary();
-            if (!summary) {
-                showMessage('Select a time on the agenda first.', 'warning');
-                return;
-            }
-            const title = document.getElementById('agenda-quick-title')?.value.trim();
-            if (!title) {
-                showMessage('Enter a title for the new event.', 'warning');
-                document.getElementById('agenda-quick-title')?.focus();
-                return;
-            }
-            const attendees = (document.getElementById('agenda-quick-attendees')?.value || '')
-                .split(',')
-                .map(value => value.trim())
-                .filter(Boolean);
-            try {
-                const resp = await safeFetch('/api/schedule', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        title,
-                        date: summary.date,
-                        time: summary.startTime,
-                        duration_minutes: summary.durationMinutes,
-                        attendees,
-                        attendee_ids: attendees,
-                        rsvp_statuses: Object.fromEntries(attendees.map(name => [name, 'pending'])),
-                        game_name: '',
-                        game_appid: '',
-                        game_image_url: '',
-                        schedule_id: activeScheduleId || null,
-                        notes: '',
-                        create_discord_event: false,
-                        discord_guild_id: null,
-                        timezone_name: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-                        timezone_offset_minutes: new Date().getTimezoneOffset(),
-                    })
-                });
-                if (!resp.ok) {
-                    const errorData = await resp.json();
-                    showMessage(errorData.error || 'Failed to create event', 'error');
-                    return;
-                }
-                clearAgendaSelection(true);
-                await loadSchedule();
-                showMessage('Event created.', 'success');
-            } catch (e) {
-                showMessage(`Error: ${e.message}`, 'error');
-            }
         }
 
         async function updateScheduleEvent(eventId, payload, successMessage = 'Event updated.') {
@@ -4379,19 +4354,19 @@ Event ID: ${result.discord_event_id}`);
                 const data = await resp.json();
                 const playlists = data.playlists || [];
                 if (!playlists.length) {
-                    container.innerHTML = '<div class="loading">No playlists yet. Create one above!</div>';
+                    container.innerHTML = '<div class="loading">No playlists yet. Create one from the actions panel.</div>';
                     return;
                 }
                 container.innerHTML = playlists.map(p => `
-                    <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:var(--radius,12px); padding:16px; margin-bottom:12px;">
+                    <div class="backlog-playlist-card" style="padding:16px;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <strong style="font-size:1.1em;">📋 ${p.name}</strong>
+                            <strong style="font-size:1.1em;">📋 ${escapeHtml(p.name || 'Playlist')}</strong>
                             <span style="color:var(--text-secondary); font-size:0.9em;">${p.count} game(s)</span>
                         </div>
                         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-                            <button onclick="viewPlaylist('${p.name}')" style="padding:5px 14px; background:var(--list-hover); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); cursor:pointer; color:var(--text-primary);">👁 View</button>
-                            <button onclick="pickFromPlaylist('${p.name}')" style="padding:5px 14px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer;">🎲 Pick</button>
-                            <button onclick="deletePlaylist('${p.name}')" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">🗑️ Delete</button>
+                            <button onclick="viewPlaylist('${escAttr(p.name)}')" style="padding:5px 14px; background:var(--list-hover); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); cursor:pointer; color:var(--text-primary);">👁 View</button>
+                            <button onclick="pickFromPlaylist('${escAttr(p.name)}')" style="padding:5px 14px; background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer;">🎲 Pick</button>
+                            <button onclick="deletePlaylist('${escAttr(p.name)}')" style="padding:5px 14px; background:#ef4444; color:white; border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">🗑️ Delete</button>
                         </div>
                         <div id="playlist-games-${CSS.escape(p.name)}" style="margin-top:10px; display:none;"></div>
                     </div>`).join('');
@@ -4512,6 +4487,23 @@ Event ID: ${result.discord_event_id}`);
             return backlogCollectionsCache.find(backlog => backlog.id === activeBacklogId) || null;
         }
 
+        function getFilteredBacklogCollections() {
+            const query = getFilterValue('backlog-selector-search').trim().toLowerCase();
+            if (!query) return backlogCollectionsCache;
+            return backlogCollectionsCache.filter(backlog => {
+                const searchText = [
+                    backlog.name,
+                    backlog.owner,
+                    ...(Array.isArray(backlog.members) ? backlog.members : [])
+                ].filter(Boolean).join(' ').toLowerCase();
+                return searchText.includes(query);
+            });
+        }
+
+        function filterBacklogCollections() {
+            renderBacklogSelector();
+        }
+
         function isDefaultBacklog(backlog) {
             const currentUsername = getBacklogCurrentUsername().toLowerCase();
             if (!backlog || !currentUsername) return false;
@@ -4534,12 +4526,12 @@ Event ID: ${result.discord_event_id}`);
             const sharedCount = Math.max(((active?.members || []).length || 1) - 1, 0);
             if (meta) {
                 meta.textContent = active
-                    ? `${active.name || 'Backlog'} • ${owned ? 'You own this backlog' : `Owned by ${active.owner || 'someone else'}`}`
-                    : 'Choose a backlog to view, share, or leave.';
+                    ? `${active.name || 'List'} • ${owned ? 'You own this list' : `Owned by ${active.owner || 'someone else'}`}`
+                    : 'Choose a list to preview, edit, share, or leave.';
             }
             if (copy) {
                 copy.textContent = active
-                    ? `${active.is_shared ? `Shared with ${sharedCount} other${sharedCount === 1 ? '' : 's'}` : 'Personal backlog'}`
+                    ? `${active.is_shared ? `Shared with ${sharedCount} other${sharedCount === 1 ? '' : 's'}` : 'Personal list'}`
                     : '';
             }
             if (renameBtn) renameBtn.disabled = !active || !owned;
@@ -4549,6 +4541,7 @@ Event ID: ${result.discord_event_id}`);
 
         function renderBacklogSelector() {
             const selector = document.getElementById('backlog-selector');
+            const visibleBacklogs = getFilteredBacklogCollections();
             if (!selector) return;
             if (!backlogCollectionsCache.length) {
                 selector.innerHTML = '<option value="">No backlogs yet</option>';
@@ -4557,7 +4550,13 @@ Event ID: ${result.discord_event_id}`);
                 updateBacklogSidebarMeta();
                 return;
             }
-            selector.innerHTML = backlogCollectionsCache.map(backlog => {
+            if (!visibleBacklogs.length) {
+                selector.innerHTML = '<option value="">No matching lists</option>';
+                selector.value = '';
+                updateBacklogSidebarMeta();
+                return;
+            }
+            selector.innerHTML = visibleBacklogs.map(backlog => {
                 const memberCount = Array.isArray(backlog.members) ? Math.max(backlog.members.length - 1, 0) : 0;
                 const ownerSuffix = isOwnedBacklog(backlog) ? '' : ` • ${escapeHtml(backlog.owner || '')}`;
                 const sharedSuffix = backlog.is_shared ? ` • shared ${memberCount}` : '';
@@ -4566,7 +4565,7 @@ Event ID: ${result.discord_event_id}`);
             if (!activeBacklogId || !backlogCollectionsCache.some(backlog => backlog.id === activeBacklogId)) {
                 activeBacklogId = backlogCollectionsCache[0].id || '';
             }
-            selector.value = activeBacklogId || '';
+            selector.value = visibleBacklogs.some(backlog => backlog.id === activeBacklogId) ? (activeBacklogId || '') : '';
             updateBacklogSidebarMeta();
         }
 
