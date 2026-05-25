@@ -20,7 +20,7 @@ flask>=2.0.0
 
 python-dotenv>=1.2.2
 flask-limiter>=4.1.1          
-flask-compress>=1.14
+flask-compress>=1.24
 
 # Database (PostgreSQL — required for multi-user web GUI)
 sqlalchemy>=2.0.0
