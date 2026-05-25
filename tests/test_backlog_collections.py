@@ -30,7 +30,7 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'backlog-collection-modal',
             'backlog-modal-collection',
             'backlog-library-search',
-            'backlog-library-genre-filter',
+            'backlog-library-search-results',
             'backlog-library-preview',
             'backlog-library-add-select',
         ):
@@ -158,6 +158,22 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
             shared = next(item for item in payload['backlogs'] if item['id'] == backlog_id)
             self.assertEqual(shared['entry_count'], 1)
             self.assertEqual(shared['invited_count'], 1)
+
+    def test_backlog_listing_resolves_plain_app_id_entries(self):
+        service = self._service()
+        with patch.object(gapi_gui, '_shared_backlog_service', service), \
+                patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
+            status_resp = self.client.post('/api/backlog/620', json={
+                'status': 'want_to_play',
+            })
+            self.assertEqual(status_resp.status_code, 200)
+
+            list_resp = self.client.get('/api/backlog')
+            self.assertEqual(list_resp.status_code, 200)
+            payload = list_resp.get_json()
+            self.assertEqual(len(payload['games']), 1)
+            self.assertEqual(payload['games'][0]['game_id'], 'steam:620')
+            self.assertEqual(payload['games'][0]['backlog_status'], 'want_to_play')
 
     def test_library_demo_payload_includes_composite_game_id(self):
         with patch.object(gapi_gui, 'ensure_db_available', return_value=False):

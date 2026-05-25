@@ -353,6 +353,10 @@ class BacklogService:
             gid = str(game.get('game_id') or '').strip()
             if gid:
                 candidate_ids.append(gid)
+                if ':' in gid:
+                    suffix = gid.rsplit(':', 1)[-1].strip()
+                    if suffix:
+                        candidate_ids.append(suffix)
             app_id = str(game.get('app_id') or game.get('appid') or '').strip()
             if app_id:
                 candidate_ids.append(app_id)
