@@ -3370,6 +3370,18 @@
 
         function openScheduleCreateModal() {
             clearScheduleForm();
+            // Pre-fill today's date and the next 30-minute slot
+            const now = new Date();
+            const dateField = document.getElementById('sch-date');
+            if (dateField && !dateField.value) {
+                dateField.value = formatScheduleDateKey(now);
+            }
+            const timeField = document.getElementById('sch-time');
+            if (timeField && !timeField.value) {
+                const next = new Date(now);
+                next.setMinutes(Math.ceil(next.getMinutes() / SCHEDULE_SLOT_MINUTES) * SCHEDULE_SLOT_MINUTES, 0, 0);
+                timeField.value = `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`;
+            }
             void ensureScheduleGameFilterData();
             const modal = document.getElementById('schedule-modal');
             if (modal) modal.style.display = 'flex';
@@ -3923,6 +3935,11 @@
                     resp = await safeFetch('/api/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 }
                 if (!resp.ok) { const d = await resp.json(); alert(d.error || 'Failed to save event'); return; }
+                // Navigate the agenda to the week containing the saved event
+                if (body.date) {
+                    const eventDate = parseScheduleLocalDateTime(body.date);
+                    if (eventDate) scheduleAgendaWeekStart = scheduleStartOfWeek(eventDate);
+                }
                 closeScheduleModal(true);
                 await loadSchedule();
                 showMessage(editId ? 'Event updated.' : 'Event created.', 'success');
@@ -4924,6 +4941,7 @@ Event ID: ${result.discord_event_id}`);
             const renameBtn = document.getElementById('backlog-rename-btn');
             const deleteBtn = document.getElementById('backlog-delete-btn');
             const leaveBtn = document.getElementById('backlog-leave-btn');
+            const inviteBtn = document.getElementById('backlog-invite-btn');
             const quickAddBtn = document.getElementById('backlog-library-add-btn');
             const active = getActiveBacklog();
             const isFavorites = isFavoritesBacklog(active?.id);
@@ -4947,6 +4965,10 @@ Event ID: ${result.discord_event_id}`);
             const enableDelete = Boolean(showDelete && !isDefaultBacklog(active));
             const showLeave = Boolean(active && !owned && active.is_shared && !isFavorites);
             if (renameBtn) renameBtn.disabled = !active || !owned || isFavorites;
+            if (inviteBtn) {
+                inviteBtn.style.display = owned && !isFavorites ? '' : 'none';
+                inviteBtn.disabled = !active || !owned || isFavorites;
+            }
             if (deleteBtn) {
                 deleteBtn.style.display = showDelete ? '' : 'none';
                 deleteBtn.disabled = !enableDelete;
