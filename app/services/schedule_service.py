@@ -226,6 +226,30 @@ class ScheduleService:
         self._repo.save()
         return schedule
 
+    def remove_schedule(self, schedule_id: str, username: Optional[str] = None) -> bool:
+        """Delete a schedule and all events assigned to it."""
+        safe_schedule_id = str(schedule_id or '').strip()
+        if not safe_schedule_id:
+            return False
+        schedules = self._get_schedules()
+        schedule = schedules.get(safe_schedule_id)
+        if not schedule:
+            return False
+        if username:
+            safe_username = str(username or '').strip()
+            owner = str(schedule.get('owner') or '').strip()
+            if owner.lower() != safe_username.lower():
+                return False
+            if safe_schedule_id == self._default_schedule_id(safe_username):
+                return False
+        del schedules[safe_schedule_id]
+        events = self._get_events()
+        for event_id, event in list(events.items()):
+            if str(event.get('schedule_id') or '').strip() == safe_schedule_id:
+                del events[event_id]
+        self._repo.save()
+        return True
+
     def add_event(self, title: str, date: str, time_str: str,
                   duration_minutes: Optional[int] = None,
                   attendees: Optional[List[str]] = None,

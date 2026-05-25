@@ -24,15 +24,17 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
     def test_index_merges_playlists_and_backlogs(self):
         content = _read('templates', 'index.html')
         for token in (
-            'Playlists &amp; Backlogs',
-            'playlists-container',
             'backlog-selector',
             'backlog-selector-search',
             'backlog-side-panel',
             'backlog-collection-modal',
             'backlog-modal-collection',
+            'backlog-library-search',
+            'backlog-library-add-select',
         ):
             self.assertIn(token, content)
+        self.assertNotIn('Playlists &amp; Backlogs', content)
+        self.assertNotIn('playlists-container', content)
         self.assertNotIn('id="playlists-tab"', content)
         self.assertNotIn('id="nav-playlists"', content)
 
