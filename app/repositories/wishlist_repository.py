@@ -20,8 +20,8 @@ class WishlistRepository(BaseRepository):
         }
     """
 
-    def __init__(self, file_path: str = '.gapi_wishlist.json') -> None:
-        super().__init__(file_path)
+    def __init__(self, file_path: str = '.gapi_wishlist.json', backend: str = 'file') -> None:
+        super().__init__(file_path, backend=backend)
         self.data: Dict[str, Dict] = self._load({})
 
     def find(self, game_id: str) -> Optional[Dict]:

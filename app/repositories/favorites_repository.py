@@ -14,8 +14,8 @@ class FavoritesRepository(BaseRepository):
     on load for backward compatibility.
     """
 
-    def __init__(self, file_path: str = '.gapi_favorites.json') -> None:
-        super().__init__(file_path)
+    def __init__(self, file_path: str = '.gapi_favorites.json', backend: str = 'file') -> None:
+        super().__init__(file_path, backend=backend)
         raw: List = self._load([])
         # Normalise legacy int entries
         self.data: List[str] = [

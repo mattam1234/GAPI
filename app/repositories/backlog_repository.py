@@ -33,8 +33,8 @@ class BacklogRepository(BaseRepository):
     :class:`app.services.backlog_service.BacklogService`.
     """
 
-    def __init__(self, file_path: str = '.gapi_backlog.json') -> None:
-        super().__init__(file_path)
+    def __init__(self, file_path: str = '.gapi_backlog.json', backend: str = 'file') -> None:
+        super().__init__(file_path, backend=backend)
         self.data: Dict = self._load({})
 
     def find(self, game_id: str) -> Optional[str]:

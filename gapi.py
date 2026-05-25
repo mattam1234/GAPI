@@ -846,15 +846,15 @@ class GamePicker:
             """Prefix *filename* with the per-user data directory when set."""
             return os.path.join(self._data_dir, filename) if self._data_dir else filename
 
-        self._history_repo = HistoryRepository(_dp(self.HISTORY_FILE), self.MAX_HISTORY)
-        self._favorites_repo = FavoritesRepository(_dp(self.FAVORITES_FILE))
-        self._review_repo = ReviewRepository(_dp(self.REVIEWS_FILE))
-        self._tag_repo = TagRepository(_dp(self.TAGS_FILE))
-        self._schedule_repo = ScheduleRepository(_dp(self.SCHEDULE_FILE))
-        self._playlist_repo = PlaylistRepository(_dp(self.PLAYLISTS_FILE))
-        self._backlog_repo = BacklogRepository(_dp(self.BACKLOG_FILE))
-        self._budget_repo = BudgetRepository(_dp(self.BUDGET_FILE))
-        self._wishlist_repo = WishlistRepository(_dp(self.WISHLIST_FILE))
+        self._history_repo = HistoryRepository(_dp(self.HISTORY_FILE), self.MAX_HISTORY, backend='db')
+        self._favorites_repo = FavoritesRepository(_dp(self.FAVORITES_FILE), backend='db')
+        self._review_repo = ReviewRepository(_dp(self.REVIEWS_FILE), backend='db')
+        self._tag_repo = TagRepository(_dp(self.TAGS_FILE), backend='db')
+        self._schedule_repo = ScheduleRepository(_dp(self.SCHEDULE_FILE), backend='db')
+        self._playlist_repo = PlaylistRepository(_dp(self.PLAYLISTS_FILE), backend='db')
+        self._backlog_repo = BacklogRepository(_dp(self.BACKLOG_FILE), backend='db')
+        self._budget_repo = BudgetRepository(_dp(self.BUDGET_FILE), backend='db')
+        self._wishlist_repo = WishlistRepository(_dp(self.WISHLIST_FILE), backend='db')
 
         # ----------------------------------------------------------------
         # Services — contain all business / domain logic.

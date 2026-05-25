@@ -11,8 +11,8 @@ class PlaylistRepository(BaseRepository):
         { "<playlist_name>": ["<game_id>", ...] }
     """
 
-    def __init__(self, file_path: str = '.gapi_playlists.json') -> None:
-        super().__init__(file_path)
+    def __init__(self, file_path: str = '.gapi_playlists.json', backend: str = 'file') -> None:
+        super().__init__(file_path, backend=backend)
         self.data: Dict[str, List[str]] = self._load({})
 
     def find(self, name: str) -> Optional[List[str]]:
