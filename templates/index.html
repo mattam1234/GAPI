@@ -1143,12 +1143,19 @@
                                 <div class="loading">Loading list…</div>
                             </div>
                         </div>
+                        <div class="backlog-preview-card">
+                            <div class="schedule-agenda-eyebrow">Selection</div>
+                            <h3>Entry preview</h3>
+                            <div id="backlog-entry-preview" class="backlog-entry-preview">
+                                Select a game in this list to preview details and save personal notes.
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="backlog-side-panel">
                     <div class="backlog-sidebar-card backlog-filter-panel">
                         <div class="schedule-agenda-eyebrow">Filters</div>
-                        <h3>Refine entries</h3>
+                        <h3>Refine entries &amp; quick add</h3>
                         <input type="text" id="backlog-search" class="search-input" placeholder="🔍 Filter backlog..." oninput="renderBacklogList()" style="margin-bottom:0;">
                         <div class="backlog-control-grid">
                             <label class="schedule-filter-group">
@@ -1174,14 +1181,14 @@
                                 </select>
                             </label>
                         </div>
-                    </div>
-                    <div class="backlog-sidebar-card">
                         <div class="schedule-agenda-eyebrow">Library</div>
                         <h3>Quick add</h3>
                         <label for="backlog-library-search" class="schedule-field-hint">Add game from library</label>
-                        <input type="text" id="backlog-library-search" class="search-input" placeholder="Search by title, platform, genre..." oninput="filterBacklogLibraryQuickAdd()" list="backlog-library-search-suggestions" style="margin-bottom:0;">
+                        <div class="schedule-autocomplete backlog-library-autocomplete">
+                            <input type="text" id="backlog-library-search" class="search-input" placeholder="Search by title, platform, genre..." onfocus="filterBacklogLibraryQuickAdd()" oninput="filterBacklogLibraryQuickAdd()" list="backlog-library-search-suggestions" style="margin-bottom:0;">
+                            <div id="backlog-library-search-results" class="schedule-autocomplete-dropdown backlog-library-search-results" style="display:none;"></div>
+                        </div>
                         <datalist id="backlog-library-search-suggestions"></datalist>
-                        <div id="backlog-library-search-results" class="backlog-library-search-results" style="display:none;"></div>
                         <select id="backlog-library-add-select" class="backlog-selector" size="6" onchange="setBacklogLibraryQuickAddSelection(this.value)">
                             <option value="">Loading library…</option>
                         </select>

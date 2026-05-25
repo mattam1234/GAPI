@@ -1219,7 +1219,7 @@
             modal.style.display = 'flex';
         }
 
-        async function updateBacklogEntryStatus(gameId, status, collectionId = activeBacklogId) {
+        async function updateBacklogEntryStatus(gameId, status, collectionId = activeBacklogId, notes = undefined) {
             try {
                 const safeCollectionId = String(collectionId || '').trim();
                 if (!status) {
@@ -1228,10 +1228,12 @@
                     scheduleGameFilterCacheReady = false;
                     return true;
                 } else {
+                    const payload = {status, collection_id: safeCollectionId || null};
+                    if (notes !== undefined) payload.notes = String(notes || '');
                     await safeFetch(`/api/backlog/${gameId}`, {
                         method: 'POST',
                         headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({status, collection_id: safeCollectionId || null})
+                        body: JSON.stringify(payload)
                     });
                     scheduleGameFilterCacheReady = false;
                     return true;
@@ -1579,6 +1581,7 @@
         let _backlogData = [];
         let backlogCollectionsCache = [];
         let activeBacklogId = '';
+        let activeBacklogEntryGameId = '';
         let backlogShareCandidatesCache = [];
         let _recommendationsData = [];
         const FAVORITES_BACKLOG_ID = '__favorites__';
@@ -2808,10 +2811,12 @@
             const attendeeDropdown = document.getElementById('attendee-search-dropdown');
             const discordDropdown = document.getElementById('discord-guild-search-dropdown');
             const scheduleMembersDropdown = document.getElementById('schedule-collection-members-dropdown');
+            const backlogLibraryDropdown = document.getElementById('backlog-library-search-results');
             const gameField = document.getElementById('sch-game');
             const attendeeField = document.getElementById('sch-attendees');
             const discordField = document.getElementById('sch-discord-guild-search');
             const scheduleMembersField = document.getElementById('schedule-collection-members');
+            const backlogLibraryField = document.getElementById('backlog-library-search');
             
             if (gameDropdown && gameField && !gameField.contains(event.target) && !gameDropdown.contains(event.target)) {
                 gameDropdown.style.display = 'none';
@@ -2826,6 +2831,11 @@
                 && !scheduleMembersField.contains(event.target)
                 && !scheduleMembersDropdown.contains(event.target)) {
                 scheduleMembersDropdown.style.display = 'none';
+            }
+            if (backlogLibraryDropdown && backlogLibraryField
+                && !backlogLibraryField.contains(event.target)
+                && !backlogLibraryDropdown.contains(event.target)) {
+                backlogLibraryDropdown.style.display = 'none';
             }
         });
 
@@ -4960,6 +4970,19 @@ Event ID: ${result.discord_event_id}`);
             return String(game?.game_id || game?.app_id || game?.appid || '').trim();
         }
 
+        function getBacklogEntryGameId(game) {
+            return String(game?.game_id || game?.app_id || game?.appid || '').trim();
+        }
+
+        function getBacklogEntryAppId(game) {
+            const parsed = Number.parseInt(String(game?.app_id || game?.appid || '').trim(), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+        }
+
+        function getBacklogStatusLabel(status) {
+            return String(status || '').replace(/_/g, ' ').trim() || 'unknown';
+        }
+
         function getBacklogGameGenres(game) {
             if (Array.isArray(game?.genres)) return game.genres.map(value => String(value || '').trim()).filter(Boolean);
             if (Array.isArray(game?.tags)) return game.tags.map(value => String(value || '').trim()).filter(Boolean);
@@ -5057,6 +5080,104 @@ Event ID: ${result.discord_event_id}`);
             renderBacklogLibraryAutocompleteResults([]);
         }
 
+        function selectBacklogEntryGame(gameId) {
+            const safeGameId = String(gameId || '').trim();
+            if (!safeGameId) return;
+            activeBacklogEntryGameId = safeGameId;
+            renderBacklogList();
+            renderBacklogEntryPreview();
+        }
+
+        async function renderBacklogEntryPreview() {
+            const preview = document.getElementById('backlog-entry-preview');
+            if (!preview) return;
+            if (!activeBacklogEntryGameId) {
+                preview.innerHTML = 'Select a game in this list to preview details and save personal notes.';
+                return;
+            }
+            const selectedGameId = activeBacklogEntryGameId;
+            const selected = _backlogData.find(game => getBacklogEntryGameId(game) === selectedGameId);
+            if (!selected) {
+                preview.innerHTML = 'Selected game is hidden by the current filters.';
+                return;
+            }
+
+            const appId = getBacklogEntryAppId(selected);
+            const statusLabel = getBacklogStatusLabel(selected.backlog_status);
+            const statusColor = {
+                want_to_play: '#4f46e5',
+                playing: '#10b981',
+                completed: '#f59e0b',
+                dropped: '#ef4444',
+                favorite: '#f59e0b',
+            }[selected.backlog_status] || '#888';
+            const platformBadges = renderInlinePlatformBadges(selected);
+            const noteValue = String(selected.backlog_notes || '').trim();
+            const canEditNotes = selected.backlog_status !== 'favorite';
+
+            let details = null;
+            if (appId) {
+                preview.innerHTML = '<div class="loading">Loading game details…</div>';
+                details = await loadGameDetailsAsync(appId);
+                if (selectedGameId !== activeBacklogEntryGameId) return;
+            }
+            const genres = Array.isArray(details?.genres) ? details.genres.slice(0, 4).join(', ') : '';
+            const description = String(details?.description || '').trim() || 'No game description available.';
+
+            preview.innerHTML = `
+                <div class="backlog-entry-preview-head">
+                    <div style="min-width:0;">
+                        <div class="backlog-entry-preview-title">${escapeHtml(selected.name || activeBacklogEntryGameId)}</div>
+                        <div class="backlog-entry-preview-meta">${escapeHtml(String(selected.playtime_hours || 0))}h played${appId ? ` • App ID ${escapeHtml(String(appId))}` : ''}</div>
+                    </div>
+                    <span style="background:${statusColor}; color:white; padding:3px 10px; border-radius:var(--radius,12px); font-size:0.82em; font-weight:600; white-space:nowrap;">${escapeHtml(statusLabel)}</span>
+                </div>
+                ${platformBadges ? `<div class="game-inline-meta" style="margin-top:8px;">${platformBadges}</div>` : ''}
+                ${genres ? `<div class="schedule-field-hint" style="margin-top:8px;">${escapeHtml(genres)}</div>` : ''}
+                <div class="backlog-entry-preview-desc">${escapeHtml(description)}</div>
+                <div class="backlog-entry-preview-notes">
+                    <label for="backlog-entry-notes" class="schedule-field-hint">Your notes for this list entry</label>
+                    <textarea id="backlog-entry-notes" class="search-input" placeholder="Write a reminder for later…" style="margin-bottom:0;" ${canEditNotes ? '' : 'disabled'}>${escapeHtml(noteValue)}</textarea>
+                    ${canEditNotes
+                        ? `<div class="schedule-modal-actions schedule-modal-actions-inline" style="margin-top:0;">
+                            <button type="button" class="chat-room-secondary-btn" onclick="saveBacklogEntryNotes()">💾 Save notes</button>
+                        </div>`
+                        : '<div class="schedule-field-hint">Favorites are read-only in this view.</div>'}
+                </div>
+            `;
+        }
+
+        async function saveBacklogEntryNotes() {
+            const selected = _backlogData.find(game => getBacklogEntryGameId(game) === activeBacklogEntryGameId);
+            if (!selected) {
+                showMessage('Choose a list entry first.', 'warning');
+                return;
+            }
+            if (selected.backlog_status === 'favorite') {
+                showMessage('Notes can only be saved for regular list entries.', 'warning');
+                return;
+            }
+            const notesField = document.getElementById('backlog-entry-notes');
+            const nextNotes = String(notesField?.value || '').trim();
+            try {
+                const updated = await updateBacklogEntryStatus(
+                    getBacklogEntryGameId(selected),
+                    selected.backlog_status,
+                    activeBacklogId,
+                    nextNotes
+                );
+                if (!updated) {
+                    showMessage('Failed to save notes for this entry.', 'error');
+                    return;
+                }
+                selected.backlog_notes = nextNotes;
+                showMessage('✅ List notes saved.', 'success');
+                renderBacklogEntryPreview();
+            } catch (error) {
+                showMessage(`Failed to save notes: ${error.message}`, 'error');
+            }
+        }
+
         function filterBacklogLibraryQuickAdd() {
             const select = document.getElementById('backlog-library-add-select');
             if (!select) return;
@@ -5136,6 +5257,8 @@ Event ID: ${result.discord_event_id}`);
                     renderBacklogList();
                 } catch (e) {
                     list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+                    activeBacklogEntryGameId = '';
+                    renderBacklogEntryPreview();
                 }
                 return;
             }
@@ -5157,11 +5280,14 @@ Event ID: ${result.discord_event_id}`);
                 renderBacklogList();
             } catch (e) {
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+                activeBacklogEntryGameId = '';
+                renderBacklogEntryPreview();
             }
         }
 
         function changeActiveBacklog(backlogId) {
             activeBacklogId = String(backlogId || '').trim();
+            activeBacklogEntryGameId = '';
             loadBacklog();
         }
 
@@ -5172,17 +5298,26 @@ Event ID: ${result.discord_event_id}`);
             updateBacklogSidebarMeta();
             if (!activeBacklog) {
                 list.innerHTML = '<div class="loading">No list selected yet. Create one from the sidebar to get started.</div>';
+                activeBacklogEntryGameId = '';
+                renderBacklogEntryPreview();
                 return;
             }
             if (!_backlogData.length) {
                 list.innerHTML = '<div class="loading">No list entries yet. Add games from your library using the panel on the right.</div>';
+                activeBacklogEntryGameId = '';
+                renderBacklogEntryPreview();
                 return;
             }
             if (!games.length) {
                 list.innerHTML = '<div class="loading">No list entries match your current filters.</div>';
+                activeBacklogEntryGameId = '';
+                renderBacklogEntryPreview();
                 return;
             }
 
+            if (!games.some(game => getBacklogEntryGameId(game) === activeBacklogEntryGameId)) {
+                activeBacklogEntryGameId = getBacklogEntryGameId(games[0]);
+            }
             const statusColors = {want_to_play:'#4f46e5', playing:'#10b981', completed:'#f59e0b', dropped:'#ef4444', favorite:'#f59e0b'};
             const BATCH_SIZE = 10;
             let allHtml = '';
@@ -5193,6 +5328,8 @@ Event ID: ${result.discord_event_id}`);
 
                 for (let i = startIdx; i < endIdx; i++) {
                     const g = games[i];
+                    const gameId = getBacklogEntryGameId(g);
+                    const isActive = gameId && gameId === activeBacklogEntryGameId;
                     const color = statusColors[g.backlog_status] || '#888';
                     const label = (g.backlog_status || '').replace(/_/g,' ');
                     const platformBadges = renderInlinePlatformBadges(g);
@@ -5200,12 +5337,13 @@ Event ID: ${result.discord_event_id}`);
                     const thumb = appId
                         ? renderGameListThumb(appId, g.name)
                         : '<div class="backlog-list-thumb-placeholder">🎮</div>';
-                    batchHtml += `<div class="list-item backlog-list-item">
+                    batchHtml += `<div class="list-item backlog-list-item ${isActive ? 'is-active' : ''}" onclick="selectBacklogEntryGame('${escAttr(gameId)}')">
                         <div class="list-item-media">
                             ${thumb}
                             <div style="min-width:0;">
                                 <div style="font-weight:600;">${escapeHtml(g.name || g.game_id || 'Unknown game')}</div>
                                 ${platformBadges ? `<div class="game-inline-meta" style="margin-top:6px;">${platformBadges}</div>` : ''}
+                                ${g.backlog_notes ? `<div class="schedule-field-hint" style="margin-top:6px;">📝 ${escapeHtml(String(g.backlog_notes).slice(0, 90))}</div>` : ''}
                             </div>
                         </div>
                         <span style="background:${color}; color:white; padding:3px 10px; border-radius:var(--radius,12px); font-size:0.82em; font-weight:600; white-space:nowrap;">${escapeHtml(label || 'unknown')}</span>
@@ -5216,6 +5354,8 @@ Event ID: ${result.discord_event_id}`);
                 list.innerHTML = allHtml;
                 if (endIdx < games.length) {
                     requestAnimationFrame(() => renderBatch(endIdx));
+                } else {
+                    renderBacklogEntryPreview();
                 }
             };
 

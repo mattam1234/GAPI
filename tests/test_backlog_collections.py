@@ -33,6 +33,7 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'backlog-library-search-results',
             'backlog-library-preview',
             'backlog-library-add-select',
+            'backlog-entry-preview',
         ):
             self.assertIn(token, content)
         self.assertNotIn('Playlists &amp; Backlogs', content)
@@ -60,6 +61,7 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             '.backlog-selector',
             '.backlog-side-panel',
             '.backlog-preview-grid',
+            '.backlog-entry-preview',
             '.backlog-playlist-card',
             '.backlog-share-list',
         ):
@@ -174,6 +176,29 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
             self.assertEqual(len(payload['games']), 1)
             self.assertEqual(payload['games'][0]['game_id'], 'steam:620')
             self.assertEqual(payload['games'][0]['backlog_status'], 'want_to_play')
+
+    def test_backlog_entry_notes_round_trip(self):
+        service = self._service()
+        with patch.object(gapi_gui, '_shared_backlog_service', service), \
+                patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
+            status_resp = self.client.post('/api/backlog/steam:620', json={
+                'status': 'playing',
+                'notes': 'Remember co-op challenge mode',
+            })
+            self.assertEqual(status_resp.status_code, 200)
+            status_payload = status_resp.get_json()
+            self.assertEqual(status_payload['notes'], 'Remember co-op challenge mode')
+
+            list_resp = self.client.get('/api/backlog')
+            self.assertEqual(list_resp.status_code, 200)
+            list_payload = list_resp.get_json()
+            self.assertEqual(list_payload['games'][0]['backlog_notes'], 'Remember co-op challenge mode')
+
+            entry_resp = self.client.get('/api/backlog/steam:620')
+            self.assertEqual(entry_resp.status_code, 200)
+            entry_payload = entry_resp.get_json()
+            self.assertEqual(entry_payload['status'], 'playing')
+            self.assertEqual(entry_payload['notes'], 'Remember co-op challenge mode')
 
     def test_library_demo_payload_includes_composite_game_id(self):
         with patch.object(gapi_gui, 'ensure_db_available', return_value=False):

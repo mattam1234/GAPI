@@ -5763,10 +5763,10 @@ def api_get_backlog_status(game_id: str):
     collection_id = request.args.get('collection_id')
     service = _get_shared_backlog_service()
     with picker_lock:
-        status = service.get_status(game_id, username=username, collection_id=collection_id)
-    if status is None:
-        return jsonify({'game_id': game_id, 'status': None})
-    return jsonify({'game_id': game_id, 'status': status})
+        entry = service.get_entry(game_id, username=username, collection_id=collection_id)
+    if entry is None:
+        return jsonify({'game_id': game_id, 'status': None, 'notes': ''})
+    return jsonify({'game_id': game_id, 'status': entry.get('status'), 'notes': entry.get('notes', '')})
 
 
 @app.route('/api/backlog/<game_id>', methods=['POST', 'PUT'])
@@ -5779,16 +5779,32 @@ def api_set_backlog_status(game_id: str):
     status = (data.get('status') or '').strip()
     if not status:
         return jsonify({'error': 'status is required'}), 400
+    notes = data.get('notes')
+    notes_value = str(notes) if notes is not None else None
     collection_id = str(data.get('collection_id') or '').strip() or request.args.get('collection_id')
     with picker_lock:
         if collection_id:
             backlog = service.get_collection(collection_id)
             if not backlog or not service._can_access_collection(backlog, username):
                 return jsonify({'error': 'Backlog not found'}), 404
-        ok = service.set_status(game_id, status, username=username, collection_id=collection_id)
+        ok = service.set_status(
+            game_id,
+            status,
+            username=username,
+            collection_id=collection_id,
+            notes=notes_value,
+        )
     if not ok:
         return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
-    return jsonify({'success': True, 'game_id': game_id, 'status': status, 'collection_id': collection_id})
+    with picker_lock:
+        saved_entry = service.get_entry(game_id, username=username, collection_id=collection_id) or {}
+    return jsonify({
+        'success': True,
+        'game_id': game_id,
+        'status': status,
+        'notes': saved_entry.get('notes', ''),
+        'collection_id': collection_id,
+    })
 
 
 @app.route('/api/backlog/<game_id>', methods=['DELETE'])
