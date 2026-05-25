@@ -854,44 +854,16 @@
                     <div class="schedule-sidebar-card">
                         <div class="schedule-agenda-eyebrow">Schedules</div>
                         <h3>Collections</h3>
-                        <label for="schedule-selector" class="schedule-field-hint">Schedule</label>
-                        <select id="schedule-selector" class="search-input" onchange="changeActiveSchedule(this.value)" style="margin-bottom:0; width:100%; padding:8px 12px;">
+                        <label for="schedule-selector-search" class="schedule-field-hint">Find a schedule</label>
+                        <input type="search" id="schedule-selector-search" class="search-input schedule-selector-search" placeholder="Search schedules…" oninput="filterScheduleCollections()" style="margin-bottom:0;">
+                        <label for="schedule-selector" class="schedule-field-hint">Available schedules</label>
+                        <select id="schedule-selector" class="backlog-selector schedule-selector-list" size="10" onchange="changeActiveSchedule(this.value)">
                             <option value="">Loading schedules…</option>
                         </select>
+                        <div id="schedule-sidebar-meta" class="schedule-agenda-copy">Choose a schedule to review your week.</div>
                         <div class="schedule-sidebar-actions">
                             <button type="button" class="chat-room-secondary-btn" onclick="openScheduleCollectionModal()">🗂️ New schedule</button>
                             <button type="button" id="schedule-rename-btn" class="chat-room-secondary-btn" onclick="openRenameScheduleModal()">✏️ Rename schedule</button>
-                        </div>
-                    </div>
-
-                    <div class="schedule-sidebar-card">
-                        <div class="schedule-agenda-eyebrow">Range</div>
-                        <h3>Calendar window</h3>
-                        <div class="schedule-filter-toolbar">
-                            <label class="schedule-filter-group">
-                                <span>From</span>
-                                <input type="datetime-local" id="schedule-filter-start" class="search-input" onchange="applyScheduleFilters()" style="margin-bottom:0;">
-                            </label>
-                            <label class="schedule-filter-group">
-                                <span>Until</span>
-                                <input type="datetime-local" id="schedule-filter-end" class="search-input" onchange="applyScheduleFilters()" style="margin-bottom:0;">
-                            </label>
-                        </div>
-                        <div class="schedule-sidebar-actions">
-                            <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(-1)">← Prev</button>
-                            <button type="button" class="chat-room-secondary-btn" onclick="goToCurrentScheduleAgendaWeek()">Today</button>
-                            <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(1)">Next →</button>
-                        </div>
-                        <div id="schedule-filter-summary" class="schedule-filter-summary"></div>
-                    </div>
-
-                    <div class="schedule-sidebar-card">
-                        <div class="schedule-agenda-eyebrow">Actions</div>
-                        <h3>Event tools</h3>
-                        <div class="schedule-sidebar-actions">
-                            <button type="button" class="chat-room-secondary-btn" onclick="openScheduleCreateModal()">➕ Create Event</button>
-                            <button type="button" class="chat-room-secondary-btn" onclick="openScheduleIcalSyncModal()">📆 iCal Sync</button>
-                            <button type="button" class="chat-room-secondary-btn" onclick="clearScheduleFilters()">Reset week</button>
                         </div>
                     </div>
                 </div>
@@ -904,17 +876,14 @@
                         </div>
                         <div id="schedule-agenda-range" class="schedule-agenda-range"></div>
                     </div>
-                    <div class="schedule-agenda-copy">Click a time slot to quick-create an event, drag across slots to pick a longer block, or click an agenda card to edit it in a modal.</div>
+                    <div class="schedule-agenda-copy">Select a time block to prefill the main event form, drag agenda cards to reschedule them, or click an event to edit it.</div>
                     <div id="schedule-agenda-quick-create" class="schedule-agenda-quick-create" hidden>
                         <div>
                             <strong id="schedule-agenda-selection-label">New agenda event</strong>
                             <div id="schedule-agenda-selection-meta" class="schedule-agenda-selection-meta"></div>
                         </div>
-                        <input type="text" id="agenda-quick-title" class="search-input" placeholder="Quick event title" style="margin-bottom:0;">
-                        <input type="text" id="agenda-quick-attendees" class="search-input" placeholder="Invite friends (comma separated)" style="margin-bottom:0;">
                         <div class="schedule-agenda-quick-create-actions">
-                            <button type="button" onclick="createAgendaEvent()" style="padding:var(--space-10) var(--space-22); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">➕ Create event</button>
-                            <button type="button" onclick="applyAgendaSelectionToForm()" style="padding:var(--space-10) var(--space-18); background:var(--card-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">Use full form</button>
+                            <button type="button" id="schedule-agenda-create-btn" onclick="applyAgendaSelectionToForm()" style="padding:var(--space-10) var(--space-22); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-family:inherit;">➕ Create event</button>
                             <button type="button" onclick="clearAgendaSelection()" style="padding:var(--space-10) var(--space-18); background:transparent; color:var(--text-secondary); border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); cursor:pointer;">Cancel</button>
                         </div>
                     </div>
@@ -923,11 +892,45 @@
                     </div>
                 </div>
 
-                <div class="schedule-upcoming-panel">
-                    <div class="schedule-agenda-eyebrow">Events</div>
-                    <h3>Upcoming Events</h3>
-                    <div id="schedule-list" class="list-container schedule-upcoming-list" style="margin-top:10px;">
-                        <div class="loading">Loading schedule…</div>
+                <div class="schedule-right-rail">
+                    <div class="schedule-sidebar-card">
+                        <div class="schedule-right-card-section">
+                            <div class="schedule-agenda-eyebrow">Range</div>
+                            <h3>Calendar window</h3>
+                            <div class="schedule-filter-toolbar">
+                                <label class="schedule-filter-group">
+                                    <span>From</span>
+                                    <input type="datetime-local" id="schedule-filter-start" class="search-input" onchange="applyScheduleFilters()" style="margin-bottom:0;">
+                                </label>
+                                <label class="schedule-filter-group">
+                                    <span>Until</span>
+                                    <input type="datetime-local" id="schedule-filter-end" class="search-input" onchange="applyScheduleFilters()" style="margin-bottom:0;">
+                                </label>
+                            </div>
+                            <div class="schedule-sidebar-actions">
+                                <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(-1)">← Prev</button>
+                                <button type="button" class="chat-room-secondary-btn" onclick="goToCurrentScheduleAgendaWeek()">Today</button>
+                                <button type="button" class="chat-room-secondary-btn" onclick="changeScheduleAgendaWeek(1)">Next →</button>
+                            </div>
+                            <div id="schedule-filter-summary" class="schedule-filter-summary"></div>
+                        </div>
+                        <div class="schedule-right-card-section">
+                            <div class="schedule-agenda-eyebrow">Actions</div>
+                            <h3>Event tools</h3>
+                            <div class="schedule-sidebar-actions">
+                                <button type="button" class="chat-room-secondary-btn" onclick="openScheduleCreateModal()">➕ Create Event</button>
+                                <button type="button" class="chat-room-secondary-btn" onclick="openScheduleIcalSyncModal()">📆 Calendar Sync</button>
+                                <button type="button" class="chat-room-secondary-btn" onclick="clearScheduleFilters()">Reset filters</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="schedule-upcoming-panel">
+                        <div class="schedule-agenda-eyebrow">Events</div>
+                        <h3>Upcoming Events</h3>
+                        <div id="schedule-list" class="list-container schedule-upcoming-list" style="margin-top:10px;">
+                            <div class="loading">Loading schedule…</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1086,59 +1089,89 @@
         <!-- Backlog Tab -->
         <div id="backlog-tab" class="tab-content">
             <h2>📚 Playlists &amp; Backlogs</h2>
-            <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); padding:16px; margin-bottom:20px;">
-                <div class="schedule-agenda-eyebrow">Playlists</div>
-                <div style="display:flex; gap:var(--space-10); margin-bottom:16px; flex-wrap:wrap; align-items:center;">
-                    <input type="text" id="new-playlist-name" class="search-input" placeholder="New playlist name…" style="max-width:260px; margin-bottom:0;">
-                    <button onclick="createPlaylist()" style="padding:var(--space-10) var(--space-22); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; border:none; border-radius:50px; cursor:pointer; font-weight:600;font-family:inherit;">➕ Create Playlist</button>
-                </div>
-                <div id="playlists-container">
-                    <div class="loading">Loading playlists…</div>
-                </div>
-            </div>
             <div class="backlog-shell">
                 <div class="backlog-sidebar">
                     <div class="backlog-sidebar-card">
-                        <div class="schedule-agenda-eyebrow">Backlogs</div>
+                        <div class="schedule-agenda-eyebrow">Lists</div>
                         <h3>Collections</h3>
-                        <select id="backlog-selector" class="backlog-selector" size="8" onchange="changeActiveBacklog(this.value)">
+                        <label for="backlog-selector-search" class="schedule-field-hint">Find a list</label>
+                        <input type="search" id="backlog-selector-search" class="search-input backlog-selector-search" placeholder="Search lists…" oninput="filterBacklogCollections()" style="margin-bottom:0;">
+                        <label for="backlog-selector" class="schedule-field-hint">Available lists</label>
+                        <select id="backlog-selector" class="backlog-selector" size="10" onchange="changeActiveBacklog(this.value)">
                             <option value="">Loading backlogs…</option>
                         </select>
                         <div id="backlog-sidebar-meta" class="schedule-agenda-copy">Choose a backlog to view, share, or leave.</div>
+                    </div>
+                </div>
+                <div class="backlog-main-panel">
+                    <div class="backlog-panel-header">
+                        <div>
+                            <div class="schedule-agenda-eyebrow">Preview</div>
+                            <h3>List preview</h3>
+                        </div>
+                        <div id="backlog-active-copy" class="schedule-filter-summary"></div>
+                    </div>
+                    <div class="backlog-preview-grid">
+                        <div class="backlog-preview-card">
+                            <div class="schedule-agenda-eyebrow">Playlists</div>
+                            <h3>Saved picks</h3>
+                            <div id="playlists-container" class="backlog-playlist-list">
+                                <div class="loading">Loading playlists…</div>
+                            </div>
+                        </div>
+                        <div class="backlog-preview-card backlog-preview-card-main">
+                            <div class="schedule-agenda-eyebrow">Entries</div>
+                            <h3>What’s in this list</h3>
+                            <div id="backlog-list" class="list-container backlog-list-panel">
+                                <div class="loading">Loading backlog…</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="backlog-side-panel">
+                    <div class="backlog-sidebar-card backlog-filter-panel">
+                        <div class="schedule-agenda-eyebrow">Filters</div>
+                        <h3>Refine entries</h3>
+                        <input type="text" id="backlog-search" class="search-input" placeholder="🔍 Filter backlog..." oninput="renderBacklogList()" style="margin-bottom:0;">
+                        <div class="backlog-control-grid">
+                            <label class="schedule-filter-group">
+                                <span>Platform</span>
+                                <select id="backlog-platform-filter" onchange="renderBacklogList()" class="search-input" style="margin-bottom:0;">
+                                    <option value="">All Platforms</option>
+                                    <option value="steam">Steam</option>
+                                    <option value="epic">Epic Games</option>
+                                    <option value="gog">GOG</option>
+                                    <option value="xbox">Xbox</option>
+                                    <option value="playstation">PlayStation</option>
+                                    <option value="nintendo">Nintendo</option>
+                                </select>
+                            </label>
+                            <label class="schedule-filter-group">
+                                <span>Status</span>
+                                <select id="backlog-filter" onchange="loadBacklog()" class="search-input" style="margin-bottom:0;">
+                                    <option value="">All</option>
+                                    <option value="want_to_play">Want to Play</option>
+                                    <option value="playing">Playing</option>
+                                    <option value="completed">Completed</option>
+                                    <option value="dropped">Dropped</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="backlog-sidebar-card">
+                        <div class="schedule-agenda-eyebrow">Actions</div>
+                        <h3>Manage lists</h3>
+                        <label for="new-playlist-name" class="schedule-field-hint">New playlist</label>
+                        <input type="text" id="new-playlist-name" class="search-input" placeholder="New playlist name…" style="margin-bottom:0;">
                         <div class="schedule-sidebar-actions">
-                            <button type="button" class="chat-room-primary-btn" onclick="openBacklogCollectionModal()">➕ Create</button>
+                            <button onclick="createPlaylist()" type="button" class="chat-room-primary-btn">➕ Create Playlist</button>
+                        </div>
+                        <div class="schedule-sidebar-actions">
+                            <button type="button" class="chat-room-primary-btn" onclick="openBacklogCollectionModal()">➕ Create List</button>
                             <button type="button" class="chat-room-secondary-btn" id="backlog-rename-btn" onclick="openBacklogCollectionModal(true)" disabled>✏️ Rename</button>
                             <button type="button" class="chat-room-secondary-btn" id="backlog-delete-btn" onclick="deleteActiveBacklog()" disabled>🗑️ Delete</button>
                             <button type="button" class="chat-room-secondary-btn" id="backlog-leave-btn" onclick="leaveActiveBacklog()" disabled>↩️ Leave</button>
                         </div>
-                    </div>
-                </div>
-                <div class="backlog-main-panel">
-                    <div class="backlog-toolbar">
-                        <input type="text" id="backlog-search" class="search-input" placeholder="🔍 Filter backlog..." oninput="renderBacklogList()" style="margin-bottom:0; flex:1; min-width:180px;">
-                        <select id="backlog-platform-filter" onchange="renderBacklogList()"
-                                style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md); min-width:160px;">
-                            <option value="">All Platforms</option>
-                            <option value="steam">Steam</option>
-                            <option value="epic">Epic Games</option>
-                            <option value="gog">GOG</option>
-                            <option value="xbox">Xbox</option>
-                            <option value="playstation">PlayStation</option>
-                            <option value="nintendo">Nintendo</option>
-                        </select>
-                        <label style="font-weight:600;">Filter by status:</label>
-                        <select id="backlog-filter" onchange="loadBacklog()"
-                                style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md);">
-                            <option value="">All</option>
-                            <option value="want_to_play">Want to Play</option>
-                            <option value="playing">Playing</option>
-                            <option value="completed">Completed</option>
-                            <option value="dropped">Dropped</option>
-                        </select>
-                    </div>
-                    <div id="backlog-active-copy" class="schedule-filter-summary"></div>
-                    <div id="backlog-list" class="list-container backlog-list-panel">
-                        <div class="loading">Loading backlog…</div>
                     </div>
                 </div>
             </div>

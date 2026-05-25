@@ -27,6 +27,8 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'Playlists &amp; Backlogs',
             'playlists-container',
             'backlog-selector',
+            'backlog-selector-search',
+            'backlog-side-panel',
             'backlog-collection-modal',
             'backlog-modal-collection',
         ):
@@ -39,6 +41,7 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
         for token in (
             "if (tabName === 'playlists') tabName = 'backlog';",
             'ensureBacklogCollectionsLoaded',
+            'filterBacklogCollections',
             'openBacklogCollectionModal',
             'leaveActiveBacklog',
             'loadPlaylists();',
@@ -51,6 +54,9 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
         for token in (
             '.backlog-shell',
             '.backlog-selector',
+            '.backlog-side-panel',
+            '.backlog-preview-grid',
+            '.backlog-playlist-card',
             '.backlog-share-list',
         ):
             self.assertIn(token, content)
