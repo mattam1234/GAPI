@@ -78,14 +78,32 @@ export function useGapiApi() {
   /** POST /api/pick — pick a random game */
   const pickGame = useCallback(
     async (mode: PickMode = 'random'): Promise<PickResult> => {
-      const data = await _fetch<{game: Game; reason?: string}>('/api/pick', {
+      const data = await _fetch<any>('/api/pick', {
         method: 'POST',
         body: JSON.stringify({mode}),
       });
       if (!data) {
         return {game: null, error: error ?? 'Unknown error'};
       }
-      return {game: data.game, reason: data.reason};
+      const rawGame = data.game ?? data;
+      if (!rawGame || !rawGame.name) {
+        return {game: null, error: 'No game returned'};
+      }
+      const normalized: Game = {
+        name: rawGame.name,
+        appid: rawGame.appid ?? rawGame.app_id ?? rawGame.game_id,
+        game_id:
+          rawGame.game_id ??
+          `${(rawGame.platform ?? 'steam').toLowerCase()}:${rawGame.appid ?? rawGame.app_id ?? ''}`,
+        platform: rawGame.platform ?? 'steam',
+        playtime_forever:
+          rawGame.playtime_forever ??
+          Math.round(Number(rawGame.playtime_hours ?? 0) * 60),
+        img_icon_url: rawGame.img_icon_url,
+        tags: rawGame.tags,
+        genres: rawGame.genres,
+      };
+      return {game: normalized, reason: data.reason};
     },
     [_fetch, error],
   );
