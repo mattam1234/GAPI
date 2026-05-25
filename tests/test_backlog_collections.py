@@ -32,7 +32,7 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
             'backlog-library-search',
             'backlog-library-search-results',
             'backlog-library-preview',
-            'backlog-library-add-select',
+            'backlog-library-add-list',
             'backlog-entry-preview',
             'game-details-backlog-notes',
         ):
@@ -65,6 +65,8 @@ class TestBacklogCollectionsMarkup(unittest.TestCase):
         for token in (
             '.backlog-shell',
             '.backlog-selector',
+            '.backlog-list-widget',
+            '.backlog-list-widget-item',
             '.backlog-side-panel',
             '.backlog-preview-grid',
             '.backlog-entry-preview',
