@@ -4589,10 +4589,6 @@ Event ID: ${result.discord_event_id}`);
 
         async function openScheduleCommonGamePicker() {
             const attendees = getScheduleEventAttendees();
-            if (!attendees.length) {
-                showMessage('Invite at least one person before opening the common-game picker.', 'warning');
-                return;
-            }
             const modal = document.getElementById('schedule-game-picker-modal');
             if (modal) modal.style.display = 'flex';
             setScheduleBodyLock();
@@ -4600,8 +4596,11 @@ Event ID: ${result.discord_event_id}`);
             const search = document.getElementById('schedule-common-games-search');
             const list = document.getElementById('schedule-common-games-list');
             if (search) search.value = '';
-            if (status) status.textContent = 'Loading common games from invited libraries…';
-            if (list) list.innerHTML = '<div class="loading">Loading common games…</div>';
+            const loadingMsg = attendees.length
+                ? 'Loading games shared by you and your invitees…'
+                : 'Loading your library…';
+            if (status) status.textContent = loadingMsg;
+            if (list) list.innerHTML = '<div class="loading">Loading games…</div>';
             try {
                 const resp = await safeFetch('/api/schedule/common-games', {
                     method: 'POST',
@@ -4611,16 +4610,19 @@ Event ID: ${result.discord_event_id}`);
                 const data = await resp.json();
                 if (!resp.ok) {
                     scheduleCommonGamesCache = [];
-                    if (status) status.textContent = data.error || 'Could not load common games.';
-                    if (list) list.innerHTML = '<div class="error">No common games found.</div>';
+                    if (status) status.textContent = data.error || 'Could not load games.';
+                    if (list) list.innerHTML = '<div class="error">No games found.</div>';
                     return;
                 }
                 scheduleCommonGamesCache = Array.isArray(data.games) ? data.games : [];
-                if (status) status.textContent = `${scheduleCommonGamesCache.length} common game${scheduleCommonGamesCache.length === 1 ? '' : 's'} available for ${attendees.join(', ')}`;
+                const countLabel = `${scheduleCommonGamesCache.length} game${scheduleCommonGamesCache.length === 1 ? '' : 's'}`;
+                if (status) status.textContent = attendees.length
+                    ? `${countLabel} shared by you and ${attendees.join(', ')}`
+                    : `${countLabel} in your library`;
                 filterScheduleCommonGames();
             } catch (error) {
                 scheduleCommonGamesCache = [];
-                if (status) status.textContent = 'Could not load common games right now.';
+                if (status) status.textContent = 'Could not load games right now.';
                 if (list) list.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
             }
         }
@@ -4661,10 +4663,6 @@ Event ID: ${result.discord_event_id}`);
 
         async function pickRandomScheduleCommonGame() {
             const attendees = getScheduleEventAttendees();
-            if (!attendees.length) {
-                showMessage('Invite at least one person before picking a random shared game.', 'warning');
-                return;
-            }
             try {
                 const resp = await safeFetch('/api/schedule/common-games/random', {
                     method: 'POST',
@@ -4673,7 +4671,7 @@ Event ID: ${result.discord_event_id}`);
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showMessage(data.error || 'Could not pick a random shared game.', 'error');
+                    showMessage(data.error || 'Could not pick a random game.', 'error');
                     return;
                 }
                 const game = data.game || {};

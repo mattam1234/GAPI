@@ -1648,7 +1648,7 @@ a.auth-required,
   inset: 0;
   background: rgba(15, 23, 42, 0.74);
   z-index: 2200;
-  padding: 20px;
+  padding: 48px 20px 20px;
   align-items: center;
   justify-content: center;
   overflow-y: auto;
