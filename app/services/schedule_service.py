@@ -204,6 +204,28 @@ class ScheduleService:
         self._repo.save()
         return schedule
 
+    def update_schedule(self, schedule_id: str, username: str,
+                        name: str, members: Optional[List[str]] = None,
+                        is_shared: Optional[bool] = None) -> Optional[Dict]:
+        """Rename or re-share an existing schedule owned by *username*."""
+        safe_schedule_id = str(schedule_id or '').strip()
+        safe_username = str(username or '').strip()
+        safe_name = str(name or '').strip()
+        if not safe_schedule_id or not safe_username or not safe_name:
+            return None
+        schedule = self._get_schedules().get(safe_schedule_id)
+        if not schedule:
+            return None
+        if str(schedule.get('owner') or '').strip().lower() != safe_username.lower():
+            return None
+        clean_members = _clean_schedule_members([safe_username] + (members or []))
+        schedule['name'] = safe_name
+        schedule['members'] = clean_members
+        schedule['is_shared'] = bool(is_shared) if is_shared is not None else len(clean_members) > 1
+        schedule['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._repo.save()
+        return schedule
+
     def add_event(self, title: str, date: str, time_str: str,
                   duration_minutes: Optional[int] = None,
                   attendees: Optional[List[str]] = None,

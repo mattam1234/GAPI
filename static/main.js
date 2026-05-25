@@ -527,6 +527,7 @@
         }
         
         function switchTab(tabName, event) {
+            if (tabName === 'playlists') tabName = 'backlog';
             // Sync sidebar active state
             document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
             const navItem = document.getElementById('nav-' + tabName);
@@ -537,7 +538,7 @@
                 dashboard: 'Dashboard',
                 picker: 'Game Picker', library: 'Library', favorites: 'Favorites',
                 stats: 'Statistics', users: 'Users', multiuser: 'Multi-User',
-                schedule: 'Schedule', playlists: 'Playlists', backlog: 'Backlog',
+                schedule: 'Schedule', playlists: 'Playlists', backlog: 'Lists',
                 ignored: 'No-Play List', achievements: 'Achievements', friends: 'Friends',
                 recommendations: 'For You', chat: 'Chat',
                 sessions: 'Sessions', notifications: 'Notifications',
@@ -592,8 +593,10 @@
                 }
             }
             if (tabName === 'schedule') loadSchedule();
-            if (tabName === 'playlists') loadPlaylists();
-            if (tabName === 'backlog') loadBacklog();
+            if (tabName === 'backlog') {
+                loadPlaylists();
+                loadBacklog();
+            }
             if (tabName === 'ignored') loadIgnoredGames();
             if (tabName === 'achievements') loadAchievements();
             if (tabName === 'friends') loadFriends();
@@ -627,7 +630,7 @@
                 safeFetch('/api/library').then(r => r.json()),
                 safeFetch('/api/live-session/active').then(r => r.json()),
                 safeFetch('/api/schedule').then(r => r.json()),
-                safeFetch('/api/recommendations?count=4').then(r => r.json()),
+                safeFetch(`/api/recommendations?count=4&refresh_seed=${Date.now()}`).then(r => r.json()),
                 safeFetch('/api/notifications?unread_only=false').then(r => r.json()),
             ]);
 
@@ -1218,20 +1221,31 @@
             modal.style.display = 'flex';
         }
 
-        async function setBacklogStatus(gameId, status) {
+        async function updateBacklogEntryStatus(gameId, status, collectionId = activeBacklogId) {
             try {
+                const safeCollectionId = String(collectionId || '').trim();
                 if (!status) {
-                    await safeFetch(`/api/backlog/${gameId}`, {method:'DELETE'});
-                    if (currentGame) currentGame.backlog_status = null;
+                    const query = safeCollectionId ? `?collection_id=${encodeURIComponent(safeCollectionId)}` : '';
+                    await safeFetch(`/api/backlog/${gameId}${query}`, {method:'DELETE'});
+                    return true;
                 } else {
                     await safeFetch(`/api/backlog/${gameId}`, {
                         method: 'POST',
                         headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({status})
+                        body: JSON.stringify({status, collection_id: safeCollectionId || null})
                     });
-                    if (currentGame) currentGame.backlog_status = status;
+                    return true;
                 }
-            } catch (e) { alert('Failed to update backlog: ' + e.message); }
+            } catch (e) {
+                alert('Failed to update backlog: ' + e.message);
+                return false;
+            }
+        }
+
+        async function setBacklogStatus(gameId, status) {
+            const updated = await updateBacklogEntryStatus(gameId, status, activeBacklogId);
+            if (!updated) return;
+            if (currentGame) currentGame.backlog_status = status || null;
         }
 
         function shareGame() {
@@ -1516,6 +1530,9 @@
 
         let _favoritesData = [];
         let _backlogData = [];
+        let backlogCollectionsCache = [];
+        let activeBacklogId = '';
+        let backlogShareCandidatesCache = [];
         let _recommendationsData = [];
 
         function normalisePlatformKey(value) {
@@ -2734,9 +2751,11 @@
             const gameDropdown = document.getElementById('game-search-dropdown');
             const attendeeDropdown = document.getElementById('attendee-search-dropdown');
             const discordDropdown = document.getElementById('discord-guild-search-dropdown');
+            const scheduleMembersDropdown = document.getElementById('schedule-collection-members-dropdown');
             const gameField = document.getElementById('sch-game');
             const attendeeField = document.getElementById('sch-attendees');
             const discordField = document.getElementById('sch-discord-guild-search');
+            const scheduleMembersField = document.getElementById('schedule-collection-members');
             
             if (gameDropdown && gameField && !gameField.contains(event.target) && !gameDropdown.contains(event.target)) {
                 gameDropdown.style.display = 'none';
@@ -2746,6 +2765,11 @@
             }
             if (discordDropdown && discordField && !discordField.contains(event.target) && !discordDropdown.contains(event.target)) {
                 discordDropdown.style.display = 'none';
+            }
+            if (scheduleMembersDropdown && scheduleMembersField
+                && !scheduleMembersField.contains(event.target)
+                && !scheduleMembersDropdown.contains(event.target)) {
+                scheduleMembersDropdown.style.display = 'none';
             }
         });
 
@@ -2771,6 +2795,7 @@
         let activeScheduleId = '';
         let scheduleCommonGamesCache = [];
         let scheduleIcalSyncInfo = null;
+        let scheduleMemberSearchTimeout;
 
         function normalizeScheduleDurationMinutes(value, fallback = DEFAULT_SCHEDULE_DURATION_MINUTES) {
             const parsed = parseInt(value, 10);
@@ -2805,6 +2830,11 @@
 
         function formatScheduleDateKey(date) {
             return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        }
+
+        function formatScheduleDateTimeLocalValue(date) {
+            if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+            return `${formatScheduleDateKey(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
         }
 
         function scheduleSlotIndexToTime(slotIndex) {
@@ -2846,6 +2876,25 @@
             const start = days[0].toLocaleDateString([], { month: 'short', day: 'numeric' });
             const end = days[days.length - 1].toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
             return `${start} – ${end}`;
+        }
+
+        function getScheduleAgendaWeekBounds(weekStart = scheduleAgendaWeekStart) {
+            ensureScheduleAgendaWeek(scheduleFilteredEventsCache.length ? scheduleFilteredEventsCache : scheduleEventsCache);
+            const safeWeekStart = weekStart || scheduleAgendaWeekStart || scheduleStartOfWeek(new Date());
+            const start = new Date(safeWeekStart);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(safeWeekStart);
+            end.setDate(end.getDate() + 6);
+            end.setHours(23, 30, 0, 0);
+            return { start, end };
+        }
+
+        function setScheduleFiltersToAgendaWeek() {
+            const startField = document.getElementById('schedule-filter-start');
+            const endField = document.getElementById('schedule-filter-end');
+            const { start, end } = getScheduleAgendaWeekBounds();
+            if (startField) startField.value = formatScheduleDateTimeLocalValue(start);
+            if (endField) endField.value = formatScheduleDateTimeLocalValue(end);
         }
 
         function getScheduleEventDurationMinutes(event) {
@@ -3021,9 +3070,96 @@
         }
 
         function setScheduleBodyLock() {
-            const anyOpen = ['schedule-modal', 'schedule-game-picker-modal', 'schedule-ical-modal']
+            const anyOpen = ['schedule-modal', 'schedule-game-picker-modal', 'schedule-ical-modal', 'schedule-collection-modal']
                 .some(id => document.getElementById(id)?.style.display === 'flex');
             document.body.style.overflow = anyOpen ? 'hidden' : '';
+        }
+
+        function getActiveSchedule() {
+            return scheduleCollectionsCache.find(schedule => schedule.id === activeScheduleId) || null;
+        }
+
+        function getScheduleCollectionMembers() {
+            return (document.getElementById('schedule-collection-member-tags')?.dataset.members || '')
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+        }
+
+        function updateScheduleCollectionMemberTags() {
+            const tags = document.getElementById('schedule-collection-member-tags');
+            if (!tags) return;
+            const members = getScheduleCollectionMembers();
+            tags.innerHTML = members.map(member => `
+                <span style="padding:4px 10px; background:#4f46e5; color:white; border-radius:var(--radius-lg,16px); font-size:0.85em; display:inline-flex; align-items:center; gap:6px;">
+                    ${escapeHtml(member)}
+                    <button type="button" onclick="removeScheduleCollectionMember('${escAttr(member)}')" style="background:none; border:none; color:white; cursor:pointer; padding:0; font-size:1em; line-height:1;">×</button>
+                </span>
+            `).join('');
+        }
+
+        function setScheduleCollectionMembers(members) {
+            const tags = document.getElementById('schedule-collection-member-tags');
+            if (!tags) return;
+            const unique = [];
+            const seen = new Set();
+            (members || []).forEach(member => {
+                const safeMember = String(member || '').trim();
+                if (!safeMember) return;
+                const key = safeMember.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                unique.push(safeMember);
+            });
+            tags.dataset.members = unique.join(',');
+            updateScheduleCollectionMemberTags();
+        }
+
+        function clearScheduleCollectionForm() {
+            const editField = document.getElementById('schedule-collection-edit-id');
+            const nameField = document.getElementById('schedule-collection-name');
+            const searchField = document.getElementById('schedule-collection-members');
+            const dropdown = document.getElementById('schedule-collection-members-dropdown');
+            const title = document.getElementById('schedule-collection-title');
+            if (editField) editField.value = '';
+            if (nameField) nameField.value = '';
+            if (searchField) searchField.value = '';
+            if (dropdown) dropdown.style.display = 'none';
+            if (title) title.textContent = '🗂️ New Schedule';
+            setScheduleCollectionMembers([]);
+        }
+
+        function openScheduleCollectionModal() {
+            clearScheduleCollectionForm();
+            const modal = document.getElementById('schedule-collection-modal');
+            if (modal) modal.style.display = 'flex';
+            setScheduleBodyLock();
+            setTimeout(() => document.getElementById('schedule-collection-name')?.focus(), 0);
+        }
+
+        function openRenameScheduleModal() {
+            const schedule = getActiveSchedule();
+            if (!schedule) {
+                showMessage('Choose a schedule first.', 'warning');
+                return;
+            }
+            clearScheduleCollectionForm();
+            document.getElementById('schedule-collection-edit-id').value = schedule.id || '';
+            document.getElementById('schedule-collection-name').value = schedule.name || '';
+            document.getElementById('schedule-collection-title').textContent = '✏️ Rename Schedule';
+            const owner = String(schedule.owner || '').trim().toLowerCase();
+            setScheduleCollectionMembers((schedule.members || []).filter(member => String(member || '').trim().toLowerCase() !== owner));
+            const modal = document.getElementById('schedule-collection-modal');
+            if (modal) modal.style.display = 'flex';
+            setScheduleBodyLock();
+            setTimeout(() => document.getElementById('schedule-collection-name')?.focus(), 0);
+        }
+
+        function closeScheduleCollectionModal(resetForm = true) {
+            const modal = document.getElementById('schedule-collection-modal');
+            if (modal) modal.style.display = 'none';
+            if (resetForm) clearScheduleCollectionForm();
+            setScheduleBodyLock();
         }
 
         function openScheduleCreateModal() {
@@ -3099,21 +3235,20 @@
         }
 
         function clearScheduleFilters() {
-            const startField = document.getElementById('schedule-filter-start');
-            const endField = document.getElementById('schedule-filter-end');
-            if (startField) startField.value = '';
-            if (endField) endField.value = '';
-            scheduleAgendaWeekStart = null;
+            scheduleAgendaWeekStart = scheduleStartOfWeek(new Date());
+            setScheduleFiltersToAgendaWeek();
             applyScheduleFilters();
         }
 
         function renderScheduleSelector() {
             const selector = document.getElementById('schedule-selector');
+            const renameButton = document.getElementById('schedule-rename-btn');
             if (!selector) return;
             if (!scheduleCollectionsCache.length) {
                 selector.innerHTML = '<option value="">No schedules yet</option>';
                 selector.value = '';
                 activeScheduleId = '';
+                if (renameButton) renameButton.disabled = true;
                 return;
             }
             selector.innerHTML = scheduleCollectionsCache.map(schedule => {
@@ -3127,43 +3262,13 @@
                 activeScheduleId = scheduleCollectionsCache[0].id || '';
             }
             selector.value = activeScheduleId || '';
+            if (renameButton) renameButton.disabled = !activeScheduleId;
         }
 
         function changeActiveSchedule(scheduleId) {
             activeScheduleId = String(scheduleId || '').trim();
             clearAgendaSelection(false);
             loadSchedule();
-        }
-
-        async function openCreateSchedulePrompt() {
-            const name = prompt('Schedule name');
-            if (!name || !name.trim()) return;
-            const membersInput = prompt('Invite friends by username (comma separated). Leave blank for personal schedule.') || '';
-            const members = membersInput
-                .split(',')
-                .map(value => value.trim())
-                .filter(Boolean);
-            try {
-                const resp = await safeFetch('/api/schedules', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: name.trim(),
-                        members,
-                        is_shared: members.length > 0,
-                    }),
-                });
-                const data = await resp.json();
-                if (!resp.ok) {
-                    showMessage(data.error || 'Could not create schedule.', 'error');
-                    return;
-                }
-                activeScheduleId = data.id || '';
-                await loadSchedule();
-                showMessage(`Created schedule: ${data.name || 'New schedule'}`, 'success');
-            } catch (error) {
-                showMessage(`Error: ${error.message}`, 'error');
-            }
         }
 
         async function loadSchedule() {
@@ -3184,10 +3289,10 @@
                 activeScheduleId = String(data.active_schedule_id || activeScheduleId || '').trim();
                 renderScheduleSelector();
                 scheduleEventsCache = Array.isArray(data.events) ? data.events : [];
-                if (!hasScheduleFilters()) {
-                    scheduleAgendaWeekStart = null;
+                if (!scheduleAgendaWeekStart) {
                     ensureScheduleAgendaWeek(scheduleEventsCache);
                 }
+                setScheduleFiltersToAgendaWeek();
                 applyScheduleFilters();
             } catch (e) {
                 if (listDiv) listDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
@@ -3509,14 +3614,16 @@
             const nextWeek = new Date(scheduleAgendaWeekStart);
             nextWeek.setDate(nextWeek.getDate() + offset * 7);
             scheduleAgendaWeekStart = scheduleStartOfWeek(nextWeek);
+            setScheduleFiltersToAgendaWeek();
             clearAgendaSelection(false);
-            renderScheduleAgenda(scheduleFilteredEventsCache);
+            applyScheduleFilters();
         }
 
         function goToCurrentScheduleAgendaWeek() {
             scheduleAgendaWeekStart = scheduleStartOfWeek(new Date());
+            setScheduleFiltersToAgendaWeek();
             clearAgendaSelection(false);
-            renderScheduleAgenda(scheduleFilteredEventsCache);
+            applyScheduleFilters();
         }
 
         function applyAgendaSelectionToForm() {
@@ -3667,6 +3774,40 @@
             } catch (e) { alert('Error: ' + e.message); }
         }
 
+        async function submitScheduleCollectionForm() {
+            const editId = document.getElementById('schedule-collection-edit-id').value.trim();
+            const name = document.getElementById('schedule-collection-name').value.trim();
+            if (!name) {
+                showMessage('Schedule name is required.', 'warning');
+                document.getElementById('schedule-collection-name')?.focus();
+                return;
+            }
+            const members = getScheduleCollectionMembers();
+            const body = {
+                name,
+                members,
+                is_shared: members.length > 0,
+            };
+            try {
+                const resp = await safeFetch(editId ? `/api/schedules/${encodeURIComponent(editId)}` : '/api/schedules', {
+                    method: editId ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Could not save schedule.', 'error');
+                    return;
+                }
+                activeScheduleId = data.id || activeScheduleId;
+                closeScheduleCollectionModal(true);
+                await loadSchedule();
+                showMessage(editId ? 'Schedule updated.' : `Created schedule: ${data.name || 'New schedule'}`, 'success');
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            }
+        }
+
         let gameSearchTimeout;
         async function searchGames(query) {
             clearTimeout(gameSearchTimeout);
@@ -3723,6 +3864,75 @@
             const fallbackImageUrl = imageUrl || (appid ? `https://cdn.akamai.steamstatic.com/steam/apps/${appid}/header.jpg` : '');
             document.getElementById('sch-game-image-url').value = fallbackImageUrl;
             document.getElementById('game-search-dropdown').style.display = 'none';
+        }
+
+        async function searchScheduleMembers(query) {
+            clearTimeout(scheduleMemberSearchTimeout);
+            if (!query || query.length < 1) {
+                document.getElementById('schedule-collection-members-dropdown').style.display = 'none';
+                return;
+            }
+
+            scheduleMemberSearchTimeout = setTimeout(async () => {
+                try {
+                    const resp = await fetch('/api/schedule/search-attendees', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({query: query, limit: 10})
+                    });
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    const dropdown = document.getElementById('schedule-collection-members-dropdown');
+                    if (!dropdown) return;
+                    if (!data.results || data.results.length === 0) {
+                        dropdown.innerHTML = '<div style="padding:10px; color:var(--text-secondary);">No people found</div>';
+                        dropdown.style.display = 'block';
+                        return;
+                    }
+                    const selectedMembers = new Set(getScheduleCollectionMembers().map(member => member.toLowerCase()));
+                    dropdown.innerHTML = data.results.map(user => {
+                        const safeName = String(user.name || '').trim();
+                        const isSelected = selectedMembers.has(safeName.toLowerCase());
+                        return `
+                            <div class="attendee-search-result" data-name="${escAttr(safeName)}"
+                                 style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); width:100%; opacity:${isSelected ? '0.6' : '1'};">
+                                <strong>${escapeHtml(safeName)}</strong>
+                                ${isSelected ? '<span style="margin-left:8px; color:var(--text-secondary); font-size:0.82em;">Added</span>' : ''}
+                            </div>
+                        `;
+                    }).join('');
+                    dropdown.querySelectorAll('.attendee-search-result').forEach(el => {
+                        el.onclick = () => addScheduleCollectionMember(el.dataset.name);
+                    });
+                    dropdown.style.display = 'block';
+                } catch (error) {
+                    console.error('Schedule member search error:', error);
+                }
+            }, 300);
+        }
+
+        function showScheduleMemberSearch() {
+            const query = document.getElementById('schedule-collection-members')?.value.trim() || '';
+            if (query.length >= 1) {
+                searchScheduleMembers(query);
+            }
+        }
+
+        function addScheduleCollectionMember(name) {
+            const current = getScheduleCollectionMembers();
+            current.push(name);
+            setScheduleCollectionMembers(current);
+            const dropdown = document.getElementById('schedule-collection-members-dropdown');
+            if (dropdown) dropdown.style.display = 'none';
+            const searchField = document.getElementById('schedule-collection-members');
+            if (searchField) {
+                searchField.value = '';
+                searchField.focus();
+            }
+        }
+
+        function removeScheduleCollectionMember(name) {
+            setScheduleCollectionMembers(getScheduleCollectionMembers().filter(member => member.toLowerCase() !== String(name || '').trim().toLowerCase()));
         }
 
         let attendeeSearchTimeout;
@@ -4151,6 +4361,7 @@ Event ID: ${result.discord_event_id}`);
 
         document.addEventListener('keydown', function(event) {
             if (event.key !== 'Escape') return;
+            closeScheduleCollectionModal();
             closeScheduleCommonGamePicker();
             closeScheduleIcalSyncModal();
             closeScheduleModal();
@@ -4161,6 +4372,7 @@ Event ID: ${result.discord_event_id}`);
 
         async function loadPlaylists() {
             const container = document.getElementById('playlists-container');
+            if (!container) return;
             try {
                 const resp = await fetch('/api/playlists');
                 if (!resp.ok) { container.innerHTML = '<div class="loading">Error loading playlists.</div>'; return; }
@@ -4289,27 +4501,148 @@ Event ID: ${result.discord_event_id}`);
         // Backlog
         // =====================================================================
 
+        function getBacklogCurrentUsername() {
+            const raw = document.getElementById('current-username')?.textContent
+                || document.getElementById('sidebar-username')?.textContent
+                || '';
+            return raw.trim();
+        }
+
+        function getActiveBacklog() {
+            return backlogCollectionsCache.find(backlog => backlog.id === activeBacklogId) || null;
+        }
+
+        function isDefaultBacklog(backlog) {
+            const currentUsername = getBacklogCurrentUsername().toLowerCase();
+            if (!backlog || !currentUsername) return false;
+            return String(backlog.id || '').trim().toLowerCase() === `personal:${currentUsername}`;
+        }
+
+        function isOwnedBacklog(backlog) {
+            if (!backlog) return false;
+            return String(backlog.owner || '').trim().toLowerCase() === getBacklogCurrentUsername().toLowerCase();
+        }
+
+        function updateBacklogSidebarMeta() {
+            const meta = document.getElementById('backlog-sidebar-meta');
+            const copy = document.getElementById('backlog-active-copy');
+            const renameBtn = document.getElementById('backlog-rename-btn');
+            const deleteBtn = document.getElementById('backlog-delete-btn');
+            const leaveBtn = document.getElementById('backlog-leave-btn');
+            const active = getActiveBacklog();
+            const owned = isOwnedBacklog(active);
+            const sharedCount = Math.max(((active?.members || []).length || 1) - 1, 0);
+            if (meta) {
+                meta.textContent = active
+                    ? `${active.name || 'Backlog'} • ${owned ? 'You own this backlog' : `Owned by ${active.owner || 'someone else'}`}`
+                    : 'Choose a backlog to view, share, or leave.';
+            }
+            if (copy) {
+                copy.textContent = active
+                    ? `${active.is_shared ? `Shared with ${sharedCount} other${sharedCount === 1 ? '' : 's'}` : 'Personal backlog'}`
+                    : '';
+            }
+            if (renameBtn) renameBtn.disabled = !active || !owned;
+            if (deleteBtn) deleteBtn.disabled = !active || !owned || isDefaultBacklog(active);
+            if (leaveBtn) leaveBtn.disabled = !active || owned || !active.is_shared;
+        }
+
+        function renderBacklogSelector() {
+            const selector = document.getElementById('backlog-selector');
+            if (!selector) return;
+            if (!backlogCollectionsCache.length) {
+                selector.innerHTML = '<option value="">No backlogs yet</option>';
+                selector.value = '';
+                activeBacklogId = '';
+                updateBacklogSidebarMeta();
+                return;
+            }
+            selector.innerHTML = backlogCollectionsCache.map(backlog => {
+                const memberCount = Array.isArray(backlog.members) ? Math.max(backlog.members.length - 1, 0) : 0;
+                const ownerSuffix = isOwnedBacklog(backlog) ? '' : ` • ${escapeHtml(backlog.owner || '')}`;
+                const sharedSuffix = backlog.is_shared ? ` • shared ${memberCount}` : '';
+                return `<option value="${escAttr(backlog.id || '')}">${escapeHtml(backlog.name || 'Backlog')}${escapeHtml(sharedSuffix)}${ownerSuffix}</option>`;
+            }).join('');
+            if (!activeBacklogId || !backlogCollectionsCache.some(backlog => backlog.id === activeBacklogId)) {
+                activeBacklogId = backlogCollectionsCache[0].id || '';
+            }
+            selector.value = activeBacklogId || '';
+            updateBacklogSidebarMeta();
+        }
+
+        async function ensureBacklogCollectionsLoaded(force = false) {
+            if (!force && backlogCollectionsCache.length) {
+                renderBacklogSelector();
+                return backlogCollectionsCache;
+            }
+            const query = activeBacklogId ? `?collection_id=${encodeURIComponent(activeBacklogId)}` : '';
+            const resp = await safeFetch(`/api/backlogs${query}`);
+            const data = await resp.json();
+            backlogCollectionsCache = data.backlogs || [];
+            activeBacklogId = String(data.active_backlog_id || activeBacklogId || '').trim();
+            renderBacklogSelector();
+            return backlogCollectionsCache;
+        }
+
+        function populateBacklogModalCollections(selectedId = activeBacklogId) {
+            const selector = document.getElementById('backlog-modal-collection');
+            if (!selector) return;
+            if (!backlogCollectionsCache.length) {
+                selector.innerHTML = '<option value="">No backlogs available</option>';
+                selector.value = '';
+                return;
+            }
+            selector.innerHTML = backlogCollectionsCache.map(backlog => `
+                <option value="${escAttr(backlog.id || '')}">
+                    ${escapeHtml(backlog.name || 'Backlog')}
+                </option>
+            `).join('');
+            const safeSelected = String(selectedId || '').trim();
+            selector.value = backlogCollectionsCache.some(backlog => backlog.id === safeSelected)
+                ? safeSelected
+                : (backlogCollectionsCache[0].id || '');
+        }
+
         async function loadBacklog() {
             const list = document.getElementById('backlog-list');
             const statusFilter = document.getElementById('backlog-filter').value;
             list.innerHTML = renderSkeletonList(5);
-            const url = '/api/backlog' + (statusFilter ? `?status=${statusFilter}` : '');
+            const params = new URLSearchParams();
+            if (statusFilter) params.set('status', statusFilter);
+            if (activeBacklogId) params.set('collection_id', activeBacklogId);
+            const url = `/api/backlog${params.toString() ? `?${params.toString()}` : ''}`;
             try {
-                const resp = await fetch(url);
+                const resp = await safeFetch(url);
                 if (!resp.ok) { list.innerHTML = '<div class="loading">Error loading backlog.</div>'; return; }
                 const data = await resp.json();
+                backlogCollectionsCache = data.backlogs || backlogCollectionsCache;
+                activeBacklogId = String(data.active_backlog_id || activeBacklogId || '').trim();
+                renderBacklogSelector();
                 _backlogData = data.games || [];
+                populateBacklogModalCollections(activeBacklogId);
+                void loadPlaylists();
                 renderBacklogList();
             } catch (e) {
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
             }
         }
 
+        function changeActiveBacklog(backlogId) {
+            activeBacklogId = String(backlogId || '').trim();
+            loadBacklog();
+        }
+
         function renderBacklogList() {
             const list = document.getElementById('backlog-list');
             const games = filterGamesByControls(_backlogData, 'backlog-search', 'backlog-platform-filter');
+            const activeBacklog = getActiveBacklog();
+            updateBacklogSidebarMeta();
+            if (!activeBacklog) {
+                list.innerHTML = '<div class="loading">No backlog selected yet. Create one from the sidebar to get started.</div>';
+                return;
+            }
             if (!_backlogData.length) {
-                list.innerHTML = '<div class="loading">No backlog entries. Set a game\'s status from the Pick a Game tab.</div>';
+                list.innerHTML = '<div class="loading">No backlog entries yet. Add games from the library, recommendations, or picker views.</div>';
                 return;
             }
             if (!games.length) {
@@ -4347,6 +4680,150 @@ Event ID: ${result.discord_event_id}`);
             };
 
             renderBatch(0);
+        }
+
+        async function loadBacklogShareCandidates(force = false) {
+            if (!force && backlogShareCandidatesCache.length) return backlogShareCandidatesCache;
+            const resp = await safeFetch('/api/users/list');
+            const data = await resp.json();
+            const currentUsername = getBacklogCurrentUsername().toLowerCase();
+            backlogShareCandidatesCache = (data.users || [])
+                .map(user => String(user.username || '').trim())
+                .filter(Boolean)
+                .filter(name => name.toLowerCase() !== currentUsername);
+            return backlogShareCandidatesCache;
+        }
+
+        function renderBacklogShareList(selectedMembers = []) {
+            const list = document.getElementById('backlog-collection-share-list');
+            if (!list) return;
+            const selected = new Set((selectedMembers || []).map(member => String(member || '').trim().toLowerCase()));
+            if (!backlogShareCandidatesCache.length) {
+                list.innerHTML = '<div class="loading">No other users available to share with.</div>';
+                return;
+            }
+            list.innerHTML = backlogShareCandidatesCache.map(name => `
+                <label class="backlog-share-option">
+                    <input type="checkbox" class="backlog-share-checkbox" value="${escAttr(name)}" ${selected.has(name.toLowerCase()) ? 'checked' : ''}>
+                    <span>${escapeHtml(name)}</span>
+                </label>
+            `).join('');
+        }
+
+        async function openBacklogCollectionModal(editMode = false) {
+            const active = getActiveBacklog();
+            if (editMode && (!active || !isOwnedBacklog(active))) {
+                showMessage('Only the backlog owner can rename or re-share it.', 'warning');
+                return;
+            }
+            document.getElementById('backlog-collection-edit-id').value = editMode ? (active.id || '') : '';
+            document.getElementById('backlog-collection-title').textContent = editMode ? '✏️ Edit Backlog' : '📚 New Backlog';
+            document.getElementById('backlog-collection-name').value = editMode ? (active.name || '') : '';
+            document.getElementById('backlog-collection-modal').style.display = 'flex';
+            try {
+                await loadBacklogShareCandidates(editMode || !backlogShareCandidatesCache.length);
+                renderBacklogShareList(editMode ? (active.members || []).filter(member => String(member || '').trim().toLowerCase() !== String(active.owner || '').trim().toLowerCase()) : []);
+            } catch (error) {
+                document.getElementById('backlog-collection-share-list').innerHTML = `<div class="error">Error loading users: ${error.message}</div>`;
+            }
+            setTimeout(() => document.getElementById('backlog-collection-name')?.focus(), 0);
+        }
+
+        function closeBacklogCollectionModal() {
+            const modal = document.getElementById('backlog-collection-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function getSelectedBacklogCollectionMembers() {
+            return Array.from(document.querySelectorAll('.backlog-share-checkbox:checked'))
+                .map(input => String(input.value || '').trim())
+                .filter(Boolean);
+        }
+
+        async function submitBacklogCollectionForm() {
+            const editId = document.getElementById('backlog-collection-edit-id').value.trim();
+            const name = document.getElementById('backlog-collection-name').value.trim();
+            if (!name) {
+                showMessage('Please enter a backlog name.', 'warning');
+                document.getElementById('backlog-collection-name')?.focus();
+                return;
+            }
+            const payload = {
+                name,
+                members: getSelectedBacklogCollectionMembers(),
+                is_shared: getSelectedBacklogCollectionMembers().length > 0,
+            };
+            try {
+                const resp = await safeFetch(editId ? `/api/backlogs/${encodeURIComponent(editId)}` : '/api/backlogs', {
+                    method: editId ? 'PUT' : 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to save backlog', 'error');
+                    return;
+                }
+                activeBacklogId = String(data.id || activeBacklogId || '').trim();
+                closeBacklogCollectionModal();
+                await ensureBacklogCollectionsLoaded(true);
+                await loadBacklog();
+                showMessage(editId ? 'Backlog updated.' : 'Backlog created.', 'success');
+            } catch (error) {
+                showMessage(`Error saving backlog: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteActiveBacklog() {
+            const active = getActiveBacklog();
+            if (!active) return;
+            if (isDefaultBacklog(active)) {
+                showMessage('Your personal backlog cannot be deleted.', 'warning');
+                return;
+            }
+            if (!isOwnedBacklog(active)) {
+                showMessage('Only the backlog owner can delete it.', 'warning');
+                return;
+            }
+            if (!confirm(`Delete backlog "${active.name}"?`)) return;
+            try {
+                const resp = await safeFetch(`/api/backlogs/${encodeURIComponent(active.id)}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to delete backlog', 'error');
+                    return;
+                }
+                activeBacklogId = '';
+                await ensureBacklogCollectionsLoaded(true);
+                await loadBacklog();
+                showMessage('Backlog deleted.', 'success');
+            } catch (error) {
+                showMessage(`Error deleting backlog: ${error.message}`, 'error');
+            }
+        }
+
+        async function leaveActiveBacklog() {
+            const active = getActiveBacklog();
+            if (!active) return;
+            if (isOwnedBacklog(active)) {
+                showMessage('Owners delete shared backlogs instead of leaving them.', 'warning');
+                return;
+            }
+            if (!confirm(`Leave backlog "${active.name}"?`)) return;
+            try {
+                const resp = await safeFetch(`/api/backlogs/${encodeURIComponent(active.id)}/leave`, { method: 'POST' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to leave backlog', 'error');
+                    return;
+                }
+                activeBacklogId = '';
+                await ensureBacklogCollectionsLoaded(true);
+                await loadBacklog();
+                showMessage('You left the backlog.', 'success');
+            } catch (error) {
+                showMessage(`Error leaving backlog: ${error.message}`, 'error');
+            }
         }
         
         // ==============================================================================================
@@ -5447,25 +5924,32 @@ Event ID: ${result.discord_event_id}`);
             currentBacklogGameId = gameId;
             currentBacklogGameName = gameName;
             document.getElementById('backlog-modal-title').textContent = `📚 Add "${gameName}" to Backlog`;
+            try {
+                await ensureBacklogCollectionsLoaded();
+            } catch (error) {
+                showMessage(`Failed to load backlogs: ${error.message}`, 'error');
+            }
+            populateBacklogModalCollections(activeBacklogId);
             document.getElementById('backlog-modal').style.display = 'flex';
         }
 
         async function selectBacklogStatus(status) {
             if (!currentBacklogGameId) return;
+            const collectionId = document.getElementById('backlog-modal-collection')?.value || activeBacklogId;
+            const collection = backlogCollectionsCache.find(backlog => backlog.id === collectionId) || null;
             
             try {
-                const response = await fetch(`/api/backlog/${currentBacklogGameId}`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({status: status})
-                });
-                const data = await response.json();
-                if (response.ok) {
+                const updated = await updateBacklogEntryStatus(currentBacklogGameId, status, collectionId);
+                if (updated) {
                     const statusLabel = status.replace(/_/g, ' ').charAt(0).toUpperCase() + status.replace(/_/g, ' ').slice(1);
-                    showMessage(`✅ Added "${currentBacklogGameName}" to backlog as "${statusLabel}"!`, 'success');
+                    const backlogLabel = collection?.name ? ` in "${collection.name}"` : '';
+                    showMessage(`✅ Added "${currentBacklogGameName}" to backlog${backlogLabel} as "${statusLabel}"!`, 'success');
                     closeBacklogModal();
+                    if (activeBacklogId && collectionId === activeBacklogId && document.getElementById('backlog-tab')?.classList.contains('active')) {
+                        await loadBacklog();
+                    }
                 } else {
-                    showMessage(data.error || 'Failed to add to backlog', 'error');
+                    showMessage('Failed to add to backlog', 'error');
                 }
             } catch (error) {
                 console.error('Add to backlog error:', error);
@@ -5477,6 +5961,7 @@ Event ID: ${result.discord_event_id}`);
             document.getElementById('backlog-modal').style.display = 'none';
             currentBacklogGameId = null;
             currentBacklogGameName = null;
+            populateBacklogModalCollections(activeBacklogId);
         }
 
         // ==============================================================================================

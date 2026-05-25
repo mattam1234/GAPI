@@ -60,6 +60,13 @@ except ImportError:
     PERFORMANCE_AVAILABLE = False
 
 try:
+    from app.repositories.backlog_repository import BacklogRepository as SharedBacklogRepository
+    from app.services.backlog_service import BacklogService as SharedBacklogService
+except Exception:
+    SharedBacklogRepository = None  # type: ignore[assignment]
+    SharedBacklogService = None  # type: ignore[assignment]
+
+try:
     from flask_compress import Compress as _FlaskCompress
     _COMPRESS_AVAILABLE = True
 except ImportError:
@@ -519,6 +526,20 @@ _pickers_lock = threading.Lock()
 
 # Directory that holds per-user sub-directories with JSON data files
 _USER_DATA_DIR = 'user_data'
+_SHARED_BACKLOGS_FILE = os.path.join(_USER_DATA_DIR, '.gapi_shared_backlogs.json')
+_shared_backlog_service = None
+
+
+def _get_shared_backlog_service():
+    """Return the shared backlog collection service."""
+    global _shared_backlog_service
+    if _shared_backlog_service is not None:
+        return _shared_backlog_service
+    if SharedBacklogRepository is None or SharedBacklogService is None:
+        raise RuntimeError('Backlog collections are unavailable')
+    os.makedirs(_USER_DATA_DIR, exist_ok=True)
+    _shared_backlog_service = SharedBacklogService(SharedBacklogRepository(_SHARED_BACKLOGS_FILE))
+    return _shared_backlog_service
 
 
 def _sanitize_username(username: str) -> str:
@@ -2556,7 +2577,12 @@ def api_pick_game():
                 is_favorite = app_id in p.favorites if app_id else False
                 review = p.review_service.get(game_id) if game_id else None
                 tags = p.tag_service.get(game_id) if game_id else []
-                backlog_status = p.backlog_service.get_status(game_id) if game_id else None
+                backlog_status = None
+                if game_id:
+                    try:
+                        backlog_status = _get_shared_backlog_service().get_status(game_id, username=username)
+                    except Exception:
+                        backlog_status = p.backlog_service.get_status(game_id)
 
                 response = {
                     'app_id': app_id,
@@ -4624,6 +4650,37 @@ def api_create_schedule():
     return jsonify(schedule), 201
 
 
+@app.route('/api/schedules/<schedule_id>', methods=['PUT'])
+@require_login
+def api_update_schedule(schedule_id: str):
+    """Rename or update sharing for a schedule collection."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+    data = request.json or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    raw_members = data.get('members', [])
+    if isinstance(raw_members, str):
+        members = [value.strip() for value in raw_members.split(',') if value.strip()]
+    else:
+        members = [str(value).strip() for value in (raw_members or []) if str(value).strip()]
+    is_shared = data.get('is_shared')
+    with picker_lock:
+        schedule = p.schedule_service.update_schedule(
+            schedule_id=schedule_id,
+            username=username,
+            name=name,
+            members=members,
+            is_shared=bool(is_shared) if is_shared is not None else None,
+        )
+    if schedule is None:
+        return jsonify({'error': 'Schedule not found'}), 404
+    return jsonify(schedule)
+
+
 @app.route('/api/schedule', methods=['POST'])
 @require_login
 def api_create_event():
@@ -5502,6 +5559,116 @@ def api_remove_from_playlist(name: str, game_id: str):
 # Backlog / Status Tracker API
 # ---------------------------------------------------------------------------
 
+
+def _parse_shared_member_usernames(raw_members) -> List[str]:
+    """Normalize member usernames supplied as JSON arrays or comma-separated strings."""
+    if isinstance(raw_members, str):
+        return [value.strip() for value in raw_members.split(',') if value.strip()]
+    return [str(value).strip() for value in (raw_members or []) if str(value).strip()]
+
+
+@app.route('/api/backlogs', methods=['GET'])
+@require_login
+def api_list_backlog_collections():
+    """List backlog collections available to the current user."""
+    username = get_current_username()
+    service = _get_shared_backlog_service()
+    requested_collection_id = request.args.get('collection_id')
+    with picker_lock:
+        backlogs = service.list_collections(username=username)
+        active_backlog_id = service.resolve_collection_for_user(requested_collection_id, username)
+    return jsonify({
+        'backlogs': backlogs,
+        'count': len(backlogs),
+        'active_backlog_id': active_backlog_id,
+    })
+
+
+@app.route('/api/backlogs', methods=['POST'])
+@require_login
+def api_create_backlog_collection():
+    """Create a personal or shared backlog collection."""
+    username = get_current_username()
+    service = _get_shared_backlog_service()
+    data = request.json or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    members = _parse_shared_member_usernames(data.get('members', []))
+    is_shared = bool(data.get('is_shared', True))
+    with picker_lock:
+        backlog = service.create_collection(
+            name=name,
+            owner_username=username,
+            members=members,
+            is_shared=is_shared,
+        )
+    return jsonify(backlog), 201
+
+
+@app.route('/api/backlogs/<backlog_id>', methods=['PUT'])
+@require_login
+def api_update_backlog_collection(backlog_id: str):
+    """Rename or re-share a backlog collection."""
+    username = get_current_username()
+    service = _get_shared_backlog_service()
+    data = request.json or {}
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    members = _parse_shared_member_usernames(data.get('members', []))
+    is_shared = data.get('is_shared')
+    with picker_lock:
+        backlog = service.update_collection(
+            collection_id=backlog_id,
+            username=username,
+            name=name,
+            members=members,
+            is_shared=bool(is_shared) if is_shared is not None else None,
+        )
+    if backlog is None:
+        return jsonify({'error': 'Backlog not found'}), 404
+    return jsonify(backlog)
+
+
+@app.route('/api/backlogs/<backlog_id>', methods=['DELETE'])
+@require_login
+def api_delete_backlog_collection(backlog_id: str):
+    """Delete a backlog collection owned by the current user."""
+    username = get_current_username()
+    service = _get_shared_backlog_service()
+    with picker_lock:
+        backlog = service.get_collection(backlog_id)
+        if not backlog or not service._can_access_collection(backlog, username):
+            return jsonify({'error': 'Backlog not found'}), 404
+        if str(backlog.get('owner') or '').strip().lower() != str(username or '').strip().lower():
+            return jsonify({'error': 'Only the backlog owner can delete it'}), 403
+        if service.is_default_collection_id(backlog_id, username):
+            return jsonify({'error': 'Your personal backlog cannot be deleted'}), 400
+        deleted = service.delete_collection(backlog_id, username)
+    if not deleted:
+        return jsonify({'error': 'Backlog not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/backlogs/<backlog_id>/leave', methods=['POST'])
+@require_login
+def api_leave_backlog_collection(backlog_id: str):
+    """Leave a shared backlog that the current user does not own."""
+    username = get_current_username()
+    service = _get_shared_backlog_service()
+    with picker_lock:
+        backlog = service.get_collection(backlog_id)
+        if not backlog or not service._can_access_collection(backlog, username):
+            return jsonify({'error': 'Backlog not found'}), 404
+        if str(backlog.get('owner') or '').strip().lower() == str(username or '').strip().lower():
+            return jsonify({'error': 'Backlog owners must delete the backlog instead of leaving it'}), 403
+        left = service.leave_collection(backlog_id, username)
+    if not left:
+        return jsonify({'error': 'Unable to leave backlog'}), 400
+    return jsonify({'success': True})
+
+
 @app.route('/api/backlog', methods=['GET'])
 @require_login
 def api_list_backlog():
@@ -5513,9 +5680,25 @@ def api_list_backlog():
     status_filter = request.args.get('status', '').strip() or None
     if status_filter and status_filter not in gapi.GamePicker.BACKLOG_STATUSES:
         return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
+    requested_collection_id = request.args.get('collection_id')
+    service = _get_shared_backlog_service()
     with picker_lock:
-        games = p.backlog_service.get_games(p.games, status_filter)
-    return jsonify({'games': games, 'count': len(games)})
+        backlogs = service.list_collections(username=username)
+        active_backlog_id = service.resolve_collection_for_user(requested_collection_id, username)
+        games = service.get_games(
+            p.games,
+            status_filter,
+            username=username,
+            collection_id=active_backlog_id,
+        )
+        active_backlog = service.get_collection(active_backlog_id)
+    return jsonify({
+        'games': games,
+        'count': len(games),
+        'backlogs': backlogs,
+        'active_backlog_id': active_backlog_id,
+        'active_backlog': active_backlog,
+    })
 
 
 @app.route('/api/backlog/<game_id>', methods=['GET'])
@@ -5523,11 +5706,10 @@ def api_list_backlog():
 def api_get_backlog_status(game_id: str):
     """Get the backlog status for a specific game."""
     username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
+    collection_id = request.args.get('collection_id')
+    service = _get_shared_backlog_service()
     with picker_lock:
-        status = p.backlog_service.get_status(game_id)
+        status = service.get_status(game_id, username=username, collection_id=collection_id)
     if status is None:
         return jsonify({'game_id': game_id, 'status': None})
     return jsonify({'game_id': game_id, 'status': status})
@@ -5538,18 +5720,21 @@ def api_get_backlog_status(game_id: str):
 def api_set_backlog_status(game_id: str):
     """Set the backlog status for a game. Expects JSON ``{"status": "..."}``."""
     username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
+    service = _get_shared_backlog_service()
     data = request.json or {}
     status = (data.get('status') or '').strip()
     if not status:
         return jsonify({'error': 'status is required'}), 400
+    collection_id = str(data.get('collection_id') or '').strip() or request.args.get('collection_id')
     with picker_lock:
-        ok = p.backlog_service.set_status(game_id, status)
+        if collection_id:
+            backlog = service.get_collection(collection_id)
+            if not backlog or not service._can_access_collection(backlog, username):
+                return jsonify({'error': 'Backlog not found'}), 404
+        ok = service.set_status(game_id, status, username=username, collection_id=collection_id)
     if not ok:
         return jsonify({'error': f'Invalid status. Valid: {list(gapi.GamePicker.BACKLOG_STATUSES)}'}), 400
-    return jsonify({'success': True, 'game_id': game_id, 'status': status})
+    return jsonify({'success': True, 'game_id': game_id, 'status': status, 'collection_id': collection_id})
 
 
 @app.route('/api/backlog/<game_id>', methods=['DELETE'])
@@ -5557,11 +5742,14 @@ def api_set_backlog_status(game_id: str):
 def api_delete_backlog_status(game_id: str):
     """Remove a game from the backlog."""
     username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
+    collection_id = request.args.get('collection_id')
+    service = _get_shared_backlog_service()
     with picker_lock:
-        removed = p.backlog_service.remove(game_id)
+        if collection_id:
+            backlog = service.get_collection(collection_id)
+            if not backlog or not service._can_access_collection(backlog, username):
+                return jsonify({'error': 'Backlog not found'}), 404
+        removed = service.remove(game_id, username=username, collection_id=collection_id)
     if not removed:
         return jsonify({'error': 'Game not in backlog'}), 404
     return jsonify({'success': True})
@@ -9100,7 +9288,8 @@ def api_export_library():
                 'platform': game.get('platform', 'steam'),
                 'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
                 'is_favorite': 'yes' if p.favorites_service.contains(game_id) else 'no',
-                'backlog_status': p.backlog_service.get_status(game_id) or '',
+                'backlog_status': (_get_shared_backlog_service().get_status(game_id, username=username)
+                                   if game_id else '') or '',
                 'tags': ','.join(p.tag_service.get(game_id)),
                 'review_rating': review.get('rating', ''),
                 'review_notes': review.get('notes', ''),

@@ -367,7 +367,9 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
         content = _read('templates', 'index.html')
         for token in (
             'schedule-modal',
+            'schedule-collection-modal',
             'schedule-filter-start',
+            'schedule-rename-btn',
             'schedule-rsvp-list',
             'schedule-common-games-list',
             'schedule-ical-modal',
@@ -379,7 +381,10 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
         content = _read('static', 'main.js')
         for token in (
             'openScheduleCreateModal',
+            'openScheduleCollectionModal',
+            'openRenameScheduleModal',
             'applyScheduleFilters',
+            'setScheduleFiltersToAgendaWeek',
             'updateScheduleRsvpStatus',
             'openScheduleCommonGamePicker',
             'openScheduleIcalSyncModal',
@@ -391,10 +396,12 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
         content = _read('static', 'style.css')
         for token in (
             '.schedule-modal',
+            '.schedule-sidebar',
             '.schedule-form-grid',
             '.schedule-rsvp-row',
             '.schedule-filter-toolbar',
             '.schedule-common-game-item',
+            '.schedule-upcoming-list',
         ):
             self.assertIn(token, content)
 

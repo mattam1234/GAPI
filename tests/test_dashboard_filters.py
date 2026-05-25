@@ -40,6 +40,10 @@ class TestDashboardFilterMarkup(unittest.TestCase):
         ):
             self.assertIn(token, content)
 
+    def test_dashboard_recommendations_refresh_each_render(self):
+        content = _read('static', 'main.js')
+        self.assertIn("/api/recommendations?count=4&refresh_seed=${Date.now()}", content)
+
 
 class TestRecommendationsRefreshRoute(unittest.TestCase):
 
