@@ -538,7 +538,9 @@ def _get_shared_backlog_service():
     if SharedBacklogRepository is None or SharedBacklogService is None:
         raise RuntimeError('Backlog collections are unavailable')
     os.makedirs(_USER_DATA_DIR, exist_ok=True)
-    _shared_backlog_service = SharedBacklogService(SharedBacklogRepository(_SHARED_BACKLOGS_FILE))
+    _shared_backlog_service = SharedBacklogService(
+        SharedBacklogRepository(_SHARED_BACKLOGS_FILE, backend='db')
+    )
     return _shared_backlog_service
 
 

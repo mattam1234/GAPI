@@ -15,8 +15,8 @@ class HistoryRepository(BaseRepository):
     """
 
     def __init__(self, file_path: str = '.gapi_history.json',
-                 max_size: int = 20) -> None:
-        super().__init__(file_path)
+                 max_size: int = 20, backend: str = 'file') -> None:
+        super().__init__(file_path, backend=backend)
         self.max_size = max_size
         raw: List = self._load([])
         self.data: List[str] = [

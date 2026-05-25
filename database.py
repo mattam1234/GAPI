@@ -436,6 +436,16 @@ class AppSettings(Base):
     updated_by = Column(String(255), nullable=True)  # username of last editor
 
 
+class RepositoryBlob(Base):
+    """JSON blob storage for app repository-backed user data."""
+    __tablename__ = "repository_blobs"
+
+    id = Column(Integer, primary_key=True)
+    storage_key = Column(String(1024), unique=True, nullable=False, index=True)
+    payload = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # PHASE 9: ADMIN EXCELLENCE & USER EXPERIENCE FEATURES
 # ═══════════════════════════════════════════════════════════════════════════

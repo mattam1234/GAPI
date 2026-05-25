@@ -11,8 +11,8 @@ class TagRepository(BaseRepository):
         { "<game_id>": ["<tag1>", "<tag2>", ...] }
     """
 
-    def __init__(self, file_path: str = '.gapi_tags.json') -> None:
-        super().__init__(file_path)
+    def __init__(self, file_path: str = '.gapi_tags.json', backend: str = 'file') -> None:
+        super().__init__(file_path, backend=backend)
         self.data: Dict[str, List[str]] = self._load({})
 
     def find(self, game_id: str) -> List[str]:
