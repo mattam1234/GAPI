@@ -1261,17 +1261,8 @@
             
             <div style="background: var(--card-bg); padding: var(--space-xl); border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>Start a new achievement hunt</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: var(--space-10); margin-top: 10px;">
-                    <input type="number" id="hunt-app-id" placeholder="Steam App ID" style="padding: var(--space-10); border: 1.5px solid var(--input-border); border-radius: var(--radius-sm, 8px); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
-                    <input type="text" id="hunt-game-name" placeholder="Game name" style="padding: var(--space-10); border: 1.5px solid var(--input-border); border-radius: var(--radius-sm, 8px); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
-                    <select id="hunt-difficulty" style="padding: var(--space-10); border: 1.5px solid var(--input-border); border-radius: var(--radius-sm, 8px); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
-                        <option value="easy">Easy</option>
-                        <option value="medium" selected>Medium</option>
-                        <option value="hard">Hard</option>
-                        <option value="extreme">Extreme</option>
-                    </select>
-                    <input type="number" id="hunt-targets" placeholder="Target count" min="0" style="padding: var(--space-10); border: 1.5px solid var(--input-border); border-radius: var(--radius-sm, 8px); background: var(--input-bg); color: var(--text-primary); font-family: inherit;">
-                    <button onclick="startAchievementHunt()" style="padding: var(--space-10) var(--space-xl); background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer;">Start Hunt</button>
+                <div style="display:flex; justify-content:flex-start; margin-top:10px;">
+                    <button onclick="openAchievementHuntModal()" style="padding: var(--space-10) var(--space-xl); background: #4f46e5; color: white; border: none; border-radius: 50px; cursor: pointer;">Start Hunt</button>
                 </div>
             </div>
 
@@ -2427,6 +2418,19 @@
                 <button onclick="filterAchievements('platinum')" style="padding:var(--space-sm) var(--space-md); border:1px solid var(--input-border); border-radius:var(--radius-xs,6px); background:rgba(230,230,250,0.2); color:#e6e6fa; cursor:pointer;">Platinum</button>
             </div>
             <div id="achievements-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:var(--space-md);"></div>
+        </div>
+    </div>
+
+    <!-- Achievement Hunt Modal -->
+    <div id="achievement-hunt-modal" onclick="if(event.target.id==='achievement-hunt-modal')closeAchievementHuntModal()" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); flex-direction:column; justify-content:center; align-items:center; z-index:1000; overflow-y:auto;">
+        <div style="background:var(--input-bg); border:2px solid var(--input-border); border-radius:var(--radius,12px); padding:var(--space-2xl); width:90%; max-width:800px; max-height:80vh; overflow-y:auto; box-shadow:var(--shadow-xl,0 8px 32px rgba(0,0,0,0.3)); margin:var(--space-xl) 0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0; color:var(--text-primary);">🎯 Start Achievement Hunt</h3>
+                <button onclick="closeAchievementHuntModal()" style="padding:var(--space-xs) var(--space-sm); background:var(--input-border); color:var(--text-primary); border:none; border-radius:var(--radius-tag,4px); cursor:pointer; font-size:var(--font-lg);">✕</button>
+            </div>
+            <p style="margin-top:0; color:var(--text-secondary);">Select a game from your synced Steam library.</p>
+            <input id="achievement-hunt-search" type="text" placeholder="Search library games..." oninput="renderAchievementHuntLibrary()" style="width:100%; box-sizing:border-box; padding:var(--space-10); border:1.5px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); font-family:inherit; margin-bottom:12px;">
+            <div id="achievement-hunt-library" style="display:grid; gap:10px;"></div>
         </div>
     </div>
 
