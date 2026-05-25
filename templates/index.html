@@ -1146,8 +1146,8 @@
                         <div class="backlog-preview-card">
                             <div class="schedule-agenda-eyebrow">Selection</div>
                             <h3>Entry preview</h3>
-                            <div id="backlog-entry-preview" class="backlog-entry-preview">
-                                Select a game in this list to preview details and save personal notes.
+                            <div class="schedule-agenda-copy">
+                                Select an entry to open its preview modal and manage your notes.
                             </div>
                         </div>
                     </div>
@@ -2108,6 +2108,19 @@
             </div>
             <div style="display:flex; gap:var(--space-10); margin-top:20px; justify-content:flex-end;">
                 <button onclick="closeBacklogModal()" style="padding:var(--space-sm) var(--space-lg); background:var(--card-border); color:var(--text-primary); border:none; border-radius:var(--radius-sm,8px); cursor:pointer;">✕ Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backlog Entry Preview Modal -->
+    <div id="backlog-entry-preview-modal" onclick="if(event.target.id==='backlog-entry-preview-modal')closeBacklogEntryPreviewModal()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center; overflow-y:auto;">
+        <div class="backlog-entry-preview-modal-card">
+            <div class="backlog-entry-preview-modal-header">
+                <h3 style="margin:0;">📝 Entry Preview</h3>
+                <button type="button" class="schedule-modal-close" onclick="closeBacklogEntryPreviewModal()">✕</button>
+            </div>
+            <div id="backlog-entry-preview" class="backlog-entry-preview">
+                Select a game in this list to preview details and save personal notes.
             </div>
         </div>
     </div>

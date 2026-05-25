@@ -559,6 +559,7 @@
 
             if (tabName !== 'chat' && typeof stopChatPolling === 'function') stopChatPolling();
             if (tabName !== 'sessions' && typeof stopSessionsPolling === 'function') stopSessionsPolling();
+            if (tabName !== 'backlog') closeBacklogEntryPreviewModal();
 
             document.querySelectorAll('.tab, .sidebar-item').forEach(tab => {
                 tab.classList.remove('active');
@@ -5238,7 +5239,25 @@ Event ID: ${result.discord_event_id}`);
             if (!safeGameId) return;
             activeBacklogEntryGameId = safeGameId;
             renderBacklogList();
+            openBacklogEntryPreviewModal();
+        }
+
+        function isBacklogEntryPreviewModalOpen() {
+            const modal = document.getElementById('backlog-entry-preview-modal');
+            return Boolean(modal && modal.style.display === 'flex');
+        }
+
+        function openBacklogEntryPreviewModal() {
+            const modal = document.getElementById('backlog-entry-preview-modal');
+            if (!modal) return;
+            modal.style.display = 'flex';
             renderBacklogEntryPreview();
+        }
+
+        function closeBacklogEntryPreviewModal() {
+            const modal = document.getElementById('backlog-entry-preview-modal');
+            if (!modal) return;
+            modal.style.display = 'none';
         }
 
         async function renderBacklogEntryPreview() {
@@ -5434,7 +5453,7 @@ Event ID: ${result.discord_event_id}`);
             } catch (e) {
                 list.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
                 activeBacklogEntryGameId = '';
-                renderBacklogEntryPreview();
+                closeBacklogEntryPreviewModal();
             }
         }
 
@@ -5452,19 +5471,19 @@ Event ID: ${result.discord_event_id}`);
             if (!activeBacklog) {
                 list.innerHTML = '<div class="loading">No list selected yet. Create one from the sidebar to get started.</div>';
                 activeBacklogEntryGameId = '';
-                renderBacklogEntryPreview();
+                closeBacklogEntryPreviewModal();
                 return;
             }
             if (!_backlogData.length) {
                 list.innerHTML = '<div class="loading">No list entries yet. Add games from your library using the panel on the right.</div>';
                 activeBacklogEntryGameId = '';
-                renderBacklogEntryPreview();
+                closeBacklogEntryPreviewModal();
                 return;
             }
             if (!games.length) {
                 list.innerHTML = '<div class="loading">No list entries match your current filters.</div>';
                 activeBacklogEntryGameId = '';
-                renderBacklogEntryPreview();
+                closeBacklogEntryPreviewModal();
                 return;
             }
 
@@ -5508,7 +5527,9 @@ Event ID: ${result.discord_event_id}`);
                 if (endIdx < games.length) {
                     requestAnimationFrame(() => renderBatch(endIdx));
                 } else {
-                    renderBacklogEntryPreview();
+                    if (isBacklogEntryPreviewModalOpen()) {
+                        renderBacklogEntryPreview();
+                    }
                 }
             };
 
