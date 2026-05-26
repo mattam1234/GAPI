@@ -6560,6 +6560,7 @@ Event ID: ${result.discord_event_id}`);
         // ==============================================================================================
         
         let achievementGamesData = [];
+        let achievementHuntLibraryData = [];
         let achievementBacklogCollections = [];
         let achievementCollectionGameIds = {};
         let achievementsLibrarySyncAttempted = false;
@@ -6578,9 +6579,6 @@ Event ID: ${result.discord_event_id}`);
         }
 
         function populateAchievementListFilterOptions(backlogs) {
-            const listFilterEl = document.getElementById('achievements-list-filter');
-            if (!listFilterEl) return;
-            const existingValue = listFilterEl.value;
             const options = ['<option value="all">All library games</option>'];
             (backlogs || []).forEach(backlog => {
                 const id = String(backlog?.id || '').trim();
@@ -6588,10 +6586,15 @@ Event ID: ${result.discord_event_id}`);
                 const name = String(backlog?.name || 'Unnamed list').trim() || 'Unnamed list';
                 options.push(`<option value="${id}">${name}</option>`);
             });
-            listFilterEl.innerHTML = options.join('');
-            if (existingValue && options.some(option => option.includes(`value="${existingValue}"`))) {
-                listFilterEl.value = existingValue;
-            }
+            ['achievements-list-filter', 'achievement-hunt-list-filter'].forEach(id => {
+                const listFilterEl = document.getElementById(id);
+                if (!listFilterEl) return;
+                const existingValue = listFilterEl.value;
+                listFilterEl.innerHTML = options.join('');
+                if (existingValue && options.some(option => option.includes(`value="${existingValue}"`))) {
+                    listFilterEl.value = existingValue;
+                }
+            });
         }
 
         async function loadAchievementBacklogFilters() {
@@ -6702,6 +6705,14 @@ Event ID: ${result.discord_event_id}`);
             renderBatch(0);
         }
 
+        async function ensureAchievementHuntLibrary(force = false) {
+            if (!force && achievementHuntLibraryData.length) return achievementHuntLibraryData;
+            const response = await safeFetch('/api/library');
+            const data = await response.json();
+            achievementHuntLibraryData = Array.isArray(data.games) ? data.games : [];
+            return achievementHuntLibraryData;
+        }
+
         async function loadUserAchievements(forceSync = false) {
             const listDiv = document.getElementById('achievements-list');
             if (!listDiv) return;
@@ -6737,6 +6748,12 @@ Event ID: ${result.discord_event_id}`);
             const modal = document.getElementById('achievement-hunt-modal');
             if (!modal) return;
             modal.style.display = 'flex';
+            await loadAchievementBacklogFilters();
+            try {
+                await ensureAchievementHuntLibrary();
+            } catch (_error) {
+                achievementHuntLibraryData = [];
+            }
             if (!achievementGamesData.length) {
                 await loadUserAchievements();
             }
@@ -6748,17 +6765,54 @@ Event ID: ${result.discord_event_id}`);
             if (modal) modal.style.display = 'none';
         }
 
+        function updateAchievementHuntSearchSuggestions(games, query = '') {
+            const datalist = document.getElementById('achievement-hunt-search-suggestions');
+            if (!datalist) return;
+            const queryLower = String(query || '').trim().toLowerCase();
+            const options = [];
+            (games || []).forEach(game => {
+                const name = String(game?.name || '').trim();
+                const appId = String(game?.app_id || game?.appid || '').trim();
+                if (name) options.push(name);
+                if (appId) options.push(appId);
+            });
+            const unique = Array.from(new Set(
+                options.filter(Boolean).filter(value => !queryLower || value.toLowerCase().includes(queryLower))
+            )).slice(0, 20);
+            datalist.innerHTML = unique.map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
+        }
+
         function renderAchievementHuntLibrary() {
             const listEl = document.getElementById('achievement-hunt-library');
             if (!listEl) return;
             const searchEl = document.getElementById('achievement-hunt-search');
+            const listFilterEl = document.getElementById('achievement-hunt-list-filter');
             const query = String(searchEl?.value || '').trim().toLowerCase();
+            const listFilter = String(listFilterEl?.value || 'all').trim();
 
-            let games = Array.isArray(achievementGamesData) ? [...achievementGamesData] : [];
+            let games = Array.isArray(achievementHuntLibraryData) ? [...achievementHuntLibraryData] : [];
+            if (listFilter && listFilter !== 'all') {
+                const cachedSet = achievementCollectionGameIds[String(listFilter).trim()];
+                if (cachedSet instanceof Set) {
+                    games = games.filter(game => cachedSet.has(String(game?.app_id || game?.appid || '').trim()));
+                } else {
+                    listEl.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); border:1px solid var(--card-border); border-radius: var(--radius-sm, 8px);">Loading list games…</div>';
+                    getAchievementGameIdsForCollection(listFilter).then(gameIds => {
+                        const hydrated = gameIds instanceof Set
+                            ? achievementHuntLibraryData.filter(game => gameIds.has(String(game?.app_id || game?.appid || '').trim()))
+                            : [];
+                        updateAchievementHuntSearchSuggestions(hydrated, query);
+                        renderAchievementHuntLibrary();
+                    });
+                    return;
+                }
+            }
+
+            updateAchievementHuntSearchSuggestions(games, query);
             if (query) {
                 games = games.filter(game => {
-                    const name = String(game?.game_name || '').toLowerCase();
-                    const appId = String(game?.app_id || '');
+                    const name = String(game?.name || game?.game_name || '').toLowerCase();
+                    const appId = String(game?.app_id || game?.appid || '');
                     return name.includes(query) || appId.includes(query);
                 });
             }
@@ -6769,14 +6823,21 @@ Event ID: ${result.discord_event_id}`);
             }
 
             listEl.innerHTML = games.map(game => {
-                const appId = parseInt(game?.app_id, 10);
-                const gameName = String(game?.game_name || `App ${game?.app_id || ''}`);
+                const appId = parseInt(game?.app_id || game?.appid, 10);
+                const gameName = String(game?.name || game?.game_name || `App ${game?.app_id || game?.appid || ''}`);
+                const playtime = Number(game?.playtime_hours || 0);
+                const imageUrl = appId
+                    ? `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`
+                    : '';
                 if (!Number.isInteger(appId)) return '';
                 return `
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; border:1px solid var(--card-border); border-radius:var(--radius-sm,8px); padding:12px; background:var(--card-bg);">
-                        <div>
-                            <strong>${escapeHtml(gameName)}</strong><br>
-                            <small style="color:var(--text-secondary);">App ID: ${appId}</small>
+                        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                            ${imageUrl ? `<img src="${escAttr(imageUrl)}" alt="" style="width:88px; height:42px; object-fit:cover; border-radius:var(--radius-tag,4px); flex-shrink:0;">` : ''}
+                            <div style="min-width:0;">
+                                <strong style="display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(gameName)}</strong>
+                                <small style="color:var(--text-secondary);">App ID: ${appId}${playtime ? ` • ${escapeHtml(String(playtime))}h played` : ''}</small>
+                            </div>
                         </div>
                         <button onclick="startAchievementHunt(${appId}, '${escAttr(gameName)}')" style="padding: var(--space-8) var(--space-lg); background:#4f46e5; color:white; border:none; border-radius:50px; cursor:pointer; white-space:nowrap;">Start Hunt</button>
                     </div>

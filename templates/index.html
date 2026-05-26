@@ -2428,9 +2428,15 @@
                 <h3 style="margin:0; color:var(--text-primary);">🎯 Start Achievement Hunt</h3>
                 <button onclick="closeAchievementHuntModal()" style="padding:var(--space-xs) var(--space-sm); background:var(--input-border); color:var(--text-primary); border:none; border-radius:var(--radius-tag,4px); cursor:pointer; font-size:var(--font-lg);">✕</button>
             </div>
-            <p style="margin-top:0; color:var(--text-secondary);">Select a game from your synced Steam library.</p>
-            <input id="achievement-hunt-search" type="text" placeholder="Search library games..." oninput="renderAchievementHuntLibrary()" style="width:100%; box-sizing:border-box; padding:var(--space-10); border:1.5px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); font-family:inherit; margin-bottom:12px;">
-            <div id="achievement-hunt-library" style="display:grid; gap:10px;"></div>
+            <p style="margin-top:0; color:var(--text-secondary);">Select from your synced library or one of your lists.</p>
+            <div style="display:grid; grid-template-columns: 1fr minmax(180px, 260px); gap: var(--space-10); margin-bottom:12px;">
+                <input id="achievement-hunt-search" type="text" list="achievement-hunt-search-suggestions" placeholder="Search library games..." oninput="renderAchievementHuntLibrary()" style="width:100%; box-sizing:border-box; padding:var(--space-10); border:1.5px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); font-family:inherit; margin-bottom:0;">
+                <select id="achievement-hunt-list-filter" onchange="renderAchievementHuntLibrary()" style="padding:var(--space-10); border:1.5px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); font-family:inherit; margin-bottom:0;">
+                    <option value="all">All library games</option>
+                </select>
+            </div>
+            <datalist id="achievement-hunt-search-suggestions"></datalist>
+            <div id="achievement-hunt-library" style="display:grid; gap:10px; max-height:min(48vh, 420px); overflow-y:auto; padding-right:2px;"></div>
         </div>
     </div>
 

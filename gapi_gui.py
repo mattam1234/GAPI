@@ -1628,6 +1628,94 @@ def _ensure_multi_picker() -> None:
         multi_picker.users = users
 
 
+def _sync_user_achievements_from_cached_library(username: str) -> Dict[str, int]:
+    """Best-effort achievements sync for all cached Steam games for one user."""
+    result = {'synced': 0, 'skipped': 0, 'errors': 0}
+    if not ensure_db_available():
+        return result
+
+    try:
+        base_config = load_base_config()
+        steam_api_key = str(base_config.get('steam_api_key', '')).strip()
+        if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
+            gui_logger.info("Skipping auto achievement sync for %s: Steam API key missing", username)
+            return result
+
+        db = database.SessionLocal()
+        try:
+            user = database.get_user(db, username)
+            steam_id = getattr(user, 'steam_id', '') if user else ''
+            if not steam_id:
+                gui_logger.info("Skipping auto achievement sync for %s: Steam ID missing", username)
+                return result
+
+            cached_games = (
+                _library_service.get_cached(db, username)
+                if _library_service
+                else database.get_cached_library(db, username)
+            ) or []
+        finally:
+            db.close()
+
+        if not cached_games:
+            return result
+
+        steam_client = gapi.SteamAPIClient(steam_api_key)
+        for game in cached_games:
+            app_id = str(game.get('app_id', '')).strip()
+            if not app_id.isdigit():
+                result['skipped'] += 1
+                continue
+
+            game_name = str(game.get('name') or app_id).strip() or app_id
+            try:
+                player_achievements = steam_client.get_player_achievements_detailed(steam_id, app_id)
+                if not player_achievements:
+                    result['skipped'] += 1
+                    continue
+
+                schema = steam_client.get_schema_for_game(app_id)
+                db_game = database.SessionLocal()
+                try:
+                    database.sync_steam_achievements(
+                        db_game,
+                        username,
+                        steam_id,
+                        app_id,
+                        game_name,
+                        player_achievements,
+                        schema,
+                    )
+                finally:
+                    db_game.close()
+                result['synced'] += 1
+            except Exception:
+                gui_logger.exception(
+                    "Auto achievement sync failed for %s app_id=%s",
+                    username,
+                    app_id,
+                )
+                result['errors'] += 1
+    except Exception:
+        gui_logger.exception("Auto achievement sync failed for user %s", username)
+    return result
+
+
+def _queue_library_achievement_sync(username: str) -> None:
+    """Queue background achievement sync for the user's cached library."""
+    def _run():
+        stats = _sync_user_achievements_from_cached_library(username)
+        gui_logger.info(
+            "Auto achievement sync complete for %s: synced=%s skipped=%s errors=%s",
+            username,
+            stats.get('synced', 0),
+            stats.get('skipped', 0),
+            stats.get('errors', 0),
+        )
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def sync_library_to_db(username: str, force: bool = False) -> Tuple[bool, str]:
     """Sync user's game library from Steam API to database cache.
     
@@ -1687,7 +1775,8 @@ def sync_library_to_db(username: str, force: bool = False) -> Tuple[bool, str]:
             db.close()
 
         gui_logger.info(f"Synced {count} games for {username}")
-        return True, f"Synced {count} games"
+        _queue_library_achievement_sync(username)
+        return True, f"Synced {count} games and queued achievement sync"
         
     except Exception as e:
         gui_logger.exception(f"Error syncing library for {username}: {e}")
