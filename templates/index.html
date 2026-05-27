@@ -1477,10 +1477,14 @@
                         <p class="schedule-agenda-copy">Create or join a session, pick a game, and vote together.</p>
                         <div class="session-create-form">
                             <input id="session-name-input" type="text" class="search-input" placeholder="Session name (optional)" maxlength="80" style="margin-bottom:0;">
-                            <select id="session-discord-guild" class="search-input" onchange="populateLiveSessionDiscordChannels()" style="margin-bottom:0;">
-                                <option value="">No Discord sync</option>
-                            </select>
-                            <select id="session-discord-channel" class="search-input" style="margin-bottom:0;">
+                            <input type="hidden" id="session-discord-guild-id" value="">
+                            <div class="schedule-autocomplete" style="position:relative;">
+                                <input type="text" id="session-discord-guild-search" class="search-input"
+                                       placeholder="Search Discord servers… (optional)"
+                                       onfocus="showSessionDiscordGuildSearch()" oninput="showSessionDiscordGuildSearch()" style="margin-bottom:0;">
+                                <div id="session-discord-guild-dropdown" class="schedule-autocomplete-dropdown" style="display:none;"></div>
+                            </div>
+                            <select id="session-discord-channel" class="search-input" style="margin-bottom:0;" disabled>
                                 <option value="">Choose Discord channel</option>
                             </select>
                             <label class="session-coop-toggle">
@@ -1661,6 +1665,22 @@
                 <button onclick="saveSettings()" style="padding: var(--space-md) 30px; background: #10b981; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: 600; font-family: inherit;">
                     Save Settings
                 </button>
+            </div>
+
+            <!-- Connected Discord Servers -->
+            <div style="background: var(--card-bg); padding: var(--space-xl); border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
+                <h3 style="margin-top:0; display:flex; align-items:center; gap:8px;">
+                    <span style="background:#5865F2; border-radius:50%; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-size:0.9em; flex-shrink:0;">💠</span>
+                    Connected Discord Servers
+                </h3>
+                <p style="color: var(--text-secondary); margin-bottom: 15px; font-size:var(--font-md);">
+                    Discord servers that the bot has seen you in. These are available when creating scheduled events or game sessions.
+                    Talk to the bot in your server to refresh this list.
+                </p>
+                <div id="settings-discord-guilds-list" style="margin-bottom:12px;">
+                    <div style="color:var(--text-secondary); font-size:0.9em;">Loading…</div>
+                </div>
+                <button onclick="loadSettingsDiscordGuilds(true)" style="padding:6px 18px; background:transparent; color:var(--text-secondary); border:1px solid var(--card-border); border-radius:50px; cursor:pointer; font-size:0.85em; font-family:inherit;">🔄 Refresh</button>
             </div>
             
             <!-- Change Password Section -->
