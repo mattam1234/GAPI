@@ -3699,14 +3699,43 @@ def api_stats_compare():
 @app.route('/api/users')
 @require_login
 def api_users_list():
-    """Get all registered users (for multi-user game picker)"""
+    """Get users for the multi-user game picker.
+
+    Query params:
+      scope: 'all' (default) | 'friends' | 'me_and_friends'
+    """
+    username = get_current_username()
+    scope = (request.args.get('scope') or 'all').strip().lower()
     users = user_manager.get_all_users()
-    # Filter to users with at least one platform ID
-    users_with_games = [
-        u for u in users
-        if u.get('steam_id') or u.get('epic_id') or u.get('gog_id')
-    ]
-    return jsonify({'users': users_with_games})
+
+    if scope in ('friends', 'me_and_friends'):
+        allowed_usernames = set()
+        if scope == 'me_and_friends' and username:
+            allowed_usernames.add(str(username).strip().lower())
+
+        if ensure_db_available() and username:
+            db = database.SessionLocal()
+            try:
+                friends_data = database.get_app_friends_with_platforms(db, username)
+                for friend in friends_data.get('friends', []):
+                    friend_username = str(friend.get('username') or '').strip().lower()
+                    if friend_username:
+                        allowed_usernames.add(friend_username)
+            finally:
+                db.close()
+
+        users = [
+            u for u in users
+            if str(u.get('username') or '').strip().lower() in allowed_usernames
+        ]
+
+    if scope == 'all':
+        users = [
+            u for u in users
+            if u.get('steam_id') or u.get('epic_id') or u.get('gog_id')
+        ]
+
+    return jsonify({'users': users})
 
 
 # ===========================================================================================

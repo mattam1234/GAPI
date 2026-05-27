@@ -2532,7 +2532,7 @@
             checkboxDiv.innerHTML = renderSkeletonList(3);
             
             try {
-                const response = await fetch('/api/users');
+                const response = await fetch('/api/users?scope=me_and_friends');
                 const data = await response.json();
                 
                 if (data.users && data.users.length > 0) {
@@ -2934,6 +2934,11 @@
             }
             if (discordDropdown && discordField && !discordField.contains(event.target) && !discordDropdown.contains(event.target)) {
                 discordDropdown.style.display = 'none';
+            }
+            const sessionDiscordDropdown = document.getElementById('session-discord-guild-dropdown');
+            const sessionDiscordField = document.getElementById('session-discord-guild-search');
+            if (sessionDiscordDropdown && sessionDiscordField && !sessionDiscordField.contains(event.target) && !sessionDiscordDropdown.contains(event.target)) {
+                sessionDiscordDropdown.style.display = 'none';
             }
             if (scheduleMembersDropdown && scheduleMembersField
                 && !scheduleMembersField.contains(event.target)
@@ -6209,10 +6214,35 @@ Event ID: ${result.discord_event_id}`);
                 await loadSyncSettings();
                 await loadMigrations();
                 await refreshPlatformFilters();
+                loadSettingsDiscordGuilds();
             } catch (error) {
                 console.error('Error loading settings:', error);
             }
         }
+
+        async function loadSettingsDiscordGuilds(force = false) {
+            const container = document.getElementById('settings-discord-guilds-list');
+            if (!container) return;
+            try {
+                const guilds = await loadScheduleDiscordGuilds(force);
+                if (!guilds.length) {
+                    container.innerHTML = '<div style="color:var(--text-secondary); font-size:0.9em;">No Discord servers found. Make sure your Discord ID is saved and talk to the bot in your server.</div>';
+                    return;
+                }
+                container.innerHTML = guilds.map(g => `
+                    <div style="display:flex; align-items:center; gap:10px; padding:8px 10px; background:var(--input-bg); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); margin-bottom:6px;">
+                        ${g.icon_url ? `<img src="${escAttr(g.icon_url)}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">` : `<div style="width:32px;height:32px;border-radius:50%;background:#5865F2;display:flex;align-items:center;justify-content:center;color:white;font-size:0.85em;flex-shrink:0;">💠</div>`}
+                        <div>
+                            <div style="font-weight:600;">${escapeHtml(g.guild_name || g.guild_id || '')}</div>
+                            <div style="color:var(--text-secondary);font-size:0.78em;">ID: ${escapeHtml(g.guild_id || '')}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                container.innerHTML = '<div style="color:var(--text-secondary); font-size:0.9em;">Could not load Discord servers.</div>';
+            }
+        }
+
 
         async function checkInitialSetup() {
             try {
@@ -8592,11 +8622,10 @@ Event ID: ${result.discord_event_id}`);
             return (el && el.textContent ? el.textContent.trim() : '');
         }
 
-        function populateLiveSessionDiscordChannels() {
-            const guildSelect = document.getElementById('session-discord-guild');
+        function populateLiveSessionDiscordChannels(guildId) {
             const channelSelect = document.getElementById('session-discord-channel');
-            if (!guildSelect || !channelSelect) return;
-            const guild = liveSessionDiscordGuilds.find(g => g.guild_id === guildSelect.value);
+            if (!channelSelect) return;
+            const guild = liveSessionDiscordGuilds.find(g => g.guild_id === guildId);
             const channels = guild ? (guild.channels || []) : [];
             channelSelect.innerHTML = '<option value="">Choose Discord channel</option>';
             channels.forEach(channel => {
@@ -8609,21 +8638,12 @@ Event ID: ${result.discord_event_id}`);
         }
 
         async function loadLiveSessionDiscordLocations() {
-            const guildSelect = document.getElementById('session-discord-guild');
             const hintEl = document.getElementById('session-discord-hint');
-            if (!guildSelect) return;
             try {
                 const resp = await fetch('/api/live-session/discord-locations');
                 const data = await resp.json();
                 const guilds = data.guilds || [];
                 liveSessionDiscordGuilds = guilds;
-                guildSelect.innerHTML = '<option value="">No Discord sync</option>';
-                guilds.forEach(guild => {
-                    const option = document.createElement('option');
-                    option.value = guild.guild_id;
-                    option.textContent = guild.guild_name;
-                    guildSelect.appendChild(option);
-                });
                 if (hintEl) {
                     if (guilds.length) {
                         hintEl.textContent = 'Choose a Discord server and channel to mirror the session through the bot.';
@@ -8631,19 +8651,60 @@ Event ID: ${result.discord_event_id}`);
                         hintEl.textContent = data.error || 'Link your Discord ID in Settings, then talk to the bot in your server so it can cache your available channels.';
                     }
                 }
-                populateLiveSessionDiscordChannels();
+                populateLiveSessionDiscordChannels('');
             } catch (err) {
                 if (hintEl) hintEl.textContent = 'Could not load Discord channels right now.';
             }
         }
 
+        async function showSessionDiscordGuildSearch() {
+            const dropdown = document.getElementById('session-discord-guild-dropdown');
+            const input = document.getElementById('session-discord-guild-search');
+            if (!dropdown || !input) return;
+            if (!liveSessionDiscordGuilds.length) {
+                await loadLiveSessionDiscordLocations();
+            }
+            const query = input.value.trim().toLowerCase();
+            const guilds = liveSessionDiscordGuilds;
+            const filtered = guilds.filter(g => {
+                if (!query) return true;
+                return String(g.guild_name || '').toLowerCase().includes(query)
+                    || String(g.guild_id || '').toLowerCase().includes(query);
+            });
+            if (!filtered.length) {
+                dropdown.innerHTML = '<div style="padding:10px; color:var(--text-secondary);">No Discord servers found</div>';
+                dropdown.style.display = 'block';
+                return;
+            }
+            dropdown.innerHTML = filtered.map(g => `
+                <div class="schedule-discord-guild-result" data-guild-id="${escAttr(g.guild_id || '')}" data-guild-name="${escAttr(g.guild_name || '')}"
+                     style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border); display:flex; align-items:center; gap:8px; width:100%;">
+                    ${g.icon_url ? `<img src="${escAttr(g.icon_url)}" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;flex-shrink:0;">` : `<div style="width:24px;height:24px;border-radius:50%;background:#5865F2;display:flex;align-items:center;justify-content:center;color:white;font-size:0.75em;flex-shrink:0;">💠</div>`}
+                    <div>
+                        <strong>${escapeHtml(g.guild_name || g.guild_id || '')}</strong>
+                        <div style="color:var(--text-secondary); font-size:0.8em;">${escapeHtml(g.guild_id || '')}</div>
+                    </div>
+                </div>
+            `).join('');
+            dropdown.querySelectorAll('.schedule-discord-guild-result').forEach(el => {
+                el.onclick = () => selectSessionDiscordGuild(el.dataset.guildId, el.dataset.guildName);
+            });
+            dropdown.style.display = 'block';
+        }
+
+        function selectSessionDiscordGuild(guildId, guildName) {
+            document.getElementById('session-discord-guild-id').value = guildId || '';
+            document.getElementById('session-discord-guild-search').value = guildName || guildId || '';
+            document.getElementById('session-discord-guild-dropdown').style.display = 'none';
+            populateLiveSessionDiscordChannels(guildId || '');
+        }
+
         async function createLiveSession() {
             const nameInput = document.getElementById('session-name-input');
             const coopOnly = document.getElementById('session-coop-only').checked;
-            const guildSelect = document.getElementById('session-discord-guild');
             const channelSelect = document.getElementById('session-discord-channel');
             const name = (nameInput.value || '').trim();
-            const discordGuildId = (guildSelect && guildSelect.value) || '';
+            const discordGuildId = (document.getElementById('session-discord-guild-id')?.value || '').trim();
             const discordChannelId = (channelSelect && channelSelect.value) || '';
             if (discordGuildId && !discordChannelId) {
                 showMessage('Choose a Discord channel for the selected server', 'error');
@@ -8667,8 +8728,7 @@ Event ID: ${result.discord_event_id}`);
                 }
                 showMessage('Session created!', 'success');
                 if (nameInput) nameInput.value = '';
-                if (guildSelect) guildSelect.value = '';
-                populateLiveSessionDiscordChannels();
+                selectSessionDiscordGuild('', '');
                 activeLiveSessionId = data.session_id;
                 await loadLiveSessions();
                 renderLiveSessionDetails(data);
