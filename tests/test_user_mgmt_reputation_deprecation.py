@@ -892,5 +892,47 @@ class TestDeprecationHeaders(unittest.TestCase):
                                f'Sunset date {sunset_str} should be in the future')
 
 
+class TestUsersListScopes(unittest.TestCase):
+    def setUp(self):
+        gapi_gui.app.config['TESTING'] = True
+        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        self.client = gapi_gui.app.test_client()
+
+    def test_users_list_scope_me_and_friends_limits_candidates(self):
+        _set_user_session(self.client, 'alice')
+        all_users = [
+            {'username': 'alice', 'steam_id': '', 'epic_id': '', 'gog_id': ''},
+            {'username': 'bob', 'steam_id': '123', 'epic_id': '', 'gog_id': ''},
+            {'username': 'charlie', 'steam_id': '999', 'epic_id': '', 'gog_id': ''},
+        ]
+        fake_db = MagicMock()
+        with patch.object(gapi_gui.user_manager, 'get_all_users', return_value=all_users), \
+             patch.object(gapi_gui, 'ensure_db_available', return_value=True), \
+             patch('database.SessionLocal', return_value=fake_db), \
+             patch('database.get_app_friends_with_platforms', return_value={
+                 'friends': [{'username': 'bob'}],
+                 'sent': [],
+                 'received': [],
+             }):
+            resp = self.client.get('/api/users?scope=me_and_friends')
+
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertEqual([u['username'] for u in data['users']], ['alice', 'bob'])
+
+    def test_users_list_default_scope_keeps_platform_filter(self):
+        _set_user_session(self.client, 'alice')
+        all_users = [
+            {'username': 'alice', 'steam_id': '', 'epic_id': '', 'gog_id': ''},
+            {'username': 'bob', 'steam_id': '123', 'epic_id': '', 'gog_id': ''},
+        ]
+        with patch.object(gapi_gui.user_manager, 'get_all_users', return_value=all_users):
+            resp = self.client.get('/api/users')
+
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertEqual([u['username'] for u in data['users']], ['bob'])
+
+
 if __name__ == '__main__':
     unittest.main()

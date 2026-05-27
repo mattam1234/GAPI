@@ -2532,7 +2532,7 @@
             checkboxDiv.innerHTML = renderSkeletonList(3);
             
             try {
-                const response = await fetch('/api/users');
+                const response = await fetch('/api/users?scope=me_and_friends');
                 const data = await response.json();
                 
                 if (data.users && data.users.length > 0) {
