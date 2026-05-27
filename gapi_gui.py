@@ -3543,135 +3543,154 @@ def api_stats():
         return jsonify({'error': 'Failed to load stats'}), 500
 
 
+@app.route('/api/stats/compare/candidates')
+@require_login
+def api_stats_compare_candidates():
+    """Return users available for comparison, filtered by scope.
+
+    Query params:
+      scope: 'all' (default) | 'friends' | 'me_and_friends'
+    """
+    current = get_current_username()
+    scope = request.args.get('scope', 'all')
+
+    if not ensure_db_available():
+        return jsonify({'users': [], 'current_user': current}), 200
+
+    try:
+        db = database.SessionLocal()
+        try:
+            if scope in ('friends', 'me_and_friends'):
+                friends_data = database.get_app_friends(db, current)
+                friend_usernames = [f['username'] for f in friends_data.get('friends', [])]
+                if scope == 'me_and_friends':
+                    candidates = [current] + friend_usernames
+                else:
+                    candidates = friend_usernames
+                users = [{'username': u} for u in candidates]
+            else:
+                # all: return all users who have a cached library
+                all_users = user_manager.get_all_users()
+                users = [{'username': u['username']} for u in all_users if u.get('username')]
+        finally:
+            db.close()
+
+        return jsonify({'users': users, 'current_user': current})
+    except Exception as e:
+        gui_logger.error(f"Error fetching compare candidates: {e}")
+        return jsonify({'users': [], 'current_user': current}), 200
+
+
 @app.route('/api/stats/compare')
 @require_login
 def api_stats_compare():
-    """Compare statistics across multiple users"""
-    # Get list of usernames to compare
+    """Compare statistics across multiple users using per-user DB library cache."""
     users_param = request.args.get('users', '')
     if not users_param:
         return jsonify({'error': 'No users specified'}), 400
-    
+
     usernames = [u.strip() for u in users_param.split(',') if u.strip()]
     if not usernames:
         return jsonify({'error': 'Invalid users parameter'}), 400
-    
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
     comparison_data = {
         'users': [],
         'comparison_metrics': {}
     }
-    
+
     try:
-        # Load base config
-        base_config = load_base_config()
-        
-        # Gather stats for each user
-        for username in usernames:
-            try:
-                # Get user's platform IDs
-                user_ids = user_manager.get_user_ids(username)
-                
-                # Create temporary config with user's IDs
-                user_config = {
-                    'steam_api_key': base_config.get('steam_api_key', ''),
-                    'steam_id': user_ids.get('steam_id', ''),
-                    'epic_enabled': user_ids.get('epic_id') != '',
-                    'epic_id': user_ids.get('epic_id', ''),
-                    'gog_enabled': user_ids.get('gog_id') != '',
-                    'gog_id': user_ids.get('gog_id', '')
-                }
-                
-                # Load user's games using GamePicker
+        db = database.SessionLocal()
+        try:
+            # Collect per-user library data and stats from the DB cache
+            user_game_ids: dict[str, set] = {}
+            for username in usernames:
                 try:
-                    # Write temporary config to a file for GamePicker to load
-                    temp_config_path = os.path.join(tempfile.gettempdir(), f'.gapi_compare_{username}_config.json')
-                    with open(temp_config_path, 'w') as f:
-                        json.dump(user_config, f)
-                    
-                    # Create picker for this user
-                    user_picker = gapi.GamePicker(config_path=temp_config_path)
-                    user_picker.fetch_games()
-                    games = user_picker.games if user_picker.games else []
-                    
-                    # Clean up temp file
-                    try:
-                        os.remove(temp_config_path)
-                    except:
-                        pass
+                    if _library_service:
+                        cached_games = _library_service.get_cached(db, username)
+                    else:
+                        cached_games = database.get_cached_library(db, username)
+
+                    total = len(cached_games)
+                    unplayed = len([g for g in cached_games if g.get('playtime_hours', 0) == 0])
+                    total_playtime = sum(g.get('playtime_hours', 0) for g in cached_games)
+                    avg_playtime = total_playtime / total if total > 0 else 0
+
+                    top_games = sorted(
+                        cached_games,
+                        key=lambda g: g.get('playtime_hours', 0),
+                        reverse=True
+                    )[:5]
+
+                    # Collect canonical game keys for shared-game analysis
+                    user_game_ids[username] = set(
+                        g.get('app_id') or g.get('name', '')
+                        for g in cached_games
+                        if g.get('app_id') or g.get('name')
+                    )
+
+                    comparison_data['users'].append({
+                        'username': username,
+                        'total_games': total,
+                        'unplayed_games': unplayed,
+                        'played_games': total - unplayed,
+                        'unplayed_percentage': round(unplayed / total * 100, 1) if total > 0 else 0,
+                        'total_playtime': round(total_playtime, 1),
+                        'average_playtime': round(avg_playtime, 1),
+                        'top_games': [
+                            {
+                                'name': g.get('name', 'Unknown'),
+                                'playtime_hours': round(g.get('playtime_hours', 0), 1)
+                            }
+                            for g in top_games
+                        ]
+                    })
+
                 except Exception as e:
-                    gui_logger.warning(f"Failed to load games for user {username}: {e}")
-                    games = []
-                
-                # If no games loaded, use demo games for demo purposes
-                if not games:
-                    games = DEMO_GAMES
-                
-                # Calculate stats
-                total = len(games)
-                unplayed = len([g for g in games if g.get('playtime_forever', 0) == 0])
-                total_playtime = sum(g.get('playtime_forever', 0) for g in games) / 60
-                avg_playtime = total_playtime / total if total > 0 else 0
-                
-                # Top 5 games
-                top_games = sorted(
-                    games,
-                    key=lambda g: g.get('playtime_forever', 0),
-                    reverse=True
-                )[:5]
-                
-                user_stats = {
-                    'username': username,
-                    'total_games': total,
-                    'unplayed_games': unplayed,
-                    'played_games': total - unplayed,
-                    'unplayed_percentage': round(unplayed / total * 100, 1) if total > 0 else 0,
-                    'total_playtime': round(total_playtime, 1),
-                    'average_playtime': round(avg_playtime, 1),
-                    'top_games': [
-                        {
-                            'name': g.get('name', 'Unknown'),
-                            'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1)
-                        }
-                        for g in top_games
-                    ]
-                }
-                
-                comparison_data['users'].append(user_stats)
-                
-            except Exception as e:
-                gui_logger.warning(f"Error loading stats for user {username}: {e}")
-                # Still include user with error indicator
-                comparison_data['users'].append({
-                    'username': username,
-                    'error': str(e),
-                    'total_games': 0,
-                    'unplayed_games': 0,
-                    'played_games': 0
-                })
-        
-        # Calculate comparison metrics
-        if comparison_data['users']:
-            valid_users = [u for u in comparison_data['users'] if 'error' not in u]
-            
-            if valid_users:
-                total_games_list = [u['total_games'] for u in valid_users]
-                playtime_list = [u['total_playtime'] for u in valid_users]
-                
-                comparison_data['comparison_metrics'] = {
-                    'most_games': max(total_games_list) if total_games_list else 0,
-                    'least_games': min(total_games_list) if total_games_list else 0,
-                    'avg_games': round(sum(total_games_list) / len(total_games_list), 1) if total_games_list else 0,
-                    'most_playtime': max(playtime_list) if playtime_list else 0,
-                    'least_playtime': min(playtime_list) if playtime_list else 0,
-                    'avg_playtime': round(sum(playtime_list) / len(playtime_list), 1) if playtime_list else 0,
-                    'total_unique_games': len(set(
-                        g.get('app_id') for user in valid_users 
-                        for g in user.get('games', [])
-                    ))
-                }
-        
+                    gui_logger.warning(f"Error loading stats for user {username}: {e}")
+                    user_game_ids[username] = set()
+                    comparison_data['users'].append({
+                        'username': username,
+                        'error': str(e),
+                        'total_games': 0,
+                        'unplayed_games': 0,
+                        'played_games': 0,
+                        'total_playtime': 0,
+                        'average_playtime': 0,
+                    })
+        finally:
+            db.close()
+
+        # Compute aggregate comparison metrics
+        valid_users = [u for u in comparison_data['users'] if 'error' not in u]
+        if valid_users:
+            total_games_list = [u['total_games'] for u in valid_users]
+            playtime_list = [u['total_playtime'] for u in valid_users]
+
+            # Shared games: present in ALL compared users' libraries
+            if user_game_ids:
+                all_id_sets = list(user_game_ids.values())
+                shared_ids = all_id_sets[0].intersection(*all_id_sets[1:]) if len(all_id_sets) > 1 else set()
+                total_unique = len(set().union(*all_id_sets)) if all_id_sets else 0
+            else:
+                shared_ids = set()
+                total_unique = 0
+
+            comparison_data['comparison_metrics'] = {
+                'most_games': max(total_games_list),
+                'least_games': min(total_games_list),
+                'avg_games': round(sum(total_games_list) / len(total_games_list), 1),
+                'most_playtime': max(playtime_list),
+                'least_playtime': min(playtime_list),
+                'avg_playtime': round(sum(playtime_list) / len(playtime_list), 1),
+                'total_unique_games': total_unique,
+                'shared_game_count': len(shared_ids),
+            }
+
         return jsonify(comparison_data), 200
-        
+
     except Exception as e:
         gui_logger.error(f"Error comparing stats: {e}")
         return jsonify({'error': 'Failed to compare statistics'}), 500
@@ -7747,24 +7766,51 @@ def api_messages(username):
 @app.route('/api/library/compare/<username>', methods=['GET'])
 @require_login
 def api_compare_libraries(username):
-    """Compare game libraries with another user"""
+    """Compare the current user's game library with one other user's library.
+
+    Returns per-user game lists plus shared/exclusive sets.
+    """
+    current = get_current_username()
+    other = unquote(username) if '%' in username else username
+
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
     try:
-        decoded = unquote(username) if '%' in username else username
-        
-        # Mock data - in production, query actual game libraries
-        your_games = ['Portal 2', 'The Witcher 3', 'Elden Ring', 'Baldurs Gate 3', 'Hollow Knight', 'Hades']
-        their_games = ['Portal 2', 'Dark Souls 3', 'Starfield', 'Baldurs Gate 3', 'Stardew Valley', 'Terraria']
-        shared = [g for g in your_games if g in their_games]
-        
+        db = database.SessionLocal()
+        try:
+            if _library_service:
+                your_games_raw = _library_service.get_cached(db, current)
+                their_games_raw = _library_service.get_cached(db, other)
+            else:
+                your_games_raw = database.get_cached_library(db, current)
+                their_games_raw = database.get_cached_library(db, other)
+        finally:
+            db.close()
+
+        def _game_key(g):
+            return g.get('app_id') or g.get('name', '')
+
+        your_map = {_game_key(g): g.get('name', 'Unknown') for g in your_games_raw if _game_key(g)}
+        their_map = {_game_key(g): g.get('name', 'Unknown') for g in their_games_raw if _game_key(g)}
+
+        shared_keys = set(your_map) & set(their_map)
+        shared_games = sorted(your_map[k] for k in shared_keys)
+        your_only = sorted(your_map[k] for k in set(your_map) - shared_keys)
+        their_only = sorted(their_map[k] for k in set(their_map) - shared_keys)
+
         return jsonify({
-            'your_games': your_games,
-            'their_games': their_games,
-            'shared_games': shared,
-            'your_count': len(your_games),
-            'their_count': len(their_games),
-            'shared_count': len(shared)
+            'your_games': sorted(your_map.values()),
+            'their_games': sorted(their_map.values()),
+            'shared_games': shared_games,
+            'your_only': your_only,
+            'their_only': their_only,
+            'your_count': len(your_map),
+            'their_count': len(their_map),
+            'shared_count': len(shared_games),
         })
     except Exception as e:
+        gui_logger.error(f"Error comparing libraries for {current} vs {other}: {e}")
         return jsonify({'error': str(e)}), 500
 
 

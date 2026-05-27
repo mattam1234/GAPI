@@ -590,7 +590,14 @@
             <div style="background: var(--card-bg); padding: var(--space-xl); border-radius: var(--radius, 12px); margin-bottom: 20px; border: 1px solid var(--card-border);">
                 <h3>👥 Compare Users (Optional)</h3>
                 <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: var(--font-md);">Select multiple users to compare statistics side-by-side</p>
-                
+
+                <!-- Scope selector -->
+                <div style="display: flex; gap: var(--space-9); margin-bottom: var(--space-md); flex-wrap: wrap;" id="compare-scope-btns">
+                    <button class="compare-scope-btn active" data-scope="all" onclick="setCompareScope('all')" style="padding: var(--space-9) var(--space-md); border-radius: 50px; border: 1.5px solid #4f46e5; background: #4f46e5; color: white; cursor: pointer; font-weight: 600; font-size: var(--font-sm); font-family: inherit;">🌐 All Users</button>
+                    <button class="compare-scope-btn" data-scope="me_and_friends" onclick="setCompareScope('me_and_friends')" style="padding: var(--space-9) var(--space-md); border-radius: 50px; border: 1.5px solid var(--card-border); background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 600; font-size: var(--font-sm); font-family: inherit;">🤝 Me + Friends</button>
+                    <button class="compare-scope-btn" data-scope="friends" onclick="setCompareScope('friends')" style="padding: var(--space-9) var(--space-md); border-radius: 50px; border: 1.5px solid var(--card-border); background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 600; font-size: var(--font-sm); font-family: inherit;">👥 Friends Only</button>
+                </div>
+
                 <div id="comparison-user-checkboxes" style="margin-top: 15px; margin-bottom: 15px;">
                     <div class="loading">Loading users...</div>
                 </div>
