@@ -11,7 +11,7 @@ import json
 import os
 import sys
 import asyncio
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set, Optional, Tuple
 from datetime import datetime, timedelta
 import requests
 import multiuser
@@ -160,6 +160,83 @@ class GAPIBot(discord.Client):
         if not database.SessionLocal:
             return None
         return database.SessionLocal()
+
+    def _sync_multi_picker_link(self, username: str, discord_user_id: int, steam_id: str) -> None:
+        """Keep MultiUserPicker metadata aligned with DB-backed Discord links."""
+        discord_id_str = str(discord_user_id)
+        matched = False
+        for user in self.multi_picker.users:
+            if user.get('name') == username or str(user.get('discord_id', '')) == discord_id_str:
+                user['name'] = username
+                user['discord_id'] = discord_id_str
+                platforms = user.get('platforms')
+                if not isinstance(platforms, dict):
+                    platforms = {}
+                platforms['steam'] = steam_id
+                user['platforms'] = platforms
+                matched = True
+                break
+
+        if matched:
+            save_users = getattr(self.multi_picker, 'save_users', None)
+            if callable(save_users):
+                save_users()
+            return
+
+        self.multi_picker.add_user(username, steam_id, discord_id=discord_id_str)
+
+    def _link_discord_account(self, discord_user_id: int, username: str, steam_id: Optional[str] = None) -> Tuple[bool, str]:
+        """Link a Discord account to an existing GAPI user."""
+        clean_username = str(username or '').strip()
+        clean_steam_id = str(steam_id or '').strip()
+        if not clean_username:
+            return False, "❌ `username` is required and must match your GAPI username."
+
+        db = self._db_session()
+        if not db:
+            return False, "❌ Database unavailable. Cannot link accounts right now."
+
+        try:
+            user = database.get_user_by_username(db, clean_username)
+            if not user:
+                return False, f"❌ GAPI user `{clean_username}` was not found."
+
+            caller_discord_id = str(discord_user_id)
+            linked_discord_id = str(getattr(user, 'discord_id', '') or '').strip()
+            if linked_discord_id and linked_discord_id != caller_discord_id:
+                return False, f"❌ GAPI user `{clean_username}` is already linked to another Discord account."
+
+            existing_discord_user = database.get_user_by_discord_id(db, caller_discord_id)
+            if existing_discord_user and existing_discord_user.username != clean_username:
+                return False, (
+                    f"❌ This Discord account is already linked to GAPI user "
+                    f"`{existing_discord_user.username}`."
+                )
+
+            effective_steam_id = clean_steam_id or str(getattr(user, 'steam_id', '') or '').strip()
+            if not effective_steam_id:
+                return False, (
+                    "❌ No Steam ID is saved for that GAPI user. "
+                    "Provide `steam_id` or update your profile first."
+                )
+
+            user.discord_id = caller_discord_id
+            if clean_steam_id:
+                user.steam_id = clean_steam_id
+            db.commit()
+
+            self.user_mappings[discord_user_id] = effective_steam_id
+            self._sync_multi_picker_link(clean_username, discord_user_id, effective_steam_id)
+            return True, (
+                f"✅ Linked <@{discord_user_id}> to GAPI user `{clean_username}` "
+                f"(Steam ID: `{effective_steam_id}`)"
+            )
+        except Exception as e:
+            db.rollback()
+            print(f"❌ Error linking Discord account: {e}")
+            return False, "❌ Failed to link account due to a database error."
+        finally:
+            db.close()
 
     def _build_discord_location_payloads(self) -> List[Dict]:
         """Snapshot guild/channel/member data for the web UI cache."""
@@ -837,21 +914,13 @@ class GAPIBot(discord.Client):
         
         @self.tree.command(name='link', description='Link your Discord account to your Steam ID')
         @app_commands.describe(
-            steam_id='Your Steam ID (64-bit format)',
-            username='Optional: Custom username (defaults to your Discord name)'
+            username='Your existing GAPI username',
+            steam_id='Optional Steam ID (uses your saved GAPI Steam ID if omitted)'
         )
-        async def link_steam(interaction: discord.Interaction, steam_id: str, username: Optional[str] = None):
+        async def link_steam(interaction: discord.Interaction, username: str, steam_id: Optional[str] = None):
             """Link Discord user to Steam account"""
-            user_name = username or interaction.user.name
-            
-            # Add to multi-user picker
-            self.multi_picker.add_user(user_name, steam_id)
-            
-            # Add to Discord mapping
-            self.user_mappings[interaction.user.id] = steam_id
-            self.save_user_mappings()
-            
-            await interaction.response.send_message(f"✅ Linked {interaction.user.mention} to Steam ID: {steam_id}")
+            success, message = self._link_discord_account(interaction.user.id, username, steam_id)
+            await interaction.response.send_message(message, ephemeral=not success)
         
         @self.tree.command(name='unlink', description='Unlink your Steam account')
         async def unlink_steam(interaction: discord.Interaction):
@@ -919,7 +988,7 @@ class GAPIBot(discord.Client):
                 )
             else:
                 await interaction.response.send_message(
-                    f"❌ {interaction.user.mention} is not linked yet. Use `/link steam_id:<id>`"
+                    f"❌ {interaction.user.mention} is not linked yet. Use `/link username:<gapi_username> [steam_id:<id>]`"
                 )
 
         @self.tree.command(name='help', description='Show available GAPI bot commands')
