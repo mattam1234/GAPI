@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch GAPI source/config files and trigger controlled restart
+
+[Path]
+PathModified=/opt/GAPI/gapi_gui.py
+PathModified=/opt/GAPI/templates/index.html
+PathModified=/opt/GAPI/static/main.js
+PathModified=/opt/GAPI/static/style.css
+PathModified=/opt/GAPI/config.json
+Unit=gapi-watch.service
+
+[Install]
+WantedBy=multi-user.target

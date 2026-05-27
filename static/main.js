@@ -403,7 +403,7 @@
                 'library-list', 'favorites-list', 'ignored-games-list',
                 'backlog-list', 'playlists-list', 'playlists-container',
                 'achievements-list', 'friends-list', 'recommendations-list',
-                'schedule-list', 'notifications-list', 'leaderboard-list', 'dash-leaderboard-list',
+                'schedule-list', 'schedule-pending-list', 'notifications-list', 'leaderboard-list', 'dash-leaderboard-list',
                 'users-list', 'common-games-list', 'presence-avatars', 'dash-online-list'
             ];
             listIds.forEach(id => {
@@ -3140,8 +3140,12 @@
         }
 
         function getScheduleEventRsvpEntries(event) {
-            const attendees = Array.isArray(event?.attendees) ? event.attendees : [];
-            const attendeeIds = Array.isArray(event?.attendee_ids) ? event.attendee_ids : [];
+            const attendees = Array.isArray(event?.invited_attendees) && event.invited_attendees.length
+                ? event.invited_attendees
+                : (Array.isArray(event?.attendees) ? event.attendees : []);
+            const attendeeIds = Array.isArray(event?.invited_attendee_ids) && event.invited_attendee_ids.length
+                ? event.invited_attendee_ids
+                : (Array.isArray(event?.attendee_ids) ? event.attendee_ids : []);
             const rsvpMap = event?.rsvp_statuses && typeof event.rsvp_statuses === 'object' ? event.rsvp_statuses : {};
             return attendees.map((name, index) => {
                 const attendeeId = attendeeIds[index] || name;
@@ -3151,6 +3155,26 @@
                     status: normalizeScheduleRsvpStatus(rsvpMap[attendeeId] || rsvpMap[name] || 'pending'),
                 };
             });
+        }
+
+        function eventHasPendingInviteForCurrentUser(event) {
+            const current = getScheduleCurrentUsername().toLowerCase();
+            if (!current) return false;
+            const entry = getScheduleEventRsvpEntries(event).find(item => (
+                String(item.id || '').trim().toLowerCase() === current
+                || String(item.name || '').trim().toLowerCase() === current
+            ));
+            return !!entry && entry.status === 'pending';
+        }
+
+        function splitScheduleEventsByInviteState(events = []) {
+            const pendingInvites = [];
+            const acceptedEvents = [];
+            (events || []).forEach(event => {
+                if (eventHasPendingInviteForCurrentUser(event)) pendingInvites.push(event);
+                else acceptedEvents.push(event);
+            });
+            return { pendingInvites, acceptedEvents };
         }
 
         function buildScheduleRsvpSummary(event) {
@@ -3448,9 +3472,11 @@
                 ensureScheduleAgendaWeek(scheduleFilteredEventsCache.length ? scheduleFilteredEventsCache : scheduleEventsCache);
             }
             updateScheduleFilterSummary(scheduleFilteredEventsCache);
-            renderScheduleList(scheduleFilteredEventsCache);
-            renderScheduleAgenda(scheduleFilteredEventsCache);
-            hydrateScheduleEventDetails(scheduleFilteredEventsCache);
+            const { pendingInvites, acceptedEvents } = splitScheduleEventsByInviteState(scheduleFilteredEventsCache);
+            renderSchedulePendingInvites(pendingInvites);
+            renderScheduleList(acceptedEvents);
+            renderScheduleAgenda(acceptedEvents);
+            hydrateScheduleEventDetails(acceptedEvents);
         }
 
         function clearScheduleFilters() {
@@ -3507,14 +3533,17 @@
 
         async function loadSchedule() {
             const listDiv = document.getElementById('schedule-list');
+            const pendingListDiv = document.getElementById('schedule-pending-list');
             const agendaDiv = document.getElementById('schedule-agenda');
             if (listDiv) listDiv.innerHTML = renderSkeletonList(5);
+            if (pendingListDiv) pendingListDiv.innerHTML = renderSkeletonList(2);
             if (agendaDiv) agendaDiv.innerHTML = '<div class="loading">Loading agenda…</div>';
             try {
                 const query = activeScheduleId ? `?schedule_id=${encodeURIComponent(activeScheduleId)}` : '';
                 const resp = await fetch(`/api/schedule${query}`);
                 if (!resp.ok) {
                     if (listDiv) listDiv.innerHTML = '<div class="error">Could not load schedule</div>';
+                    if (pendingListDiv) pendingListDiv.innerHTML = '<div class="error">Could not load invites</div>';
                     if (agendaDiv) agendaDiv.innerHTML = '<div class="error">Could not load agenda</div>';
                     return;
                 }
@@ -3530,6 +3559,7 @@
                 applyScheduleFilters();
             } catch (e) {
                 if (listDiv) listDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+                if (pendingListDiv) pendingListDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
                 if (agendaDiv) agendaDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
             }
         }
@@ -3544,6 +3574,53 @@
                 return;
             }
             listDiv.innerHTML = events.map(ev => renderEventCard(ev)).join('');
+        }
+
+        function renderSchedulePendingInvites(events = []) {
+            const listDiv = document.getElementById('schedule-pending-list');
+            if (!listDiv) return;
+            if (!events.length) {
+                listDiv.innerHTML = '<div style="color:var(--text-secondary);padding:14px;">No pending invites.</div>';
+                return;
+            }
+            listDiv.innerHTML = events.map(ev => {
+                const title = escapeHtml(ev.title || 'Game Night');
+                const game = escapeHtml(ev.game_name || 'No game selected');
+                const timeLabel = escapeHtml(buildScheduleEventListTimeText(ev));
+                return `
+                    <div class="schedule-event-card pending-invite">
+                        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <strong>${title}</strong>
+                            <span style="color:var(--text-secondary); font-size:0.85em;">${timeLabel}</span>
+                        </div>
+                        <div style="margin-top:6px; color:var(--text-secondary); font-size:0.88em;">🎮 ${game}</div>
+                        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                            <button type="button" class="schedule-rsvp-btn active" onclick="submitScheduleRsvp('${escAttr(ev.id)}', 'accepted')">✅ Accept</button>
+                            <button type="button" class="schedule-rsvp-btn" onclick="submitScheduleRsvp('${escAttr(ev.id)}', 'maybe')">❔ Maybe</button>
+                            <button type="button" class="schedule-rsvp-btn" onclick="submitScheduleRsvp('${escAttr(ev.id)}', 'declined')">❌ Decline</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function submitScheduleRsvp(eventId, status) {
+            try {
+                const resp = await safeFetch(`/api/schedule/${eventId}/rsvp`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Could not update RSVP.', 'error');
+                    return;
+                }
+                await loadSchedule();
+                showMessage('RSVP updated.', 'success');
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            }
         }
 
         function buildScheduleGameLinks(appId, gameName) {
@@ -3582,6 +3659,12 @@
             const eventImageUrl = ev.game_image_url || (ev.game_appid ? `https://cdn.akamai.steamstatic.com/steam/apps/${ev.game_appid}/header.jpg` : '');
             const safeGameJs = escAttr(ev.game_name || '');
             const rsvpSummary = buildScheduleRsvpSummary(ev);
+            const attendeeEntries = getScheduleEventRsvpEntries(ev)
+                .filter(entry => entry.status === 'accepted')
+                .map(entry => ({
+                    ...entry,
+                    initials: String(entry.name || '?').trim().charAt(0).toUpperCase() || '?',
+                }));
             let gameImageHtml = '';
             if (eventImageUrl) {
                 gameImageHtml = `<img src="${escAttr(eventImageUrl)}" alt="Game" style="max-width:100px; max-height:60px; border-radius:var(--radius-xs,6px); margin-right:10px; object-fit:cover;">`;
@@ -3622,6 +3705,16 @@
                     ${rsvpSummary ? `<span>✅ RSVP ${escapeHtml(rsvpSummary)}</span>` : ''}
                     ${safeNotes ? `<span>📝 ${safeNotes}</span>` : ''}
                 </div>
+                ${attendeeEntries.length ? `
+                <div class="schedule-event-status-row">
+                    ${attendeeEntries.map(entry => `
+                        <span class="schedule-attendee-pill">
+                            <span class="schedule-attendee-avatar">${escapeHtml(entry.initials)}</span>
+                            <span>${escapeHtml(entry.name)}</span>
+                            <span class="schedule-rsvp-chip ${escAttr(entry.status)}">${escapeHtml(entry.status)}</span>
+                        </span>
+                    `).join('')}
+                </div>` : ''}
                 ${discordLinkedInfo}
                 ${ev.game_appid ? `
                 <div style="margin-top:8px; padding:10px; background:var(--list-hover); border-radius:var(--radius-sm,8px);">
@@ -3916,7 +4009,6 @@
                 duration_minutes: normalizeScheduleDurationMinutes(document.getElementById('sch-duration').value),
                 attendees: getScheduleEventAttendees(),
                 attendee_ids: getScheduleEventAttendeeIds(),
-                rsvp_statuses: getScheduleRsvpValues(),
                 game_name: document.getElementById('sch-game').value.trim(),
                 game_appid: document.getElementById('sch-game-appid').value,
                 game_image_url: document.getElementById('sch-game-image-url').value,
@@ -3927,6 +4019,9 @@
                 timezone_name: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
                 timezone_offset_minutes: new Date().getTimezoneOffset(),
             };
+            if (!editId) {
+                body.rsvp_statuses = getScheduleRsvpValues();
+            }
             try {
                 let resp;
                 if (editId) {
@@ -4394,7 +4489,7 @@
             const searchField = document.getElementById('sch-attendees');
             if (searchField) {
                 searchField.focus();
-                showMessage('Search for friends to invite, update the RSVP states, then save the event.', 'info');
+                showMessage('Search for friends to invite, then save the event. Invitees update their own RSVP status.', 'info');
             }
         }
 
@@ -5796,7 +5891,8 @@ Event ID: ${result.discord_event_id}`);
                 document.getElementById('nav-chat'),
                 document.getElementById('nav-friends'),
                 document.getElementById('nav-recommendations'),
-                document.getElementById('nav-achievements')
+                document.getElementById('nav-achievements'),
+                document.getElementById('nav-notifications')
             ];
             const adminTab = document.getElementById('nav-admin');
 
@@ -9035,7 +9131,7 @@ Event ID: ${result.discord_event_id}`);
         function updateNotifBadge(count) {
             const badge = document.getElementById('notif-badge');
             if (!badge) return;
-            if (count > 0) { badge.textContent = count; badge.style.display = 'inline'; }
+            if (count > 0) { badge.textContent = String(count); badge.style.display = 'inline-flex'; }
             else { badge.style.display = 'none'; }
         }
 

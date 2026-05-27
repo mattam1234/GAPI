@@ -107,6 +107,20 @@ docker-compose up -d
 # Access at http://localhost:5000
 ```
 
+## Optional: systemd service + auto-restart watcher (Linux)
+
+From `/tmp/workspace/mattam1234/GAPI`, install the provided unit files:
+
+```bash
+sudo install -m 644 systemd/gapi.service /etc/systemd/system/gapi.service
+sudo install -m 644 systemd/gapi-watch.service /etc/systemd/system/gapi-watch.service
+sudo install -m 644 systemd/gapi-watch.path /etc/systemd/system/gapi-watch.path
+sudo systemctl daemon-reload
+sudo systemctl enable --now gapi.service gapi-watch.path
+```
+
+The watcher triggers `systemctl try-restart gapi.service` on file changes, so restarts are controlled and only happen when the app is already running.
+
 ## Troubleshooting
 
 ### "No games found"

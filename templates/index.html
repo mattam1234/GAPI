@@ -164,12 +164,6 @@
                     <span class="sidebar-item-icon">🏅</span>
                     <span class="sidebar-item-label">Achievements</span>
                 </a>
-                <a class="sidebar-item" id="nav-notifications" onclick="switchTab('notifications',event)" role="button" tabindex="0">
-                    <span class="sidebar-item-icon">🔔</span>
-                    <span class="sidebar-item-label">Notifications</span>
-                    <span id="notif-badge" class="sidebar-badge" style="display:none;"></span>
-                </a>
-
                 <div class="sidebar-section-label">Stats</div>
                 <a class="sidebar-item" id="nav-stats" onclick="switchTab('stats',event)" role="button" tabindex="0">
                     <span class="sidebar-item-icon">📊</span>
@@ -208,6 +202,11 @@
                     <div class="user-info-name" id="sidebar-username"></div>
                     <div class="user-info-status">Online</div>
                 </div>
+                <a class="sidebar-item sidebar-user-notif auth-required" id="nav-notifications" onclick="switchTab('notifications',event)" role="button" tabindex="0" style="display:none;">
+                    <span class="sidebar-item-icon">🔔</span>
+                    <span class="sidebar-item-label">Notifications</span>
+                    <span id="notif-badge" class="sidebar-badge sidebar-user-badge" style="display:none;"></span>
+                </a>
                 <div class="sidebar-action-btns" id="sidebar-action-btns" style="display:none;">
                     <button class="sidebar-icon-btn" onclick="toggleDarkMode()" id="theme-toggle-btn" title="Toggle theme">🌙</button>
                     <button class="sidebar-icon-btn" onclick="handleLogout()" title="Sign out">⏻</button>
@@ -924,8 +923,16 @@
                     </div>
 
                     <div class="schedule-upcoming-panel">
+                        <div class="schedule-agenda-eyebrow">Invites</div>
+                        <h3>Pending Invites</h3>
+                        <div id="schedule-pending-list" class="list-container schedule-upcoming-list" style="margin-top:10px;">
+                            <div class="loading">No pending invites.</div>
+                        </div>
+                    </div>
+
+                    <div class="schedule-upcoming-panel">
                         <div class="schedule-agenda-eyebrow">Events</div>
-                        <h3>Upcoming Events</h3>
+                        <h3>Accepted Events</h3>
                         <div id="schedule-list" class="list-container schedule-upcoming-list" style="margin-top:10px;">
                             <div class="loading">Loading schedule…</div>
                         </div>

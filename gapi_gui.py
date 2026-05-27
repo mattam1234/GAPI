@@ -4927,6 +4927,131 @@ def _build_schedule_ical_sync_urls(username: str) -> Dict[str, str]:
         'token': token,
     }
 
+
+def _normalize_schedule_username(value: Optional[str]) -> str:
+    return str(value or '').strip().lower()
+
+
+def _schedule_invitee_pairs(event: Optional[Dict]) -> List[Tuple[str, str]]:
+    event = event or {}
+    attendees = event.get('invited_attendees', event.get('attendees', []))
+    attendee_ids = event.get('invited_attendee_ids', event.get('attendee_ids', []))
+    clean_attendees = attendees if isinstance(attendees, list) else []
+    clean_attendee_ids = attendee_ids if isinstance(attendee_ids, list) else []
+    pairs: List[Tuple[str, str]] = []
+    for index, attendee_name in enumerate(clean_attendees):
+        name = str(attendee_name or '').strip()
+        if not name:
+            continue
+        attendee_id = str(clean_attendee_ids[index] if index < len(clean_attendee_ids) else name).strip() or name
+        pairs.append((name, attendee_id))
+    return pairs
+
+
+def _schedule_event_members(event: Optional[Dict]) -> Dict[str, str]:
+    """Return canonical username map for users linked to a schedule event."""
+    members: Dict[str, str] = {}
+    for name, attendee_id in _schedule_invitee_pairs(event):
+        for candidate in (attendee_id, name):
+            key = _normalize_schedule_username(candidate)
+            if key and key not in members:
+                members[key] = str(candidate).strip()
+    host = str((event or {}).get('created_by') or '').strip()
+    host_key = _normalize_schedule_username(host)
+    if host_key and host_key not in members:
+        members[host_key] = host
+    return members
+
+
+def _send_schedule_in_app_notifications(recipients: List[str],
+                                        title: str,
+                                        message: str,
+                                        exclude_usernames: Optional[set] = None) -> None:
+    if not DB_AVAILABLE:
+        return
+    excluded = {_normalize_schedule_username(user) for user in (exclude_usernames or set()) if user}
+    seen = set()
+    for recipient in recipients:
+        key = _normalize_schedule_username(recipient)
+        if not key or key in excluded or key in seen:
+            continue
+        seen.add(key)
+        db = next(database.get_db())
+        try:
+            database.create_notification(db, recipient, title=title, message=message, type='info')
+        except Exception as exc:
+            gui_logger.warning('Failed to send schedule notification to %s: %s', recipient, exc)
+        finally:
+            if db:
+                db.close()
+
+
+def _load_discord_bot_token_from_config() -> Optional[str]:
+    token = str(os.getenv('DISCORD_BOT_TOKEN', '') or '').strip()
+    if token:
+        return token
+    config_path = os.environ.get('GAPI_DISCORD_CONFIG', 'config.json')
+    if not os.path.exists(config_path):
+        return None
+    try:
+        with open(config_path, 'r') as handle:
+            data = json.load(handle)
+        token = str((data or {}).get('discord_bot_token') or '').strip()
+        return token or None
+    except Exception:
+        return None
+
+
+def _send_schedule_discord_dm(recipient_username: str, message: str) -> bool:
+    """Best-effort Discord DM delivery for a linked user."""
+    if not DB_AVAILABLE:
+        return False
+    safe_username = str(recipient_username or '').strip()
+    if not safe_username:
+        return False
+
+    db = next(database.get_db())
+    try:
+        user = database.get_user_by_username(db, safe_username)
+        discord_id = str(getattr(user, 'discord_id', '') or '').strip() if user else ''
+    except Exception:
+        discord_id = ''
+    finally:
+        if db:
+            db.close()
+
+    if not discord_id or not discord_id.isdigit():
+        return False
+
+    token = _load_discord_bot_token_from_config()
+    if not token:
+        return False
+
+    try:
+        import requests
+        headers = {'Authorization': f'Bot {token}', 'Content-Type': 'application/json'}
+        channel_resp = requests.post(
+            'https://discord.com/api/v10/users/@me/channels',
+            json={'recipient_id': discord_id},
+            headers=headers,
+            timeout=8,
+        )
+        if channel_resp.status_code not in (200, 201):
+            return False
+        channel_id = str((channel_resp.json() or {}).get('id') or '').strip()
+        if not channel_id:
+            return False
+        message_resp = requests.post(
+            f'https://discord.com/api/v10/channels/{channel_id}/messages',
+            json={'content': message[:1800]},
+            headers=headers,
+            timeout=8,
+        )
+        return message_resp.status_code in (200, 201)
+    except Exception as exc:
+        gui_logger.warning('Failed schedule Discord DM to %s: %s', safe_username, exc)
+        return False
+
 @app.route('/api/schedule', methods=['GET'])
 @require_login
 def api_get_schedule():
@@ -5155,6 +5280,18 @@ def api_create_event():
             timezone_name=timezone_name,
             timezone_offset_minutes=timezone_offset_minutes
         )
+
+    invite_recipients = []
+    for invitee_name, invitee_id in _schedule_invitee_pairs(event):
+        recipient = str(invitee_id or invitee_name).strip()
+        if recipient:
+            invite_recipients.append(recipient)
+    _send_schedule_in_app_notifications(
+        invite_recipients,
+        title=f'📨 Schedule invite: {title}',
+        message=f'{username} invited you to "{title}" on {date} at {time_str}.',
+        exclude_usernames={username},
+    )
     
     # Create Discord event if requested
     discord_result = None
@@ -5265,6 +5402,14 @@ def api_update_event(event_id: str):
     if not p:
         return jsonify({'error': 'Not initialized'}), 400
     data = request.json or {}
+    with picker_lock:
+        existing_event = p.schedule_service.get_event(event_id)
+    if existing_event is None:
+        return jsonify({'error': 'Event not found'}), 404
+
+    if 'rsvp_statuses' in data:
+        return jsonify({'error': 'Use /api/schedule/<event_id>/rsvp for attendee-driven RSVP updates.'}), 403
+
     safe: Dict = {}
     for k in ('title', 'date', 'time', 'game_name', 'notes', 'game_appid', 'game_image_url', 'discord_guild_id', 'timezone_name', 'schedule_id'):
         if k in data:
@@ -5301,7 +5446,98 @@ def api_update_event(event_id: str):
         event = p.schedule_service.update_event(event_id, username=username, **safe)
     if event is None:
         return jsonify({'error': 'Event not found'}), 404
+
+    before_members = _schedule_event_members(existing_event)
+    after_members = _schedule_event_members(event)
+    newly_invited = [
+        after_members[key]
+        for key in after_members
+        if key not in before_members
+    ]
+    if newly_invited:
+        _send_schedule_in_app_notifications(
+            newly_invited,
+            title=f'📨 Schedule invite: {event.get("title", "Game Night")}',
+            message=f'{username} invited you to "{event.get("title", "Game Night")}" on {event.get("date", "")} at {event.get("time", "")}.',
+            exclude_usernames={username},
+        )
     return jsonify(event)
+
+
+@app.route('/api/schedule/<event_id>/rsvp', methods=['POST'])
+@require_login
+def api_update_schedule_rsvp(event_id: str):
+    """Allow invited attendees to update only their own RSVP."""
+    username = get_current_username()
+    p = ensure_picker_initialized(username)
+    if not p:
+        return jsonify({'error': 'Not initialized'}), 400
+
+    data = request.json or {}
+    status = str(data.get('status', '')).strip().lower()
+    if status not in {'accepted', 'maybe', 'declined', 'pending'}:
+        return jsonify({'error': 'status must be accepted, maybe, declined, or pending'}), 400
+
+    with picker_lock:
+        event = p.schedule_service.get_event(event_id)
+    if event is None:
+        return jsonify({'error': 'Event not found'}), 404
+
+    invite_pairs = _schedule_invitee_pairs(event)
+    requester_key = _normalize_schedule_username(username)
+    resolved_attendee_id = None
+    for attendee_name, attendee_id in invite_pairs:
+        if _normalize_schedule_username(attendee_id) == requester_key or _normalize_schedule_username(attendee_name) == requester_key:
+            resolved_attendee_id = attendee_id
+            break
+    if not resolved_attendee_id:
+        return jsonify({'error': 'Only invited users can RSVP for this event'}), 403
+
+    with picker_lock:
+        updated_event = p.schedule_service.update_event_rsvp(event_id, resolved_attendee_id, status)
+    if updated_event is None:
+        return jsonify({'error': 'Event not found'}), 404
+
+    if status == 'accepted':
+        linked_members = _schedule_event_members(updated_event)
+        linked_recipients = list(linked_members.values())
+        title = f'✅ Invite accepted: {updated_event.get("title", "Game Night")}'
+        message = f'{username} accepted the invite for "{updated_event.get("title", "Game Night")}".'
+        _send_schedule_in_app_notifications(
+            linked_recipients,
+            title=title,
+            message=message,
+            exclude_usernames={username},
+        )
+
+        accepted_keys = {
+            _normalize_schedule_username(entry.get('id'))
+            for entry in [
+                {'id': attendee_id, 'status': str((updated_event.get('rsvp_statuses') or {}).get(attendee_id, 'pending')).strip().lower()}
+                for _, attendee_id in _schedule_invitee_pairs(updated_event)
+            ]
+            if entry['status'] == 'accepted'
+        }
+        host_username = str(updated_event.get('created_by') or '').strip()
+        host_key = _normalize_schedule_username(host_username)
+        dm_targets: List[str] = []
+        for key, value in linked_members.items():
+            if key in accepted_keys and key != requester_key:
+                dm_targets.append(value)
+        if host_key and host_key != requester_key:
+            dm_targets.append(host_username)
+        seen_dm = set()
+        for target in dm_targets:
+            dm_key = _normalize_schedule_username(target)
+            if not dm_key or dm_key in seen_dm:
+                continue
+            seen_dm.add(dm_key)
+            _send_schedule_discord_dm(
+                target,
+                f'{username} accepted "{updated_event.get("title", "Game Night")}" on {updated_event.get("date", "")} at {updated_event.get("time", "")}.'
+            )
+
+    return jsonify(updated_event)
 
 
 @app.route('/api/schedule/<event_id>', methods=['DELETE'])
@@ -6670,7 +6906,7 @@ def api_export_schedule_ics():
         return jsonify({'error': 'Not initialized'}), 400
 
     with picker_lock:
-        events = p.schedule_service.get_events()
+        events = p.schedule_service.get_events(username=username)
 
     lines = [
         'BEGIN:VCALENDAR',
@@ -6691,14 +6927,28 @@ def api_export_schedule_ics():
             if len(clean_time) == 4:
                 clean_time += '00'
             dtstart = f'{clean_date}T{clean_time}'
-        attendees = ', '.join(ev.get('attendees', []))
+        invitee_names = ev.get('invited_attendees', ev.get('attendees', []))
+        invitee_ids = ev.get('invited_attendee_ids', ev.get('attendee_ids', []))
+        attendees = ', '.join(invitee_names or [])
         game_name = ev.get('game_name', '')
         notes = ev.get('notes', '')
+        rsvp_statuses = ev.get('rsvp_statuses', {}) if isinstance(ev.get('rsvp_statuses'), dict) else {}
         desc_parts = []
         if game_name:
             desc_parts.append(f'Game: {game_name}')
         if attendees:
             desc_parts.append(f'Attendees: {attendees}')
+        rsvp_lines = []
+        for index, attendee_name in enumerate(invitee_names or []):
+            attendee_id = invitee_ids[index] if isinstance(invitee_ids, list) and index < len(invitee_ids) else attendee_name
+            status = str(
+                rsvp_statuses.get(attendee_id)
+                or rsvp_statuses.get(attendee_name)
+                or 'pending'
+            ).strip().lower()
+            rsvp_lines.append(f'{attendee_name} ({status})')
+        if rsvp_lines:
+            desc_parts.append(f'RSVP: {", ".join(rsvp_lines)}')
         if notes:
             desc_parts.append(notes)
         description = '\\n'.join(desc_parts)

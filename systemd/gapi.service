@@ -1,0 +1,18 @@
+[Unit]
+Description=GAPI Game Picker Web GUI
+After=network.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/GAPI
+EnvironmentFile=/opt/GAPI/.env
+ExecStart=/opt/GAPI/venv/bin/python3 /opt/GAPI/gapi_gui.py
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
