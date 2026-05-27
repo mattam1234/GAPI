@@ -246,7 +246,8 @@ class TestLiveSessionSyncEnhancements(unittest.TestCase):
             'rejected_game_ids': ['1'],
             'vote_state': {'votes_by_user': {}},
         }
-        with patch.object(gapi_gui, 'multi_picker', fake_picker):
+        with patch.object(gapi_gui, 'multi_picker', fake_picker), \
+             patch.object(gapi_gui, '_ensure_multi_picker', return_value=None):
             view = gapi_gui._live_session_view(session)
         self.assertEqual(view['common_game_count'], 1)
 
