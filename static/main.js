@@ -8764,11 +8764,14 @@ Event ID: ${result.discord_event_id}`);
                 }
 
                 const me = getCurrentUsername();
+                const isAdmin = String(window.currentUserRole || '').toLowerCase() === 'admin';
                 listDiv.innerHTML = sessions.map(s => {
                     const joined = (s.participants || []).includes(me);
                     const isHost = s.host === me;
+                    const canDisband = isHost || isAdmin;
                     const pickedGame = s.picked_game || {};
                     const appId = String(pickedGame.appid || pickedGame.app_id || '').trim();
+                    const commonGameCount = Number(s.common_game_count || 0);
                     const discordSummary = s.discord && s.discord.guild_name && s.discord.channel_name
                         ? `<div class="schedule-agenda-copy" style="margin-top:4px;">Discord: ${s.discord.guild_name} / #${s.discord.channel_name}</div>`
                         : '';
@@ -8783,7 +8786,7 @@ Event ID: ${result.discord_event_id}`);
                                         <strong class="list-item-title" style="max-width:100%;">${s.name || s.session_id}</strong>
                                         <span class="schedule-field-hint">${s.status}</span>
                                     </div>
-                                    <div class="schedule-agenda-copy" style="margin-top:4px;">Host: ${s.host} · Players: ${(s.participants || []).length}</div>
+                                    <div class="schedule-agenda-copy" style="margin-top:4px;">Host: ${s.host} · Players: ${(s.participants || []).length} · Eligible games: ${commonGameCount}</div>
                                     ${discordSummary}
                                 </div>
                             </div>
@@ -8794,6 +8797,9 @@ Event ID: ${result.discord_event_id}`);
                                     : `<button onclick="joinLiveSession('${s.session_id}')" class="chat-room-create-btn">Join</button>`}
                                 ${isHost
                                     ? `<button onclick="pickLiveSessionGame('${s.session_id}')" class="chat-room-secondary-btn">Pick</button>`
+                                    : ''}
+                                ${canDisband
+                                    ? `<button onclick="disbandLiveSession('${s.session_id}')" class="session-danger-btn">Disband</button>`
                                     : ''}
                             </div>
                         </div>
@@ -8866,6 +8872,31 @@ Event ID: ${result.discord_event_id}`);
                 }
                 loadLiveSessions();
                 showMessage('Left session', 'success');
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function disbandLiveSession(sessionId) {
+            if (!confirm('Disband this session for everyone?')) return;
+            try {
+                const resp = await fetch(`/api/live-session/${encodeURIComponent(sessionId)}/disband`, { method: 'POST' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showMessage(data.error || 'Failed to disband session', 'error');
+                    return;
+                }
+                if (activeLiveSessionId === sessionId) {
+                    activeLiveSessionId = null;
+                    if (activeSessionEventSource) {
+                        activeSessionEventSource.close();
+                        activeSessionEventSource = null;
+                    }
+                    const detailsDiv = document.getElementById('session-details');
+                    if (detailsDiv) detailsDiv.innerHTML = '<div style="color:var(--text-secondary);">Session was disbanded.</div>';
+                }
+                await loadLiveSessions();
+                showMessage('Session disbanded', 'success');
             } catch (err) {
                 showMessage('Error: ' + err.message, 'error');
             }
@@ -9047,6 +9078,9 @@ Event ID: ${result.discord_event_id}`);
             const canVote = joined && session.status === 'awaiting_vote' && !!session.picked_game;
             const pendingJoins = session.pending_joins || [];
             const discordInfo = session.discord || {};
+            const isAdmin = String(window.currentUserRole || '').toLowerCase() === 'admin';
+            const canDisband = isHost || isAdmin;
+            const commonGameCount = Number(session.common_game_count || 0);
 
             detailsDiv.innerHTML = `
                 <div class="session-detail-grid">
@@ -9055,6 +9089,7 @@ Event ID: ${result.discord_event_id}`);
                         <span class="schedule-field-hint">${session.status}</span>
                     </div>
                     <div class="schedule-agenda-copy">Host: ${session.host} · Round: ${session.round || 0}</div>
+                    <div class="schedule-agenda-copy">Eligible games with current filters: ${commonGameCount}</div>
                     <div class="schedule-agenda-copy">Players: ${participants.join(', ') || 'None'}</div>
                     ${discordInfo.guild_name && discordInfo.channel_name
                         ? `<div class="schedule-agenda-copy">Discord sync: ${discordInfo.guild_name} / #${discordInfo.channel_name} · Pending joins: ${session.pending_join_count || 0}</div>`
@@ -9066,6 +9101,9 @@ Event ID: ${result.discord_event_id}`);
                         ${isHost
                             ? `<button onclick="pickLiveSessionGame('${session.session_id}')" class="chat-room-secondary-btn">Pick Game</button>
                                <button onclick="openInviteUsersModal('${session.session_id}')" class="chat-room-secondary-btn">Invite Users</button>`
+                            : ''}
+                        ${canDisband
+                            ? `<button onclick="disbandLiveSession('${session.session_id}')" class="session-danger-btn">Disband</button>`
                             : ''}
                     </div>
                     <div id="live-session-lootbox" style="display:${session.status === 'completed' && session.picked_game ? 'block' : 'none'};"></div>
