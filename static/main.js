@@ -1903,33 +1903,56 @@
                 alert('Error removing favorite: ' + error.message);
             }
         }
-        
+
+        let _compareScope = 'all';
+
+        function setCompareScope(scope) {
+            _compareScope = scope;
+            // Update active button styles
+            document.querySelectorAll('.compare-scope-btn').forEach(btn => {
+                const active = btn.dataset.scope === scope;
+                btn.style.background = active ? '#4f46e5' : 'transparent';
+                btn.style.color = active ? 'white' : 'var(--text-secondary)';
+                btn.style.border = active ? '1.5px solid #4f46e5' : '1.5px solid var(--card-border)';
+            });
+            loadStatsUsers();
+        }
+
         async function loadStatsUsers() {
             const checkboxDiv = document.getElementById('comparison-user-checkboxes');
-            
+
             try {
-                const response = await fetch('/api/users');
+                const response = await fetch(`/api/stats/compare/candidates?scope=${_compareScope}`);
                 const data = await response.json();
-                
-                if (data.users && data.users.length > 1) {
+                const currentUser = data.current_user || '';
+
+                if (data.users && data.users.length >= 1) {
                     let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">';
-                    data.users.forEach((user, index) => {
-                        // Always enable - let user compare themselves too
+                    data.users.forEach(user => {
+                        // In me_and_friends mode, pre-check the current user
+                        const isMe = user.username === currentUser;
+                        const preChecked = (_compareScope === 'me_and_friends' && isMe) ? 'checked' : '';
+                        const meLabel = isMe ? ' <em style="color:var(--text-secondary);font-size:0.85em;">(you)</em>' : '';
                         html += `
                             <label style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--card-bg); border-radius: var(--radius-sm, 8px); cursor: pointer; border: 2px solid var(--card-border);" title="Select to compare">
-                                <input type="checkbox" class="compare-user-checkbox" value="${user.username}" style="width: 18px; height: 18px;">
-                                <span><strong>${user.username}</strong></span>
+                                <input type="checkbox" class="compare-user-checkbox" value="${user.username}" ${preChecked} style="width: 18px; height: 18px;">
+                                <span><strong>${escapeHtml(user.username)}</strong>${meLabel}</span>
                             </label>
                         `;
                     });
                     html += '</div>';
                     checkboxDiv.innerHTML = html;
-                    
-                    // Show compare buttons
-                    document.getElementById('compare-btn').style.display = 'inline-block';
-                    document.getElementById('clear-compare-btn').style.display = 'inline-block';
+
+                    const hasEnough = data.users.length > 1 || (_compareScope === 'me_and_friends' && data.users.length >= 1);
+                    document.getElementById('compare-btn').style.display = hasEnough ? 'inline-block' : 'none';
+                    document.getElementById('clear-compare-btn').style.display = hasEnough ? 'inline-block' : 'none';
                 } else {
-                    checkboxDiv.innerHTML = '<p style="color: var(--text-secondary);">Need at least 2 users to compare</p>';
+                    const msg = _compareScope === 'friends'
+                        ? 'No friends found. Add friends to compare libraries.'
+                        : _compareScope === 'me_and_friends'
+                        ? 'No friends found. Add friends to compare, or switch to "All Users".'
+                        : 'Need at least 2 users to compare';
+                    checkboxDiv.innerHTML = `<p style="color: var(--text-secondary);">${msg}</p>`;
                     document.getElementById('compare-btn').style.display = 'none';
                     document.getElementById('clear-compare-btn').style.display = 'none';
                 }
@@ -2076,6 +2099,10 @@
                                 <div style="background: var(--card-bg); padding: 15px; border-radius: var(--radius-sm, 8px); border-left: 4px solid #10b981;">
                                     <div style="color: var(--text-secondary); font-size: 0.9em;">Total Unique Games</div>
                                     <div style="font-size: 1.8em; font-weight: 700; color: #10b981;">${data.comparison_metrics.total_unique_games}</div>
+                                </div>
+                                <div style="background: var(--card-bg); padding: 15px; border-radius: var(--radius-sm, 8px); border-left: 4px solid #06b6d4;">
+                                    <div style="color: var(--text-secondary); font-size: 0.9em;">Games in Common</div>
+                                    <div style="font-size: 1.8em; font-weight: 700; color: #06b6d4;">${data.comparison_metrics.shared_game_count ?? 0}</div>
                                 </div>
                             </div>
                         </div>
