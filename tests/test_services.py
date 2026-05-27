@@ -395,7 +395,9 @@ class TestScheduleService(TmpDirMixin):
             attendees=['alice', 'bob'],
             attendee_ids=['alice-id', 'bob-id'],
         )
-        self.assertEqual(event['attendee_ids'], ['alice-id', 'bob-id'])
+        self.assertEqual(event['invited_attendee_ids'], ['alice-id', 'bob-id'])
+        self.assertEqual(event['attendee_ids'], [])
+        self.assertEqual(event['pending_attendee_ids'], ['alice-id', 'bob-id'])
         self.assertEqual(event['rsvp_statuses'], {
             'alice-id': 'pending',
             'bob-id': 'pending',
@@ -416,10 +418,28 @@ class TestScheduleService(TmpDirMixin):
             attendees=['alice', 'carol'],
             attendee_ids=['alice-id', 'carol-id'],
         )
+        self.assertEqual(updated['attendee_ids'], ['alice-id'])
+        self.assertEqual(updated['invited_attendee_ids'], ['alice-id', 'carol-id'])
+        self.assertEqual(updated['pending_attendee_ids'], ['carol-id'])
         self.assertEqual(updated['rsvp_statuses'], {
             'alice-id': 'accepted',
             'carol-id': 'pending',
         })
+
+    def test_update_event_rsvp_updates_only_matching_invitee(self):
+        svc = self._make()
+        event = svc.add_event(
+            'RSVP Night',
+            '2026-03-01',
+            '19:00',
+            attendees=['alice', 'bob'],
+            attendee_ids=['alice', 'bob'],
+        )
+        updated = svc.update_event_rsvp(event['id'], 'alice', 'accepted')
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated['rsvp_statuses']['alice'], 'accepted')
+        self.assertEqual(updated['rsvp_statuses']['bob'], 'pending')
+        self.assertEqual(updated['attendee_ids'], ['alice'])
 
     def test_remove_event(self):
         svc = self._make()

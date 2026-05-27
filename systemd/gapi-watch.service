@@ -1,0 +1,6 @@
+[Unit]
+Description=Trigger a controlled GAPI restart after watched file changes
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl try-restart gapi.service

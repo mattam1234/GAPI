@@ -233,14 +233,24 @@ class TestICalScheduleExport(unittest.TestCase):
                 if len(clean_time) == 4:
                     clean_time += '00'
                 dtstart = f'{clean_date}T{clean_time}'
-            attendees = ', '.join(ev.get('attendees', []))
+            invitee_names = ev.get('invited_attendees', ev.get('attendees', []))
+            invitee_ids = ev.get('invited_attendee_ids', ev.get('attendee_ids', []))
+            attendees = ', '.join(invitee_names)
             game_name = ev.get('game_name', '')
             notes = ev.get('notes', '')
+            rsvp_statuses = ev.get('rsvp_statuses', {}) if isinstance(ev.get('rsvp_statuses'), dict) else {}
             desc_parts = []
             if game_name:
                 desc_parts.append(f'Game: {game_name}')
             if attendees:
                 desc_parts.append(f'Attendees: {attendees}')
+            if invitee_names:
+                rsvp_lines = []
+                for index, attendee_name in enumerate(invitee_names):
+                    attendee_id = invitee_ids[index] if index < len(invitee_ids) else attendee_name
+                    status = rsvp_statuses.get(attendee_id) or rsvp_statuses.get(attendee_name) or 'pending'
+                    rsvp_lines.append(f'{attendee_name} ({status})')
+                desc_parts.append(f'RSVP: {", ".join(rsvp_lines)}')
             if notes:
                 desc_parts.append(notes)
             description = '\\n'.join(desc_parts)
@@ -289,6 +299,19 @@ class TestICalScheduleExport(unittest.TestCase):
         ical = self._generate_ical(events)
         self.assertIn('Game: Hades', ical)
         self.assertIn('Attendees: carol', ical)
+
+    def test_rsvp_statuses_in_description(self):
+        events = [{
+            'id': 'x',
+            'title': 'T',
+            'date': '2026-03-01',
+            'time': '20:00',
+            'invited_attendees': ['carol', 'dave'],
+            'invited_attendee_ids': ['carol', 'dave'],
+            'rsvp_statuses': {'carol': 'accepted', 'dave': 'pending'},
+        }]
+        ical = self._generate_ical(events)
+        self.assertIn('RSVP: carol (accepted), dave (pending)', ical)
 
     def test_multiple_events_produce_multiple_vevents(self):
         events = [
@@ -372,12 +395,15 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
             'schedule-filter-start',
             'schedule-right-rail',
             'schedule-rename-btn',
+            'schedule-pending-list',
             'schedule-rsvp-list',
             'schedule-common-games-list',
             'schedule-ical-modal',
             'sch-discord-guild-search',
+            'sidebar-user-notif',
         ):
             self.assertIn(token, content)
+        self.assertNotIn('<a class="sidebar-item" id="nav-notifications"', content)
 
     def test_main_js_contains_schedule_modal_handlers(self):
         content = _read('static', 'main.js')
@@ -389,6 +415,8 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
             'applyScheduleFilters',
             'setScheduleFiltersToAgendaWeek',
             'updateScheduleRsvpStatus',
+            'renderSchedulePendingInvites',
+            'submitScheduleRsvp',
             'openScheduleCommonGamePicker',
             'openScheduleIcalSyncModal',
             'showScheduleDiscordGuildSearch',
@@ -408,6 +436,9 @@ class TestScheduleEnhancementMarkup(unittest.TestCase):
             '.schedule-filter-toolbar',
             '.schedule-common-game-item',
             '.schedule-upcoming-list',
+            '.sidebar-user-notif',
+            '.schedule-attendee-pill',
+            '.schedule-rsvp-chip',
         ):
             self.assertIn(token, content)
 
@@ -424,7 +455,7 @@ class TestScheduleIcalSyncRoutes(unittest.TestCase):
     def _fake_picker(self):
         return SimpleNamespace(
             schedule_service=SimpleNamespace(
-                get_events=lambda: [
+                get_events=lambda **kwargs: [
                     {
                         'id': 'ev1',
                         'title': 'Game Night',
@@ -456,6 +487,140 @@ class TestScheduleIcalSyncRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn('BEGIN:VCALENDAR', resp.get_data(as_text=True))
         self.assertEqual(resp.headers['Content-Type'], 'text/calendar; charset=utf-8')
+
+
+class TestScheduleSystemdFilesAndDocs(unittest.TestCase):
+
+    def test_systemd_units_exist(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for rel_path in (
+            ('systemd', 'gapi.service'),
+            ('systemd', 'gapi-watch.service'),
+            ('systemd', 'gapi-watch.path'),
+        ):
+            self.assertTrue(os.path.exists(os.path.join(root, *rel_path)))
+
+    def test_docs_reference_watch_unit_enable_flow(self):
+        readme = _read('README.md')
+        self.assertIn('gapi-watch.path', readme)
+        self.assertIn('systemctl enable --now gapi.service gapi-watch.path', readme)
+
+
+class _FakeScheduleService:
+    def __init__(self, event):
+        self._event = dict(event)
+        self.rsvp_updates = []
+
+    def get_event(self, event_id):
+        if str(self._event.get('id')) != str(event_id):
+            return None
+        return dict(self._event)
+
+    def update_event(self, event_id, username=None, **kwargs):
+        if str(self._event.get('id')) != str(event_id):
+            return None
+        self._event.update(kwargs)
+        if 'attendees' in kwargs:
+            self._event['invited_attendees'] = list(kwargs.get('attendees') or [])
+        if 'attendee_ids' in kwargs:
+            self._event['invited_attendee_ids'] = list(kwargs.get('attendee_ids') or [])
+        return dict(self._event)
+
+    def update_event_rsvp(self, event_id, attendee_identity, status):
+        if str(self._event.get('id')) != str(event_id):
+            return None
+        self.rsvp_updates.append((attendee_identity, status))
+        rsvps = dict(self._event.get('rsvp_statuses') or {})
+        rsvps[attendee_identity] = status
+        self._event['rsvp_statuses'] = rsvps
+        invited_names = list(self._event.get('invited_attendees', []))
+        invited_ids = list(self._event.get('invited_attendee_ids', []))
+        accepted = []
+        accepted_ids = []
+        pending = []
+        pending_ids = []
+        for idx, name in enumerate(invited_names):
+            attendee_id = invited_ids[idx] if idx < len(invited_ids) else name
+            attendee_status = rsvps.get(attendee_id, 'pending')
+            if attendee_status == 'accepted':
+                accepted.append(name)
+                accepted_ids.append(attendee_id)
+            if attendee_status == 'pending':
+                pending.append(name)
+                pending_ids.append(attendee_id)
+        self._event['attendees'] = accepted
+        self._event['attendee_ids'] = accepted_ids
+        self._event['pending_attendees'] = pending
+        self._event['pending_attendee_ids'] = pending_ids
+        return dict(self._event)
+
+
+class TestScheduleRsvpPermissionAndFanoutRoutes(unittest.TestCase):
+
+    def setUp(self):
+        gapi_gui.app.config['TESTING'] = True
+        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        self.client = gapi_gui.app.test_client()
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'host'
+        self.event = {
+            'id': 'ev1',
+            'title': 'Game Night',
+            'date': '2026-03-15',
+            'time': '20:00',
+            'created_by': 'host',
+            'invited_attendees': ['alice', 'bob'],
+            'invited_attendee_ids': ['alice', 'bob'],
+            'attendees': [],
+            'attendee_ids': [],
+            'rsvp_statuses': {'alice': 'pending', 'bob': 'pending'},
+        }
+
+    def _picker(self, event=None):
+        return SimpleNamespace(schedule_service=_FakeScheduleService(event or self.event))
+
+    def test_creator_cannot_update_rsvp_via_event_put(self):
+        picker = self._picker()
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
+            resp = self.client.put('/api/schedule/ev1', json={'rsvp_statuses': {'alice': 'accepted'}})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('/api/schedule/<event_id>/rsvp', resp.get_data(as_text=True))
+
+    def test_invited_user_can_rsvp_for_self_and_triggers_fanout(self):
+        picker = self._picker()
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'alice'
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
+            with patch.object(gapi_gui, '_send_schedule_in_app_notifications') as notif_mock:
+                with patch.object(gapi_gui, '_send_schedule_discord_dm', return_value=True) as dm_mock:
+                    resp = self.client.post('/api/schedule/ev1/rsvp', json={'status': 'accepted'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(picker.schedule_service.rsvp_updates, [('alice', 'accepted')])
+        notif_mock.assert_called_once()
+        dm_targets = [call.args[0] for call in dm_mock.call_args_list]
+        self.assertIn('host', dm_targets)
+        self.assertNotIn('alice', dm_targets)
+
+    def test_updating_event_invites_notifies_newly_added_members(self):
+        picker = self._picker()
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
+            with patch.object(gapi_gui, '_send_schedule_in_app_notifications') as notif_mock:
+                resp = self.client.put('/api/schedule/ev1', json={
+                    'title': 'Game Night',
+                    'attendees': ['alice', 'bob', 'carol'],
+                    'attendee_ids': ['alice', 'bob', 'carol'],
+                })
+        self.assertEqual(resp.status_code, 200)
+        notif_mock.assert_called_once()
+        self.assertIn('carol', notif_mock.call_args.args[0])
+
+    def test_non_member_cannot_rsvp(self):
+        picker = self._picker()
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'mallory'
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
+            resp = self.client.post('/api/schedule/ev1/rsvp', json={'status': 'accepted'})
+        self.assertEqual(resp.status_code, 403)
 
 
 class TestScheduleCommonGamePickerRoutes(unittest.TestCase):

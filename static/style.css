@@ -445,8 +445,24 @@ html[data-theme="light"] .sidebar-icon-btn:hover {
   background: var(--bg-tertiary);
 }
 
+.sidebar-user-notif {
+  margin-left: auto;
+  min-width: 0;
+  max-width: 180px;
+  padding: 6px 8px;
+}
+
+.sidebar-user-badge {
+  margin-left: 6px;
+}
+
 .sidebar.collapsed .sidebar-user {
   justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-user-notif {
+  max-width: none;
+  margin-left: 0;
 }
 
 .user-avatar-wrap {
@@ -1935,6 +1951,72 @@ a.auth-required,
 
 .schedule-event-card:last-child {
   margin-bottom: 0;
+}
+
+.schedule-event-status-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.schedule-attendee-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px 4px 4px;
+  background: var(--bg-secondary);
+}
+
+.schedule-attendee-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.schedule-rsvp-chip {
+  font-size: 0.72rem;
+  border-radius: 999px;
+  padding: 2px 8px;
+  text-transform: capitalize;
+  border: 1px solid transparent;
+}
+
+.schedule-rsvp-chip.accepted {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #059669;
+}
+
+.schedule-rsvp-chip.maybe {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #d97706;
+}
+
+.schedule-rsvp-chip.declined {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #dc2626;
+}
+
+.schedule-rsvp-chip.pending {
+  background: rgba(148, 163, 184, 0.16);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: var(--text-secondary);
+}
+
+.schedule-event-card.pending-invite {
+  border-left: 3px solid #f59e0b;
 }
 
 .schedule-agenda-time-label {

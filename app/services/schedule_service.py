@@ -1,7 +1,7 @@
 """Business logic for the game-night scheduler."""
 import datetime
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from ..repositories.schedule_repository import ScheduleRepository
 
@@ -59,6 +59,59 @@ def _normalize_rsvp_statuses(attendees: List[str],
         normalized[attendee_id] = safe_status if safe_status in _VALID_RSVP_STATUSES else 'pending'
 
     return normalized
+
+
+def _build_event_participant_state(attendees: Optional[List[str]],
+                                   attendee_ids: Optional[List[str]] = None,
+                                   rsvp_statuses: Optional[Dict[str, str]] = None,
+                                   existing_statuses: Optional[Dict[str, str]] = None) -> Dict[str, Union[List[str], Dict[str, str]]]:
+    """Normalize invitees + RSVP map and split accepted/pending attendees."""
+    invited_attendees, invited_attendee_ids = _clean_schedule_participants(attendees, attendee_ids)
+    normalized_rsvps = _normalize_rsvp_statuses(
+        invited_attendees,
+        invited_attendee_ids,
+        rsvp_statuses,
+        existing_statuses,
+    )
+
+    accepted_attendees: List[str] = []
+    accepted_attendee_ids: List[str] = []
+    pending_attendees: List[str] = []
+    pending_attendee_ids: List[str] = []
+
+    for index, attendee_name in enumerate(invited_attendees):
+        attendee_id = invited_attendee_ids[index] if index < len(invited_attendee_ids) else attendee_name
+        status = normalized_rsvps.get(attendee_id, 'pending')
+        if status == 'accepted':
+            accepted_attendees.append(attendee_name)
+            accepted_attendee_ids.append(attendee_id)
+        if status == 'pending':
+            pending_attendees.append(attendee_name)
+            pending_attendee_ids.append(attendee_id)
+
+    return {
+        'attendees': accepted_attendees,
+        'attendee_ids': accepted_attendee_ids,
+        'invited_attendees': invited_attendees,
+        'invited_attendee_ids': invited_attendee_ids,
+        'pending_attendees': pending_attendees,
+        'pending_attendee_ids': pending_attendee_ids,
+        'rsvp_statuses': normalized_rsvps,
+    }
+
+
+def _resolve_attendee_id(attendees: List[str],
+                         attendee_ids: List[str],
+                         requested_identity: str) -> Optional[str]:
+    """Resolve a requested attendee identity to a canonical attendee_id."""
+    safe_identity = str(requested_identity or '').strip().lower()
+    if not safe_identity:
+        return None
+    for index, attendee_name in enumerate(attendees):
+        attendee_id = attendee_ids[index] if index < len(attendee_ids) else attendee_name
+        if str(attendee_id).strip().lower() == safe_identity or str(attendee_name).strip().lower() == safe_identity:
+            return attendee_id
+    return None
 
 
 def _clean_schedule_members(members: Optional[List[str]]) -> List[str]:
@@ -285,7 +338,7 @@ class ScheduleService:
         """
         event_id = str(uuid.uuid4())[:8]
         resolved_schedule_id = self.resolve_schedule_for_user(schedule_id, owner_username)
-        clean_attendees, clean_attendee_ids = _clean_schedule_participants(attendees, attendee_ids)
+        participant_state = _build_event_participant_state(attendees, attendee_ids, rsvp_statuses)
         event: Dict = {
             'id': event_id,
             'schedule_id': resolved_schedule_id,
@@ -293,12 +346,16 @@ class ScheduleService:
             'date': date,
             'time': time_str,
             'duration_minutes': duration_minutes,
-            'attendees': clean_attendees,
+            'attendees': participant_state['attendees'],
             'game_name': game_name,
             'notes': notes,
             'game_appid': game_appid,
-            'attendee_ids': clean_attendee_ids,
-            'rsvp_statuses': _normalize_rsvp_statuses(clean_attendees, clean_attendee_ids, rsvp_statuses),
+            'attendee_ids': participant_state['attendee_ids'],
+            'invited_attendees': participant_state['invited_attendees'],
+            'invited_attendee_ids': participant_state['invited_attendee_ids'],
+            'pending_attendees': participant_state['pending_attendees'],
+            'pending_attendee_ids': participant_state['pending_attendee_ids'],
+            'rsvp_statuses': participant_state['rsvp_statuses'],
             'game_image_url': game_image_url,
             'discord_event_id': None,  # Will be set when Discord event is created
             'discord_guild_id': discord_guild_id,
@@ -332,17 +389,43 @@ class ScheduleService:
             resolved_schedule_id = self.resolve_schedule_for_user(kwargs.get('schedule_id'), username)
             if resolved_schedule_id:
                 event['schedule_id'] = resolved_schedule_id
-        next_attendees = kwargs.get('attendees', event.get('attendees', []))
-        next_attendee_ids = kwargs.get('attendee_ids', event.get('attendee_ids', []))
-        clean_attendees, clean_attendee_ids = _clean_schedule_participants(next_attendees, next_attendee_ids)
-        event['attendees'] = clean_attendees
-        event['attendee_ids'] = clean_attendee_ids
-        event['rsvp_statuses'] = _normalize_rsvp_statuses(
-            clean_attendees,
-            clean_attendee_ids,
+        previous_invited_attendees = previous_event.get('invited_attendees', previous_event.get('attendees', []))
+        previous_invited_attendee_ids = previous_event.get('invited_attendee_ids', previous_event.get('attendee_ids', []))
+        next_attendees = kwargs.get('attendees', previous_invited_attendees)
+        next_attendee_ids = kwargs.get('attendee_ids', previous_invited_attendee_ids)
+        participant_state = _build_event_participant_state(
+            next_attendees,
+            next_attendee_ids,
             kwargs.get('rsvp_statuses'),
             previous_event.get('rsvp_statuses'),
         )
+        event.update(participant_state)
+        event['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._get_events()[event_id] = event
+        self._repo.save()
+        return event
+
+    def update_event_rsvp(self, event_id: str, attendee_identity: str, status: str) -> Optional[Dict]:
+        """Update RSVP for exactly one invited attendee."""
+        event = self._get_events().get(event_id)
+        if event is None:
+            return None
+        event = dict(event)
+        invited_attendees = list(event.get('invited_attendees', event.get('attendees', [])) or [])
+        invited_attendee_ids = list(event.get('invited_attendee_ids', event.get('attendee_ids', [])) or [])
+        attendee_id = _resolve_attendee_id(invited_attendees, invited_attendee_ids, attendee_identity)
+        if attendee_id is None:
+            return None
+        safe_status = str(status or 'pending').strip().lower()
+        if safe_status not in _VALID_RSVP_STATUSES:
+            safe_status = 'pending'
+        participant_state = _build_event_participant_state(
+            invited_attendees,
+            invited_attendee_ids,
+            {attendee_id: safe_status},
+            event.get('rsvp_statuses'),
+        )
+        event.update(participant_state)
         event['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._get_events()[event_id] = event
         self._repo.save()

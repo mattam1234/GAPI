@@ -296,26 +296,27 @@ Available slash commands: `/link`, `/unlink`, `/pick`, `/vote`, `/common`, `/sta
 
 **systemd (Linux)**
 
-```ini
-# /etc/systemd/system/gapi.service
-[Unit]
-Description=GAPI Game Picker Web GUI
-After=network.target postgresql.service
+Real unit files are included in this repo:
 
-[Service]
-User=youruser
-WorkingDirectory=/opt/GAPI
-EnvironmentFile=/opt/GAPI/.env
-ExecStart=/opt/GAPI/venv/bin/python3 gapi_gui.py
-Restart=on-failure
+- `/tmp/workspace/mattam1234/GAPI/systemd/gapi.service`
+- `/tmp/workspace/mattam1234/GAPI/systemd/gapi-watch.service`
+- `/tmp/workspace/mattam1234/GAPI/systemd/gapi-watch.path`
 
-[Install]
-WantedBy=multi-user.target
-```
+Install and enable them:
 
 ```bash
-sudo systemctl enable --now gapi
+sudo install -m 644 systemd/gapi.service /etc/systemd/system/gapi.service
+sudo install -m 644 systemd/gapi-watch.service /etc/systemd/system/gapi-watch.service
+sudo install -m 644 systemd/gapi-watch.path /etc/systemd/system/gapi-watch.path
+sudo systemctl daemon-reload
+sudo systemctl enable --now gapi.service gapi-watch.path
 ```
+
+Safe restart behavior:
+
+- The app service uses `Restart=on-failure` with a restart backoff (`RestartSec=5s`).
+- The watch path unit triggers `gapi-watch.service`, which runs `systemctl try-restart gapi.service`.
+- `try-restart` only restarts if GAPI is already active, so file changes never start a stopped instance unexpectedly.
 
 **Docker Compose (quick)**
 
