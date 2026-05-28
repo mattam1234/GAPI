@@ -363,6 +363,7 @@ class Notification(Base):
     type = Column(String(50), default='info')   # 'info', 'warning', 'success', 'error', 'friend_request'
     title = Column(String(255))
     message = Column(Text)
+    link = Column(String(500), nullable=True)   # optional deep-link / action URL
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -406,6 +407,25 @@ class ChatMessageReaction(Base):
     __table_args__ = (
         # One user can only react once with each emoji per message
         Index('idx_message_user_emoji', 'message_id', 'user_id', 'emoji', unique=True),
+    )
+
+
+class DirectMessage(Base):
+    """Persisted direct messages between two GAPI users."""
+    __tablename__ = "direct_messages"
+
+    id = Column(Integer, primary_key=True)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    message = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    sender = relationship("User", foreign_keys=[sender_id])
+    recipient = relationship("User", foreign_keys=[recipient_id])
+
+    __table_args__ = (
+        Index('idx_dm_sender_recipient', 'sender_id', 'recipient_id'),
     )
 
 
@@ -1974,15 +1994,26 @@ def update_game_details_cache(db, app_id: str, platform: str, details: dict) -> 
 # Notification helpers
 # ---------------------------------------------------------------------------
 
-def create_notification(db, username: str, title: str, message: str, type: str = 'info') -> bool:
-    """Create a notification for the given user."""
+def create_notification(db, username: str, title: str, message: str,
+                        type: str = 'info', link: str = None) -> bool:
+    """Create a notification for the given user.
+
+    Args:
+        db:       SQLAlchemy session.
+        username: Target username.
+        title:    Short notification title.
+        message:  Body text.
+        type:     One of ``'info'``, ``'warning'``, ``'success'``, ``'error'``.
+        link:     Optional deep-link / action URL surfaced in the bell popup.
+    """
     if not db:
         return False
     try:
         user = db.query(User).filter(User.username == username).first()
         if not user:
             return False
-        notif = Notification(user_id=user.id, type=type, title=title, message=message)
+        notif = Notification(user_id=user.id, type=type, title=title,
+                             message=message, link=link or None)
         db.add(notif)
         db.commit()
         return True
@@ -2010,6 +2041,7 @@ def get_notifications(db, username: str, unread_only: bool = False) -> list:
                 'type': n.type,
                 'title': n.title,
                 'message': n.message,
+                'link': n.link or None,
                 'is_read': n.is_read,
                 'created_at': n.created_at.isoformat() if n.created_at else None,
             }
@@ -2038,6 +2070,127 @@ def mark_notifications_read(db, username: str, notification_ids: list = None) ->
         logger.error(f"Error marking notifications read: {e}")
         db.rollback()
         return False
+
+
+# ---------------------------------------------------------------------------
+# Direct message helpers
+# ---------------------------------------------------------------------------
+
+def create_direct_message(db, sender_username: str, recipient_username: str,
+                          message: str) -> dict:
+    """Persist a DM from *sender_username* to *recipient_username*.
+
+    Returns a dict with the new message on success, empty dict on failure.
+    """
+    if not db:
+        return {}
+    try:
+        sender = db.query(User).filter(User.username == sender_username).first()
+        recipient = db.query(User).filter(User.username == recipient_username).first()
+        if not sender or not recipient:
+            return {}
+        dm = DirectMessage(
+            sender_id=sender.id,
+            recipient_id=recipient.id,
+            message=message[:2000],
+        )
+        db.add(dm)
+        db.commit()
+        db.refresh(dm)
+        return {
+            'id': dm.id,
+            'sender': sender_username,
+            'recipient': recipient_username,
+            'message': dm.message,
+            'is_read': dm.is_read,
+            'created_at': dm.created_at.isoformat() if dm.created_at else None,
+        }
+    except Exception as e:
+        logger.error(f"Error creating direct message: {e}")
+        db.rollback()
+        return {}
+
+
+def get_direct_messages(db, username: str, other_username: str,
+                        limit: int = 50) -> list:
+    """Return the conversation between *username* and *other_username*."""
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        other = db.query(User).filter(User.username == other_username).first()
+        if not user or not other:
+            return []
+        msgs = (
+            db.query(DirectMessage)
+            .filter(
+                ((DirectMessage.sender_id == user.id) & (DirectMessage.recipient_id == other.id))
+                | ((DirectMessage.sender_id == other.id) & (DirectMessage.recipient_id == user.id))
+            )
+            .order_by(DirectMessage.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+        # mark messages sent to current user as read
+        unread_ids = [m.id for m in msgs
+                      if m.recipient_id == user.id and not m.is_read]
+        if unread_ids:
+            db.query(DirectMessage).filter(
+                DirectMessage.id.in_(unread_ids)
+            ).update({'is_read': True}, synchronize_session=False)
+            db.commit()
+        return [
+            {
+                'id': m.id,
+                'sender': m.sender.username if m.sender else '',
+                'recipient': m.recipient.username if m.recipient else '',
+                'message': m.message,
+                'is_read': m.is_read,
+                'created_at': m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in msgs
+        ]
+    except Exception as e:
+        logger.error(f"Error getting direct messages: {e}")
+        return []
+
+
+def get_dm_conversations(db, username: str) -> list:
+    """Return a summary of all DM threads for *username*.
+
+    Returns one entry per conversation partner sorted by most recent message.
+    """
+    if not db:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        from sqlalchemy import or_, func as sqlfunc
+        rows = (
+            db.query(DirectMessage)
+            .filter(
+                or_(DirectMessage.sender_id == user.id,
+                    DirectMessage.recipient_id == user.id)
+            )
+            .order_by(DirectMessage.created_at.desc())
+            .all()
+        )
+        seen: dict = {}
+        for m in rows:
+            other_id = m.recipient_id if m.sender_id == user.id else m.sender_id
+            if other_id not in seen:
+                other_user = db.query(User).filter(User.id == other_id).first()
+                seen[other_id] = {
+                    'username': other_user.username if other_user else str(other_id),
+                    'last_message': m.message[:80],
+                    'created_at': m.created_at.isoformat() if m.created_at else None,
+                    'unread': m.recipient_id == user.id and not m.is_read,
+                }
+        return list(seen.values())
+    except Exception as e:
+        logger.error(f"Error getting DM conversations: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -2648,6 +2801,24 @@ def get_user_card(db, username: str) -> dict:
 
         roles = [r.name for r in user.roles]
 
+        # Top 3 games by playtime
+        top_game_rows = (
+            db.query(GameLibraryCache)
+            .filter(GameLibraryCache.user_id == user.id)
+            .order_by(GameLibraryCache.playtime_hours.desc())
+            .limit(3)
+            .all()
+        )
+        top_games = [
+            {
+                'app_id': g.app_id,
+                'name': g.game_name or g.app_id,
+                'playtime_hours': round(float(g.playtime_hours or 0), 1),
+                'platform': g.platform or 'steam',
+            }
+            for g in top_game_rows
+        ]
+
         return {
             'username': user.username,
             'display_name': user.display_name or user.username,
@@ -2655,11 +2826,16 @@ def get_user_card(db, username: str) -> dict:
             'avatar_url': user.avatar_url or '',
             'roles': roles,
             'steam_id': user.steam_id or '',
+            'is_online': bool(
+                user.last_seen and
+                user.last_seen >= (datetime.utcnow() - timedelta(minutes=5))
+            ),
             'stats': {
                 'total_games': int(total_games),
                 'total_playtime_hours': round(float(total_playtime), 1),
                 'total_achievements': int(total_achievements),
             },
+            'top_games': top_games,
             'joined': user.created_at.isoformat() if user.created_at else None,
         }
     except Exception as e:
