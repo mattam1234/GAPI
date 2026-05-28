@@ -5213,6 +5213,7 @@ def _send_invite_notifications(recipients: List[str], title: str, message: str,
 
 
 
+@app.route('/api/schedule', methods=['GET'])
 @require_login
 def api_get_schedule():
     """Return all game night events sorted by date/time."""
