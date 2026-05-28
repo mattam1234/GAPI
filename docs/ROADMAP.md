@@ -52,6 +52,12 @@ This roadmap now separates shipped capabilities from the next iteration so prior
 - [Changelog](CHANGELOG.md)
 - [Contributing Guide](CONTRIBUTING.md)
 
+## 🗃️ Historical Under-Consideration Items (Completed)
+
+- ~~VR game filtering~~ ✅
+- ~~Controller support for desktop app~~ ✅
+- ~~Voice commands for game picking~~ ✅
+
 ## 📝 Notes
 
 - Priority order may change based on production issues and community feedback.
