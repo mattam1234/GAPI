@@ -489,6 +489,36 @@ class TestScheduleIcalSyncRoutes(unittest.TestCase):
         self.assertEqual(resp.headers['Content-Type'], 'text/calendar; charset=utf-8')
 
 
+class TestScheduleAgendaRoute(unittest.TestCase):
+
+    def setUp(self):
+        gapi_gui.app.config['TESTING'] = True
+        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        self.client = gapi_gui.app.test_client()
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'alice'
+
+    @staticmethod
+    def _fake_picker():
+        return SimpleNamespace(
+            schedule_service=SimpleNamespace(
+                list_schedules=lambda username=None: [{'id': 'personal:alice', 'name': 'My Schedule'}],
+                resolve_schedule_for_user=lambda schedule_id, username: 'personal:alice',
+                get_events=lambda schedule_id=None, username=None: [],
+            )
+        )
+
+    def test_schedule_get_route_returns_events_payload(self):
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
+            resp = self.client.get('/api/schedule')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data['events'], [])
+        self.assertEqual(data['count'], 0)
+        self.assertEqual(data['active_schedule_id'], 'personal:alice')
+        self.assertEqual(len(data['schedules']), 1)
+
+
 class TestScheduleSystemdFilesAndDocs(unittest.TestCase):
 
     def test_systemd_units_exist(self):
