@@ -4365,3 +4365,251 @@ html[data-theme="light"] .dash-rec-btn:hover {
     justify-content: space-between;
   }
 }
+
+/* ── Bell notification popup ─────────────────────────────────────── */
+#nav-notifications-wrap {
+  position: relative;
+}
+
+#notif-bell-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 1.2em;
+  border-radius: var(--radius-sm, 8px);
+  transition: background 0.15s, color 0.15s;
+  font-family: inherit;
+}
+
+#notif-bell-btn:hover {
+  background: var(--list-hover);
+  color: var(--text-primary);
+}
+
+#notif-badge {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ef4444;
+  color: white;
+  font-size: 0.65em;
+  font-weight: 700;
+  border-radius: 50px;
+  line-height: 1;
+}
+
+#notif-popup {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  min-width: 320px;
+  max-width: 360px;
+  background: var(--card-bg, #1e2130);
+  border: 1px solid var(--card-border, rgba(255,255,255,0.08));
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  z-index: 900;
+  overflow: hidden;
+}
+
+.notif-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--card-border, rgba(255,255,255,0.06));
+}
+
+.notif-popup-header-title {
+  font-weight: 700;
+  font-size: 0.95em;
+}
+
+.notif-popup-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.notif-popup-header-actions button {
+  padding: 4px 10px;
+  border: 1px solid var(--card-border, rgba(255,255,255,0.1));
+  border-radius: 50px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75em;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.notif-popup-header-actions button:hover {
+  background: var(--list-hover);
+  color: var(--text-primary);
+}
+
+/* ── User card top games ──────────────────────────────────────────── */
+.user-card-top-games {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--card-border, rgba(255,255,255,0.06));
+}
+
+.user-card-top-games-label {
+  font-size: 0.72em;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.user-card-top-game-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8em;
+  padding: 2px 0;
+  color: var(--text-primary);
+}
+
+.user-card-top-game-item span:last-child {
+  color: var(--text-secondary);
+  font-size: 0.9em;
+}
+
+.user-card-online-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* ── Game picker redesign ─────────────────────────────────────────── */
+.picker-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  min-height: 400px;
+}
+
+.picker-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--card-bg, #1e2130);
+  border: 1px solid var(--card-border, rgba(255,255,255,0.08));
+  border-radius: var(--radius, 12px);
+  padding: 16px;
+  transition: width 0.2s, opacity 0.2s, padding 0.2s;
+  overflow: hidden;
+}
+
+.picker-sidebar.picker-sidebar-collapsed {
+  width: 0;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  border-width: 0;
+}
+
+.picker-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.picker-sidebar-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.picker-sidebar-close:hover {
+  background: var(--list-hover);
+  color: var(--text-primary);
+}
+
+.picker-filter-section {
+  margin-bottom: 16px;
+}
+
+.picker-filter-label {
+  font-size: 0.78em;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.picker-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-main-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.picker-sidebar-toggle-btn {
+  padding: 8px 16px;
+  border: 1.5px solid var(--card-border, rgba(255,255,255,0.15));
+  border-radius: 50px;
+  background: var(--card-bg, #1e2130);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.85em;
+  font-family: inherit;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.picker-sidebar-toggle-btn:hover,
+.picker-sidebar-toggle-btn.active {
+  background: var(--accent, #6366f1);
+  color: white;
+  border-color: var(--accent, #6366f1);
+}
+
+.picker-pick-btn {
+  margin: 0 !important;
+}
+
+@media (max-width: 640px) {
+  .picker-layout {
+    flex-direction: column;
+  }
+  .picker-sidebar {
+    width: 100%;
+  }
+  .picker-sidebar.picker-sidebar-collapsed {
+    width: 100%;
+    max-height: 0;
+    opacity: 0;
+    padding: 0;
+    border-width: 0;
+  }
+}

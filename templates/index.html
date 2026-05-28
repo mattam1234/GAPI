@@ -202,11 +202,27 @@
                     <div class="user-info-name" id="sidebar-username"></div>
                     <div class="user-info-status">Online</div>
                 </div>
-                <a class="sidebar-item sidebar-user-notif auth-required" id="nav-notifications" onclick="switchTab('notifications',event)" role="button" tabindex="0" style="display:none;">
-                    <span class="sidebar-item-icon">🔔</span>
-                    <span class="sidebar-item-label">Notifications</span>
-                    <span id="notif-badge" class="sidebar-badge sidebar-user-badge" style="display:none;"></span>
-                </a>
+                <!-- Bell-only notification toggle (replaces labeled sidebar item) -->
+                <div class="auth-required sidebar-user-notif" id="nav-notifications-wrap" style="position:relative; display:none;">
+                    <button id="notif-bell-btn" class="sidebar-icon-btn" onclick="toggleNotifPopup(event)"
+                            title="Notifications" aria-label="Toggle notifications" style="font-size:1.2em; position:relative;">
+                        🔔
+                        <span id="notif-badge" class="sidebar-badge sidebar-user-badge" style="display:none; position:absolute; top:2px; right:2px; min-width:16px; height:16px; border-radius:50%; font-size:0.65em; line-height:16px; text-align:center; padding:0 3px; pointer-events:none;"></span>
+                    </button>
+                    <!-- Compact notification popup panel -->
+                    <div id="notif-popup" style="display:none; position:absolute; bottom:calc(100% + 8px); left:0; width:320px; max-height:400px; overflow-y:auto; background:var(--card-bg,#1e2130); border:1px solid var(--card-border,rgba(255,255,255,0.08)); border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.4); z-index:2000; padding:0;">
+                        <div style="padding:12px 16px 8px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--card-border,rgba(255,255,255,0.08));">
+                            <span style="font-weight:700; font-size:0.95em;">Notifications</span>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <button onclick="markAllNotifsRead()" style="font-size:0.75em; padding:3px 10px; background:var(--accent,#6366f1); color:white; border:none; border-radius:50px; cursor:pointer; font-family:inherit; font-weight:600;">Mark all read</button>
+                                <button onclick="switchTab('notifications',event); closeNotifPopup();" style="font-size:0.75em; padding:3px 10px; background:var(--card-border,rgba(255,255,255,0.1)); color:var(--text-secondary); border:none; border-radius:50px; cursor:pointer; font-family:inherit;">See all</button>
+                            </div>
+                        </div>
+                        <div id="notif-popup-list" style="padding:6px 0;">
+                            <div style="padding:16px; color:var(--text-secondary); font-size:0.9em; text-align:center;">Loading…</div>
+                        </div>
+                    </div>
+                </div>
                 <div class="sidebar-action-btns" id="sidebar-action-btns" style="display:none;">
                     <button class="sidebar-icon-btn" onclick="toggleDarkMode()" id="theme-toggle-btn" title="Toggle theme">🌙</button>
                     <button class="sidebar-icon-btn" onclick="handleLogout()" title="Sign out">⏻</button>
@@ -449,99 +465,105 @@
 
         <!-- Picker Tab -->
         <div id="picker-tab" class="tab-content">
-            <div class="filters">
-                <div class="filter-group">
-                    <label class="filter-label">Filter Options</label>
-                    <div class="radio-group">
-                        <div class="radio-option">
-                            <input type="radio" id="filter-all" name="filter" value="all" checked>
-                            <label for="filter-all">All Games</label>
-                        </div>
-                        <div class="radio-option">
-                            <input type="radio" id="filter-unplayed" name="filter" value="unplayed">
-                            <label for="filter-unplayed">Unplayed Games</label>
-                        </div>
-                        <div class="radio-option">
-                            <input type="radio" id="filter-barely" name="filter" value="barely">
-                            <label for="filter-barely">Barely Played (&lt; 2h)</label>
-                        </div>
-                        <div class="radio-option">
-                            <input type="radio" id="filter-well" name="filter" value="well">
-                            <label for="filter-well">Well-Played (&gt; 10h)</label>
-                        </div>
-                        <div class="radio-option">
-                            <input type="radio" id="filter-favorites" name="filter" value="favorites">
-                            <label for="filter-favorites">Favorites Only</label>
+            <!-- Game Picker — two-column layout: filter sidebar + main content -->
+            <div class="picker-layout">
+                <!-- ── Filter sidebar ── -->
+                <aside class="picker-sidebar" id="picker-sidebar">
+                    <div class="picker-sidebar-header">
+                        <span style="font-weight:700;font-size:1em;">🎛️ Filters</span>
+                        <button class="picker-sidebar-close" onclick="togglePickerSidebar()" title="Collapse">✕</button>
+                    </div>
+
+                    <div class="picker-filter-section">
+                        <div class="picker-filter-label">Play time</div>
+                        <div class="radio-group">
+                            <div class="radio-option"><input type="radio" id="filter-all" name="filter" value="all" checked><label for="filter-all">All Games</label></div>
+                            <div class="radio-option"><input type="radio" id="filter-unplayed" name="filter" value="unplayed"><label for="filter-unplayed">Unplayed</label></div>
+                            <div class="radio-option"><input type="radio" id="filter-barely" name="filter" value="barely"><label for="filter-barely">Barely Played (&lt;2 h)</label></div>
+                            <div class="radio-option"><input type="radio" id="filter-well" name="filter" value="well"><label for="filter-well">Well-Played (&gt;10 h)</label></div>
+                            <div class="radio-option"><input type="radio" id="filter-favorites" name="filter" value="favorites"><label for="filter-favorites">Favorites Only</label></div>
                         </div>
                     </div>
-                </div>
 
-                <div class="filter-group">
-                    <label class="filter-label" for="genre-filter">Genre (e.g., Action, RPG)</label>
-                    <input type="text" id="genre-filter" class="genre-input" placeholder="Leave empty for any genre">
-                </div>
+                    <div class="picker-filter-section">
+                        <div class="picker-filter-label" for="genre-filter">Genre</div>
+                        <input type="text" id="genre-filter" class="genre-input" placeholder="Action, RPG…" style="width:100%;box-sizing:border-box;">
+                    </div>
 
-                <div class="filter-group">
-                    <label class="filter-label" for="platform-filter">Platform / Device</label>
-                    <div style="display:flex; gap:var(--space-sm); flex-wrap:wrap;">
-                        <select id="platform-filter" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md); min-width:160px;">
+                    <div class="picker-filter-section">
+                        <div class="picker-filter-label">Platform / Device</div>
+                        <select id="platform-filter" style="width:100%;box-sizing:border-box;padding:var(--space-sm) var(--space-md);border-radius:var(--radius-sm,8px);border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-size:var(--font-md);">
                             <option value="">Any platform</option>
                         </select>
-                        <select id="device-filter" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md); min-width:140px;">
+                        <select id="device-filter" style="width:100%;box-sizing:border-box;margin-top:6px;padding:var(--space-sm) var(--space-md);border-radius:var(--radius-sm,8px);border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-size:var(--font-md);">
                             <option value="">Any device</option>
                         </select>
                     </div>
-                </div>
 
-                <!-- Advanced filters toggle -->
-                <div class="filter-group">
-                    <label class="filter-label" style="cursor:pointer;" onclick="toggleAdvancedFilters()">
-                        ⚙️ Advanced Filters <span id="adv-toggle-icon">▾</span>
-                    </label>
-                    <div id="advanced-filters" style="display:none; margin-top:10px; gap:var(--space-md); flex-wrap:wrap;">
-                        <label style="font-weight:600;">Min Metacritic:
-                            <input type="number" id="adv-min-score" min="0" max="100" placeholder="e.g. 75"
-                                   style="width:70px; margin-left:5px; padding:var(--space-5) var(--space-sm); border-radius:var(--radius-sm,8px); border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
-                        </label>
-                        <label style="font-weight:600;">Release Year ≥
-                            <input type="number" id="adv-min-year" min="1980" max="2099" placeholder="e.g. 2015"
-                                   style="width:80px; margin-left:5px; padding:var(--space-5) var(--space-sm); border-radius:var(--radius-sm,8px); border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
-                        </label>
-                        <label style="font-weight:600;">Release Year ≤
-                            <input type="number" id="adv-max-year" min="1980" max="2099" placeholder="e.g. 2023"
-                                   style="width:80px; margin-left:5px; padding:var(--space-5) var(--space-sm); border-radius:var(--radius-sm,8px); border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
-                        </label>
-                        <label style="font-weight:600;">Max Price $:
-                            <input type="number" id="adv-max-price" min="0" max="100" step="0.01" placeholder="e.g. 20"
-                                   style="width:70px; margin-left:5px; padding:var(--space-5) var(--space-sm); border-radius:var(--radius-sm,8px); border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
-                        </label>
-                        <label style="font-weight:600;">Exclude App IDs:
-                            <input type="text" id="adv-exclude-ids" placeholder="730,570"
-                                   style="width:120px; margin-left:5px; padding:var(--space-5) var(--space-sm); border-radius:var(--radius-sm,8px); border:1.5px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-family:inherit;">
-                        </label>
-                        <label style="font-weight:600;">Multiplayer Only:
-                            <input type="checkbox" id="adv-multiplayer" style="margin-left:5px; width:18px; height:18px;">
-                        </label>
-                        <label style="font-weight:600;">Single Player Only:
-                            <input type="checkbox" id="adv-singleplayer" style="margin-left:5px; width:18px; height:18px;">
-                        </label>
+                    <div class="picker-filter-section">
+                        <div class="picker-filter-label">🏷️ Tag</div>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <select id="tag-filter" style="flex:1;padding:var(--space-sm) var(--space-md);border-radius:var(--radius-sm,8px);border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-size:var(--font-md);">
+                                <option value="">Any tag</option>
+                            </select>
+                            <button onclick="refreshTagFilter()" title="Refresh tags" style="padding:var(--space-7) var(--space-sm);background:var(--list-hover);border:1px solid var(--input-border);border-radius:var(--radius-sm,8px);cursor:pointer;color:var(--text-primary);">🔄</button>
+                        </div>
+                    </div>
+
+                    <div class="picker-filter-section">
+                        <div class="picker-filter-label" style="cursor:pointer;" onclick="toggleAdvancedFilters()">
+                            ⚙️ Advanced <span id="adv-toggle-icon">▾</span>
+                        </div>
+                        <div id="advanced-filters" style="display:none;margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+                            <label style="font-size:0.85em;font-weight:600;display:flex;justify-content:space-between;align-items:center;">Min Metacritic
+                                <input type="number" id="adv-min-score" min="0" max="100" placeholder="75"
+                                       style="width:60px;padding:4px 6px;border-radius:6px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-family:inherit;">
+                            </label>
+                            <label style="font-size:0.85em;font-weight:600;display:flex;justify-content:space-between;align-items:center;">Year ≥
+                                <input type="number" id="adv-min-year" min="1980" max="2099" placeholder="2015"
+                                       style="width:70px;padding:4px 6px;border-radius:6px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-family:inherit;">
+                            </label>
+                            <label style="font-size:0.85em;font-weight:600;display:flex;justify-content:space-between;align-items:center;">Year ≤
+                                <input type="number" id="adv-max-year" min="1980" max="2099" placeholder="2023"
+                                       style="width:70px;padding:4px 6px;border-radius:6px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-family:inherit;">
+                            </label>
+                            <label style="font-size:0.85em;font-weight:600;display:flex;justify-content:space-between;align-items:center;">Max Price $
+                                <input type="number" id="adv-max-price" min="0" max="100" step="0.01" placeholder="20"
+                                       style="width:60px;padding:4px 6px;border-radius:6px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-family:inherit;">
+                            </label>
+                            <label style="font-size:0.85em;font-weight:600;display:flex;justify-content:space-between;align-items:center;">Exclude IDs
+                                <input type="text" id="adv-exclude-ids" placeholder="730,570"
+                                       style="width:90px;padding:4px 6px;border-radius:6px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);font-family:inherit;">
+                            </label>
+                            <label style="font-size:0.85em;font-weight:600;display:flex;justify-content:space-between;align-items:center;">Multiplayer only
+                                <input type="checkbox" id="adv-multiplayer" style="width:16px;height:16px;">
+                            </label>
+                            <label style="font-size:0.85em;font-weight:600;display:flex;justify-content:space-between;align-items:center;">Single-player only
+                                <input type="checkbox" id="adv-singleplayer" style="width:16px;height:16px;">
+                            </label>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- ── Main picker area ── -->
+                <div class="picker-main">
+                    <div class="picker-main-header">
+                        <button class="picker-sidebar-toggle-btn" onclick="togglePickerSidebar()" id="picker-sidebar-toggle-btn" title="Show / hide filters">🎛️ Filters</button>
+                        <div style="flex:1;"></div>
+                        <button class="pick-button picker-pick-btn" onclick="pickGame()" data-tooltip="Randomly pick a game (Ctrl+P)">🎲 Pick Random Game</button>
+                    </div>
+
+                    <div id="game-result" class="game-display" style="display:none;">
+                        <!-- Game info will be displayed here -->
+                    </div>
+
+                    <div id="picker-empty-state" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:48px 24px;text-align:center;color:var(--text-secondary);">
+                        <div style="font-size:3em;">🎮</div>
+                        <div style="font-size:1.1em;font-weight:600;color:var(--text-primary);">Ready to pick?</div>
+                        <div style="font-size:0.9em;">Set your filters on the left, then click <strong>Pick Random Game</strong> to discover your next play.</div>
+                        <button class="pick-button" onclick="pickGame()" style="margin-top:8px;">🎲 Pick Now</button>
                     </div>
                 </div>
-                <!-- Tag filter -->
-                <div class="filter-group">
-                    <label class="filter-label" for="tag-filter">🏷️ Filter by Tag</label>
-                    <select id="tag-filter" style="padding:var(--space-sm) var(--space-md); border-radius:var(--radius-sm,8px); border:1px solid var(--input-border); background:var(--input-bg); color:var(--text-primary); font-size:var(--font-md); min-width:160px;">
-                        <option value="">Any tag</option>
-                    </select>
-                    <button onclick="refreshTagFilter()" title="Refresh tag list"
-                            style="padding:var(--space-7) var(--space-md); margin-left:6px; background:var(--list-hover); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); cursor:pointer; color:var(--text-primary);">🔄</button>
-                </div>
-            </div>
-
-            <button class="pick-button" onclick="pickGame()" data-tooltip="Randomly pick a game (Ctrl+P)">🎲 Pick Random Game</button>
-
-            <div id="game-result" class="game-display" style="display: none;">
-                <!-- Game info will be displayed here -->
             </div>
         </div>
 

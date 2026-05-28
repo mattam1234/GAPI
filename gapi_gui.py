@@ -22,7 +22,7 @@ import subprocess
 import signal
 import collections
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple, Deque
+from typing import Optional, List, Dict, Tuple, Deque, Any
 from functools import wraps
 from werkzeug.local import LocalProxy
 from urllib.parse import unquote, quote_plus
@@ -5018,24 +5018,24 @@ def _schedule_event_members(event: Optional[Dict]) -> Dict[str, str]:
 def _send_schedule_in_app_notifications(recipients: List[str],
                                         title: str,
                                         message: str,
-                                        exclude_usernames: Optional[set] = None) -> None:
-    if not DB_AVAILABLE:
-        return
-    excluded = {_normalize_schedule_username(user) for user in (exclude_usernames or set()) if user}
-    seen = set()
-    for recipient in recipients:
-        key = _normalize_schedule_username(recipient)
-        if not key or key in excluded or key in seen:
-            continue
-        seen.add(key)
-        db = next(database.get_db())
-        try:
-            database.create_notification(db, recipient, title=title, message=message, type='info')
-        except Exception as exc:
-            gui_logger.warning('Failed to send schedule notification to %s: %s', recipient, exc)
-        finally:
-            if db:
-                db.close()
+                                        exclude_usernames: Optional[set] = None,
+                                        link: Optional[str] = None) -> None:
+    """Send in-app (+ Discord DM fallback) notifications for schedule events.
+
+    Delegates to :func:`_send_invite_notifications` so behaviour is consistent
+    with session invites.  The *link* parameter may be set after ``_send_invite_notifications``
+    is defined; callers that already use this helper gain the Discord-DM fallback
+    automatically.
+    """
+    # _send_invite_notifications is defined below this function in the file;
+    # we call it lazily to avoid a forward-reference issue.
+    _send_invite_notifications(
+        recipients,
+        title=title,
+        message=message,
+        link=link,
+        exclude_usernames=exclude_usernames,
+    )
 
 
 def _load_discord_bot_token_from_config() -> Optional[str]:
@@ -5104,7 +5104,74 @@ def _send_schedule_discord_dm(recipient_username: str, message: str) -> bool:
         gui_logger.warning('Failed schedule Discord DM to %s: %s', safe_username, exc)
         return False
 
-@app.route('/api/schedule', methods=['GET'])
+
+def _send_invite_notification(recipient: str, title: str, message: str,
+                               link: Optional[str] = None) -> bool:
+    """Send an in-app notification to *recipient* and fall back to a Discord DM
+    if the user is currently offline.
+
+    Args:
+        recipient: Target GAPI username.
+        title:     Notification title.
+        message:   Notification body text.
+        link:      Optional deep-link stored on the notification (e.g. ``#schedule/42``).
+
+    Returns:
+        True if at least one channel (in-app or Discord) succeeded.
+    """
+    if not DB_AVAILABLE:
+        return False
+    recipient = str(recipient or '').strip()
+    if not recipient:
+        return False
+
+    in_app_ok = False
+    db = next(database.get_db())
+    try:
+        in_app_ok = database.create_notification(
+            db, recipient, title=title, message=message, type='info', link=link
+        )
+        # Check online status to decide on Discord DM fallback
+        user = database.get_user_by_username(db, recipient)
+        is_online = False
+        if user and getattr(user, 'last_seen', None):
+            from datetime import timedelta as _td
+            is_online = user.last_seen >= (datetime.utcnow() - _td(minutes=5))
+    except Exception as exc:
+        gui_logger.warning('Failed in-app invite notification to %s: %s', recipient, exc)
+        is_online = True  # avoid unnecessary Discord call on error
+    finally:
+        if db:
+            db.close()
+
+    if not is_online:
+        _send_schedule_discord_dm(recipient, message)
+
+    return in_app_ok
+
+
+def _send_invite_notifications(recipients: List[str], title: str, message: str,
+                                link: Optional[str] = None,
+                                exclude_usernames: Optional[set] = None) -> None:
+    """Send invite notifications (in-app + Discord DM fallback) to a list of users.
+
+    This is the single authoritative helper for both session and schedule
+    invite flows to keep behaviour consistent.
+    """
+    excluded = {_normalize_schedule_username(u) for u in (exclude_usernames or set()) if u}
+    seen: set = set()
+    for recipient in recipients:
+        key = _normalize_schedule_username(recipient)
+        if not key or key in excluded or key in seen:
+            continue
+        seen.add(key)
+        try:
+            _send_invite_notification(recipient, title=title, message=message, link=link)
+        except Exception as exc:
+            gui_logger.warning('Invite notification failed for %s: %s', recipient, exc)
+
+
+
 @require_login
 def api_get_schedule():
     """Return all game night events sorted by date/time."""
@@ -5338,11 +5405,13 @@ def api_create_event():
         recipient = str(invitee_id or invitee_name).strip()
         if recipient:
             invite_recipients.append(recipient)
+    event_id = event.get('id', '')
     _send_schedule_in_app_notifications(
         invite_recipients,
         title=f'📨 Schedule invite: {title}',
         message=f'{username} invited you to "{title}" on {date} at {time_str}.',
         exclude_usernames={username},
+        link=f'#schedule/{event_id}' if event_id else None,
     )
     
     # Create Discord event if requested
@@ -5512,6 +5581,7 @@ def api_update_event(event_id: str):
             title=f'📨 Schedule invite: {event.get("title", "Game Night")}',
             message=f'{username} invited you to "{event.get("title", "Game Night")}" on {event.get("date", "")} at {event.get("time", "")}.',
             exclude_usernames={username},
+            link=f'#schedule/{event_id}',
         )
     return jsonify(event)
 
@@ -6869,6 +6939,86 @@ def api_sync_achievements():
 
 
 # ---------------------------------------------------------------------------
+# Per-platform achievement sync
+# ---------------------------------------------------------------------------
+
+# Platform stub sync functions — extend these when real API clients are added
+def _sync_platform_achievements_epic(username: str, user) -> Dict:
+    """Stub for Epic Games achievement sync (not yet implemented)."""
+    return {'status': 'not_configured', 'error': 'Epic Games integration not yet available', 'synced': [], 'errors': []}
+
+
+def _sync_platform_achievements_gog(username: str, user) -> Dict:
+    """Stub for GOG achievement sync (not yet implemented)."""
+    return {'status': 'not_configured', 'error': 'GOG integration not yet available', 'synced': [], 'errors': []}
+
+
+def _sync_platform_achievements_xbox(username: str, user) -> Dict:
+    """Stub for Xbox/Microsoft achievement sync (not yet implemented)."""
+    return {'status': 'not_configured', 'error': 'Xbox integration not yet available', 'synced': [], 'errors': []}
+
+
+_PLATFORM_SYNC_HANDLERS: Dict[str, Any] = {
+    'steam': None,  # handled by existing api_sync_achievements
+    'epic': _sync_platform_achievements_epic,
+    'gog': _sync_platform_achievements_gog,
+    'xbox': _sync_platform_achievements_xbox,
+}
+
+
+@app.route('/api/achievements/sync/platform', methods=['POST'])
+@require_login
+def api_sync_achievements_platform():
+    """Sync achievements for a specific connected platform.
+
+    Request JSON::
+
+        {
+          "platform": "epic" | "gog" | "xbox" | "steam"
+        }
+
+    Response JSON::
+
+        {
+          "platform": "epic",
+          "status": "ok" | "not_configured" | "error",
+          "synced": [...],
+          "errors": [...],
+          "error": "reason if not ok"
+        }
+    """
+    if not ensure_db_available():
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    platform = str(data.get('platform', '')).lower().strip()
+    if not platform:
+        return jsonify({'error': 'platform is required'}), 400
+
+    if platform not in _PLATFORM_SYNC_HANDLERS:
+        return jsonify({'error': f'Unknown platform: {platform}. Supported: {list(_PLATFORM_SYNC_HANDLERS)}'}), 400
+
+    if platform == 'steam':
+        # Delegate to the existing full Steam sync
+        with app.test_request_context():
+            pass  # handled by api_sync_achievements; caller should use /api/achievements/sync
+        return jsonify({'platform': 'steam', 'status': 'ok', 'message': 'Use /api/achievements/sync for Steam'}), 200
+
+    username = get_current_username()
+    db = next(database.get_db())
+    try:
+        user = database.get_user(db, username)
+    finally:
+        db.close()
+
+    handler = _PLATFORM_SYNC_HANDLERS[platform]
+    result = handler(username, user)
+    result['platform'] = platform
+    status_code = 200 if result.get('status') == 'ok' else 200  # always 200; client reads 'status'
+    return jsonify(result), status_code
+
+
+# ---------------------------------------------------------------------------
 # Achievement statistics dashboard
 # ---------------------------------------------------------------------------
 
@@ -7760,34 +7910,53 @@ def api_unfollow_user(username):
 @app.route('/api/messages/conversations', methods=['GET'])
 @require_login
 def api_get_conversations():
-    """Get user's DM conversations"""
-    conversations = [
-        {'username': 'gamer123', 'last_message': 'Hey, want to play together?', 'unread': False},
-        {'username': 'player_pro', 'last_message': 'Nice pick earlier!', 'unread': True},
-    ]
-    return jsonify({'conversations': conversations})
+    """Get DM conversations for the current user."""
+    username = get_current_username()
+    if DB_AVAILABLE and ensure_db_available():
+        db = next(database.get_db())
+        try:
+            convos = database.get_dm_conversations(db, username)
+            return jsonify({'conversations': convos})
+        finally:
+            if db:
+                db.close()
+    return jsonify({'conversations': []})
 
 
 @app.route('/api/messages/<username>', methods=['GET', 'POST'])
 @require_login
 def api_messages(username):
-    """Get or send direct messages"""
+    """Get or send direct messages with another user."""
     try:
         decoded = unquote(username) if '%' in username else username
         current = get_current_username()
-        
+
         if request.method == 'GET':
-            messages = [
-                {'sender': decoded, 'message': 'Hey there!', 'created_at': datetime.now().isoformat()},
-                {'sender': current, 'message': 'Hi! How are you?', 'created_at': datetime.now().isoformat()},
-            ]
-            return jsonify({'messages': messages})
+            if DB_AVAILABLE and ensure_db_available():
+                db = next(database.get_db())
+                try:
+                    messages = database.get_direct_messages(db, current, decoded)
+                    return jsonify({'messages': messages})
+                finally:
+                    if db:
+                        db.close()
+            return jsonify({'messages': []})
         else:  # POST
             data = request.get_json() or {}
-            msg = data.get('message', '')
+            msg = data.get('message', '').strip()
             if not msg:
                 return jsonify({'error': 'Message required'}), 400
-            return jsonify({'success': True, 'message': 'Message sent'})
+            if DB_AVAILABLE and ensure_db_available():
+                db = next(database.get_db())
+                try:
+                    result = database.create_direct_message(db, current, decoded, msg)
+                    if result:
+                        return jsonify({'success': True, 'message': result})
+                    return jsonify({'error': 'Failed to send message'}), 500
+                finally:
+                    if db:
+                        db.close()
+            return jsonify({'success': True, 'message': {'sender': current, 'message': msg}})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -11238,8 +11407,11 @@ def api_live_session_vote(session_id: str):
 @app.route('/api/live-session/<session_id>/invite', methods=['POST'])
 @require_login
 def api_live_session_invite(session_id: str):
-    """Invite one or more users to a live pick session by sending them an
-    in-app notification.
+    """Invite one or more users to a live pick session.
+
+    Sends an in-app notification with a deep link to the session.  If the
+    invitee is currently offline the notification is also delivered via
+    Discord DM (best-effort, requires bot token + linked Discord account).
 
     Only the session host may send invites.
 
@@ -11248,6 +11420,9 @@ def api_live_session_invite(session_id: str):
     """
     global current_user
     username = get_current_username()
+    deep_link = f'#session/{session_id}'
+
+    # ── DB-linked (Discord) session path ──────────────────────────────────
     if DB_AVAILABLE and ensure_db_available():
         db = None
         try:
@@ -11262,29 +11437,27 @@ def api_live_session_invite(session_id: str):
                 if not usernames or not isinstance(usernames, list):
                     return jsonify({'error': 'usernames (list) is required'}), 400
                 sent, failed = [], []
-                for target in usernames:
-                    target = str(target).strip()
-                    if not target:
-                        continue
+                for target in [str(u).strip() for u in usernames if str(u).strip()]:
                     try:
-                        ok = database.create_notification(
-                            db,
+                        ok = _send_invite_notification(
                             target,
-                            title=f'Game session invite from {username}',
+                            title=f'🎮 Session invite from {username}',
                             message=(
                                 f'{username} invited you to join their Discord-linked live pick session '
-                                f'"{session_name}". Session ID: {session_id}'
+                                f'"{session_name}".'
                             ),
-                            type='info',
+                            link=deep_link,
                         )
                         (sent if ok else failed).append(target)
                     except Exception as exc:
-                        gui_logger.warning('Failed to send linked session invite to %s: %s', target, exc)
+                        gui_logger.warning('Failed linked session invite to %s: %s', target, exc)
                         failed.append(target)
                 return jsonify({'sent': sent, 'failed': failed})
         finally:
             if db:
                 db.close()
+
+    # ── In-memory session path ─────────────────────────────────────────────
     with live_sessions_lock:
         session = live_sessions.get(session_id)
         if not session:
@@ -11299,29 +11472,20 @@ def api_live_session_invite(session_id: str):
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available for notifications'}), 503
     sent, failed = [], []
-    for target in usernames:
-        target = str(target).strip()
-        if not target:
-            continue
-        db = next(database.get_db())
+    for target in [str(u).strip() for u in usernames if str(u).strip()]:
         try:
-            ok = database.create_notification(
-                db,
+            ok = _send_invite_notification(
                 target,
-                title=f'Game session invite from {username}',
+                title=f'🎮 Session invite from {username}',
                 message=(
-                    f'{username} invited you to join their live pick session '
-                    f'"{session_name}". Session ID: {session_id}'
+                    f'{username} invited you to join their live pick session "{session_name}".'
                 ),
-                type='info',
+                link=deep_link,
             )
             (sent if ok else failed).append(target)
         except Exception as exc:
             gui_logger.warning('Failed to send invite notification to %s: %s', target, exc)
             failed.append(target)
-        finally:
-            if db:
-                db.close()
     return jsonify({'sent': sent, 'failed': failed})
 
 

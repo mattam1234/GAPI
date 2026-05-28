@@ -815,6 +815,8 @@
                             monthStr = d.toLocaleDateString('en', { month: 'short' });
                             dayStr   = d.getDate();
                         } catch(_) {}
+                        const evId = ev.id || '';
+                        const attendees = (ev.invited_attendees || ev.attendees || []).join(', ');
                         return `<div class="dash-event-item">
                             <div class="dash-event-date-box">
                                 <div class="dash-event-month">${monthStr}</div>
@@ -823,7 +825,11 @@
                             <div style="flex:1; min-width:0;">
                                 <div class="dash-event-title">${escapeHtml(ev.title || 'Event')}</div>
                                 <div class="dash-event-time">${escapeHtml(ev.time || 'Time TBD')}</div>
+                                ${attendees ? `<div style="font-size:0.75em;color:var(--text-secondary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">👥 ${escapeHtml(attendees)}</div>` : ''}
                             </div>
+                            <button onclick="openScheduleEventDetail(${JSON.stringify(ev).replace(/"/g,'&quot;')})"
+                                    style="flex-shrink:0;margin-left:8px;padding:4px 10px;background:var(--accent,#6366f1);color:white;border:none;border-radius:50px;cursor:pointer;font-size:0.75em;font-family:inherit;font-weight:600;"
+                                    title="View event details">View</button>
                         </div>`;
                     }).join('');
                 }
@@ -1029,6 +1035,10 @@
         
         async function displayGame(game) {
             const resultDiv = document.getElementById('game-result');
+            // Hide empty state, show result
+            const emptyState = document.getElementById('picker-empty-state');
+            if (emptyState) emptyState.style.display = 'none';
+            if (resultDiv) resultDiv.style.display = '';
             const favoriteIcon = game.is_favorite ? '<span class="favorite-icon">⭐</span>' : '';
             resultDiv.dataset.gameName = game.name || '';
             const review = game.review;
@@ -1382,7 +1392,16 @@
             panel.style.display = isVisible ? 'none' : 'flex';
             icon.textContent = isVisible ? '▾' : '▴';
         }
-        
+
+        function togglePickerSidebar() {
+            const sidebar = document.getElementById('picker-sidebar');
+            const toggleBtn = document.getElementById('picker-sidebar-toggle-btn');
+            if (!sidebar) return;
+            const isOpen = !sidebar.classList.contains('picker-sidebar-collapsed');
+            sidebar.classList.toggle('picker-sidebar-collapsed', isOpen);
+            if (toggleBtn) toggleBtn.classList.toggle('active', !isOpen);
+        }
+
         async function loadGameDetails(appId) {
             try {
                 const response = await fetch(`/api/game/${appId}/details`);
@@ -3450,6 +3469,47 @@
             if (modal) modal.style.display = 'none';
             if (resetForm) clearScheduleForm();
             setScheduleBodyLock();
+        }
+
+        function openScheduleEventDetail(ev) {
+            let modal = document.getElementById('schedule-event-detail-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'schedule-event-detail-modal';
+                modal.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:3000;align-items:center;justify-content:center;';
+                modal.innerHTML = `<div style="background:var(--card-bg,#1e2130);border-radius:16px;padding:28px 32px;max-width:440px;width:90%;box-shadow:0 12px 48px rgba(0,0,0,0.5);position:relative;">
+                    <button onclick="document.getElementById('schedule-event-detail-modal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;cursor:pointer;font-size:1.4em;color:var(--text-secondary);">✕</button>
+                    <div id="schedule-event-detail-body"></div>
+                    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+                        <button id="sched-detail-goto-btn" style="padding:8px 20px;background:var(--accent,#6366f1);color:white;border:none;border-radius:50px;cursor:pointer;font-weight:600;font-family:inherit;">Open in Schedule →</button>
+                        <button onclick="document.getElementById('schedule-event-detail-modal').style.display='none'" style="padding:8px 20px;background:var(--card-border,rgba(255,255,255,0.1));color:var(--text-primary);border:none;border-radius:50px;cursor:pointer;font-family:inherit;">Close</button>
+                    </div>
+                </div>`;
+                document.body.appendChild(modal);
+            }
+            const body = document.getElementById('schedule-event-detail-body');
+            if (body) {
+                const attendees = (ev.invited_attendees || ev.attendees || []);
+                const rsvp = ev.rsvp_statuses || {};
+                body.innerHTML = `
+                    <div style="font-size:1.2em;font-weight:700;margin-bottom:4px;">${escapeHtml(ev.title || 'Event')}</div>
+                    <div style="color:var(--text-secondary);font-size:0.9em;margin-bottom:14px;">📅 ${escapeHtml(ev.date || '')}  🕐 ${escapeHtml(ev.time || 'TBD')}</div>
+                    ${ev.game_name ? `<div style="margin-bottom:10px;">🎮 <strong>${escapeHtml(ev.game_name)}</strong></div>` : ''}
+                    ${ev.description ? `<div style="color:var(--text-secondary);font-size:0.88em;margin-bottom:12px;">${escapeHtml(ev.description)}</div>` : ''}
+                    ${attendees.length ? `<div style="font-size:0.85em;"><strong>Attendees:</strong><div style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">${
+                        attendees.map(a => {
+                            const status = rsvp[a] || 'pending';
+                            const statusIcon = { accepted:'✅', declined:'❌', maybe:'🤔', pending:'⏳' }[status] || '⏳';
+                            return `<div style="display:flex;justify-content:space-between;"><span>👤 ${escapeHtml(a)}</span><span style="color:var(--text-secondary);">${statusIcon} ${status}</span></div>`;
+                        }).join('')
+                    }</div></div>` : ''}`;
+            }
+            const gotoBtn = document.getElementById('sched-detail-goto-btn');
+            if (gotoBtn) gotoBtn.onclick = () => {
+                modal.style.display = 'none';
+                switchTab('schedule', null);
+            };
+            modal.style.display = 'flex';
         }
 
         function closeScheduleCommonGamePicker() {
@@ -5918,13 +5978,13 @@ Event ID: ${result.discord_event_id}`);
             const sidebarUserInfo = document.getElementById('sidebar-user-info');
             const sidebarActionBtns = document.getElementById('sidebar-action-btns');
             const sidebarStatusDot = document.getElementById('sidebar-status-dot');
+            const notifWrap = document.getElementById('nav-notifications-wrap');
             const authTabs = [
                 document.getElementById('nav-sessions'),
                 document.getElementById('nav-chat'),
                 document.getElementById('nav-friends'),
                 document.getElementById('nav-recommendations'),
                 document.getElementById('nav-achievements'),
-                document.getElementById('nav-notifications')
             ];
             const adminTab = document.getElementById('nav-admin');
 
@@ -5937,6 +5997,7 @@ Event ID: ${result.discord_event_id}`);
                 if (sidebarUsername) sidebarUsername.textContent = username || '';
                 if (sidebarUserInfo) sidebarUserInfo.style.display = '';
                 if (sidebarActionBtns) sidebarActionBtns.style.display = '';
+                if (notifWrap) notifWrap.style.setProperty('display', 'flex', 'important');
                 if (sidebarStatusDot) sidebarStatusDot.classList.remove('offline');
                 if (topbarUserInfo) topbarUserInfo.style.display = '';
                 if (topbarLoginBtn) topbarLoginBtn.style.display = 'none';
@@ -5965,6 +6026,7 @@ Event ID: ${result.discord_event_id}`);
                 if (sidebarUsername) sidebarUsername.textContent = '';
                 if (sidebarUserInfo) sidebarUserInfo.style.display = 'none';
                 if (sidebarActionBtns) sidebarActionBtns.style.display = 'none';
+                if (notifWrap) notifWrap.style.setProperty('display', 'none', 'important');
                 if (sidebarStatusDot) sidebarStatusDot.classList.add('offline');
                 if (topbarUserInfo) topbarUserInfo.style.display = 'none';
                 if (topbarLoginBtn) topbarLoginBtn.style.display = 'inline-block';
@@ -7423,6 +7485,16 @@ Event ID: ${result.discord_event_id}`);
                 `<span class="user-card-badge${r === 'admin' ? ' admin' : ''}">${r}</span>`
             ).join('');
             const stats = card.stats || {};
+            const onlineDot = card.is_online
+                ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-left:6px;vertical-align:middle;" title="Online"></span>`
+                : '';
+            // Top 3 games
+            const topGames = (card.top_games || []);
+            const topGamesHtml = topGames.length
+                ? `<div class="user-card-top-games"><span style="font-size:0.78em;color:var(--text-secondary);font-weight:600;letter-spacing:0.03em;">TOP GAMES</span><div style="display:flex;flex-direction:column;gap:3px;margin-top:4px;">${
+                    topGames.map(g => `<div style="display:flex;justify-content:space-between;font-size:0.82em;"><span style="color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;">${escapeHtml(g.name)}</span><span style="color:var(--text-secondary);flex-shrink:0;margin-left:6px;">${g.playtime_hours}h</span></div>`).join('')
+                  }</div></div>`
+                : '';
             const actionsHtml = (actions || []).map(a =>
                 `<button onclick="${a.onclick}" style="background:${a.bg || 'var(--card-border)'}; color:${a.color || 'var(--text-primary)'};">${a.label}</button>`
             ).join('');
@@ -7431,12 +7503,12 @@ Event ID: ${result.discord_event_id}`);
                     <div class="user-card-header">
                         ${avatar}
                         <div class="user-card-info">
-                            <div class="user-card-name">${card.display_name || card.username}</div>
-                            ${card.display_name && card.display_name !== card.username ? `<div class="user-card-username">@${card.username}</div>` : ''}
+                            <div class="user-card-name">${escapeHtml(card.display_name || card.username)}${onlineDot}</div>
+                            ${card.display_name && card.display_name !== card.username ? `<div class="user-card-username">@${escapeHtml(card.username)}</div>` : ''}
                             ${roles ? `<div class="user-card-badges" style="margin-top:4px">${roles}</div>` : ''}
                         </div>
                     </div>
-                    ${card.bio ? `<div class="user-card-bio">"${card.bio}"</div>` : ''}
+                    ${card.bio ? `<div class="user-card-bio">"${escapeHtml(card.bio)}"</div>` : ''}
                     <div class="user-card-stats">
                         <div>
                             <div class="user-card-stat-value">${(stats.total_playtime_hours || 0).toLocaleString()}h</div>
@@ -7451,6 +7523,7 @@ Event ID: ${result.discord_event_id}`);
                             <div class="user-card-stat-label">Achievements</div>
                         </div>
                     </div>
+                    ${topGamesHtml}
                     ${actionsHtml ? `<div class="user-card-actions">${actionsHtml}</div>` : ''}
                 </div>`;
         }
@@ -7495,6 +7568,9 @@ Event ID: ${result.discord_event_id}`);
                 grid.innerHTML = cards.map(card =>
                     buildUserCard(card, [
                         { label: '👤 View Card', onclick: `showUserCardModal('${card.username}')`, bg: 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: 'white' },
+                        { label: '🎮 Invite to Session', onclick: `inviteFriendToSession('${card.username}')`, bg: 'linear-gradient(135deg,#059669,#10b981)', color: 'white' },
+                        { label: '📚 Compare Library', onclick: `compareFriendLibrary('${card.username}')`, bg: 'rgba(99,102,241,0.12)', color: 'var(--text-primary)' },
+                        { label: '💬 Message', onclick: `openDmWith('${card.username}')`, bg: 'rgba(255,255,255,0.06)', color: 'var(--text-primary)' },
                         { label: '❌ Remove', onclick: `removeAppFriend('${card.username}')`, bg: 'rgba(239,68,68,0.1)', color: '#ef4444' },
                     ])
                 ).join('');
@@ -7572,6 +7648,53 @@ Event ID: ${result.discord_event_id}`);
             } catch (err) {
                 showMessage('Error: ' + err.message, 'error');
             }
+        }
+
+        async function inviteFriendToSession(username) {
+            // Find the active live session if any, otherwise prompt the user to start one
+            try {
+                const resp = await fetch('/api/live-session/active');
+                if (!resp.ok) { showMessage('No active session found. Start a session first.', 'info'); return; }
+                const data = await resp.json();
+                const sessions = data.sessions || [];
+                if (!sessions.length) { showMessage('No active session. Start one in the Sessions tab.', 'info'); return; }
+                const sessionId = sessions[0].session_id || sessions[0].id;
+                const invResp = await fetch(`/api/live-session/${sessionId}/invite`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usernames: [username] }),
+                });
+                const invData = await invResp.json();
+                if (invResp.ok && (invData.sent || []).includes(username)) {
+                    showMessage(`✅ Invite sent to ${username}!`, 'success');
+                } else {
+                    showMessage(invData.error || `Failed to invite ${username}`, 'error');
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, 'error');
+            }
+        }
+
+        function compareFriendLibrary(username) {
+            // Navigate to the compare tab pre-filled with this friend
+            switchTab('stats', null);
+            setTimeout(() => {
+                const input = document.getElementById('compare-username');
+                if (input) {
+                    input.value = username;
+                    const btn = document.getElementById('compare-btn') || document.querySelector('[onclick*="compareLibraries"]');
+                    if (btn) btn.click();
+                }
+            }, 300);
+        }
+
+        async function openDmWith(username) {
+            // Open the DM modal pre-loaded with this conversation
+            const modal = document.getElementById('messages-modal');
+            if (!modal) { showMessage('DM feature not available.', 'info'); return; }
+            modal.style.display = 'flex';
+            currentDMUser = username;
+            await loadDMMessages(username);
         }
 
         // User card modal
@@ -9258,6 +9381,85 @@ Event ID: ${result.discord_event_id}`);
             if (!badge) return;
             if (count > 0) { badge.textContent = String(count); badge.style.display = 'inline-flex'; }
             else { badge.style.display = 'none'; }
+        }
+
+        let _notifPopupOpen = false;
+
+        async function toggleNotifPopup(evt) {
+            if (evt) evt.stopPropagation();
+            const popup = document.getElementById('notif-popup');
+            if (!popup) return;
+            _notifPopupOpen = !_notifPopupOpen;
+            popup.style.display = _notifPopupOpen ? 'block' : 'none';
+            if (_notifPopupOpen) {
+                await _loadNotifPopupData();
+            }
+        }
+
+        function closeNotifPopup() {
+            const popup = document.getElementById('notif-popup');
+            if (popup) popup.style.display = 'none';
+            _notifPopupOpen = false;
+        }
+
+        // Close popup when clicking outside
+        document.addEventListener('click', function(e) {
+            if (_notifPopupOpen) {
+                const wrap = document.getElementById('nav-notifications-wrap');
+                if (wrap && !wrap.contains(e.target)) closeNotifPopup();
+            }
+        });
+
+        async function _loadNotifPopupData() {
+            const listEl = document.getElementById('notif-popup-list');
+            if (!listEl) return;
+            try {
+                const resp = await fetch('/api/notifications?unread_only=false');
+                if (!resp.ok) { listEl.innerHTML = '<div style="padding:12px;color:var(--text-secondary);font-size:0.85em;">Notifications unavailable.</div>'; return; }
+                const data = await resp.json();
+                updateNotifBadge(data.unread_count || 0);
+                const notifs = (data.notifications || []).slice(0, 8);
+                const typeIcon = { info:'ℹ️', success:'✅', warning:'⚠️', error:'❌', friend_request:'👥', invites:'🎮' };
+                if (!notifs.length) {
+                    listEl.innerHTML = '<div style="padding:16px;color:var(--text-secondary);font-size:0.85em;text-align:center;">No notifications yet.</div>';
+                    return;
+                }
+                listEl.innerHTML = notifs.map(n => {
+                    const timeAgo = n.created_at ? _relTime(new Date(n.created_at)) : '';
+                    const linkAttr = n.link ? ` onclick="closeNotifPopup(); window.location.hash='${n.link.replace(/^#/, '')}'; if(!n.is_read) markNotifRead(${n.id});"` : '';
+                    return `<div${linkAttr} style="padding:10px 16px; border-bottom:1px solid var(--card-border,rgba(255,255,255,0.06)); display:flex; gap:10px; align-items:flex-start; opacity:${n.is_read ? 0.6 : 1}; cursor:${n.link ? 'pointer' : 'default'}; transition:background 0.15s;" onmouseover="this.style.background='var(--list-hover)'" onmouseout="this.style.background=''">
+                        <span style="font-size:1.1em;flex-shrink:0;margin-top:1px;">${typeIcon[n.type] || '🔔'}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:600;font-size:0.85em;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(n.title || 'Notification')}</div>
+                            <div style="font-size:0.78em;color:var(--text-secondary);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(n.message || '')}</div>
+                            <div style="font-size:0.72em;color:var(--text-secondary);margin-top:3px;">${timeAgo}</div>
+                        </div>
+                        ${!n.is_read ? `<button onclick="event.stopPropagation();markNotifReadAndRefreshPopup(${n.id})" style="flex-shrink:0;padding:2px 8px;background:var(--accent,#6366f1);color:white;border:none;border-radius:50px;cursor:pointer;font-size:0.7em;font-family:inherit;" title="Mark read">✓</button>` : ''}
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                if (listEl) listEl.innerHTML = '<div style="padding:12px;color:var(--text-secondary);font-size:0.85em;">Failed to load.</div>';
+            }
+        }
+
+        async function markNotifReadAndRefreshPopup(id) {
+            await safeFetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids:[id]}) });
+            await _loadNotifPopupData();
+            loadNotifications().catch(() => {});
+        }
+
+        async function markAllNotifsRead() {
+            await safeFetch('/api/notifications/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+            await _loadNotifPopupData();
+            loadNotifications().catch(() => {});
+        }
+
+        function _relTime(date) {
+            const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+            return `${Math.floor(diff/86400)}d ago`;
         }
 
         async function pollNotifications() {
