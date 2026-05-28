@@ -22,7 +22,7 @@ import subprocess
 import signal
 import collections
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple, Deque, Any
+from typing import Optional, List, Dict, Tuple, Deque, Any, Set
 from functools import wraps
 from werkzeug.local import LocalProxy
 from urllib.parse import unquote, quote_plus
@@ -2671,6 +2671,27 @@ def api_filter_platform_options():
     })
 
 
+def _game_identity_tokens(game: Optional[Dict]) -> Set[str]:
+    """Return comparable identifiers for a game payload."""
+    if not isinstance(game, dict):
+        return set()
+    tokens: Set[str] = set()
+    game_id = str(game.get('game_id') or '').strip()
+    if game_id:
+        tokens.add(game_id)
+        if ':' in game_id:
+            suffix = game_id.rsplit(':', 1)[-1].strip()
+            if suffix:
+                tokens.add(suffix)
+    app_id = str(game.get('appid') or game.get('app_id') or game.get('id') or '').strip()
+    if app_id:
+        tokens.add(app_id)
+        platform = str(game.get('platform') or 'steam').strip().lower()
+        tokens.add(f'{platform}:{app_id}')
+        tokens.add(f'steam:{app_id}')
+    return {token for token in tokens if token}
+
+
 @app.route('/api/pick', methods=['POST'])
 @require_login
 def api_pick_game():
@@ -2701,6 +2722,7 @@ def api_pick_game():
         tag_filter = data.get('tag', '').strip() or None
         platform_filter = data.get('platform_filter', '').strip().lower() or None
         device_filter = data.get('device_filter', '').strip().lower() or None
+        collection_id = str(data.get('collection_id') or data.get('list_id') or '').strip() or None
         min_rarity = data.get('min_rarity')
         max_rarity = data.get('max_rarity')
         vr_filter_raw = data.get('vr_filter', '').strip().lower() or None
@@ -2805,6 +2827,25 @@ def api_pick_game():
                         platform_filter,
                         device_filter
                     )
+
+                if collection_id:
+                    backlog_service = _get_shared_backlog_service()
+                    resolved_collection_id = backlog_service.resolve_collection_for_user(collection_id, username)
+                    collection_games = backlog_service.get_games(
+                        p.games,
+                        username=username,
+                        collection_id=resolved_collection_id,
+                    )
+                    allowed_tokens = {
+                        token
+                        for backlog_game in collection_games
+                        for token in _game_identity_tokens(backlog_game)
+                    }
+                    base_games = filtered_games if filtered_games is not None else p.games
+                    filtered_games = [
+                        game for game in base_games
+                        if _game_identity_tokens(game) & allowed_tokens
+                    ]
 
                 if filtered_games is not None and len(filtered_games) == 0:
                     gui_logger.info(f"No games matched filters for {username}")

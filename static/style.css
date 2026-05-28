@@ -4500,29 +4500,33 @@ html[data-theme="light"] .dash-rec-btn:hover {
 
 /* ── Game picker redesign ─────────────────────────────────────────── */
 .picker-layout {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(250px, 290px) minmax(0, 1fr);
   gap: 20px;
-  align-items: flex-start;
+  align-items: stretch;
   min-height: 400px;
 }
 
+.picker-layout.picker-layout-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
 .picker-sidebar {
-  width: 240px;
-  flex-shrink: 0;
+  min-width: 0;
   background: var(--card-bg, #1e2130);
   border: 1px solid var(--card-border, rgba(255,255,255,0.08));
   border-radius: var(--radius, 12px);
   padding: 16px;
-  transition: width 0.2s, opacity 0.2s, padding 0.2s;
+  transition: opacity 0.2s, padding 0.2s, transform 0.2s;
   overflow: hidden;
 }
 
 .picker-sidebar.picker-sidebar-collapsed {
-  width: 0;
   opacity: 0;
   padding: 0;
   pointer-events: none;
   border-width: 0;
+  transform: scaleX(0.96);
 }
 
 .picker-sidebar-header {
@@ -4563,8 +4567,14 @@ html[data-theme="light"] .dash-rec-btn:hover {
 }
 
 .picker-main {
-  flex: 1;
+  min-height: 100%;
   min-width: 0;
+  background: var(--card-bg, #1e2130);
+  border: 1px solid var(--card-border, rgba(255,255,255,0.08));
+  border-radius: var(--radius, 12px);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
 }
 
 .picker-main-header {
@@ -4598,9 +4608,25 @@ html[data-theme="light"] .dash-rec-btn:hover {
   margin: 0 !important;
 }
 
+.picker-list-filter-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.picker-list-filter-item {
+  width: 100%;
+}
+
+.picker-list-filter-item-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 640px) {
   .picker-layout {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
   .picker-sidebar {
     width: 100%;

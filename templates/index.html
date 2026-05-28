@@ -543,6 +543,14 @@
                             </label>
                         </div>
                     </div>
+
+                    <div class="picker-filter-section">
+                        <div class="picker-filter-label">📚 Pick from list</div>
+                        <input type="text" id="picker-list-filter-search" class="search-input" placeholder="Filter your lists…" oninput="renderPickerListFilter()" style="margin-bottom:10px;">
+                        <div id="picker-list-filter-list" class="backlog-list-widget picker-list-filter-list">
+                            <div class="backlog-list-widget-empty">Loading lists…</div>
+                        </div>
+                    </div>
                 </aside>
 
                 <!-- ── Main picker area ── -->

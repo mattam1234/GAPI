@@ -432,7 +432,7 @@
             try {
                 renderChatRoomList();
                 await updateStatus();
-                await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter(), refreshPlatformFilters()]);
+                await Promise.all([loadLibrary(), loadFavorites(), loadStats(), loadUsers(), refreshTagFilter(), refreshPlatformFilters(), refreshPickerListFilters()]);
                 checkInitialSetup();
                 
                 // Real-time updates are now managed by setAuthenticatedUI()
@@ -892,6 +892,7 @@
                 if (singleplayerOnly) body.singleplayer_only = true;
                 if (platformFilter) body.platform_filter = platformFilter;
                 if (deviceFilter) body.device_filter = deviceFilter;
+                if (activePickerCollectionId) body.collection_id = activePickerCollectionId;
 
                 const response = await fetch('/api/pick', {
                     method: 'POST',
@@ -1394,11 +1395,13 @@
         }
 
         function togglePickerSidebar() {
+            const layout = document.querySelector('.picker-layout');
             const sidebar = document.getElementById('picker-sidebar');
             const toggleBtn = document.getElementById('picker-sidebar-toggle-btn');
             if (!sidebar) return;
             const isOpen = !sidebar.classList.contains('picker-sidebar-collapsed');
             sidebar.classList.toggle('picker-sidebar-collapsed', isOpen);
+            if (layout) layout.classList.toggle('picker-layout-collapsed', isOpen);
             if (toggleBtn) toggleBtn.classList.toggle('active', !isOpen);
         }
 
@@ -1616,6 +1619,7 @@
         let _favoritesData = [];
         let _backlogData = [];
         let backlogCollectionsCache = [];
+        let activePickerCollectionId = '';
         let activeBacklogId = '';
         let activeBacklogEntryGameId = '';
         let activeGameDetailsModalGameId = '';
@@ -5109,6 +5113,95 @@ Event ID: ${result.discord_event_id}`);
             });
         }
 
+        function getFilteredPickerCollections() {
+            const query = getFilterValue('picker-list-filter-search').trim().toLowerCase();
+            if (!query) return backlogCollectionsCache;
+            return backlogCollectionsCache.filter(backlog => {
+                const searchText = [
+                    backlog.name,
+                    backlog.owner,
+                    ...(Array.isArray(backlog.members) ? backlog.members : [])
+                ].filter(Boolean).join(' ').toLowerCase();
+                return searchText.includes(query);
+            });
+        }
+
+        function setActivePickerCollection(collectionId = '') {
+            activePickerCollectionId = String(collectionId || '').trim();
+            renderPickerListFilter();
+        }
+
+        function renderPickerListFilter() {
+            const listEl = document.getElementById('picker-list-filter-list');
+            if (!listEl) return;
+            if (activePickerCollectionId && !backlogCollectionsCache.some(backlog => backlog.id === activePickerCollectionId)) {
+                activePickerCollectionId = '';
+            }
+            const allButton = `<button type="button" class="backlog-list-widget-item picker-list-filter-item${activePickerCollectionId ? '' : ' active'}" onclick="setActivePickerCollection('')">
+                <span class="backlog-list-widget-item-prefix">🎯</span>
+                <span class="backlog-list-widget-item-text">
+                    <span class="backlog-list-widget-item-name">Any list</span>
+                    <span class="backlog-list-widget-item-meta picker-list-filter-item-meta">
+                        <span>Pick from your whole library</span>
+                    </span>
+                </span>
+            </button>`;
+            if (!backlogCollectionsCache.length) {
+                listEl.innerHTML = `${allButton}<div class="backlog-list-widget-empty">No saved lists yet.</div>`;
+                return;
+            }
+            const collections = getFilteredPickerCollections();
+            if (!collections.length) {
+                listEl.innerHTML = `${allButton}<div class="backlog-list-widget-empty">No matching lists</div>`;
+                return;
+            }
+            const groups = { mine: [], shared: [] };
+            collections.forEach(backlog => {
+                if (isOwnedBacklog(backlog)) groups.mine.push(backlog);
+                else groups.shared.push(backlog);
+            });
+            const renderItem = (backlog) => {
+                const entryCount = Number(backlog.entry_count || 0);
+                const invitedCount = Number(backlog.invited_count || Math.max(((backlog.members || []).length || 1) - 1, 0));
+                const ownerCopy = isOwnedBacklog(backlog) ? 'Your list' : `By ${escapeHtml(backlog.owner || 'someone else')}`;
+                return `<button type="button" class="backlog-list-widget-item picker-list-filter-item${backlog.id === activePickerCollectionId ? ' active' : ''}" data-picker-collection-id="${escAttr(backlog.id || '')}" onclick="setActivePickerCollection('${escAttr(backlog.id || '')}')">
+                    <span class="backlog-list-widget-item-prefix">${backlog.is_shared ? '🔗' : '📋'}</span>
+                    <span class="backlog-list-widget-item-text">
+                        <span class="backlog-list-widget-item-name">${escapeHtml(backlog.name || 'List')}</span>
+                        <span class="backlog-list-widget-item-meta picker-list-filter-item-meta">
+                            <span>${entryCount} item${entryCount === 1 ? '' : 's'}</span>
+                            <span>${ownerCopy}${backlog.is_shared ? ` • ${invitedCount} invited` : ''}</span>
+                        </span>
+                    </span>
+                </button>`;
+            };
+            const html = [
+                allButton,
+                groups.mine.length ? `<div class="backlog-list-widget-group"><div class="backlog-list-widget-group-label">My lists</div>${groups.mine.map(renderItem).join('')}</div>` : '',
+                groups.shared.length ? `<div class="backlog-list-widget-group"><div class="backlog-list-widget-group-label">Shared with me</div>${groups.shared.map(renderItem).join('')}</div>` : '',
+            ].filter(Boolean).join('');
+            listEl.innerHTML = html;
+        }
+
+        async function refreshPickerListFilters(force = false) {
+            const listEl = document.getElementById('picker-list-filter-list');
+            if (!force && backlogCollectionsCache.length) {
+                renderPickerListFilter();
+                return backlogCollectionsCache;
+            }
+            if (listEl) listEl.innerHTML = '<div class="backlog-list-widget-empty">Loading lists…</div>';
+            try {
+                const response = await safeFetch('/api/backlogs');
+                if (!response.ok) throw new Error('Failed to load lists');
+                const data = await response.json();
+                backlogCollectionsCache = Array.isArray(data.backlogs) ? data.backlogs : [];
+            } catch (_error) {
+                backlogCollectionsCache = [];
+            }
+            renderPickerListFilter();
+            return backlogCollectionsCache;
+        }
+
         function filterBacklogCollections() {
             renderBacklogSelector();
         }
@@ -5232,6 +5325,7 @@ Event ID: ${result.discord_event_id}`);
         async function ensureBacklogCollectionsLoaded(force = false) {
             if (!force && backlogCollectionsCache.length) {
                 renderBacklogSelector();
+                renderPickerListFilter();
                 return backlogCollectionsCache;
             }
             const query = activeBacklogId && !isFavoritesBacklog(activeBacklogId)
@@ -5242,6 +5336,7 @@ Event ID: ${result.discord_event_id}`);
             backlogCollectionsCache = data.backlogs || [];
             activeBacklogId = String(data.active_backlog_id || activeBacklogId || '').trim();
             renderBacklogSelector();
+            renderPickerListFilter();
             return backlogCollectionsCache;
         }
 
@@ -5724,6 +5819,7 @@ Event ID: ${result.discord_event_id}`);
                 backlogCollectionsCache = data.backlogs || backlogCollectionsCache;
                 activeBacklogId = String(data.active_backlog_id || activeBacklogId || '').trim();
                 renderBacklogSelector();
+                renderPickerListFilter();
                 _backlogData = data.games || [];
                 populateBacklogModalCollections(activeBacklogId);
                 await ensureBacklogLibraryQuickAddData();

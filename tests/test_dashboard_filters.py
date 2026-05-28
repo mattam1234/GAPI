@@ -45,6 +45,33 @@ class TestDashboardFilterMarkup(unittest.TestCase):
         self.assertIn("/api/recommendations?count=4&refresh_seed=${Date.now()}", content)
 
 
+class TestPickerListFilterMarkup(unittest.TestCase):
+
+    def test_index_contains_picker_list_filter_controls(self):
+        content = _read('templates', 'index.html')
+        for token in (
+            'picker-list-filter-search',
+            'picker-list-filter-list',
+            'Pick from list',
+        ):
+            self.assertIn(token, content)
+
+    def test_main_js_contains_picker_list_filter_logic(self):
+        content = _read('static', 'main.js')
+        for token in (
+            'refreshPickerListFilters',
+            'renderPickerListFilter',
+            "body.collection_id = activePickerCollectionId",
+            "safeFetch('/api/backlogs')",
+        ):
+            self.assertIn(token, content)
+
+    def test_pick_api_accepts_collection_id(self):
+        content = _read('gapi_gui.py')
+        self.assertIn("data.get('collection_id') or data.get('list_id')", content)
+        self.assertIn("backlog_service.get_games(", content)
+
+
 class TestRecommendationsRefreshRoute(unittest.TestCase):
 
     def setUp(self):
