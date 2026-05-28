@@ -57,28 +57,14 @@ Thank you for your interest in contributing to GAPI! This document provides guid
    python3 gapi.py --help       # Help
    ```
 
-## Feature Ideas
+## Planning and Priorities
 
-Here are some ideas for future enhancements:
-
-### High Priority
-- [ ] Add filter by game genre/tags
-- [ ] Support for multiple Steam accounts
-- [ ] Export/import game history
-- [ ] Add game recommendations based on play patterns
-
-### Medium Priority
-- [ ] Web interface using Flask
-- [ ] Integration with other platforms (Epic Games, GOG)
-- [ ] Add game reviews from multiple sources
-- [ ] Save favorite games list
-- [ ] Schedule/reminder for game sessions
-
-### Low Priority
-- [ ] GUI using tkinter or PyQt
-- [ ] Mobile app companion
-- [ ] Social features (share picks with friends)
-- [ ] Achievement tracking
+Feature planning is tracked in:
+- [Roadmap](ROADMAP.md)
+- [Architecture Map](ARCHITECTURE_MAP.md)
+- [API Compatibility Policy](API_COMPATIBILITY.md)
+- [Regression Matrix](REGRESSION_MATRIX.md)
+- [UX Consistency Checklist](UX_CONSISTENCY_CHECKLIST.md)
 
 ## Pull Request Process
 
@@ -105,6 +91,9 @@ Here are some ideas for future enhancements:
    - Includes updates to documentation if needed
    - Passes all syntax checks
    - Doesn't introduce security vulnerabilities
+   - Classifies API impact as breaking or non-breaking (if API is touched)
+   - Includes migration notes for behavior/schema/API changes
+   - Updates `docs/CHANGELOG.md` using the standard section headings
 
 ## Bug Reports
 

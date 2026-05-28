@@ -2501,7 +2501,11 @@ def api_auth_update_ids():
                     try:
                         linked_session = database.get_linked_pick_session(db, joined_session_id)
                         if linked_session:
-                            _sse_publish(joined_session_id, 'session', database.linked_pick_session_to_dict(db, linked_session))
+                            _sse_publish(
+                                joined_session_id,
+                                'session',
+                                _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session)),
+                            )
                     finally:
                         db.close()
                 except Exception:
@@ -10470,7 +10474,7 @@ def _get_db_linked_session(session_id: str):
         session = database.get_linked_pick_session(db, session_id)
         if not session:
             return None
-        return database.linked_pick_session_to_dict(db, session)
+        return _attach_live_session_common_count(database.linked_pick_session_to_dict(db, session))
     except Exception as exc:
         gui_logger.warning('Failed to load linked session %s: %s', session_id, exc)
         return None
@@ -10508,7 +10512,7 @@ def _live_session_view(session: Dict) -> Dict:
     """Return a JSON-serialisable view of a live session dict."""
     vote_state = session.get('vote_state') or {}
     votes_by_user = vote_state.get('votes_by_user') or {}
-    return {
+    view = {
         'session_id': session['session_id'],
         'name': session.get('name', session['session_id']),
         'host': session['host'],
@@ -10517,6 +10521,8 @@ def _live_session_view(session: Dict) -> Dict:
         'created_at': session['created_at'].isoformat(),
         'picked_game': session.get('picked_game'),
         'round': int(session.get('round', 0)),
+        'coop_only': bool(session.get('coop_only', False)),
+        'rejected_game_ids': list(session.get('rejected_game_ids', [])),
         'vote_state': {
             'round': int(vote_state.get('round', 0)),
             'required_for_majority': int(vote_state.get('required_for_majority', 0)),
@@ -10526,6 +10532,48 @@ def _live_session_view(session: Dict) -> Dict:
             'result': vote_state.get('result', 'pending'),
         },
     }
+    return _attach_live_session_common_count(view)
+
+
+def _count_filtered_common_games_for_session(participants: List[str], coop_only: bool, rejected_game_ids: Optional[List[str]] = None) -> int:
+    """Count current common games for session participants under active filters."""
+    participants = [str(p).strip() for p in (participants or []) if str(p).strip()]
+    if not participants:
+        return 0
+    _ensure_multi_picker()
+    if not multi_picker:
+        return 0
+    try:
+        with multi_picker_lock:
+            common_games = multi_picker.find_common_games(user_names=participants)
+            if coop_only:
+                common_games = multi_picker.filter_coop_games(common_games, max_players=len(participants))
+            if rejected_game_ids:
+                common_games = multi_picker.filter_games(common_games, exclude_game_ids=rejected_game_ids)
+    except Exception as exc:
+        gui_logger.warning('Failed to count common games for session participants %s: %s', participants, exc)
+        return 0
+    unique_ids = {
+        str(game.get('game_id') or game.get('app_id') or game.get('appid') or '').strip()
+        for game in common_games
+        if str(game.get('game_id') or game.get('app_id') or game.get('appid') or '').strip()
+    }
+    return len(unique_ids)
+
+
+def _attach_live_session_common_count(session_view: Optional[Dict]) -> Dict:
+    """Attach filtered common-game count metadata to a session view."""
+    if not isinstance(session_view, dict):
+        return {}
+    participants = session_view.get('participants') or []
+    coop_only = bool(session_view.get('coop_only', False))
+    rejected_ids = session_view.get('rejected_game_ids') or []
+    session_view['common_game_count'] = _count_filtered_common_games_for_session(
+        participants,
+        coop_only,
+        rejected_ids,
+    )
+    return session_view
 
 
 @app.route('/api/live-session/discord-locations')
@@ -10594,7 +10642,7 @@ def api_live_session_create():
             )
             if not linked_session:
                 return jsonify({'error': 'Failed to create linked session'}), 500
-            view = database.linked_pick_session_to_dict(db, linked_session)
+            view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
         finally:
             if db:
                 db.close()
@@ -10639,7 +10687,7 @@ def api_live_session_active():
         try:
             db = database.SessionLocal()
             active.extend([
-                database.linked_pick_session_to_dict(db, session)
+                _attach_live_session_common_count(database.linked_pick_session_to_dict(db, session))
                 for session in database.list_active_linked_pick_sessions(db)
             ])
         except Exception as exc:
@@ -10668,7 +10716,7 @@ def api_live_session_join(session_id: str):
                 if username not in participants:
                     participants.append(username)
                 database.save_linked_session_state(db, linked_session, participants=participants)
-                view = database.linked_pick_session_to_dict(db, linked_session)
+                view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
                 _sse_publish(session_id, 'session', view)
                 return jsonify(view)
         finally:
@@ -10717,7 +10765,7 @@ def api_live_session_leave(session_id: str):
                 database.save_linked_session_state(
                     db, linked_session, participants=participants, host_username=host_username
                 )
-                view = database.linked_pick_session_to_dict(db, linked_session)
+                view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
                 _sse_publish(session_id, 'session', view)
                 return jsonify({'success': True, 'session': view})
         finally:
@@ -10738,6 +10786,50 @@ def api_live_session_leave(session_id: str):
         view = _live_session_view(session)
     _sse_publish(session_id, 'session', view)
     return jsonify({'success': True, 'session': view})
+
+
+@app.route('/api/live-session/<session_id>/disband', methods=['POST'])
+@require_login
+def api_live_session_disband(session_id: str):
+    """Disband a live session (host or admin)."""
+    username = get_current_username()
+    is_admin = bool(user_manager.is_admin(username))
+    if DB_AVAILABLE and ensure_db_available():
+        db = None
+        try:
+            db = database.SessionLocal()
+            linked_session = database.get_linked_pick_session(db, session_id)
+            if linked_session:
+                if linked_session.host_username != username and not is_admin:
+                    return jsonify({'error': 'Only the session host or an admin can disband this session'}), 403
+                database.save_linked_session_state(
+                    db,
+                    linked_session,
+                    participants=[],
+                    status='closed',
+                    picked_game=None,
+                    vote_state={
+                        'round': int(linked_session.round or 0),
+                        'required_for_majority': 1,
+                        'votes_by_user': {},
+                        'result': 'disbanded',
+                    },
+                )
+                _sse_publish(session_id, 'session', {'status': 'closed', 'session_id': session_id})
+                return jsonify({'success': True, 'message': 'Session disbanded'})
+        finally:
+            if db:
+                db.close()
+
+    with live_sessions_lock:
+        session = live_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session.get('host') != username and not is_admin:
+            return jsonify({'error': 'Only the session host or an admin can disband this session'}), 403
+        live_sessions.pop(session_id, None)
+    _sse_publish(session_id, 'session', {'status': 'closed', 'session_id': session_id})
+    return jsonify({'success': True, 'message': 'Session disbanded'})
 
 
 @app.route('/api/live-session/<session_id>/pick', methods=['POST'])
@@ -10802,7 +10894,7 @@ def api_live_session_pick(session_id: str):
                     status='awaiting_vote',
                     coop_only=coop_only,
                 )
-                view = database.linked_pick_session_to_dict(db, linked_session)
+                view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
         finally:
             if db:
                 db.close()
@@ -10960,14 +11052,14 @@ def api_live_session_vote(session_id: str):
                     database.save_linked_session_state(
                         db, linked_session, vote_state=vote_state, status='completed'
                     )
-                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
                     _sse_publish(session_id, 'session', view)
                     return jsonify({'success': True, 'result': 'accepted', 'session': view})
 
                 if no_count < required:
                     vote_state['result'] = 'pending'
                     database.save_linked_session_state(db, linked_session, vote_state=vote_state)
-                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
                     _sse_publish(session_id, 'session', view)
                     return jsonify({'success': True, 'result': 'pending', 'session': view})
 
@@ -10986,7 +11078,7 @@ def api_live_session_vote(session_id: str):
                             'result': 'pending',
                         }
                     )
-                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
                     _sse_publish(session_id, 'session', view)
                     return jsonify({'success': True, 'result': 'rejected_no_repick', 'session': view})
 
@@ -11012,7 +11104,7 @@ def api_live_session_vote(session_id: str):
                         },
                         rejected_game_ids=rejected_game_ids,
                     )
-                    view = database.linked_pick_session_to_dict(db, linked_session)
+                    view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
                     _sse_publish(session_id, 'session', view)
                     return jsonify({'success': True, 'result': 'rejected_no_more_games', 'session': view})
 
@@ -11031,7 +11123,7 @@ def api_live_session_vote(session_id: str):
                         'result': 'pending',
                     },
                 )
-                view = database.linked_pick_session_to_dict(db, linked_session)
+                view = _attach_live_session_common_count(database.linked_pick_session_to_dict(db, linked_session))
                 _sse_publish(session_id, 'session', view)
                 return jsonify({'success': True, 'result': 'rejected_repicked', 'session': view})
         finally:

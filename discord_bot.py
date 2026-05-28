@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import asyncio
+import uuid
 from typing import Dict, List, Set, Optional, Tuple
 from datetime import datetime, timedelta
 import requests
@@ -279,7 +280,7 @@ class GAPIBot(discord.Client):
             title=f"🎯 {session.get('name') or session.get('session_id')}",
             color=discord.Color.blurple(),
             timestamp=datetime.utcnow(),
-            description="React with ✅ to join or leave this linked GAPI session.",
+            description="React with ✅ to join/leave and 👍 or 👎 to vote in linked GAPI session.",
         )
         embed.add_field(name="Host", value=session.get('host') or 'Unknown', inline=True)
         embed.add_field(name="Status", value=session.get('status') or 'waiting', inline=True)
@@ -293,6 +294,11 @@ class GAPIBot(discord.Client):
             name="Participants",
             value=", ".join(participants) if participants else "No one joined yet",
             inline=False,
+        )
+        embed.add_field(
+            name="Eligible games",
+            value=str(int(session.get('common_game_count', 0))),
+            inline=True,
         )
         if pending:
             pending_lines = []
@@ -319,6 +325,36 @@ class GAPIBot(discord.Client):
         )
         return embed
 
+    def _count_filtered_common_games(self, participants: List[str], coop_only: bool, rejected_game_ids: Optional[List[str]] = None) -> int:
+        """Count current filtered common games for linked session participants."""
+        participants = [str(p).strip() for p in (participants or []) if str(p).strip()]
+        if not participants:
+            return 0
+        try:
+            common_games = self.multi_picker.find_common_games(user_names=participants)
+            if coop_only:
+                common_games = self.multi_picker.filter_coop_games(common_games, max_players=len(participants))
+            if rejected_game_ids:
+                common_games = self.multi_picker.filter_games(common_games, exclude_game_ids=rejected_game_ids)
+            unique_ids = {
+                str(game.get('game_id') or game.get('app_id') or game.get('appid') or '').strip()
+                for game in common_games
+                if str(game.get('game_id') or game.get('app_id') or game.get('appid') or '').strip()
+            }
+            return len(unique_ids)
+        except Exception:
+            return 0
+
+    def _augment_linked_session_view(self, session: Dict) -> Dict:
+        """Attach additional computed metadata for linked session sync embeds."""
+        session = dict(session or {})
+        session['common_game_count'] = self._count_filtered_common_games(
+            session.get('participants') or [],
+            bool(session.get('coop_only', False)),
+            session.get('rejected_game_ids') or [],
+        )
+        return session
+
     async def _sync_discord_location_cache_once(self) -> None:
         """Mirror current guild/channel/member data into the shared database."""
         db = self._db_session()
@@ -331,6 +367,7 @@ class GAPIBot(discord.Client):
 
     async def _announce_or_update_linked_session(self, session: Dict) -> None:
         """Ensure the linked session has one up-to-date Discord status message."""
+        session = self._augment_linked_session_view(session)
         discord_meta = session.get('discord') or {}
         channel_id = discord_meta.get('channel_id')
         if not channel_id:
@@ -350,6 +387,15 @@ class GAPIBot(discord.Client):
             db_session = database.get_linked_pick_session(db, session.get('session_id', ''))
             if not db_session:
                 return
+            if session.get('status') in ('completed', 'closed'):
+                if message_id:
+                    try:
+                        message = await channel.fetch_message(int(message_id))
+                        await message.delete()
+                    except Exception:
+                        pass
+                database.save_linked_session_state(db, db_session, discord_message_id='')
+                return
             if message_id:
                 try:
                     message = await channel.fetch_message(int(message_id))
@@ -359,7 +405,92 @@ class GAPIBot(discord.Client):
             if not message_id:
                 message = await channel.send(embed=embed)
                 await message.add_reaction('✅')
+                await message.add_reaction('👍')
+                await message.add_reaction('👎')
                 database.save_linked_session_state(db, db_session, discord_message_id=str(message.id))
+        finally:
+            db.close()
+
+    async def _cast_linked_session_vote(self, session_id: str, user: discord.User, accept: bool) -> Optional[Dict]:
+        """Cast a linked-session vote from Discord reactions."""
+        db = self._db_session()
+        if not db:
+            return None
+        try:
+            db_session = database.get_linked_pick_session(db, session_id)
+            if not db_session:
+                return None
+            linked_name = self._resolve_linked_user_name(user.id)
+            if not linked_name:
+                return database.linked_pick_session_to_dict(db, db_session)
+            participants = database.get_linked_session_participants(db_session)
+            if linked_name not in participants:
+                return database.linked_pick_session_to_dict(db, db_session)
+            current_game = database.get_linked_session_picked_game(db_session)
+            if db_session.status != 'awaiting_vote' or not current_game:
+                return database.linked_pick_session_to_dict(db, db_session)
+            vote_state = database.get_linked_session_vote_state(db_session) or {}
+            votes_by_user = vote_state.setdefault('votes_by_user', {})
+            votes_by_user[linked_name] = bool(accept)
+            required = (max(1, len(participants)) // 2) + 1
+            vote_state['required_for_majority'] = required
+            vote_state['round'] = int(vote_state.get('round', db_session.round or 0))
+            yes_count = sum(1 for v in votes_by_user.values() if bool(v))
+            no_count = sum(1 for v in votes_by_user.values() if not bool(v))
+
+            if yes_count >= required:
+                vote_state['result'] = 'accepted'
+                database.save_linked_session_state(db, db_session, vote_state=vote_state, status='completed')
+                return database.linked_pick_session_to_dict(db, db_session)
+
+            if no_count < required:
+                vote_state['result'] = 'pending'
+                database.save_linked_session_state(db, db_session, vote_state=vote_state)
+                return database.linked_pick_session_to_dict(db, db_session)
+
+            rejected_game_ids = database.get_linked_session_rejected_game_ids(db_session)
+            rejected_app_id = str((current_game or {}).get('appid', '')).strip()
+            if rejected_app_id:
+                rejected_game_ids.append(rejected_app_id)
+
+            next_game = self.multi_picker.pick_common_game(
+                user_names=participants,
+                coop_only=bool(db_session.coop_only),
+                max_players=len(participants),
+                exclude_game_ids=rejected_game_ids if rejected_game_ids else None,
+            )
+            if not next_game:
+                database.save_linked_session_state(
+                    db,
+                    db_session,
+                    status='waiting',
+                    picked_game=None,
+                    rejected_game_ids=rejected_game_ids,
+                    vote_state={
+                        'round': int(db_session.round or 0),
+                        'required_for_majority': required,
+                        'votes_by_user': {},
+                        'result': 'rejected',
+                    },
+                )
+                return database.linked_pick_session_to_dict(db, db_session)
+
+            next_round = int(db_session.round or 0) + 1
+            database.save_linked_session_state(
+                db,
+                db_session,
+                round=next_round,
+                picked_game=next_game,
+                status='awaiting_vote',
+                rejected_game_ids=rejected_game_ids,
+                vote_state={
+                    'round': next_round,
+                    'required_for_majority': required,
+                    'votes_by_user': {},
+                    'result': 'pending',
+                },
+            )
+            return database.linked_pick_session_to_dict(db, db_session)
         finally:
             db.close()
 
@@ -455,10 +586,10 @@ class GAPIBot(discord.Client):
             return
         try:
             database.expire_pending_discord_session_joins(db)
-            rows = db.query(database.LinkedPickSession).filter(
-                database.LinkedPickSession.status != 'closed'
-            ).all()
+            rows = db.query(database.LinkedPickSession).all()
             for row in rows:
+                if row.status == 'closed' and not row.discord_message_id:
+                    continue
                 session = database.linked_pick_session_to_dict(db, row)
                 await self._announce_or_update_linked_session(session)
         finally:
@@ -991,6 +1122,61 @@ class GAPIBot(discord.Client):
                     f"❌ {interaction.user.mention} is not linked yet. Use `/link username:<gapi_username> [steam_id:<id>]`"
                 )
 
+        @self.tree.command(name='sessionstart', description='Start a Discord-linked live session for web + Discord sync')
+        @app_commands.describe(
+            name='Optional session name',
+            coop_only='Whether to restrict picks to co-op/multiplayer'
+        )
+        async def session_start(
+            interaction: discord.Interaction,
+            name: Optional[str] = None,
+            coop_only: bool = False,
+        ):
+            """Create a persistent linked session from Discord so it appears in the web UI."""
+            if not interaction.guild or not interaction.channel:
+                await interaction.response.send_message("❌ This command only works in a server text channel.", ephemeral=True)
+                return
+            linked_username = self._resolve_linked_user_name(interaction.user.id)
+            if not linked_username:
+                await interaction.response.send_message(
+                    "❌ Link your account first with `/link username:<gapi_username>`.",
+                    ephemeral=True,
+                )
+                return
+            db = self._db_session()
+            if not db:
+                await interaction.response.send_message("❌ Database unavailable for linked sessions.", ephemeral=True)
+                return
+            try:
+                session_id = str(uuid.uuid4())
+                linked_session = database.create_linked_pick_session(
+                    db=db,
+                    session_id=session_id,
+                    host_username=linked_username,
+                    host_discord_id=str(interaction.user.id),
+                    name=(name or f"{linked_username}'s session"),
+                    discord_location={
+                        'guild_id': str(interaction.guild.id),
+                        'guild_name': str(interaction.guild.name),
+                        'channel_id': str(interaction.channel.id),
+                        'channel_name': getattr(interaction.channel, 'name', 'unknown'),
+                    },
+                    coop_only=bool(coop_only),
+                )
+                if not linked_session:
+                    await interaction.response.send_message("❌ Failed to create linked session.", ephemeral=True)
+                    return
+                view = database.linked_pick_session_to_dict(db, linked_session)
+            finally:
+                db.close()
+            await self._announce_or_update_linked_session(view)
+            await interaction.response.send_message(
+                f"✅ Linked session created: **{view.get('name')}**\n"
+                f"Session ID: `{view.get('session_id')}`\n"
+                f"Web UI: {self.app_url}",
+                ephemeral=False,
+            )
+
         @self.tree.command(name='help', description='Show available GAPI bot commands')
         async def show_help(interaction: discord.Interaction):
             """Display a compact command guide."""
@@ -1000,7 +1186,7 @@ class GAPIBot(discord.Client):
                 description="Quick reference for common commands. Join polls/votes by reacting with ✅!"
             )
             embed.add_field(name="Account", value="`/link` • `/unlink` • `/linked` • `/users`", inline=False)
-            embed.add_field(name="Game Picks", value="`/pick` • `/common` • `/vote` • `/voteprivate` • `/joinvote` • `/leavevote` • `/stats`", inline=False)
+            embed.add_field(name="Game Picks", value="`/pick` • `/common` • `/vote` • `/voteprivate` • `/joinvote` • `/leavevote` • `/sessionstart` • `/stats`", inline=False)
             embed.add_field(name="Events & Polls", value="`/createevent` • `/createpoll` • `/pollstatus`", inline=False)
             embed.add_field(name="Utilities", value="`/url` • `/invite` • `/ping` • `/botstatus` • `/ignore` • `/hunt`", inline=False)
             embed.add_field(name="ℹ️ Joining", value="React with ✅ to join any active poll, vote, or private vote lobby!", inline=False)
@@ -2020,15 +2206,21 @@ class GAPIBot(discord.Client):
         
         # Check if this is a poll or vote message
         message_id = reaction.message.id
-        if str(reaction.emoji) == '✅':
-            db = self._db_session()
-            try:
-                linked_session = database.get_linked_pick_session_by_message_id(db, str(message_id)) if db else None
-            finally:
-                if db:
-                    db.close()
-            if linked_session:
+        emoji = str(reaction.emoji)
+        db = self._db_session()
+        try:
+            linked_session = database.get_linked_pick_session_by_message_id(db, str(message_id)) if db else None
+        finally:
+            if db:
+                db.close()
+        if linked_session:
+            if emoji == '✅':
                 view = await self._set_linked_session_membership(linked_session.session_id, user, True)
+                if view:
+                    await self._announce_or_update_linked_session(view)
+                return
+            if emoji in ('👍', '👎'):
+                view = await self._cast_linked_session_vote(linked_session.session_id, user, emoji == '👍')
                 if view:
                     await self._announce_or_update_linked_session(view)
                 return
@@ -2036,7 +2228,7 @@ class GAPIBot(discord.Client):
         if message_id not in self.active_polls:
             return
         
-        if str(reaction.emoji) != '✅':
+        if emoji != '✅':
             return
         
         poll_data = self.active_polls[message_id]
@@ -2094,7 +2286,8 @@ class GAPIBot(discord.Client):
             return
         
         message_id = reaction.message.id
-        if str(reaction.emoji) == '✅':
+        emoji = str(reaction.emoji)
+        if emoji == '✅':
             db = self._db_session()
             try:
                 linked_session = database.get_linked_pick_session_by_message_id(db, str(message_id)) if db else None
@@ -2110,7 +2303,7 @@ class GAPIBot(discord.Client):
         if message_id not in self.active_polls:
             return
         
-        if str(reaction.emoji) != '✅':
+        if emoji != '✅':
             return
         
         poll_data = self.active_polls[message_id]

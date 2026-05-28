@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -218,3 +219,63 @@ class TestDiscordBotLinkedSessionHelpers(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Joined', [field.name for field in embed.fields])
         self.assertIn('Participants', [field.name for field in embed.fields])
 
+
+class TestLiveSessionSyncEnhancements(unittest.TestCase):
+    def test_live_session_view_reports_filtered_common_game_count(self):
+        fake_picker = SimpleNamespace(
+            find_common_games=lambda user_names=None: [
+                {'appid': '1'},
+                {'appid': '2'},
+                {'appid': '2'},
+            ],
+            filter_coop_games=lambda games, max_players=None: games,
+            filter_games=lambda games, exclude_game_ids=None, **kwargs: [
+                g for g in games if str(g.get('appid')) not in set(str(v) for v in (exclude_game_ids or []))
+            ],
+        )
+        session = {
+            'session_id': 'sess-count',
+            'name': 'Count session',
+            'host': 'host',
+            'participants': ['host', 'alice'],
+            'status': 'waiting',
+            'created_at': datetime.utcnow(),
+            'picked_game': None,
+            'round': 0,
+            'coop_only': False,
+            'rejected_game_ids': ['1'],
+            'vote_state': {'votes_by_user': {}},
+        }
+        with patch.object(gapi_gui, 'multi_picker', fake_picker), \
+             patch.object(gapi_gui, '_ensure_multi_picker', return_value=None):
+            view = gapi_gui._live_session_view(session)
+        self.assertEqual(view['common_game_count'], 1)
+
+    def test_admin_can_disband_live_session(self):
+        gapi_gui.app.config['TESTING'] = True
+        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        client = gapi_gui.app.test_client()
+        with client.session_transaction() as sess:
+            sess['username'] = 'admin'
+
+        session_id = 'sess-disband'
+        gapi_gui.live_sessions[session_id] = {
+            'session_id': session_id,
+            'name': 'Session to disband',
+            'host': 'alice',
+            'participants': ['alice', 'bob'],
+            'status': 'waiting',
+            'created_at': datetime.utcnow(),
+            'picked_game': None,
+            'vote_state': {'votes_by_user': {}},
+        }
+        try:
+            with patch.object(gapi_gui, 'DB_AVAILABLE', False), \
+                 patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+                resp = client.post(f'/api/live-session/{session_id}/disband')
+            data = resp.get_json()
+            self.assertEqual(resp.status_code, 200)
+            self.assertTrue(data.get('success'))
+            self.assertNotIn(session_id, gapi_gui.live_sessions)
+        finally:
+            gapi_gui.live_sessions.pop(session_id, None)

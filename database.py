@@ -1364,6 +1364,7 @@ def linked_pick_session_to_dict(db, session) -> Dict:
         'picked_game': get_linked_session_picked_game(session),
         'round': int(session.round or 0),
         'coop_only': bool(session.coop_only),
+        'rejected_game_ids': get_linked_session_rejected_game_ids(session),
         'vote_state': {
             'round': int(vote_state.get('round', 0)),
             'required_for_majority': int(vote_state.get('required_for_majority', 0)),

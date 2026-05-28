@@ -787,6 +787,10 @@ For detailed guidelines, see [CONTRIBUTING.md](docs/CONTRIBUTING.md)
 
 - **[Contributing Guide](docs/CONTRIBUTING.md)** - Detailed contribution guidelines
 - **[Roadmap](docs/ROADMAP.md)** - Planned features and improvements
+- **[Architecture Map](docs/ARCHITECTURE_MAP.md)** - Current service/repository/runtime boundaries
+- **[API Compatibility Policy](docs/API_COMPATIBILITY.md)** - Versioning and deprecation expectations
+- **[Regression Matrix](docs/REGRESSION_MATRIX.md)** - Critical-path release validation checks
+- **[UX Consistency Checklist](docs/UX_CONSISTENCY_CHECKLIST.md)** - UI naming/state/modal consistency gate
 - **[Changelog](docs/CHANGELOG.md)** - Version history and changes
 - **[License](LICENSE)** - MIT License details
 - **[Demo script](scripts/demo.py)** - `python3 scripts/demo.py` — try all features without credentials
