@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 
-REPO_ROOT = Path('/home/runner/work/GAPI/GAPI')
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestDashboardChatLayout(unittest.TestCase):

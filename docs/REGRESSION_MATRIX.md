@@ -19,8 +19,19 @@ This matrix defines high-value checks that must pass before release cuts.
 
 ## Release Checklist
 
-- [ ] All changed-area targeted tests pass
-- [ ] Full test suite passes (or known unrelated failures are documented)
-- [ ] No new failures in critical-path tests above
-- [ ] API contract changes documented and classified
-- [ ] Migration notes added where needed
+- [x] All changed-area targeted tests pass
+- [x] Full test suite passes (or known unrelated failures are documented)
+- [x] No new failures in critical-path tests above
+- [x] API contract changes documented and classified (N/A: no API contract changes in this cycle)
+- [x] Migration notes added where needed (N/A: no migration-impacting changes in this cycle)
+
+## Current Gate Snapshot (2026-06-03)
+
+- Targeted critical-path suite passed:
+  - `tests/test_security_hardening.py`
+  - `tests/test_library_achievement_autosync.py`
+  - `tests/test_backlog_collections.py`
+  - `tests/test_achievement_schedule.py`
+  - `tests/test_chat_room_commands.py`
+  - `tests/test_dashboard_chat_layout.py`
+- Full-suite validation passed: `1565 passed` via `python -m pytest`.
