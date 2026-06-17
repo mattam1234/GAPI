@@ -40,7 +40,7 @@ FAKE_GAMES = [
 def make_picker(tmp_dir: str) -> gapi.GamePicker:
     """Create a GamePicker using *tmp_dir* for all file I/O (no real API calls)."""
     cfg_path = os.path.join(tmp_dir, 'config.json')
-    with open(cfg_path, 'w') as f:
+    with open(cfg_path, 'w', encoding='utf-8') as f:
         json.dump({'steam_api_key': FAKE_API_KEY, 'steam_id': VALID_STEAM_ID}, f)
     orig = os.getcwd()
     os.chdir(tmp_dir)
@@ -773,7 +773,7 @@ class TestAtomicWriteJson(unittest.TestCase):
             path = os.path.join(d, 'test.json')
             data = {'key': 'value', 'nums': [1, 2, 3]}
             gapi._atomic_write_json(path, data)
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 loaded = json.load(f)
             self.assertEqual(loaded, data)
 
@@ -782,7 +782,7 @@ class TestAtomicWriteJson(unittest.TestCase):
             path = os.path.join(d, 'test.json')
             gapi._atomic_write_json(path, {'v': 1})
             gapi._atomic_write_json(path, {'v': 2})
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 loaded = json.load(f)
             self.assertEqual(loaded['v'], 2)
 

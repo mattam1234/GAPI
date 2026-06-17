@@ -566,7 +566,7 @@ class TestConfigTemplatePSNNintendo(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'config_template.json'
         )
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             self._cfg = json.load(f)
 
     def test_psn_keys_present(self):
@@ -594,12 +594,12 @@ class TestDockerFiles(unittest.TestCase):
                         'Dockerfile missing')
 
     def test_dockerfile_has_healthcheck(self):
-        with open(self._path('Dockerfile')) as f:
+        with open(self._path('Dockerfile'), encoding='utf-8') as f:
             content = f.read()
         self.assertIn('HEALTHCHECK', content)
 
     def test_dockerfile_has_non_root_user(self):
-        with open(self._path('Dockerfile')) as f:
+        with open(self._path('Dockerfile'), encoding='utf-8') as f:
             content = f.read()
         self.assertIn('USER gapi', content)
 
@@ -608,7 +608,7 @@ class TestDockerFiles(unittest.TestCase):
                         'docker-compose.yml missing')
 
     def test_docker_compose_has_required_services(self):
-        with open(self._path('docker-compose.yml')) as f:
+        with open(self._path('docker-compose.yml'), encoding='utf-8') as f:
             content = f.read()
         for service in ('gapi-web', 'gapi-db', 'gapi-redis', 'gapi-nginx'):
             self.assertIn(service, content, f"Missing service: {service}")
@@ -620,13 +620,13 @@ class TestDockerFiles(unittest.TestCase):
         self.assertTrue(os.path.exists(self._path('nginx', 'nginx.conf')))
 
     def test_env_example_has_postgres_keys(self):
-        with open(self._path('.env.example')) as f:
+        with open(self._path('.env.example'), encoding='utf-8') as f:
             content = f.read()
         for key in ('POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'SECRET_KEY'):
             self.assertIn(key, content, f"Missing key in .env.example: {key}")
 
     def test_env_example_has_platform_keys(self):
-        with open(self._path('.env.example')) as f:
+        with open(self._path('.env.example'), encoding='utf-8') as f:
             content = f.read()
         for key in ('EPIC_CLIENT_ID', 'GOG_CLIENT_ID', 'XBOX_CLIENT_ID', 'PSN_NPSSO'):
             self.assertIn(key, content, f"Missing key in .env.example: {key}")
@@ -647,12 +647,12 @@ class TestBrowserExtensionFiles(unittest.TestCase):
         self.assertTrue(os.path.exists(self._path('manifest.json')))
 
     def test_manifest_is_v3(self):
-        with open(self._path('manifest.json')) as f:
+        with open(self._path('manifest.json'), encoding='utf-8') as f:
             manifest = json.load(f)
         self.assertEqual(manifest.get('manifest_version'), 3)
 
     def test_manifest_has_required_keys(self):
-        with open(self._path('manifest.json')) as f:
+        with open(self._path('manifest.json'), encoding='utf-8') as f:
             manifest = json.load(f)
         for key in ('name', 'version', 'action', 'background', 'permissions'):
             self.assertIn(key, manifest, f"Missing key in manifest: {key}")
@@ -664,7 +664,7 @@ class TestBrowserExtensionFiles(unittest.TestCase):
         self.assertTrue(os.path.exists(self._path('popup.js')))
 
     def test_popup_js_has_pick_api_call(self):
-        with open(self._path('popup.js')) as f:
+        with open(self._path('popup.js'), encoding='utf-8') as f:
             content = f.read()
         self.assertIn('/api/random-game', content)
 
@@ -681,7 +681,7 @@ class TestBrowserExtensionFiles(unittest.TestCase):
         self.assertTrue(os.path.exists(self._path('README.md')))
 
     def test_service_worker_in_manifest_background(self):
-        with open(self._path('manifest.json')) as f:
+        with open(self._path('manifest.json'), encoding='utf-8') as f:
             manifest = json.load(f)
         self.assertIn('service_worker', manifest.get('background', {}))
 
@@ -700,7 +700,7 @@ class TestTutorials(unittest.TestCase):
 
     def test_tutorials_covers_all_major_topics(self):
         path = os.path.join(self.ROOT, 'docs', 'TUTORIALS.md')
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             content = f.read()
         for topic in ('Steam', 'Docker', 'Browser Extension', 'PSN', 'Nintendo',
                       'Discord', 'Slack', 'Xbox'):

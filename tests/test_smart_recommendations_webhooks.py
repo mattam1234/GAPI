@@ -604,7 +604,7 @@ class TestConfigTemplateWebhooks(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'config_template.json'
         )
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             self._cfg = json.load(f)
 
     def test_slack_webhook_url_present(self):

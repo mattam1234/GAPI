@@ -89,7 +89,7 @@ class TestReviewRepository(TmpDirMixin):
 
     def test_corrupt_file_returns_empty(self):
         path = self._path('reviews.json')
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             f.write('NOT JSON')
         repo = ReviewRepository(path)
         self.assertEqual(repo.data, {})
@@ -149,7 +149,7 @@ class TestFavoritesRepository(TmpDirMixin):
 
     def test_normalises_int_ids_on_load(self):
         path = self._path('favs.json')
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             json.dump([620, 440], f)
         repo = FavoritesRepository(path)
         self.assertIn('steam:620', repo.data)
@@ -170,12 +170,12 @@ class TestHistoryRepository(TmpDirMixin):
         repo = self._make(max_size=3)
         for i in range(5):
             repo.append(f'steam:{i}')
-        saved = json.load(open(self._path('history.json')))
+        saved = json.load(open(self._path('history.json'), encoding='utf-8'))
         self.assertLessEqual(len(saved), 3)
 
     def test_normalises_ints(self):
         path = self._path('history.json')
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             json.dump([620, 440], f)
         repo = HistoryRepository(path)
         self.assertIn('steam:620', repo.data)
@@ -897,7 +897,7 @@ class TestHistoryService(TmpDirMixin):
         repo = HistoryRepository(path)
         svc = HistoryService(repo)
         svc.append('steam:620')
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             saved = json.load(f)
         self.assertIn('steam:620', saved)
 
@@ -919,7 +919,7 @@ class TestHistoryService(TmpDirMixin):
         svc.append('steam:620')
         out = self._path('export.json')
         svc.export(out)
-        with open(out) as f:
+        with open(out, encoding='utf-8') as f:
             data = json.load(f)
         self.assertIn('history', data)
         self.assertIn('steam:620', data['history'])
@@ -928,14 +928,14 @@ class TestHistoryService(TmpDirMixin):
         svc = self._make()
         out = self._path('export.json')
         svc.export(out)
-        with open(out) as f:
+        with open(out, encoding='utf-8') as f:
             data = json.load(f)
         self.assertIn('exported_at', data)
 
     def test_import_from_list(self):
         svc = self._make()
         src = self._path('src.json')
-        with open(src, 'w') as f:
+        with open(src, 'w', encoding='utf-8') as f:
             json.dump(['steam:620', 'steam:440'], f)
         count = svc.import_from(src)
         self.assertEqual(count, 2)
@@ -944,7 +944,7 @@ class TestHistoryService(TmpDirMixin):
     def test_import_from_export_dict(self):
         svc = self._make()
         src = self._path('src.json')
-        with open(src, 'w') as f:
+        with open(src, 'w', encoding='utf-8') as f:
             json.dump({'history': ['steam:570'], 'exported_at': '2026-01-01'}, f)
         count = svc.import_from(src)
         self.assertEqual(count, 1)
@@ -957,7 +957,7 @@ class TestHistoryService(TmpDirMixin):
     def test_import_from_invalid_format_returns_none(self):
         svc = self._make()
         src = self._path('bad.json')
-        with open(src, 'w') as f:
+        with open(src, 'w', encoding='utf-8') as f:
             json.dump({'no_history_key': True}, f)
         self.assertIsNone(svc.import_from(src))
 
@@ -965,7 +965,7 @@ class TestHistoryService(TmpDirMixin):
         svc = self._make()
         svc.append('steam:999')
         src = self._path('src.json')
-        with open(src, 'w') as f:
+        with open(src, 'w', encoding='utf-8') as f:
             json.dump(['steam:620'], f)
         svc.import_from(src)
         self.assertNotIn('steam:999', svc.data)
@@ -982,7 +982,7 @@ class TestGamePickerServiceIntegration(TmpDirMixin):
     def _make_picker(self):
         import gapi
         cfg_path = self._path('config.json')
-        with open(cfg_path, 'w') as f:
+        with open(cfg_path, 'w', encoding='utf-8') as f:
             json.dump({'steam_api_key': 'TEST_KEY_12345',
                        'steam_id':      '76561190000000001'}, f)
         return gapi.GamePicker(cfg_path)

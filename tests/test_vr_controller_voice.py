@@ -23,7 +23,7 @@ def _path(*parts):
 
 
 def _read(*parts):
-    with open(_path(*parts)) as f:
+    with open(_path(*parts), encoding='utf-8') as f:
         return f.read()
 
 

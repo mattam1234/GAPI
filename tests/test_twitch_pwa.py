@@ -344,7 +344,7 @@ class TestPWAMetaTags(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'templates', 'index.html'
         )
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             return f.read()
 
     def test_manifest_link_present(self):
@@ -375,7 +375,7 @@ class TestConfigTemplate(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'config_template.json'
         )
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             self._cfg = json.load(f)
 
     def test_twitch_client_id_present(self):

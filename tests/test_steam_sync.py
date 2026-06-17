@@ -336,7 +336,7 @@ class TestRequirementsTxt(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'requirements.txt'
         )
-        with open(req_path) as f:
+        with open(req_path, encoding='utf-8') as f:
             self._content = f.read()
 
     def _assert_pkg(self, pkg):
