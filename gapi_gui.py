@@ -4979,8 +4979,11 @@ def _schedule_local_to_utc(date_str: str,
 
         if timezone_offset_minutes is not None:
             try:
+                # Convention matches JS Date.getTimezoneOffset(): the value is
+                # (UTC - local) in minutes (e.g. -120 for UTC+2), so UTC is
+                # obtained by ADDING the offset to the local time.
                 offset = int(timezone_offset_minutes)
-                dt = dt - timedelta(minutes=offset)
+                dt = dt + timedelta(minutes=offset)
                 return dt.replace(tzinfo=timezone.utc)
             except (TypeError, ValueError):
                 pass
