@@ -105,6 +105,7 @@ class TestLegacyUserSchemaMigration(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
             tmp_path = tmp.name
 
+        eng = None
         try:
             eng = create_engine(f'sqlite:///{tmp_path}')
             with eng.begin() as conn:
@@ -128,6 +129,8 @@ class TestLegacyUserSchemaMigration(unittest.TestCase):
             columns = [col['name'] for col in inspect(eng).get_columns('users')]
             self.assertIn('email', columns)
         finally:
+            if eng is not None:
+                eng.dispose()  # release the SQLite file handle (Windows locks it otherwise)
             os.unlink(tmp_path)
 
 
@@ -456,6 +459,7 @@ class TestDatabaseHelpers(unittest.TestCase):
     def test_get_db_size_bytes_sqlite(self):
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
             tmp_path = tmp.name
+        eng = None
         try:
             from sqlalchemy import create_engine
             eng = create_engine(f'sqlite:///{tmp_path}')
@@ -465,6 +469,8 @@ class TestDatabaseHelpers(unittest.TestCase):
             self.assertIsInstance(size, int)
             self.assertGreater(size, 0)
         finally:
+            if eng is not None:
+                eng.dispose()  # release the SQLite file handle (Windows locks it otherwise)
             os.unlink(tmp_path)
 
     def test_get_db_size_bytes_returns_0_when_no_engine(self):
