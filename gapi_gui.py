@@ -5774,6 +5774,33 @@ def api_delete_event(event_id: str):
 # Schedule Fuzzy Search API - Games and Attendees
 # ---------------------------------------------------------------------------
 
+def _parse_search_limit(value, default: int = 10, maximum: int = 50) -> int:
+    """Parse and clamp a search ``limit`` parameter from request input.
+
+    Tolerates missing/invalid values (returns ``default``) and bounds the
+    result to ``[1, maximum]`` so a client can't request an unbounded page.
+    """
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return default
+    if limit < 1:
+        return default
+    return min(limit, maximum)
+
+
+def _safe_playtime_hours(game: Dict) -> float:
+    """Best-effort playtime in hours, tolerant of missing/invalid data."""
+    try:
+        hours = game.get('playtime_hours')
+        if hours is None:
+            minutes = float(game.get('playtime_forever', 0) or 0)
+            hours = minutes / 60
+        return round(float(hours or 0), 1)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _fuzzy_search_games(query: str, games: List[Dict], limit: int = 10) -> List[Dict]:
     """Fuzzy search games by name or app ID.
     
@@ -5880,35 +5907,39 @@ def api_search_games():
     
     data = request.json or {}
     query = str(data.get('query', '')).strip()
-    limit = int(data.get('limit', 10))
-    
+    limit = _parse_search_limit(data.get('limit', 10))
+
     if not query:
         return jsonify({'error': 'query is required'}), 400
-    
-    with picker_lock:
-        results = _fuzzy_search_games(query, p.games, limit=limit)
-    
-    # Clean up game data for response
-    clean_results = []
-    for game in results:
-        image_url = _resolve_schedule_game_image_url(
-            game=game,
-            game_appid=str(game.get('appid') or game.get('app_id', '')),
-            existing_url=game.get('image_url')
-        )
-        clean_results.append({
-            'name': game.get('name', ''),
-            'appid': str(game.get('appid') or game.get('app_id', '')),
-            'image_url': image_url,
-            'platform': game.get('platform', 'steam'),
-            'playtime_hours': round((game.get('playtime_hours') or (game.get('playtime_forever', 0) / 60) or 0), 1),
-            'genres': game.get('genres', []) if isinstance(game.get('genres', []), list) else [],
-        })
-    
+
+    try:
+        with picker_lock:
+            results = _fuzzy_search_games(query, p.games, limit=limit)
+
+        # Clean up game data for response
+        clean_results = []
+        for game in results:
+            image_url = _resolve_schedule_game_image_url(
+                game=game,
+                game_appid=str(game.get('appid') or game.get('app_id', '')),
+                existing_url=game.get('image_url')
+            )
+            clean_results.append({
+                'name': game.get('name', ''),
+                'appid': str(game.get('appid') or game.get('app_id', '')),
+                'image_url': image_url,
+                'platform': game.get('platform', 'steam'),
+                'playtime_hours': _safe_playtime_hours(game),
+                'genres': game.get('genres', []) if isinstance(game.get('genres', []), list) else [],
+            })
+    except Exception as e:
+        gui_logger.error(f'Game search failed for "{query}": {e}')
+        return jsonify({'error': 'Game search failed'}), 500
+
     gui_logger.debug(f'Game search for "{query}" returned {len(clean_results)} results')
     if clean_results:
         gui_logger.debug(f'First result: {clean_results[0]}')
-    
+
     return jsonify({'results': clean_results, 'count': len(clean_results)})
 
 
@@ -5930,25 +5961,29 @@ def api_search_attendees():
     
     data = request.json or {}
     query = str(data.get('query', '')).strip()
-    limit = int(data.get('limit', 10))
-    
+    limit = _parse_search_limit(data.get('limit', 10))
+
     if not query:
         return jsonify({'error': 'query is required'}), 400
-    
-    _ensure_multi_picker()
-    with multi_picker_lock:
-        users_list = multi_picker.users if multi_picker else []
-        results = _fuzzy_search_users(query, users_list, limit=limit)
-    
-    # Clean up user data for response
-    clean_results = []
-    for user in results:
-        clean_results.append({
-            'name': user.get('name', ''),
-            'id': user.get('name', ''),  # Use name as identifier for now
-            'discord_id': user.get('discord_id', ''),
-        })
-    
+
+    try:
+        _ensure_multi_picker()
+        with multi_picker_lock:
+            users_list = multi_picker.users if multi_picker else []
+            results = _fuzzy_search_users(query, users_list, limit=limit)
+
+        # Clean up user data for response
+        clean_results = []
+        for user in results:
+            clean_results.append({
+                'name': user.get('name', ''),
+                'id': user.get('name', ''),  # Use name as identifier for now
+                'discord_id': user.get('discord_id', ''),
+            })
+    except Exception as e:
+        gui_logger.error(f'Attendee search failed for "{query}": {e}')
+        return jsonify({'error': 'Attendee search failed'}), 500
+
     return jsonify({'results': clean_results, 'count': len(clean_results)})
 
 
