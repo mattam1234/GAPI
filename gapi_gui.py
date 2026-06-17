@@ -4864,13 +4864,19 @@ def _resolve_schedule_game_image_url(game: Optional[Dict] = None,
         return str(existing_url).strip()
 
     game = game or {}
-    for key in ('image_url', 'header_image', 'capsule_image'):
+    # Direct image fields supplied by the various platform clients
+    # (Steam: header/capsule image, PSN: image_url, Nintendo: boxart).
+    for key in ('image_url', 'header_image', 'capsule_image', 'boxart'):
         value = str(game.get(key, '') or '').strip()
         if value:
             return value
 
+    # Steam CDN fallback by appid is ONLY valid for Steam games. Other stores
+    # (GOG, Epic, ...) also use numeric ids that are NOT Steam appids, so guard
+    # on the platform to avoid building a wrong/broken Steam URL from a GOG id.
+    platform = str(game.get('platform', '') or '').strip().lower()
     appid = str(game_appid or game.get('appid') or game.get('app_id') or '').strip()
-    if appid.isdigit():
+    if appid.isdigit() and platform in ('', 'steam'):
         return f'https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg'
 
     return ''
