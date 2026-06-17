@@ -78,11 +78,13 @@ states whose target element is a confirmed `.list-container` child — provably
 pixel-identical, no visual change:
 
 - `users-list` — "No users yet…" (`main.js` `loadUsers`)
-- `backlog-list` — "No list selected yet…" / "No list entries yet…"
+- `backlog-list` — "No list selected yet…" / "No list entries yet…" / "No list
+  entries match your current filters."
+- `library-list` — "No games found" (×2) / "No games match your current filters."
 
-Pinned by `tests/test_ux_empty_states.py`. Note `favorites-list` is **not** a
-`.list-container`, so it stays in Tier B (its `.loading` renders as plain
-centered text, not the card — migrating it would change visuals).
+Pinned by `tests/test_ux_empty_states.py`.
 
-Remaining Tier A candidates (other `.list-container` children still using
-`.loading` for empty text) and all Tier B sites are follow-up work.
+Sites deliberately **left** in Tier B (target is not a `.list-container`, so
+`.loading` renders as plain centered text and a swap would change visuals):
+`favorites-list`, `playlists-container`, `backlog-collection-share-list`, and
+the inline-styled divs (F3). These need a reviewed visual pass.

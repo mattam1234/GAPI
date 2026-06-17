@@ -25,9 +25,15 @@ class TestEmptyStateStandard(unittest.TestCase):
 
     def test_migrated_views_use_empty_state_class(self):
         for snippet in (
+            # users-list
             '<div class="empty-state">No users yet',
+            # backlog-list
             '<div class="empty-state">No list selected yet',
             '<div class="empty-state">No list entries yet',
+            '<div class="empty-state">No list entries match your current filters.',
+            # library-list
+            '<div class="empty-state">No games found',
+            '<div class="empty-state">No games match your current filters.',
         ):
             self.assertIn(snippet, self.js)
 
@@ -36,6 +42,9 @@ class TestEmptyStateStandard(unittest.TestCase):
             '<div class="loading">No users yet',
             '<div class="loading">No list selected yet',
             '<div class="loading">No list entries yet',
+            '<div class="loading">No list entries match your current filters.',
+            '<div class="loading">No games found',
+            '<div class="loading">No games match your current filters.',
         ):
             self.assertNotIn(snippet, self.js)
 
