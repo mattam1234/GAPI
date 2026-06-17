@@ -2385,7 +2385,7 @@
                     html += '</div>';
                     listDiv.innerHTML = html;
                 } else {
-                    listDiv.innerHTML = '<div class="loading">No users yet. Register using the login page!</div>';
+                    listDiv.innerHTML = '<div class="empty-state">No users yet. Register using the login page!</div>';
                 }
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading users: ' + error.message + '</div>';
@@ -5844,13 +5844,13 @@ Event ID: ${result.discord_event_id}`);
             const activeBacklog = getActiveBacklog();
             updateBacklogSidebarMeta();
             if (!activeBacklog) {
-                list.innerHTML = '<div class="loading">No list selected yet. Create one from the sidebar to get started.</div>';
+                list.innerHTML = '<div class="empty-state">No list selected yet. Create one from the sidebar to get started.</div>';
                 activeBacklogEntryGameId = '';
                 closeBacklogEntryPreviewModal();
                 return;
             }
             if (!_backlogData.length) {
-                list.innerHTML = '<div class="loading">No list entries yet. Add games from your library using the panel on the right.</div>';
+                list.innerHTML = '<div class="empty-state">No list entries yet. Add games from your library using the panel on the right.</div>';
                 activeBacklogEntryGameId = '';
                 closeBacklogEntryPreviewModal();
                 return;

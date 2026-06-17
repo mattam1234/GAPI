@@ -3995,6 +3995,7 @@ html[data-theme="light"] .dash-rec-btn:hover {
 .list-container > .loading,
 .list-container > .error,
 .list-container > .dash-empty,
+.list-container > .empty-state,
 .presence-empty {
   display: flex;
   flex-direction: column;
@@ -4013,6 +4014,7 @@ html[data-theme="light"] .dash-rec-btn:hover {
 
 .list-container > .loading::before,
 .list-container > .dash-empty::before,
+.list-container > .empty-state::before,
 .presence-empty::before {
   content: '🎮';
   font-size: 1.5rem;

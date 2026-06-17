@@ -69,3 +69,20 @@ Keep `.loading` exclusively for in-progress states.
 data views no longer emit `class="loading"` for empty text), and schedule Tier B
 as a reviewed UI pass with screenshots — per the checklist's "confirm
 docs/screenshots updated when UI behavior materially changes" gate.
+
+### Applied so far (Tier A)
+
+Introduced the semantic `.empty-state` class (`style.css`, rendered identically
+to `.loading`/`.dash-empty` inside `.list-container`) and migrated the empty
+states whose target element is a confirmed `.list-container` child — provably
+pixel-identical, no visual change:
+
+- `users-list` — "No users yet…" (`main.js` `loadUsers`)
+- `backlog-list` — "No list selected yet…" / "No list entries yet…"
+
+Pinned by `tests/test_ux_empty_states.py`. Note `favorites-list` is **not** a
+`.list-container`, so it stays in Tier B (its `.loading` renders as plain
+centered text, not the card — migrating it would change visuals).
+
+Remaining Tier A candidates (other `.list-container` children still using
+`.loading` for empty text) and all Tier B sites are follow-up work.
