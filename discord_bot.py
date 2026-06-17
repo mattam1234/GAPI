@@ -400,8 +400,18 @@ class GAPIBot(discord.Client):
                 try:
                     message = await channel.fetch_message(int(message_id))
                     await message.edit(embed=embed, content=None)
-                except Exception:
+                except discord.NotFound:
+                    # The status message was genuinely deleted; allow a fresh one.
                     message_id = ''
+                except Exception as e:
+                    # Forbidden (e.g. missing Read Message History), rate limits, or
+                    # transient API errors. Do NOT re-send: blindly creating a new
+                    # message every loop is what caused channel spam. Skip this cycle.
+                    print(
+                        f"⚠️  Could not update linked session message "
+                        f"{message_id} in channel {channel_id}: {type(e).__name__}: {e}"
+                    )
+                    return
             if not message_id:
                 message = await channel.send(embed=embed)
                 await message.add_reaction('✅')
@@ -578,7 +588,7 @@ class GAPIBot(discord.Client):
     async def before_location_cache_loop(self):
         await self.wait_until_ready()
 
-    @tasks.loop(seconds=5)
+    @tasks.loop(seconds=30)
     async def linked_session_sync_loop(self):
         """Announce and refresh linked session status messages in Discord."""
         db = self._db_session()
