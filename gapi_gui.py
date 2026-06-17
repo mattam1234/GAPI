@@ -7170,6 +7170,22 @@ def api_schedule_ical_sync_info():
     return jsonify(_build_schedule_ical_sync_urls(username))
 
 
+def _ical_escape(text) -> str:
+    """Escape a value for an RFC 5545 TEXT property.
+
+    Per RFC 5545 §3.3.11, backslash, semicolon and comma must be escaped, and
+    embedded newlines become the literal ``\\n`` sequence. Without this, a
+    title/note containing any of these characters produces a malformed .ics
+    that calendar clients reject or truncate.
+    """
+    s = str(text or '')
+    s = s.replace('\\', '\\\\')
+    s = s.replace(';', '\\;')
+    s = s.replace(',', '\\,')
+    s = s.replace('\r\n', '\\n').replace('\r', '\\n').replace('\n', '\\n')
+    return s
+
+
 @app.route('/api/schedule/export.ics')
 def api_export_schedule_ics():
     """Download the game-night schedule as an iCalendar (.ics) file.
@@ -7239,12 +7255,12 @@ def api_export_schedule_ics():
             desc_parts.append(f'RSVP: {", ".join(rsvp_lines)}')
         if notes:
             desc_parts.append(notes)
-        description = '\\n'.join(desc_parts)
+        description = '\\n'.join(_ical_escape(part) for part in desc_parts)
         uid = f"{ev.get('id', 'unknown')}@gapi"
 
         lines.append('BEGIN:VEVENT')
         lines.append(f'UID:{uid}')
-        lines.append(f'SUMMARY:{ev.get("title", "Game Night")}')
+        lines.append(f'SUMMARY:{_ical_escape(ev.get("title", "Game Night"))}')
         if dtstart:
             lines.append(f'DTSTART:{dtstart}')
         if description:
