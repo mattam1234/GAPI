@@ -7237,29 +7237,11 @@ def api_session_history():
 # User Profile API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/profile/me', methods=['GET'])
-@require_login
-def api_get_my_profile():
-    """Get current user's profile data"""
-    username = get_current_username()
-    return jsonify({
-        'username': username,
-        'bio': 'Passionate gamer',
-        'status': 'Playing games',
-        'favorite_game': 'Portal 2',
-        'is_private': False
-    })
+# MIGRATED to FastAPI: see backend/routers/profile.py. The /api/profile/me
+# and /api/profile/update routes are served natively by the FastAPI app
+# (backend.main:app). Removed from the Flask layer per the strangler-fig
+# migration (docs/MODERNIZATION_BRIEF.md).
 
-
-@app.route('/api/profile/update', methods=['POST'])
-@require_login
-def api_update_profile_legacy():
-    """Update user's profile"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    
-    # In production, save to database
-    return jsonify({'success': True, 'message': 'Profile updated'})
 
 
 # ---------------------------------------------------------------------------
