@@ -10,6 +10,7 @@ All the heavy machinery is reused from ``gapi_gui`` (the per-user picker, the
 shared services, the helpers). Error responses use a ``{"error": ...}`` body
 (via JSONResponse) to preserve the contract the frontend reads.
 """
+import random
 import threading
 from typing import Optional
 
@@ -18,13 +19,63 @@ from fastapi.responses import JSONResponse
 
 import gapi
 import gapi_gui
-from backend.dependencies import require_login
+from backend.dependencies import get_current_user, require_login
 
 router = APIRouter(prefix="/api", tags=["pick"])
 
 
 def _err(status_code: int, message: str):
     return JSONResponse(status_code=status_code, content={"error": message})
+
+
+@router.get("/random-game")
+def random_game_legacy(mode: str = "random",
+                       username: Optional[str] = Depends(get_current_user)):
+    """Legacy random-game endpoint for browser-extension compatibility.
+
+    Works anonymously (demo games) or for a logged-in user (their library).
+    """
+    g = gapi_gui
+    filter_type = g._resolve_pick_filter_type({"mode": mode})
+    game = None
+    if username:
+        p = g.ensure_picker_initialized(username)
+        if p is None:
+            return _err(500, "Failed to load games")
+        if not p.games:
+            return _err(400, "No games available in your library")
+        with g.picker_lock:
+            filtered = None
+            if filter_type == "unplayed":
+                filtered = p.filter_games(max_playtime=0)
+            elif filter_type == "barely":
+                filtered = p.filter_games(max_playtime=p.BARELY_PLAYED_THRESHOLD_MINUTES)
+            elif filter_type == "well":
+                filtered = p.filter_games(min_playtime=p.WELL_PLAYED_THRESHOLD_MINUTES)
+            elif filter_type == "favorites":
+                filtered = p.filter_games(favorites_only=True)
+            if filtered is not None and len(filtered) == 0:
+                return _err(400, "No games match the selected filters")
+            game = p.pick_random_game(filtered)
+    else:
+        demo_games = list(g.DEMO_GAMES) if isinstance(g.DEMO_GAMES, list) else []
+        if filter_type == "unplayed":
+            demo_games = [x for x in demo_games
+                          if int(x.get("playtime_forever", 0) or 0) <= 0]
+        elif filter_type == "barely":
+            demo_games = [x for x in demo_games
+                          if int(x.get("playtime_forever", 0) or 0)
+                          <= gapi.GamePicker.BARELY_PLAYED_THRESHOLD_MINUTES]
+        elif filter_type == "well":
+            demo_games = [x for x in demo_games
+                          if int(x.get("playtime_forever", 0) or 0)
+                          >= gapi.GamePicker.WELL_PLAYED_THRESHOLD_MINUTES]
+        if demo_games:
+            game = random.choice(demo_games)
+
+    if not game:
+        return _err(500, "Failed to pick a game")
+    return g._legacy_pick_payload(game)
 
 
 @router.post("/pick")

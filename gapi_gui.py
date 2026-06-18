@@ -2146,62 +2146,7 @@ def api_health():
     })
 
 
-@app.route('/api/random-game', methods=['GET'])
-def api_random_game_legacy():
-    """Legacy random-game endpoint for browser extension compatibility."""
-    mode = request.args.get('mode', 'random')
-    filter_type = _resolve_pick_filter_type({'mode': mode})
-    username = _resolve_current_username_str()
-
-    game = None
-    if username:
-        p = ensure_picker_initialized(username)
-        if p is None:
-            return jsonify({'error': 'Failed to load games'}), 500
-        if not p.games:
-            return jsonify({'error': 'No games available in your library'}), 400
-
-        with picker_lock:
-            filtered_games = None
-            if filter_type == 'unplayed':
-                filtered_games = p.filter_games(max_playtime=0)
-            elif filter_type == 'barely':
-                filtered_games = p.filter_games(
-                    max_playtime=p.BARELY_PLAYED_THRESHOLD_MINUTES
-                )
-            elif filter_type == 'well':
-                filtered_games = p.filter_games(
-                    min_playtime=p.WELL_PLAYED_THRESHOLD_MINUTES
-                )
-            elif filter_type == 'favorites':
-                filtered_games = p.filter_games(favorites_only=True)
-
-            if filtered_games is not None and len(filtered_games) == 0:
-                return jsonify({'error': 'No games match the selected filters'}), 400
-
-            game = p.pick_random_game(filtered_games)
-    else:
-        demo_games = list(DEMO_GAMES) if isinstance(DEMO_GAMES, list) else []
-        if filter_type == 'unplayed':
-            demo_games = [g for g in demo_games if int(g.get('playtime_forever', 0) or 0) <= 0]
-        elif filter_type == 'barely':
-            demo_games = [
-                g for g in demo_games
-                if int(g.get('playtime_forever', 0) or 0) <= gapi.GamePicker.BARELY_PLAYED_THRESHOLD_MINUTES
-            ]
-        elif filter_type == 'well':
-            demo_games = [
-                g for g in demo_games
-                if int(g.get('playtime_forever', 0) or 0) >= gapi.GamePicker.WELL_PLAYED_THRESHOLD_MINUTES
-            ]
-
-        if demo_games:
-            game = random.choice(demo_games)
-
-    if not game:
-        return jsonify({'error': 'Failed to pick a game'}), 500
-
-    return jsonify(_legacy_pick_payload(game))
+# MIGRATED to FastAPI: GET /api/random-game -> backend/routers/pick.py
 
 
 @app.route('/api/history', methods=['GET'])

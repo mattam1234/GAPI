@@ -10,7 +10,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
+from backend.main import app as _fastapi_app
 
 
 class TestExtensionMobileApiCompat(unittest.TestCase):
@@ -37,10 +40,12 @@ class TestExtensionMobileApiCompat(unittest.TestCase):
             {'appid': 10, 'game_id': 'steam:10', 'name': 'Demo A', 'platform': 'steam', 'playtime_forever': 0},
             {'appid': 11, 'game_id': 'steam:11', 'name': 'Demo B', 'platform': 'steam', 'playtime_forever': 30},
         ]
+        # /api/random-game is migrated to FastAPI (anonymous demo path).
+        fast_client = _FastTestClient(_fastapi_app)
         with patch.object(gapi_gui, 'DEMO_GAMES', demo_games):
-            resp = self.client.get('/api/random-game?mode=unplayed')
+            resp = fast_client.get('/api/random-game?mode=unplayed')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['name'], 'Demo A')
         self.assertIn('playtime_forever', data)
         self.assertIn('game_id', data)

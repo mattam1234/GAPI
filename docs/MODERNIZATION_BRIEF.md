@@ -191,8 +191,12 @@ biggest handler in the app (filters, rarity, collection resolution, Discord RPC,
 background ProtonDB thread, webhook + WebhookNotifier fan-out, detail caching,
 pick audit) ported faithfully — error bodies preserved as `{"error": ...}` via
 JSONResponse. Three source-code-assertion tests (VR filter, collection_id) were
-repointed from `gapi_gui.py` to `backend/routers/pick.py`. Still in Flask:
-`GET /api/random-game` (anonymous demo path).
+repointed from `gapi_gui.py` to `backend/routers/pick.py`.
+
+**✅ Picks feature fully migrated** — `/api/pick`, `/api/multiuser/pick`, and
+`/api/random-game` (anonymous demo path, no login) are all on FastAPI.
+`/random-game` uses the optional `get_current_user` dependency so it serves both
+demo and authenticated picks.
 
 **Mixed-client test file:** `test_permissions_notifprefs.py` tests many
 endpoints, only 3 of which migrated. The session helper now detects the client
