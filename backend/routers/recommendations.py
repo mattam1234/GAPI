@@ -65,6 +65,52 @@ def get_recommendations(request: Request, username: str = Depends(require_login)
     return {"recommendations": recs}
 
 
+@router.get("/smart")
+def smart_recommendations(request: Request, username: str = Depends(require_login)):
+    """AI-enhanced multi-factor recommendations (uses the global picker)."""
+    from app.services.recommendation_service import SmartRecommendationEngine
+
+    picker = gapi_gui.picker
+    if not picker:
+        return _err(400, "Not initialized. Please log in and ensure your "
+                    "Steam ID is set.")
+    args = request.query_params
+    try:
+        count = max(1, min(int(args.get("count", 10)), 50))
+    except (ValueError, TypeError):
+        count = 10
+    platforms_param = str(args.get("platforms", "")).strip()
+    platforms = ([x.strip() for x in platforms_param.split(",") if x.strip()]
+                 if platforms_param else None)
+    max_budget = None
+    mbp = str(args.get("max_budget", "")).strip()
+    if mbp:
+        try:
+            max_budget = float(mbp)
+        except (ValueError, TypeError):
+            max_budget = None
+    include_new = str(args.get("include_new", "")).lower() in ("true", "1", "yes")
+
+    with gapi_gui.picker_lock:
+        games = list(picker.games) if picker.games else []
+        history = list(picker.history) if hasattr(picker, "history") else []
+        cache = {}
+        steam_client = picker.clients.get("steam") if hasattr(picker, "clients") else None
+        if steam_client and hasattr(steam_client, "details_cache"):
+            cache = dict(steam_client.details_cache)
+        well_mins = getattr(picker, "WELL_PLAYED_THRESHOLD_MINUTES", 600)
+        barely_mins = getattr(picker, "BARELY_PLAYED_THRESHOLD_MINUTES", 120)
+        budget_svc = getattr(picker, "budget_service", None)
+
+    engine = SmartRecommendationEngine(
+        games=games, details_cache=cache, history=history,
+        well_played_mins=well_mins, barely_played_mins=barely_mins,
+        budget_service=budget_svc)
+    recs = engine.recommend(count=count, platforms=platforms,
+                            max_budget=max_budget, include_new_releases=include_new)
+    return {"recommendations": recs, "engine": "smart"}
+
+
 @router.get("/ml")
 def ml_recommendations(request: Request, username: str = Depends(require_login)):
     """ML-powered recommendations (item-CF / ALS matrix factorization / hybrid).

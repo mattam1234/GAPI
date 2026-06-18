@@ -466,16 +466,18 @@ class TestSmartRecommendationsRoute(unittest.TestCase):
 
     def setUp(self):
         import gapi_gui
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
         gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        self.client = TestClient(fastapi_app)
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'testuser'}))
 
-    @patch('gapi_gui.current_user', 'testuser')
     @patch('gapi_gui.picker', None)
     def test_returns_400_when_picker_not_initialized(self):
         resp = self.client.get('/api/recommendations/smart')
         self.assertEqual(resp.status_code, 400)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_returns_200_with_recommendations(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -490,11 +492,10 @@ class TestSmartRecommendationsRoute(unittest.TestCase):
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.client.get('/api/recommendations/smart?count=5')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('recommendations', data)
         self.assertEqual(data['engine'], 'smart')
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_count_clamped_to_50(self):
         import gapi_gui
         fake_picker = MagicMock()
