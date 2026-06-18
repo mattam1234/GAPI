@@ -16,10 +16,10 @@ Follow-up chunks (still in Flask for now): event CRUD + RSVP
 """
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
 import gapi_gui
-from backend.dependencies import require_login
+from backend.dependencies import get_current_user, require_login
 from backend.schemas.schedule import (
     CommonGamesIn, CreateScheduleIn, RsvpIn, SearchIn, UpdateScheduleIn,
 )
@@ -440,3 +440,97 @@ def common_games_random(body: CommonGamesIn,
         "attendees": attendees,
         "collection_id": collection_id,
     }
+
+
+# ── iCal export / sync (chunk 4a) ──────────────────────────────────────────
+
+@event_router.get("/ical-sync-info")
+def ical_sync_info(request: Request, username: str = Depends(require_login)):
+    """Return private iCal subscription URLs for the current user."""
+    return gapi_gui._build_schedule_ical_sync_urls(
+        username, base_url=str(request.base_url))
+
+
+@event_router.get("/export.ics")
+def export_ics(token: str = "", download: str = "1",
+               username: Optional[str] = Depends(get_current_user)):
+    """Download the schedule as an RFC 5545 iCalendar document.
+
+    Auth is by signed feed token (for calendar apps) or the session cookie.
+    """
+    token = (token or "").strip()
+    if token:
+        username = gapi_gui._resolve_schedule_ical_username(token)
+        if not username:
+            raise HTTPException(status_code=401, detail="Invalid iCal token")
+    if not username:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    picker = gapi_gui.ensure_picker_initialized(username)
+    if not picker:
+        raise HTTPException(status_code=400, detail="Not initialized")
+
+    with gapi_gui.picker_lock:
+        events = picker.schedule_service.get_events(username=username)
+
+    esc = gapi_gui._ical_escape
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//GAPI//Game Night Schedule//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+    for ev in events:
+        date_str = ev.get("date", "")
+        time_str = ev.get("time", "00:00")
+        dtstart = ""
+        if date_str:
+            clean_date = date_str.replace("-", "")
+            clean_time = time_str.replace(":", "")
+            if len(clean_time) == 4:
+                clean_time += "00"
+            dtstart = f"{clean_date}T{clean_time}"
+        invitee_names = ev.get("invited_attendees", ev.get("attendees", []))
+        invitee_ids = ev.get("invited_attendee_ids", ev.get("attendee_ids", []))
+        attendees = ", ".join(invitee_names or [])
+        game_name = ev.get("game_name", "")
+        notes = ev.get("notes", "")
+        rsvp_statuses = ev.get("rsvp_statuses", {}) if isinstance(
+            ev.get("rsvp_statuses"), dict) else {}
+        desc_parts = []
+        if game_name:
+            desc_parts.append(f"Game: {game_name}")
+        if attendees:
+            desc_parts.append(f"Attendees: {attendees}")
+        rsvp_lines = []
+        for index, attendee_name in enumerate(invitee_names or []):
+            attendee_id = (invitee_ids[index]
+                           if isinstance(invitee_ids, list) and index < len(invitee_ids)
+                           else attendee_name)
+            status = str(rsvp_statuses.get(attendee_id)
+                         or rsvp_statuses.get(attendee_name)
+                         or "pending").strip().lower()
+            rsvp_lines.append(f"{attendee_name} ({status})")
+        if rsvp_lines:
+            desc_parts.append(f'RSVP: {", ".join(rsvp_lines)}')
+        if notes:
+            desc_parts.append(notes)
+        description = "\n".join(esc(part) for part in desc_parts)
+        uid = f"{ev.get('id', 'unknown')}@gapi"
+
+        lines.append("BEGIN:VEVENT")
+        lines.append(f"UID:{uid}")
+        lines.append(f'SUMMARY:{esc(ev.get("title", "Game Night"))}')
+        if dtstart:
+            lines.append(f"DTSTART:{dtstart}")
+        if description:
+            lines.append(f"DESCRIPTION:{description}")
+        lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+
+    ical_body = "\r\n".join(lines) + "\r\n"
+    headers = {}
+    if str(download or "1").strip() != "0":
+        headers["Content-Disposition"] = 'attachment; filename="gapi_schedule.ics"'
+    return Response(content=ical_body,
+                    media_type="text/calendar; charset=utf-8", headers=headers)

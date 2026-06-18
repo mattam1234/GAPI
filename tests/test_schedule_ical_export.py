@@ -13,16 +13,24 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient
+
 import gapi_gui
+from backend.main import app as fastapi_app
+
+
+def _session_cookie(username):
+    serializer = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    return serializer.dumps({'username': username})
 
 
 class TestScheduleIcalExport(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # /api/schedule/export.ics is migrated to FastAPI.
+        self.client = TestClient(fastapi_app)
+        self.client.cookies.set('session', _session_cookie('alice'))
 
     def _picker(self, events):
         return SimpleNamespace(
@@ -33,7 +41,7 @@ class TestScheduleIcalExport(unittest.TestCase):
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._picker(events)):
             resp = self.client.get('/api/schedule/export.ics?download=0')
         self.assertEqual(resp.status_code, 200)
-        return resp.get_data(as_text=True)
+        return resp.text
 
     def test_basic_structure(self):
         body = self._export([

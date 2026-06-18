@@ -456,9 +456,9 @@ class TestScheduleIcalSyncRoutes(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # ical-sync-info and export.ics are migrated to FastAPI.
+        self.client = TestClient(fastapi_app)
+        self.client.cookies.set('session', _schedule_session_cookie('alice'))
 
     def _fake_picker(self):
         return SimpleNamespace(
@@ -483,17 +483,17 @@ class TestScheduleIcalSyncRoutes(unittest.TestCase):
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
             resp = self.client.get('/api/schedule/ical-sync-info')
         self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()  # Flask test client (ical routes still in Flask)
+        data = resp.json()
         self.assertIn('/api/schedule/export.ics?token=', data['feed_url'])
         self.assertTrue(data['webcal_url'].startswith('webcal'))
 
     def test_export_ical_accepts_signed_token(self):
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
             info_resp = self.client.get('/api/schedule/ical-sync-info')
-            token = parse_qs(urlparse(info_resp.get_json()['feed_url']).query)['token'][0]
+            token = parse_qs(urlparse(info_resp.json()['feed_url']).query)['token'][0]
             resp = self.client.get(f'/api/schedule/export.ics?token={token}&download=0')
         self.assertEqual(resp.status_code, 200)
-        self.assertIn('BEGIN:VCALENDAR', resp.get_data(as_text=True))
+        self.assertIn('BEGIN:VCALENDAR', resp.text)
         self.assertEqual(resp.headers['Content-Type'], 'text/calendar; charset=utf-8')
 
 

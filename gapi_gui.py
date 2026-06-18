@@ -4618,10 +4618,15 @@ def _resolve_schedule_ical_username(token: str) -> Optional[str]:
     return username or None
 
 
-def _build_schedule_ical_sync_urls(username: str) -> Dict[str, str]:
-    """Build absolute HTTPS and webcal feed URLs for the current user."""
+def _build_schedule_ical_sync_urls(username: str, base_url: str = None) -> Dict[str, str]:
+    """Build absolute HTTPS and webcal feed URLs for the current user.
+
+    ``base_url`` lets a non-Flask caller (the FastAPI router) supply the request
+    root; when omitted it falls back to the Flask request context.
+    """
     token = _build_schedule_ical_token(username)
-    feed_url = f"{request.url_root.rstrip('/')}/api/schedule/export.ics?token={quote_plus(token)}&download=0"
+    root = (base_url or request.url_root).rstrip('/')
+    feed_url = f"{root}/api/schedule/export.ics?token={quote_plus(token)}&download=0"
     scheme, _, remainder = feed_url.partition('://')
     webcal_scheme = 'webcals' if scheme == 'https' else 'webcal'
     return {
@@ -5808,14 +5813,8 @@ def api_achievement_stats():
 # iCalendar export for the game-night schedule
 # ---------------------------------------------------------------------------
 
-@app.route('/api/schedule/ical-sync-info')
-@require_login
-def api_schedule_ical_sync_info():
-    """Return private iCal subscription URLs for the current user."""
-    username = get_current_username()
-    if not username:
-        return jsonify({'error': 'Not logged in'}), 401
-    return jsonify(_build_schedule_ical_sync_urls(username))
+# MIGRATED to FastAPI (chunk 4a): GET /api/schedule/ical-sync-info -> see
+# backend/routers/schedule.py (event_router).
 
 
 def _ical_escape(text) -> str:
@@ -5834,103 +5833,8 @@ def _ical_escape(text) -> str:
     return s
 
 
-@app.route('/api/schedule/export.ics')
-def api_export_schedule_ics():
-    """Download the game-night schedule as an iCalendar (.ics) file.
-
-    Produces a standards-compliant RFC 5545 ``VCALENDAR`` document.
-    Each game-night event becomes a ``VEVENT`` with ``DTSTART``, ``SUMMARY``,
-    ``DESCRIPTION`` (notes + game name + attendees), and a ``UID`` derived
-    from the event ID.
-
-    Response: ``text/calendar`` attachment named ``gapi_schedule.ics``.
-    """
-    username = get_current_username()
-    token = str(request.args.get('token', '') or '').strip()
-    if token:
-        username = _resolve_schedule_ical_username(token)
-        if not username:
-            return jsonify({'error': 'Invalid iCal token'}), 401
-    if not username:
-        return jsonify({'error': 'Not logged in'}), 401
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-
-    with picker_lock:
-        events = p.schedule_service.get_events(username=username)
-
-    lines = [
-        'BEGIN:VCALENDAR',
-        'VERSION:2.0',
-        'PRODID:-//GAPI//Game Night Schedule//EN',
-        'CALSCALE:GREGORIAN',
-        'METHOD:PUBLISH',
-    ]
-
-    for ev in events:
-        date_str = ev.get('date', '')
-        time_str = ev.get('time', '00:00')
-        dtstart = ''
-        if date_str:
-            # Produce DTSTART in basic format: YYYYMMDDTHHMMSS
-            clean_date = date_str.replace('-', '')
-            clean_time = time_str.replace(':', '')
-            if len(clean_time) == 4:
-                clean_time += '00'
-            dtstart = f'{clean_date}T{clean_time}'
-        invitee_names = ev.get('invited_attendees', ev.get('attendees', []))
-        invitee_ids = ev.get('invited_attendee_ids', ev.get('attendee_ids', []))
-        attendees = ', '.join(invitee_names or [])
-        game_name = ev.get('game_name', '')
-        notes = ev.get('notes', '')
-        rsvp_statuses = ev.get('rsvp_statuses', {}) if isinstance(ev.get('rsvp_statuses'), dict) else {}
-        desc_parts = []
-        if game_name:
-            desc_parts.append(f'Game: {game_name}')
-        if attendees:
-            desc_parts.append(f'Attendees: {attendees}')
-        rsvp_lines = []
-        for index, attendee_name in enumerate(invitee_names or []):
-            attendee_id = invitee_ids[index] if isinstance(invitee_ids, list) and index < len(invitee_ids) else attendee_name
-            status = str(
-                rsvp_statuses.get(attendee_id)
-                or rsvp_statuses.get(attendee_name)
-                or 'pending'
-            ).strip().lower()
-            rsvp_lines.append(f'{attendee_name} ({status})')
-        if rsvp_lines:
-            desc_parts.append(f'RSVP: {", ".join(rsvp_lines)}')
-        if notes:
-            desc_parts.append(notes)
-        description = '\\n'.join(_ical_escape(part) for part in desc_parts)
-        uid = f"{ev.get('id', 'unknown')}@gapi"
-
-        lines.append('BEGIN:VEVENT')
-        lines.append(f'UID:{uid}')
-        lines.append(f'SUMMARY:{_ical_escape(ev.get("title", "Game Night"))}')
-        if dtstart:
-            lines.append(f'DTSTART:{dtstart}')
-        if description:
-            lines.append(f'DESCRIPTION:{description}')
-        lines.append('END:VEVENT')
-
-    lines.append('END:VCALENDAR')
-
-    ical_body = '\r\n'.join(lines) + '\r\n'
-
-    from flask import Response as _Response
-    download = str(request.args.get('download', '1') or '1').strip() != '0'
-    response_headers = {
-        'Content-Type': 'text/calendar; charset=utf-8',
-    }
-    if download:
-        response_headers['Content-Disposition'] = 'attachment; filename="gapi_schedule.ics"'
-    return _Response(
-        ical_body,
-        mimetype='text/calendar',
-        headers=response_headers,
-    )
+# MIGRATED to FastAPI (chunk 4a): GET /api/schedule/export.ics -> see
+# backend/routers/schedule.py (event_router). _ical_escape stays here.
 
 
 # ---------------------------------------------------------------------------

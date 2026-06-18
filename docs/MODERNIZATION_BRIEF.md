@@ -169,14 +169,20 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Schedule (chunk 1) | `/api/schedules` collections (list/create/update/delete) | `backend/routers/schedule.py` (`router`) | `tests/test_backend_schedule.py` |
 | Schedule (chunk 2) | `GET /api/schedule`, `PUT /api/schedule/{id}`, `POST /api/schedule/{id}/rsvp` | `backend/routers/schedule.py` (`event_router`) | ported `test_schedule_rsvp_validation.py` + `test_achievement_schedule.py` classes |
 | Schedule (chunk 3) | `/api/schedule/search-games`, `/search-attendees`, `/common-games`, `/common-games/random` | `backend/routers/schedule.py` (`event_router`) | ported `test_achievement_schedule.py::TestScheduleCommonGamePickerRoutes` (search helpers already unit-tested) |
+| Schedule (chunk 4a) | `GET /api/schedule/ical-sync-info`, `GET /api/schedule/export.ics` (token or session auth) | `backend/routers/schedule.py` (`event_router`) | ported `test_schedule_ical_export.py` + `test_achievement_schedule.py::TestScheduleIcalSyncRoutes` |
 
 **Partial-domain migration:** schedule is large (17 routes), migrated in chunks.
 Chunk 2 took the event list/update/RSVP routes (no Discord) and ported their
-existing Flask HTTP tests to the FastAPI TestClient. Still in Flask pending
-chunks: `POST /api/schedule` (create) and `DELETE /api/schedule/{id}` (both have
-inline Discord-API blocks), the `discord-guilds` + `create-discord-event`
-endpoints, and iCal export/sync (tests: `test_schedule_discord_event.py`,
-`test_schedule_ical_export.py`, `test_achievement_schedule.py::TestScheduleIcalSyncRoutes`).
+existing Flask HTTP tests to the FastAPI TestClient. Still in Flask — the final
+"Discord" chunk: `POST /api/schedule` (create) and `DELETE /api/schedule/{id}`
+(both with inline Discord-API blocks), plus `discord-guilds` and
+`create-discord-event` (test: `test_schedule_discord_event.py`).
+
+**Flask-context hazard (resolved in 4a):** `_build_schedule_ical_sync_urls`
+read Flask's `request.url_root`. Migrating its route to FastAPI raised "working
+outside an active HTTP request". Fix: the helper now takes an optional
+`base_url`, which the FastAPI handler supplies from `request.base_url`. Watch
+for other helpers that touch Flask globals (`request`, `session`, `url_for`).
 
 **Patterns proven so far:** admin-gated + service singleton (analytics);
 per-user picker-backed, 500-on-uninit (reviews, tags); picker-backed,
