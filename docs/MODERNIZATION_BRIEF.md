@@ -170,13 +170,21 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Schedule (chunk 2) | `GET /api/schedule`, `PUT /api/schedule/{id}`, `POST /api/schedule/{id}/rsvp` | `backend/routers/schedule.py` (`event_router`) | ported `test_schedule_rsvp_validation.py` + `test_achievement_schedule.py` classes |
 | Schedule (chunk 3) | `/api/schedule/search-games`, `/search-attendees`, `/common-games`, `/common-games/random` | `backend/routers/schedule.py` (`event_router`) | ported `test_achievement_schedule.py::TestScheduleCommonGamePickerRoutes` (search helpers already unit-tested) |
 | Schedule (chunk 4a) | `GET /api/schedule/ical-sync-info`, `GET /api/schedule/export.ics` (token or session auth) | `backend/routers/schedule.py` (`event_router`) | ported `test_schedule_ical_export.py` + `test_achievement_schedule.py::TestScheduleIcalSyncRoutes` |
+| Schedule (chunk 4b) | `GET /api/schedule/discord-guilds`, `POST /api/schedule/{id}/create-discord-event` | `backend/routers/schedule.py` (`event_router`) | ported `test_schedule_discord_event.py` + new `test_backend_discord_guilds.py` |
 
 **Partial-domain migration:** schedule is large (17 routes), migrated in chunks.
 Chunk 2 took the event list/update/RSVP routes (no Discord) and ported their
 existing Flask HTTP tests to the FastAPI TestClient. Still in Flask — the final
-"Discord" chunk: `POST /api/schedule` (create) and `DELETE /api/schedule/{id}`
-(both with inline Discord-API blocks), plus `discord-guilds` and
-`create-discord-event` (test: `test_schedule_discord_event.py`).
+chunk (4c): `POST /api/schedule` (create) and `DELETE /api/schedule/{id}`, the
+two event-mutation routes that embed large inline Discord-API blocks (event
+creation + base64 image upload; event cancellation). After 4c the entire
+schedule domain is on FastAPI.
+
+The dedicated Discord endpoints proved the live-`requests` integration ports
+cleanly: the test patches the **global** `requests.post`, so it intercepts the
+FastAPI handler's call unchanged. The Discord-API-error path returns a
+`JSONResponse` to preserve the legacy `{'error', 'status_code', 'details'}`
+body shape and upstream status code.
 
 **Flask-context hazard (resolved in 4a):** `_build_schedule_ical_sync_urls`
 read Flask's `request.url_root`. Migrating its route to FastAPI raised "working

@@ -15,7 +15,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _TestClient
+
 import gapi_gui
+from backend.main import app as _fastapi_app
+
+
+def _discord_session_cookie(username):
+    serializer = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    return serializer.dumps({'username': username})
 
 
 class FakeResponse:
@@ -33,9 +41,9 @@ class TestCreateDiscordEventEndpoint(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # create-discord-event is migrated to FastAPI.
+        self.client = _TestClient(_fastapi_app)
+        self.client.cookies.set('session', _discord_session_cookie('alice'))
 
         # Point the endpoint's config loader at a temp config with a token.
         self._cfg = tempfile.NamedTemporaryFile(
@@ -87,7 +95,7 @@ class TestCreateDiscordEventEndpoint(unittest.TestCase):
         with patch('requests.post', return_value=FakeResponse(201, {'id': '12345'})) as mock_post:
             resp = self._post({'guild_id': '987654321'})
         self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
+        data = resp.json()
         self.assertTrue(data['success'])
         self.assertEqual(data['discord_event_id'], '12345')
         self.assertIn('discord.com/events/987654321/12345', data['discord_event_url'])
@@ -133,7 +141,7 @@ class TestCreateDiscordEventEndpoint(unittest.TestCase):
         with patch('requests.post', return_value=err):
             resp = self._post({'guild_id': '987654321'})
         self.assertEqual(resp.status_code, 403)
-        data = resp.get_json()
+        data = resp.json()
         self.assertIn('Missing Access', data['error'])
         self.assertNotIn('set_info', self.recorded)
 

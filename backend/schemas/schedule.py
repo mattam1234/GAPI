@@ -33,3 +33,9 @@ class CommonGamesIn(BaseModel):
     attendees: Any = None  # list or comma-separated string
     collection_id: Optional[str] = None
     list_id: Optional[str] = None
+
+
+class CreateDiscordEventIn(BaseModel):
+    guild_id: Optional[str] = ""
+    timezone_name: Optional[str] = ""
+    timezone_offset_minutes: Optional[Any] = None

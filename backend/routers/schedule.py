@@ -17,11 +17,13 @@ Follow-up chunks (still in Flask for now): event CRUD + RSVP
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 import gapi_gui
 from backend.dependencies import get_current_user, require_login
 from backend.schemas.schedule import (
-    CommonGamesIn, CreateScheduleIn, RsvpIn, SearchIn, UpdateScheduleIn,
+    CommonGamesIn, CreateDiscordEventIn, CreateScheduleIn, RsvpIn, SearchIn,
+    UpdateScheduleIn,
 )
 
 router = APIRouter(prefix="/api/schedules", tags=["schedule"])
@@ -534,3 +536,156 @@ def export_ics(token: str = "", download: str = "1",
         headers["Content-Disposition"] = 'attachment; filename="gapi_schedule.ics"'
     return Response(content=ical_body,
                     media_type="text/calendar; charset=utf-8", headers=headers)
+
+
+# ── Discord integration (chunk 4b: guilds + per-event create) ──────────────
+
+@event_router.get("/discord-guilds")
+def discord_guilds(username: str = Depends(require_login)):
+    """List cached Discord guilds available to the current linked user."""
+    user = gapi_gui._get_current_user_record()
+    if not user or not user.get("discord_id"):
+        return {"guilds": [], "error": "Link your Discord ID in Settings before "
+                "syncing schedule events to Discord."}
+    if not gapi_gui.DB_AVAILABLE or not gapi_gui.ensure_db_available():
+        return {"guilds": [], "error": "Database unavailable"}
+    db = None
+    try:
+        db = gapi_gui.database.SessionLocal()
+        guilds = gapi_gui.database.list_discord_locations_for_user(db, user["discord_id"])
+        return {
+            "guilds": [
+                {"guild_id": g.get("guild_id"), "guild_name": g.get("guild_name"),
+                 "icon_url": g.get("icon_url")}
+                for g in guilds
+            ],
+            "discord_id": user["discord_id"],
+        }
+    finally:
+        if db:
+            db.close()
+
+
+@event_router.post("/{event_id}/create-discord-event")
+def create_discord_event(event_id: str, body: CreateDiscordEventIn,
+                         username: str = Depends(require_login),
+                         picker=Depends(_picker)):
+    """Create a Discord scheduled event for a game-night schedule event."""
+    import base64
+    import json as _json
+    import os
+    from datetime import timedelta
+
+    import requests
+
+    guild_id = str(body.guild_id or "").strip()
+    timezone_name = str(body.timezone_name or "").strip() or None
+    try:
+        timezone_offset_minutes = (
+            int(body.timezone_offset_minutes)
+            if body.timezone_offset_minutes is not None else None)
+    except (TypeError, ValueError):
+        timezone_offset_minutes = None
+
+    if not guild_id:
+        raise HTTPException(status_code=400, detail="guild_id is required")
+
+    with gapi_gui.picker_lock:
+        event = picker.schedule_service.get_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    discord_token = None
+    try:
+        config_path = os.environ.get("GAPI_DISCORD_CONFIG", "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                discord_token = _json.load(f).get("discord_bot_token")
+    except Exception as e:
+        gapi_gui.gui_logger.error("Could not load Discord token: %s", e)
+        raise HTTPException(status_code=500, detail="Discord bot token not configured")
+    if not discord_token:
+        raise HTTPException(
+            status_code=500, detail="Discord bot token not found in config.json")
+
+    try:
+        date_part = event.get("date", "")
+        time_part = event.get("time", "").replace(".", ":")
+        try:
+            event_datetime = gapi_gui._schedule_local_to_utc(
+                date_part, time_part,
+                timezone_name=timezone_name or event.get("timezone_name"),
+                timezone_offset_minutes=(
+                    timezone_offset_minutes if timezone_offset_minutes is not None
+                    else event.get("timezone_offset_minutes")),
+            )
+        except (ValueError, AttributeError) as e:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid event date/time format: {e}")
+        end_time = event_datetime + timedelta(hours=2)
+
+        description = gapi_gui._build_discord_schedule_description(
+            game_name=event.get("game_name", "TBA"),
+            game_appid=event.get("game_appid"),
+            notes=event.get("notes", ""),
+            attendees=event.get("attendees", []),
+        )
+        payload = {
+            "name": event.get("title", "Game Night")[:100],
+            "privacy_level": 2,
+            "scheduled_start_time": event_datetime.isoformat(),
+            "scheduled_end_time": end_time.isoformat(),
+            "entity_type": 3,
+            "entity_metadata": {"location": event.get("game_name", "Online")[:100]},
+            "description": description[:1000],
+        }
+
+        game_image_url = gapi_gui._resolve_schedule_game_image_url(
+            game_appid=event.get("game_appid"),
+            existing_url=event.get("game_image_url"))
+        if game_image_url:
+            try:
+                img_resp = requests.get(game_image_url, timeout=5)
+                if img_resp.status_code == 200 and len(img_resp.content) < 10 * 1024 * 1024:
+                    content_type = img_resp.headers.get("content-type", "image/jpeg")
+                    img_b64 = base64.b64encode(img_resp.content).decode("utf-8")
+                    payload["image"] = f"data:{content_type};base64,{img_b64}"
+            except Exception as img_err:
+                gapi_gui.gui_logger.warning("Could not fetch game image: %s", img_err)
+
+        discord_api_url = (
+            f"https://discord.com/api/v10/guilds/{guild_id}/scheduled-events")
+        headers = {"Authorization": f"Bot {discord_token}",
+                   "Content-Type": "application/json"}
+        response = requests.post(discord_api_url, json=payload, headers=headers,
+                                 timeout=10)
+
+        if response.status_code in (200, 201):
+            discord_event_id = response.json().get("id")
+            with gapi_gui.picker_lock:
+                picker.schedule_service.set_discord_event_info(
+                    event_id, discord_event_id, guild_id)
+            return {
+                "success": True,
+                "message": "Discord scheduled event created successfully",
+                "event_id": event_id,
+                "discord_event_id": discord_event_id,
+                "discord_event_url":
+                    f"https://discord.com/events/{guild_id}/{discord_event_id}",
+            }
+        error_data = (response.json()
+                      if response.headers.get("content-type", "").startswith("application/json")
+                      else {})
+        error_msg = error_data.get("message", f"HTTP {response.status_code}")
+        gapi_gui.gui_logger.error("Discord API error: %s - %s",
+                                  response.status_code, error_msg)
+        return JSONResponse(
+            status_code=response.status_code,
+            content={"error": f"Discord API error: {error_msg}",
+                     "status_code": response.status_code, "details": error_data})
+    except HTTPException:
+        raise
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error creating Discord event: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create Discord event: {str(e)}")
