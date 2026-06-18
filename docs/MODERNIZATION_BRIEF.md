@@ -161,6 +161,7 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Budget | `/api/budget[...]` | `backend/routers/budget.py` | `tests/test_backend_budget.py` |
 | Ignored-games | `/api/ignored-games` (list + toggle) | `backend/routers/ignored.py` | `tests/test_backend_ignored.py` |
 | Backlog | `/api/backlogs[...]` (collections) + `/api/backlog[...]` (status) | `backend/routers/backlog.py` | `tests/test_backend_backlog.py` + ported `tests/test_backlog_collections.py` |
+| Voting | `/api/voting/[create\|{id}/vote\|status\|close]` | `backend/routers/voting.py` | `tests/test_backend_voting.py` |
 
 **Patterns proven so far:** admin-gated + service singleton (analytics);
 per-user picker-backed, 500-on-uninit (reviews, tags); picker-backed,
@@ -172,9 +173,14 @@ service singletons** (ignored-games).
 in the same PR — the WSGI fallback means such tests can still reach any
 unmigrated routes they touch (e.g. `/api/library`).
 
-**Next candidates:** leaderboards (needs untangling — fragmented across 3
-locations, one route uses raw SQL instead of `leaderboard_service`), then the
-core multi-route domains (auth/setup, picks, schedule, achievements, chat).
+**Known messy domains (need untangling before a clean slice):**
+- **leaderboards** — fragmented across 3 locations; one route uses raw SQL
+  instead of `leaderboard_service`.
+- **friends** — heterogeneous: `GET /api/friends` is a live Steam-API call,
+  while `add`/remove/follow are unpersisted stubs.
+
+**Next candidates:** core multi-route domains (auth/setup, picks, schedule,
+achievements, chat).
 
 > Larger slices carry caveats: **backlog** has existing Flask HTTP tests
 > (`test_backlog_collections.py`, `test_dashboard_filters.py`) to port; the
