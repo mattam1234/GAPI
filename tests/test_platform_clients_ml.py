@@ -630,16 +630,20 @@ class TestMLRecommendationsRoute(unittest.TestCase):
 
     def setUp(self):
         import gapi_gui
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
         gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        # /api/recommendations/ml is migrated to FastAPI; authenticate via cookie.
+        self.client = TestClient(fastapi_app)
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'testuser'}))
 
-    @patch('gapi_gui.current_user', 'testuser')
-    @patch('gapi_gui.picker', None)
     def test_returns_400_when_not_initialized(self):
-        resp = self.client.get('/api/recommendations/ml')
+        import gapi_gui
+        with patch.object(gapi_gui, 'picker', None):
+            resp = self.client.get('/api/recommendations/ml')
         self.assertEqual(resp.status_code, 400)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_returns_200_with_games(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -651,11 +655,10 @@ class TestMLRecommendationsRoute(unittest.TestCase):
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.client.get('/api/recommendations/ml?count=5')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('recommendations', data)
         self.assertEqual(data['engine'], 'ml')
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_valid_method_param(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -667,10 +670,9 @@ class TestMLRecommendationsRoute(unittest.TestCase):
         for method in ('cf', 'mf', 'hybrid'):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.client.get(f'/api/recommendations/ml?method={method}')
-            data = json.loads(resp.data)
+            data = resp.json()
             self.assertEqual(data.get('method'), method)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_invalid_method_defaults_to_cf(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -681,7 +683,7 @@ class TestMLRecommendationsRoute(unittest.TestCase):
         fake_picker.BARELY_PLAYED_THRESHOLD_MINUTES = 120
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.client.get('/api/recommendations/ml?method=bogus')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data.get('method'), 'cf')
 
 

@@ -10544,74 +10544,7 @@ def api_smart_recommendations():
 # Machine Learning Recommendations
 # ---------------------------------------------------------------------------
 
-@app.route('/api/recommendations/ml')
-@require_login
-def api_ml_recommendations():
-    """Return machine-learning–powered game recommendations.
-
-    Uses :class:`~app.services.ml_recommendation_service.MLRecommendationEngine`
-    which offers item-based collaborative filtering, ALS matrix factorization,
-    and a hybrid blend.
-
-    Query params:
-        count  (int, 1-50, default 10): Number of recommendations to return.
-        method (str, default "cf"):     Scoring method — ``cf`` (item-based
-                                        collaborative filtering), ``mf`` (ALS
-                                        matrix factorization), or ``hybrid``.
-
-    Response JSON::
-
-        {
-          "recommendations": [
-            {
-              "name": "Portal 2",
-              "playtime_hours": 0.0,
-              "ml_score": 4.82,
-              "ml_reason": "Unplayed. Genre match: Puzzle, Action. Method: item-CF",
-              ...
-            }
-          ],
-          "engine": "ml",
-          "method": "cf"
-        }
-
-    Returns 400 if the picker is not initialised.
-    """
-    from app.services.ml_recommendation_service import MLRecommendationEngine
-
-    if not picker:
-        return jsonify({
-            'error': 'Not initialized. Please log in and ensure your Steam ID is set.'
-        }), 400
-
-    try:
-        count = max(1, min(int(request.args.get('count', 10)), 50))
-    except (ValueError, TypeError):
-        count = 10
-
-    method = request.args.get('method', 'cf')
-    if method not in ('cf', 'mf', 'hybrid'):
-        method = 'cf'
-
-    with picker_lock:
-        games   = list(picker.games) if picker.games else []
-        history = list(picker.history) if hasattr(picker, 'history') else []
-        cache: dict = {}
-        steam_client = picker.clients.get('steam') if hasattr(picker, 'clients') else None
-        if steam_client and hasattr(steam_client, 'details_cache'):
-            cache = dict(steam_client.details_cache)
-        well_mins   = getattr(picker, 'WELL_PLAYED_THRESHOLD_MINUTES', 600)
-        barely_mins = getattr(picker, 'BARELY_PLAYED_THRESHOLD_MINUTES', 120)
-
-    engine = MLRecommendationEngine(
-        games=games,
-        details_cache=cache,
-        history=history,
-        well_played_mins=well_mins,
-        barely_played_mins=barely_mins,
-    )
-    recs = engine.recommend(count=count, method=method)
-    return jsonify({'recommendations': recs, 'engine': 'ml', 'method': method})
+# MIGRATED to FastAPI: GET /api/recommendations/ml -> backend/routers/recommendations.py
 
 
 # ---------------------------------------------------------------------------

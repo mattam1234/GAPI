@@ -63,3 +63,41 @@ def get_recommendations(request: Request, username: str = Depends(require_login)
         return _err(500, f"Failed to generate recommendations: {str(e)}")
 
     return {"recommendations": recs}
+
+
+@router.get("/ml")
+def ml_recommendations(request: Request, username: str = Depends(require_login)):
+    """ML-powered recommendations (item-CF / ALS matrix factorization / hybrid).
+
+    Uses the global picker (server-wide library) like the legacy route.
+    """
+    from app.services.ml_recommendation_service import MLRecommendationEngine
+
+    picker = gapi_gui.picker
+    if not picker:
+        return _err(400, "Not initialized. Please log in and ensure your "
+                    "Steam ID is set.")
+    args = request.query_params
+    try:
+        count = max(1, min(int(args.get("count", 10)), 50))
+    except (ValueError, TypeError):
+        count = 10
+    method = args.get("method", "cf")
+    if method not in ("cf", "mf", "hybrid"):
+        method = "cf"
+
+    with gapi_gui.picker_lock:
+        games = list(picker.games) if picker.games else []
+        history = list(picker.history) if hasattr(picker, "history") else []
+        cache = {}
+        steam_client = picker.clients.get("steam") if hasattr(picker, "clients") else None
+        if steam_client and hasattr(steam_client, "details_cache"):
+            cache = dict(steam_client.details_cache)
+        well_mins = getattr(picker, "WELL_PLAYED_THRESHOLD_MINUTES", 600)
+        barely_mins = getattr(picker, "BARELY_PLAYED_THRESHOLD_MINUTES", 120)
+
+    engine = MLRecommendationEngine(
+        games=games, details_cache=cache, history=history,
+        well_played_mins=well_mins, barely_played_mins=barely_mins)
+    recs = engine.recommend(count=count, method=method)
+    return {"recommendations": recs, "engine": "ml", "method": method}
