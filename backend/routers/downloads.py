@@ -21,13 +21,20 @@ auth boundary is the GAPI server they later talk to, not the download itself.
 """
 import io
 import os
+import re
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
+import gapi_gui
+
 router = APIRouter(prefix="/api/downloads", tags=["downloads"])
+
+# Matches the `DEFAULT_SERVER = '…'` constant in the extension's JS files so the
+# built download can be re-pointed at the admin-configured server.
+_DEFAULT_SERVER_RE = re.compile(r"(DEFAULT_SERVER\s*=\s*)(['\"])[^'\"]*\2")
 
 # <repo>/backend/routers/downloads.py -> <repo>
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -58,6 +65,38 @@ def _human_size(num_bytes: int) -> str:
     return f"{size:.1f} GB"
 
 
+def _resolve_server_url(request: Request) -> str:
+    """The server URL to bake into download clients.
+
+    Prefers the admin-configured ``server_url`` app setting; falls back to the
+    address the request came in on so a freshly installed client still points
+    somewhere sensible.
+    """
+    configured = ""
+    try:
+        db = next(gapi_gui.database.get_db())
+        try:
+            svc = getattr(gapi_gui, "_app_settings_service", None)
+            if svc:
+                configured = svc.get(db, "server_url", "") or ""
+            else:
+                configured = gapi_gui.database.get_app_setting(
+                    db, "server_url", "") or ""
+        finally:
+            if db:
+                db.close()
+    except Exception:
+        configured = ""
+    url = configured.strip() or str(request.base_url)
+    return url.rstrip("/")
+
+
+def _rewrite_extension_js(text: str, server_url: str) -> str:
+    """Point the extension's DEFAULT_SERVER constant at *server_url*."""
+    return _DEFAULT_SERVER_RE.sub(
+        lambda m: f"{m.group(1)}{m.group(2)}{server_url}{m.group(2)}", text)
+
+
 def _list_desktop_installers() -> list[dict]:
     """Return metadata for every installer file in the downloads directory."""
     if not DOWNLOADS_DIR.is_dir():
@@ -82,9 +121,10 @@ def _list_desktop_installers() -> list[dict]:
 
 
 @router.get("/manifest")
-def downloads_manifest():
+def downloads_manifest(request: Request):
     """List the client apps available for download."""
     return {
+        "server_url": _resolve_server_url(request),
         "extension": {
             "name": "GAPI Browser Extension",
             "available": EXTENSION_DIR.is_dir(),
@@ -99,16 +139,27 @@ def downloads_manifest():
 
 
 @router.get("/extension")
-def download_extension():
-    """Zip the browser-extension source on the fly and serve it."""
+def download_extension(request: Request):
+    """Zip the browser-extension source on the fly and serve it.
+
+    The extension's ``DEFAULT_SERVER`` constant is rewritten to the
+    admin-configured server URL so the download works out of the box.
+    """
     if not EXTENSION_DIR.is_dir():
         raise HTTPException(status_code=404, detail="Extension source not found")
 
+    server_url = _resolve_server_url(request)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(EXTENSION_DIR.rglob("*")):
-            if path.is_file():
-                zf.write(path, arcname=path.relative_to(EXTENSION_DIR).as_posix())
+            if not path.is_file():
+                continue
+            arcname = path.relative_to(EXTENSION_DIR).as_posix()
+            if path.suffix.lower() == ".js":
+                source = path.read_text(encoding="utf-8")
+                zf.writestr(arcname, _rewrite_extension_js(source, server_url))
+            else:
+                zf.write(path, arcname=arcname)
     buffer.seek(0)
     return Response(
         content=buffer.getvalue(),

@@ -3055,6 +3055,7 @@ _DEFAULT_SETTINGS = {
     'leaderboard_public': ('true', 'Show leaderboard to all users (true/false)'),
     'chat_enabled': ('true', 'Enable the chat feature (true/false)'),
     'plugins_enabled': ('true', 'Enable the plugins system (true/false)'),
+    'server_url': ('', 'Public server URL the browser extension and desktop app connect to (e.g. https://gapi.example.com). Leave blank to use the URL the download was served from.'),
 }
 
 

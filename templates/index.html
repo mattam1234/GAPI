@@ -187,6 +187,10 @@
                     <span class="sidebar-item-icon">🧩</span>
                     <span class="sidebar-item-label">Plugins</span>
                 </a>
+                <a class="sidebar-item" id="nav-downloads" onclick="switchTab('downloads',event)" role="button" tabindex="0">
+                    <span class="sidebar-item-icon">⬇️</span>
+                    <span class="sidebar-item-label">Downloads</span>
+                </a>
                 <a class="sidebar-item" id="nav-admin" onclick="switchTab('admin',event)" role="button" tabindex="0" style="display:none;">
                     <span class="sidebar-item-icon">🛠️</span>
                     <span class="sidebar-item-label">Admin</span>
@@ -1591,6 +1595,42 @@
             <div id="plugins-list"><div class="loading">Click Refresh to load plugins…</div></div>
         </div>
 
+        <!-- Downloads Tab -->
+        <div id="downloads-tab" class="tab-content">
+            <h2>⬇️ Downloads</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;">Get the GAPI companion apps. They connect to <strong id="downloads-server-url">this server</strong> by default.</p>
+
+            <!-- Browser Extension -->
+            <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:var(--radius,12px); padding:var(--space-xl); margin-bottom:20px;">
+                <h3 style="margin-top:0;">🧩 Browser Extension</h3>
+                <p style="color:var(--text-secondary); font-size:var(--font-md); margin-bottom:14px;">
+                    A Manifest V3 extension for Chrome, Edge, and Firefox — pick a random game straight from your toolbar.
+                </p>
+                <a id="download-extension-btn" href="/api/downloads/extension"
+                   style="display:inline-block; padding:var(--space-10) var(--space-28); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; text-decoration:none; border-radius:50px; font-weight:600; font-family:inherit;">
+                    ⬇️ Download Extension (.zip)
+                </a>
+                <details style="margin-top:14px;">
+                    <summary style="cursor:pointer; font-weight:600; color:var(--text-secondary);">How to install</summary>
+                    <ol style="color:var(--text-secondary); font-size:var(--font-md); line-height:1.7; margin-top:10px;">
+                        <li>Unzip the downloaded file.</li>
+                        <li><strong>Chrome / Edge:</strong> open <code>chrome://extensions</code>, enable <em>Developer mode</em>, click <em>Load unpacked</em>, and select the unzipped folder.</li>
+                        <li><strong>Firefox:</strong> open <code>about:debugging#/runtime/this-firefox</code>, click <em>Load Temporary Add-on…</em>, and select the <code>manifest.json</code> inside the folder.</li>
+                        <li>The server URL is pre-configured — no setup needed.</li>
+                    </ol>
+                </details>
+            </div>
+
+            <!-- Desktop App -->
+            <div style="background:var(--input-bg); border:1px solid var(--input-border); border-radius:var(--radius,12px); padding:var(--space-xl); margin-bottom:20px;">
+                <h3 style="margin-top:0;">🖥️ Desktop App</h3>
+                <p style="color:var(--text-secondary); font-size:var(--font-md); margin-bottom:14px;">
+                    An Electron desktop app with system-tray quick-pick, library browser, and gamepad support.
+                </p>
+                <div id="downloads-desktop-list"><div class="loading">Loading installers…</div></div>
+            </div>
+        </div>
+
         <!-- Settings Tab -->
         <div id="settings-tab" class="tab-content">
             <h2>⚙️ Account Settings</h2>
@@ -1906,6 +1946,12 @@
                         <option value="epic">Epic only</option>
                         <option value="gog">GOG only</option>
                     </select>
+                </label>
+                <label style="display:flex; flex-direction:column; gap:var(--space-5);">
+                    <span style="font-weight:600;">Public Server URL <small style="font-weight:normal; color:var(--text-secondary);">(used as the default server in extension &amp; desktop downloads)</small></span>
+                    <input type="url" id="admin-server-url" placeholder="https://gapi.example.com"
+                           style="padding:var(--space-9); border:1px solid var(--input-border); border-radius:var(--radius-sm,8px); background:var(--input-bg); color:var(--text-primary); width:100%; box-sizing:border-box;">
+                    <small style="color:var(--text-secondary);">Leave blank to default downloads to the address they were served from.</small>
                 </label>
             </div>
         </div>

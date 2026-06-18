@@ -542,7 +542,7 @@
                 ignored: 'No-Play List', achievements: 'Achievements', friends: 'Friends',
                 recommendations: 'For You', chat: 'Chat',
                 sessions: 'Sessions', notifications: 'Notifications',
-                plugins: 'Plugins', settings: 'Settings', admin: 'Admin'
+                plugins: 'Plugins', downloads: 'Downloads', settings: 'Settings', admin: 'Admin'
             };
             const titleEl = document.getElementById('topbar-page-title');
             if (titleEl) titleEl.textContent = titleMap[tabName] || 'GameNight';
@@ -616,6 +616,9 @@
             }
             if (tabName === 'settings') {
                 loadSettings();
+            }
+            if (tabName === 'downloads') {
+                loadDownloads();
             }
             if (tabName === 'dashboard') {
                 loadDashboard();
@@ -9765,6 +9768,8 @@ Event ID: ${result.discord_event_id}`);
                 if (maxPick) maxPick.value = map['max_pick_count'] || '10';
                 const defPlatform = document.getElementById('admin-default-platform');
                 if (defPlatform) defPlatform.value = map['default_platform'] || 'all';
+                const serverUrl = document.getElementById('admin-server-url');
+                if (serverUrl) serverUrl.value = map['server_url'] || '';
             } catch (err) {
                 showMessage('Error loading settings: ' + err.message, 'error');
             }
@@ -9782,6 +9787,7 @@ Event ID: ${result.discord_event_id}`);
                 plugins_enabled: getChk('admin-plugins-enabled'),
                 max_pick_count: getVal('admin-max-pick-count') || '10',
                 default_platform: getVal('admin-default-platform') || 'all',
+                server_url: (getVal('admin-server-url') || '').trim().replace(/\/$/, ''),
             };
             try {
                 const resp = await fetch('/api/admin/settings', {
@@ -9816,6 +9822,52 @@ Event ID: ${result.discord_event_id}`);
                 msgEl.style.background = 'rgba(239,68,68,0.1)';
                 msgEl.style.color = '#ef4444';
                 msgEl.textContent = 'Error: ' + err.message;
+            }
+        }
+
+        // ==============================================================================================
+        // Downloads
+        // ==============================================================================================
+
+        const _PLATFORM_META = {
+            windows: { icon: '🪟', label: 'Windows' },
+            macos:   { icon: '🍎', label: 'macOS' },
+            linux:   { icon: '🐧', label: 'Linux' },
+        };
+
+        async function loadDownloads() {
+            const listEl = document.getElementById('downloads-desktop-list');
+            try {
+                const resp = await fetch('/api/downloads/manifest');
+                const data = await resp.json();
+
+                // Show which server the clients connect to.
+                const urlEl = document.getElementById('downloads-server-url');
+                if (urlEl && data.server_url) urlEl.textContent = data.server_url;
+
+                const installers = (data.desktop && data.desktop.installers) || [];
+                if (!listEl) return;
+                if (installers.length === 0) {
+                    listEl.innerHTML = '<p style="color:var(--text-secondary); font-size:var(--font-md);">No desktop installers are available yet. An administrator can build them with <code>npm run dist</code> in <code>desktop-app/</code> and drop the files into the server\'s downloads folder.</p>';
+                    return;
+                }
+                // Group installers by platform.
+                const groups = {};
+                installers.forEach(i => { (groups[i.platform] = groups[i.platform] || []).push(i); });
+                listEl.innerHTML = Object.keys(groups).map(platform => {
+                    const meta = _PLATFORM_META[platform] || { icon: '💾', label: platform };
+                    const buttons = groups[platform].map(i => `
+                        <a href="${escapeHtml(i.url)}" download
+                           style="display:inline-flex; align-items:center; gap:8px; padding:var(--space-10) var(--space-20); background:linear-gradient(135deg,#4f46e5,#7c3aed); color:white; text-decoration:none; border-radius:50px; font-weight:600; font-family:inherit; margin:0 8px 8px 0;">
+                            ⬇️ ${escapeHtml(i.label)} <small style="opacity:0.8; font-weight:normal;">(${i.size_human})</small>
+                        </a>`).join('');
+                    return `<div style="margin-bottom:16px;">
+                        <div style="font-weight:600; margin-bottom:8px;">${meta.icon} ${escapeHtml(meta.label)}</div>
+                        <div>${buttons}</div>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                if (listEl) listEl.innerHTML = `<p style="color:#ef4444;">Failed to load downloads: ${escapeHtml(err.message)}</p>`;
             }
         }
 

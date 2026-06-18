@@ -78,6 +78,27 @@ npm run dist
 
 Built files appear in `desktop-app/dist/`.
 
+### Publishing to the web UI
+
+The web app exposes a **Downloads** page that serves desktop installers
+directly. To make a build downloadable there, copy the installer artifacts into
+the server's downloads directory:
+
+```bash
+# Default location: <repo>/downloads
+cp dist/*.{exe,dmg,AppImage,deb} ../downloads/
+```
+
+Override the directory with the `GAPI_DOWNLOADS_DIR` environment variable. The
+server auto-detects `.exe`/`.msi` (Windows), `.dmg`/`.pkg` (macOS), and
+`.AppImage`/`.deb`/`.rpm`/`.snap` (Linux) files and lists them grouped by
+platform. The browser extension is zipped and served automatically — no build
+step needed.
+
+> Tip: set **Public Server URL** under *Admin → General Settings* so the
+> downloaded extension (and its in-app instructions) point at your real server
+> instead of `localhost`.
+
 ## System Tray
 
 The tray icon appears in the system tray / menu bar as soon as the app starts.
