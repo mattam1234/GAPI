@@ -13,7 +13,9 @@ from a2wsgi import WSGIMiddleware
 from fastapi import FastAPI
 
 import gapi_gui
-from backend.routers import analytics, playlists, reviews, tags, wishlist
+from backend.routers import (
+    analytics, budget, playlists, reviews, tags, wishlist,
+)
 
 
 def create_app() -> FastAPI:
@@ -31,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(tags.router)
     app.include_router(wishlist.router)
     app.include_router(playlists.router)
+    app.include_router(budget.router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.

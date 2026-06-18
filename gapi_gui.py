@@ -6440,70 +6440,12 @@ def api_delete_backlog_status(game_id: str):
 # Budget Tracking API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/budget', methods=['GET'])
-@require_login
-def api_get_budget():
-    """Return all budget entries and an aggregated summary."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        summary = p.budget_service.get_summary(p.games)
-    return jsonify(summary)
+# MIGRATED to FastAPI: see backend/routers/budget.py. The /api/budget routes
+# (summary, set/update price, delete) are served natively by the FastAPI app
+# (backend.main:app), reusing the same per-user picker budget_service.
+# Removed from the Flask layer per the strangler-fig migration
+# (docs/MODERNIZATION_BRIEF.md).
 
-
-@app.route('/api/budget/<path:game_id>', methods=['POST', 'PUT'])
-@require_login
-def api_set_budget(game_id: str):
-    """Set or update the purchase price for a game.
-
-    Expected JSON body::
-
-        {
-            "price":         14.99,       // required; 0 = free/gift
-            "currency":      "USD",       // optional, default "USD"
-            "purchase_date": "2024-12-25",// optional
-            "notes":         "Steam sale" // optional
-        }
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    data = request.json or {}
-    if 'price' not in data:
-        return jsonify({'error': 'price is required'}), 400
-    try:
-        price = float(data['price'])
-    except (TypeError, ValueError):
-        return jsonify({'error': 'price must be a number'}), 400
-    with picker_lock:
-        ok = p.budget_service.set_entry(
-            game_id,
-            price=price,
-            currency=str(data.get('currency', 'USD')),
-            purchase_date=str(data.get('purchase_date', '')),
-            notes=str(data.get('notes', '')),
-        )
-    if not ok:
-        return jsonify({'error': 'price must not be negative'}), 400
-    return jsonify({'success': True, 'game_id': game_id, 'price': price})
-
-
-@app.route('/api/budget/<path:game_id>', methods=['DELETE'])
-@require_login
-def api_delete_budget(game_id: str):
-    """Remove a budget entry for a game."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        removed = p.budget_service.remove_entry(game_id)
-    if not removed:
-        return jsonify({'error': 'No budget entry found for this game'}), 404
-    return jsonify({'success': True})
 
 
 # ---------------------------------------------------------------------------
