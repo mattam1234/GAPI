@@ -155,6 +155,10 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 |--------|--------|--------|-------|
 | Analytics | `/api/analytics/dashboard`, `/export` | `backend/routers/analytics.py` | `tests/test_backend_foundation.py` |
 | Reviews | `GET/POST/PUT/DELETE /api/reviews[/{id}]` | `backend/routers/reviews.py` | `tests/test_backend_reviews.py` |
+| Tags | `/api/tags[...]`, `/api/library/by-tag/{tag}` | `backend/routers/tags.py` | `tests/test_backend_tags.py` |
 
-**Next candidates (leaf domains):** tags, wishlist, backlog, leaderboards.
+**Next candidates (leaf domains):** wishlist, backlog, leaderboards.
+
+> Reusable seam: per-user picker-backed domains (reviews, tags) share the
+> `get_picker` dependency in `backend/dependencies.py`.
 </content>

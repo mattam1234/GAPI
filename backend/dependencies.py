@@ -64,6 +64,21 @@ def require_login(username: Optional[str] = Depends(get_current_user)) -> str:
     return username
 
 
+def get_picker(username: str = Depends(require_login)):
+    """Return the per-user GamePicker, reusing the legacy initializer.
+
+    Many domains (reviews, tags, …) store their data on the per-user picker;
+    this bridges to that machinery during the migration. 500 if it can't init.
+    """
+    picker = gapi_gui.ensure_picker_initialized(username)
+    if not picker:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Picker not initialized",
+        )
+    return picker
+
+
 def require_admin(
     username: str = Depends(require_login),
     db=Depends(get_db),

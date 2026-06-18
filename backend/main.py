@@ -13,7 +13,7 @@ from a2wsgi import WSGIMiddleware
 from fastapi import FastAPI
 
 import gapi_gui
-from backend.routers import analytics, reviews
+from backend.routers import analytics, reviews, tags
 
 
 def create_app() -> FastAPI:
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     # precedence over the legacy routes of the same name.
     app.include_router(analytics.router)
     app.include_router(reviews.router)
+    app.include_router(tags.router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.
