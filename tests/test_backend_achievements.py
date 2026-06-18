@@ -205,5 +205,97 @@ class BackendAchievementStatsTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class BackendAchievementSyncTest(unittest.TestCase):
+    """POST /api/achievements/sync and /sync/platform."""
+
+    def setUp(self):
+        self.client = TestClient(app)
+        self.client.cookies.set('session', _session_cookie('alice'))
+        self._db = [
+            patch.object(gapi_gui, 'ensure_db_available', return_value=True),
+            patch.object(gapi_gui.database, 'get_db',
+                         side_effect=lambda: iter([MagicMock()])),
+        ]
+        for p in self._db:
+            p.start()
+
+    def tearDown(self):
+        for p in self._db:
+            p.stop()
+
+    # --- /sync -----------------------------------------------------------
+
+    def test_sync_db_unavailable_503(self):
+        with patch.object(gapi_gui, 'ensure_db_available', return_value=False):
+            self.assertEqual(
+                self.client.post('/api/achievements/sync', json={}).status_code, 503)
+
+    def test_sync_no_api_key_400(self):
+        with patch.object(gapi_gui, 'load_base_config', return_value={}):
+            resp = self.client.post('/api/achievements/sync', json={})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Steam API key', resp.json()['detail'])
+
+    def test_sync_no_steam_id_400(self):
+        with patch.object(gapi_gui, 'load_base_config',
+                          return_value={'steam_api_key': 'real'}), \
+             patch.object(gapi, 'is_placeholder_value', return_value=False), \
+             patch.object(gapi_gui.database, 'get_user_by_username',
+                          return_value=SimpleNamespace(steam_id=None)):
+            resp = self.client.post('/api/achievements/sync', json={})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Steam ID', resp.json()['detail'])
+
+    def test_sync_happy_path(self):
+        fake_client = SimpleNamespace(
+            get_player_achievements_detailed=lambda sid, aid: {'ach': 1},
+            get_schema_for_game=lambda aid: {'schema': 1})
+        with patch.object(gapi_gui, 'load_base_config',
+                          return_value={'steam_api_key': 'real'}), \
+             patch.object(gapi, 'is_placeholder_value', return_value=False), \
+             patch.object(gapi_gui.database, 'get_user_by_username',
+                          return_value=SimpleNamespace(steam_id='765')), \
+             patch.object(gapi_gui, '_library_service', None), \
+             patch.object(gapi_gui.database, 'get_cached_library', return_value=[]), \
+             patch.object(gapi, 'SteamAPIClient', return_value=fake_client), \
+             patch.object(gapi_gui.database, 'sync_steam_achievements',
+                          return_value={'added': 2, 'updated': 1, 'total': 3}):
+            resp = self.client.post('/api/achievements/sync',
+                                    json={'app_ids': ['620']})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body['synced'][0]['app_id'], '620')
+        self.assertEqual(body['synced'][0]['total'], 3)
+        self.assertEqual(body['skipped'], [])
+        self.assertEqual(body['errors'], [])
+
+    # --- /sync/platform --------------------------------------------------
+
+    def test_platform_required_400(self):
+        resp = self.client.post('/api/achievements/sync/platform', json={})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_platform_unknown_400(self):
+        resp = self.client.post('/api/achievements/sync/platform',
+                                json={'platform': 'playstation'})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_platform_steam_message(self):
+        resp = self.client.post('/api/achievements/sync/platform',
+                                json={'platform': 'steam'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['status'], 'ok')
+
+    def test_platform_stub_returns_not_configured(self):
+        with patch.object(gapi_gui.database, 'get_user_by_username',
+                          return_value=SimpleNamespace(steam_id='x')):
+            resp = self.client.post('/api/achievements/sync/platform',
+                                    json={'platform': 'epic'})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body['platform'], 'epic')
+        self.assertEqual(body['status'], 'not_configured')
+
+
 if __name__ == '__main__':
     unittest.main()

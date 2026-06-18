@@ -16,7 +16,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import gapi
 import gapi_gui
 from backend.dependencies import require_login
-from backend.schemas.achievements import HuntStartIn, HuntUpdateIn
+from backend.schemas.achievements import (
+    HuntStartIn, HuntUpdateIn, PlatformSyncIn, SyncIn,
+)
 
 router = APIRouter(prefix="/api", tags=["achievements"])
 
@@ -198,3 +200,122 @@ def _hunt_dict(hunt, with_completed=False):
     if with_completed:
         d["completed_at"] = hunt.completed_at.isoformat() if hunt.completed_at else None
     return d
+
+
+# ── Steam achievement sync (Steam API -> DB) ───────────────────────────────
+
+def _cached_library(db, username):
+    if gapi_gui._library_service:
+        return gapi_gui._library_service.get_cached(db, username)
+    return gapi_gui.database.get_cached_library(db, username)
+
+
+@router.post("/achievements/sync")
+def sync_achievements(body: SyncIn, username: str = Depends(require_login)):
+    """Sync achievements for one or more games from the Steam API into the DB."""
+    if not gapi_gui.ensure_db_available():
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    base_config = gapi_gui.load_base_config()
+    steam_api_key = base_config.get("steam_api_key", "").strip()
+    if not steam_api_key or gapi.is_placeholder_value(steam_api_key):
+        raise HTTPException(status_code=400, detail="Steam API key not configured")
+
+    db = next(gapi_gui.database.get_db())
+    try:
+        user = gapi_gui.database.get_user_by_username(db, username)
+        steam_id = user.steam_id if user else None
+    finally:
+        if db:
+            db.close()
+    if not steam_id:
+        raise HTTPException(
+            status_code=400, detail="Steam ID not configured for this account")
+
+    requested_app_ids = body.app_ids
+    if not requested_app_ids:
+        db2 = next(gapi_gui.database.get_db())
+        try:
+            cached = _cached_library(db2, username)
+        finally:
+            if db2:
+                db2.close()
+        if not cached:
+            raise HTTPException(
+                status_code=400,
+                detail="No games in library cache. Sync your library first.")
+        requested_app_ids = [str(g.get("app_id", "")) for g in (cached or [])
+                             if g.get("app_id")]
+
+    steam_client = gapi.SteamAPIClient(steam_api_key)
+    synced, skipped, errors = [], [], []
+
+    db3 = next(gapi_gui.database.get_db())
+    try:
+        cached_all = _cached_library(db3, username)
+    finally:
+        if db3:
+            db3.close()
+    name_map = {str(g.get("app_id", "")): g.get("name", g.get("app_id", ""))
+                for g in (cached_all or [])}
+
+    for app_id in list(requested_app_ids)[:50]:
+        app_id = str(app_id).strip()
+        if not app_id:
+            continue
+        game_name = name_map.get(app_id, app_id)
+        try:
+            player_achievements = steam_client.get_player_achievements_detailed(
+                steam_id, app_id)
+            if not player_achievements:
+                skipped.append(app_id)
+                continue
+            schema = steam_client.get_schema_for_game(app_id)
+            db4 = next(gapi_gui.database.get_db())
+            try:
+                result = gapi_gui.database.sync_steam_achievements(
+                    db4, username, steam_id, app_id, game_name,
+                    player_achievements, schema)
+            finally:
+                if db4:
+                    db4.close()
+            synced.append({
+                "app_id": app_id, "game_name": game_name,
+                "added": result["added"], "updated": result["updated"],
+                "total": result["total"],
+            })
+        except Exception as exc:
+            gapi_gui.gui_logger.error(
+                "Error syncing achievements for app %s: %s", app_id, exc)
+            errors.append(app_id)
+
+    return {"synced": synced, "skipped": skipped, "errors": errors}
+
+
+@router.post("/achievements/sync/platform")
+def sync_achievements_platform(body: PlatformSyncIn,
+                               username: str = Depends(require_login)):
+    """Sync achievements for a specific connected platform."""
+    if not gapi_gui.ensure_db_available():
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    platform = str(body.platform or "").lower().strip()
+    if not platform:
+        raise HTTPException(status_code=400, detail="platform is required")
+    handlers = gapi_gui._PLATFORM_SYNC_HANDLERS
+    if platform not in handlers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown platform: {platform}. Supported: {list(handlers)}")
+    if platform == "steam":
+        return {"platform": "steam", "status": "ok",
+                "message": "Use /api/achievements/sync for Steam"}
+
+    db = next(gapi_gui.database.get_db())
+    try:
+        user = gapi_gui.database.get_user_by_username(db, username)
+    finally:
+        db.close()
+    result = handlers[platform](username, user)
+    result["platform"] = platform
+    return result

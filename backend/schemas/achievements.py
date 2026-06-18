@@ -18,3 +18,12 @@ class HuntStartIn(BaseModel):
 class HuntUpdateIn(BaseModel):
     unlocked_achievements: Optional[Any] = None
     status: Optional[str] = None
+
+
+class SyncIn(BaseModel):
+    app_ids: Optional[Any] = None
+    force: Optional[bool] = False
+
+
+class PlatformSyncIn(BaseModel):
+    platform: Optional[str] = ""

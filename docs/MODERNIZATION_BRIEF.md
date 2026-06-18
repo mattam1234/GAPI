@@ -179,9 +179,16 @@ remain in Flask.
 | Achievements (hunts) | `GET /api/achievements`, `POST /api/achievement-hunt`, `PUT /api/achievement-hunt/{id}` | `backend/routers/achievements.py` | `tests/test_backend_achievements.py` |
 | Achievement challenges | `/api/achievement-challenges[/{id}][/join\|/progress]` (6 routes) | `backend/routers/challenges.py` | `tests/test_backend_challenges.py` |
 
-**Achievements nearly complete:** hunt, multiplayer challenges, `GET /stats`, and
-`GET /achievements/{app_id}` (live Steam) are migrated. Only the two heavy Steam
-*sync* POSTs (`/api/achievements/sync`, `/sync/platform`) remain in Flask.
+**✅ Achievements domain fully migrated.** Hunt, multiplayer challenges,
+`GET /stats`, `GET /achievements/{app_id}` (live Steam), and the two Steam *sync*
+POSTs are all on FastAPI. No `/api/achievements*` routes remain in Flask. (The
+`_PLATFORM_SYNC_HANDLERS` stub functions are retained in gapi_gui and reused.)
+
+**Latent bug fixed during migration:** the legacy `/sync` and `/sync/platform`
+handlers called `database.get_user(...)`, which does not exist (the function is
+`get_user_by_username`) — the endpoint would have 500'd when reached. The FastAPI
+port uses the correct function. (gapi_gui.py still has one unrelated
+`database.get_user` call at ~line 1646, outside this migration's scope.)
 
 **Routing note:** `GET /api/achievements/{app_id:int}` uses the Starlette `:int`
 path convertor so non-integer siblings (`/stats`, `/sync`) don't collide with it
