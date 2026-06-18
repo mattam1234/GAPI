@@ -22,37 +22,24 @@ This document identifies gaps, improvements, and new features organized by categ
 ## 🎯 TIER 1: Critical Improvements (High Impact, Medium Effort)
 
 ### 1. **Advanced Analytics & Reporting Dashboard**
-**Status:** Partial (basic `/api/analytics` exists)
-**What's Missing:**
-- Detailed user engagement metrics
-- Game popularity trends
-- Pick frequency analysis over time
-- User retention metrics
-- Platform usage statistics
-- Revenue analytics (if monetized)
+**Status:** ✅ Implemented (`AnalyticsService` + `/api/analytics/dashboard` + `/export`, admin-gated)
+**Delivered:**
+- Dashboard summary (users, active 7d/30d, picks, avg picks/user, games, reviews)
+- Daily pick trends and active-user trends
+- Top games (by pick count, with human-readable names)
+- Platform distribution, engagement rate, chat + review stats
+- JSON export endpoint + admin modal UI (`static/phase9_admin_features.js`)
 
-**Impact:** 🔴 High - Gives admins visibility into platform usage
-**Effort:** ⚠️ Medium - Requires charting library + new endpoints
-**Files to Create/Modify:**
-- `app/services/analytics_service.py` - New analytics logic
-- `/api/analytics/dashboard` - Enhanced endpoint
-- `templates/analytics_dashboard.js` - New UI module
-- `templates/analytics_tab.html` - New dashboard UI
+**Pick instrumentation:** `/api/pick` and `/api/multiuser/pick` now emit a
+best-effort `pick` audit entry (`resource_type='game'`, `description=<name>`),
+which is the data source for pick totals, trends, and top-games metrics.
+Without this the dashboard reported zeros.
 
-**Sample Implementation:**
-```python
-# New analytics endpoints
-@app.route('/api/analytics/dashboard')
-def analytics_dashboard():
-    return {
-        'total_picks': count_picks(),
-        'daily_active_users': get_dau(),
-        'game_popularity': get_top_games(),
-        'pick_trends': get_pick_trends('7d'),
-        'platform_breakdown': get_platform_stats(),
-        'user_engagement': get_engagement_metrics(),
-    }
-```
+**Still open (lower priority):**
+- User retention / cohort metrics
+- Real genre breakdown (no genre column is persisted today; the previous
+  hardcoded `get_genre_popularity` placeholder was removed)
+- Charting library for richer visuals (current UI uses inline bars)
 
 ---
 
