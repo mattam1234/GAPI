@@ -182,6 +182,14 @@ remain in Flask.
 | Notification prefs/history | `GET/PUT /api/notifications/preferences`, `GET /api/notifications/history` | `backend/routers/notifications.py` | ported 3 classes in `test_permissions_notifprefs.py` |
 | Presence | `POST /api/presence`, `/presence/update`, `/presence/clear` | `backend/routers/presence.py` | `tests/test_backend_presence_duplicates.py` |
 | Duplicate detection | `GET /api/duplicates` | `backend/routers/duplicates.py` | `tests/test_backend_presence_duplicates.py` |
+| Multi-user pick | `POST /api/multiuser/pick` | `backend/routers/multiuser.py` | `tests/test_backend_multiuser.py` |
+
+**Picks status:** `/api/multiuser/pick` migrated. Still in Flask: the 314-line
+`POST /api/pick` god-handler (filters, rarity, collection resolution, Discord
+RPC, background ProtonDB thread, webhook fan-out, detail caching — coupled to
+`test_analytics_service.py::TestPickAuditWiring` + `test_extension_mobile_api_compat.py`)
+and `GET /api/random-game` (anonymous demo path). These are the hardest single
+handlers left and warrant a dedicated slice.
 
 **Mixed-client test file:** `test_permissions_notifprefs.py` tests many
 endpoints, only 3 of which migrated. The session helper now detects the client
