@@ -4662,84 +4662,10 @@ def api_voting_close(session_id: str):
 # Reviews endpoints
 # -----------------------------------------------------------------------
 
-@app.route('/api/reviews', methods=['GET'])
-@require_login
-def api_get_reviews():
-    """Return all personal game reviews."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({}), 500
-
-    with picker_lock:
-        return jsonify(p.review_service.get_all())
-
-
-@app.route('/api/reviews/<game_id>', methods=['GET'])
-@require_login
-def api_get_review(game_id: str):
-    """Return the review for a specific game."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Picker not initialized'}), 500
-
-    with picker_lock:
-        review = p.review_service.get(game_id)
-    if review is None:
-        return jsonify({'error': 'No review found'}), 404
-    return jsonify(review)
-
-
-@app.route('/api/reviews/<game_id>', methods=['POST', 'PUT'])
-@require_login
-def api_save_review(game_id: str):
-    """Add or update a personal review for a game.
-
-    Body JSON: {"rating": 1-10, "notes": "optional text"}
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Picker not initialized'}), 500
-
-    data = request.json or {}
-    rating = data.get('rating')
-    notes = data.get('notes', '')
-
-    if rating is None:
-        return jsonify({'error': 'rating is required (1-10)'}), 400
-
-    try:
-        rating = int(rating)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'rating must be an integer'}), 400
-
-    with picker_lock:
-        success = p.review_service.add_or_update(game_id, rating, notes)
-
-    if not success:
-        return jsonify({'error': 'rating must be between 1 and 10'}), 400
-
-    return jsonify({'success': True, 'game_id': game_id, 'rating': rating, 'notes': notes})
-
-
-@app.route('/api/reviews/<game_id>', methods=['DELETE'])
-@require_login
-def api_delete_review(game_id: str):
-    """Delete the review for a game."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Picker not initialized'}), 500
-
-    with picker_lock:
-        removed = p.review_service.remove(game_id)
-
-    if not removed:
-        return jsonify({'error': 'No review found'}), 404
-
-    return jsonify({'success': True})
+# MIGRATED to FastAPI: see backend/routers/reviews.py. The /api/reviews routes
+# are now served natively by the FastAPI app (backend.main:app), which reuses
+# the same per-user picker review_service. Removed from the Flask layer per the
+# strangler-fig migration (docs/MODERNIZATION_BRIEF.md).
 
 
 # -----------------------------------------------------------------------

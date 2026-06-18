@@ -144,4 +144,17 @@ init (which then collapses into `backend/`).
 - Full test suite green against the FastAPI app; legacy parity tests retired only
   after their FastAPI equivalents pass.
 - Single ASGI entrypoint; Dockerfile/CI updated.
+
+---
+
+## 6. Migration log
+
+Domains served natively by FastAPI (legacy Flask routes deleted):
+
+| Domain | Routes | Router | Tests |
+|--------|--------|--------|-------|
+| Analytics | `/api/analytics/dashboard`, `/export` | `backend/routers/analytics.py` | `tests/test_backend_foundation.py` |
+| Reviews | `GET/POST/PUT/DELETE /api/reviews[/{id}]` | `backend/routers/reviews.py` | `tests/test_backend_reviews.py` |
+
+**Next candidates (leaf domains):** tags, wishlist, backlog, leaderboards.
 </content>
