@@ -21,9 +21,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import database
 import gapi_gui
 from app.services.analytics_service import AnalyticsService
+from backend.main import app as _fastapi_app
+
+
+def _pick_session_cookie(username):
+    serializer = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    return serializer.dumps({'username': username})
 
 
 def _make_db():
@@ -205,9 +213,9 @@ class TestPickAuditWiring(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # /api/pick is migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
+        self.client.cookies.set('session', _pick_session_cookie('alice'))
 
     def test_pick_emits_pick_audit_event(self):
         audit_calls = []
@@ -222,8 +230,7 @@ class TestPickAuditWiring(unittest.TestCase):
              patch.object(gapi_gui, '_get_shared_backlog_service',
                           return_value=_FakeSvc()), \
              patch.object(gapi_gui, '_audit', side_effect=fake_audit):
-            resp = self.client.post('/api/pick', json={},
-                                    content_type='application/json')
+            resp = self.client.post('/api/pick', json={})
 
         self.assertEqual(resp.status_code, 200)
         pick_calls = [c for c in audit_calls if c[0] == 'pick']

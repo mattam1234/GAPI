@@ -247,8 +247,9 @@ class TestVRFilterCLI(unittest.TestCase):
 class TestVRFilterWebAPI(unittest.TestCase):
 
     def test_vr_filter_parsed_from_request(self):
-        content = _read('gapi_gui.py')
-        self.assertIn("data.get('vr_filter'", content)
+        # The pick endpoint (and its vr_filter parsing) migrated to FastAPI.
+        content = _read('backend', 'routers', 'pick.py')
+        self.assertIn('data.get("vr_filter"', content)
 
     def test_vr_filter_validated_values(self):
         content = _read('gapi_gui.py')
@@ -256,8 +257,8 @@ class TestVRFilterWebAPI(unittest.TestCase):
             self.assertIn(v, content, f"API missing vr_filter value: {v}")
 
     def test_vr_filter_passed_to_adv_dict(self):
-        content = _read('gapi_gui.py')
-        self.assertIn("'vr_filter': vr_filter", content)
+        content = _read('backend', 'routers', 'pick.py')
+        self.assertIn('"vr_filter": vr_filter', content)
 
     def test_vr_filter_dropdown_in_html(self):
         content = _read('gapi_gui.py')

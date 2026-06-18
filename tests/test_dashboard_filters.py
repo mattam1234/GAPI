@@ -67,8 +67,9 @@ class TestPickerListFilterMarkup(unittest.TestCase):
             self.assertIn(token, content)
 
     def test_pick_api_accepts_collection_id(self):
-        content = _read('gapi_gui.py')
-        self.assertIn("data.get('collection_id') or data.get('list_id')", content)
+        # The pick endpoint migrated to FastAPI (backend/routers/pick.py).
+        content = _read('backend', 'routers', 'pick.py')
+        self.assertIn('data.get("collection_id") or data.get("list_id")', content)
         self.assertIn("backlog_service.get_games(", content)
 
 

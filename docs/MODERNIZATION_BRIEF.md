@@ -184,12 +184,15 @@ remain in Flask.
 | Duplicate detection | `GET /api/duplicates` | `backend/routers/duplicates.py` | `tests/test_backend_presence_duplicates.py` |
 | Multi-user pick | `POST /api/multiuser/pick` | `backend/routers/multiuser.py` | `tests/test_backend_multiuser.py` |
 
-**Picks status:** `/api/multiuser/pick` migrated. Still in Flask: the 314-line
-`POST /api/pick` god-handler (filters, rarity, collection resolution, Discord
-RPC, background ProtonDB thread, webhook fan-out, detail caching — coupled to
-`test_analytics_service.py::TestPickAuditWiring` + `test_extension_mobile_api_compat.py`)
-and `GET /api/random-game` (anonymous demo path). These are the hardest single
-handlers left and warrant a dedicated slice.
+| Pick (core) | `POST /api/pick` (the 314-line god-handler) | `backend/routers/pick.py` | `tests/test_backend_pick.py` + ported `test_analytics_service.py::TestPickAuditWiring` |
+
+**Picks status:** `/api/pick` and `/api/multiuser/pick` migrated. The single
+biggest handler in the app (filters, rarity, collection resolution, Discord RPC,
+background ProtonDB thread, webhook + WebhookNotifier fan-out, detail caching,
+pick audit) ported faithfully — error bodies preserved as `{"error": ...}` via
+JSONResponse. Three source-code-assertion tests (VR filter, collection_id) were
+repointed from `gapi_gui.py` to `backend/routers/pick.py`. Still in Flask:
+`GET /api/random-game` (anonymous demo path).
 
 **Mixed-client test file:** `test_permissions_notifprefs.py` tests many
 endpoints, only 3 of which migrated. The session helper now detects the client
