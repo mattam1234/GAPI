@@ -22,3 +22,14 @@ class UpdateScheduleIn(BaseModel):
 
 class RsvpIn(BaseModel):
     status: Optional[str] = ""
+
+
+class SearchIn(BaseModel):
+    query: Optional[str] = ""
+    limit: Optional[Any] = 10
+
+
+class CommonGamesIn(BaseModel):
+    attendees: Any = None  # list or comma-separated string
+    collection_id: Optional[str] = None
+    list_id: Optional[str] = None

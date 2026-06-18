@@ -483,7 +483,7 @@ class TestScheduleIcalSyncRoutes(unittest.TestCase):
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
             resp = self.client.get('/api/schedule/ical-sync-info')
         self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
+        data = resp.get_json()  # Flask test client (ical routes still in Flask)
         self.assertIn('/api/schedule/export.ics?token=', data['feed_url'])
         self.assertTrue(data['webcal_url'].startswith('webcal'))
 
@@ -665,9 +665,9 @@ class TestScheduleCommonGamePickerRoutes(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # common-games routes are migrated to FastAPI.
+        self.client = TestClient(fastapi_app)
+        self.client.cookies.set('session', _schedule_session_cookie('alice'))
 
     @staticmethod
     def _fake_picker_with_games():
@@ -693,7 +693,7 @@ class TestScheduleCommonGamePickerRoutes(unittest.TestCase):
                     'collection_id': 'list-coop',
                 })
         self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
+        data = resp.json()
         self.assertEqual(data['count'], 1)
         self.assertEqual(data['games'][0]['app_id'], '440')
         self.assertEqual(data['collection_id'], 'list-coop')
@@ -715,7 +715,7 @@ class TestScheduleCommonGamePickerRoutes(unittest.TestCase):
                     'collection_id': 'list-coop',
                 })
         self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
+        data = resp.json()
         self.assertEqual(data['game']['app_id'], '620')
         self.assertEqual(data['collection_id'], 'list-coop')
 

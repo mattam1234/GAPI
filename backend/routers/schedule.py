@@ -20,7 +20,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 import gapi_gui
 from backend.dependencies import require_login
-from backend.schemas.schedule import CreateScheduleIn, RsvpIn, UpdateScheduleIn
+from backend.schemas.schedule import (
+    CommonGamesIn, CreateScheduleIn, RsvpIn, SearchIn, UpdateScheduleIn,
+)
 
 router = APIRouter(prefix="/api/schedules", tags=["schedule"])
 
@@ -287,3 +289,154 @@ def update_rsvp(event_id: str, body: RsvpIn,
                 f'{updated_event.get("time", "")}.')
 
     return updated_event
+
+
+# ── Events (chunk 3: fuzzy search + common-game picker) ────────────────────
+
+def _candidate_games(picker, username, data):
+    """Compute the candidate game pool for a schedule event picker.
+
+    Always includes the current user's library; with invitees, intersects with
+    the games all invitees share; then narrows to a backlog collection if given.
+    Returns (candidate_games, attendees, collection_id).
+    """
+    attendees_raw = data.get("attendees", [])
+    collection_id = str(data.get("collection_id") or data.get("list_id") or "").strip()
+    if isinstance(attendees_raw, str):
+        attendees = [v.strip() for v in attendees_raw.split(",") if v.strip()]
+    else:
+        attendees = [str(v).strip() for v in (attendees_raw or []) if str(v).strip()]
+    attendees = list(dict.fromkeys(
+        a for a in attendees if a.lower() != (username or "").lower()))
+
+    current_user_games = list(picker.games or [])
+    if not attendees:
+        candidate_games = current_user_games
+    else:
+        gapi_gui._ensure_multi_picker()
+        mp = gapi_gui.multi_picker
+        if mp:
+            with gapi_gui.multi_picker_lock:
+                invitee_common = mp.find_common_games(attendees)
+        else:
+            invitee_common = []
+        if not invitee_common:
+            candidate_games = []
+        else:
+            current_ids = set()
+            for g in current_user_games:
+                appid = str(g.get("appid") or g.get("app_id") or "").strip()
+                if appid:
+                    current_ids.add(
+                        (str(g.get("platform") or "steam").lower(), appid.lower()))
+            candidate_games = [
+                g for g in invitee_common
+                if (str(g.get("platform") or "steam").lower(),
+                    str(g.get("appid") or g.get("app_id") or "").strip().lower())
+                in current_ids
+            ]
+
+    if collection_id:
+        service = gapi_gui._get_shared_backlog_service()
+        resolved = service.resolve_collection_for_user(collection_id, username)
+        candidate_games = service.get_games(
+            candidate_games, username=username, collection_id=resolved)
+    return candidate_games, attendees, collection_id
+
+
+def _schedule_game_summary(game):
+    app_id = str(game.get("appid") or game.get("app_id") or "").strip()
+    return {
+        "app_id": app_id,
+        "name": game.get("name", "Unknown"),
+        "owners": game.get("owners", []),
+        "platform": game.get("platform", "steam"),
+        "image_url": gapi_gui._resolve_schedule_game_image_url(
+            game=game, game_appid=app_id, existing_url=game.get("image_url")),
+    }
+
+
+@event_router.post("/search-games")
+def search_games(body: SearchIn, username: str = Depends(require_login),
+                 picker=Depends(_picker)):
+    """Fuzzy-search the user's library by title or app id."""
+    query = (body.query or "").strip()
+    limit = gapi_gui._parse_search_limit(body.limit)
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    try:
+        with gapi_gui.picker_lock:
+            results = gapi_gui._fuzzy_search_games(query, picker.games, limit=limit)
+        clean = []
+        for game in results:
+            genres = game.get("genres", [])
+            clean.append({
+                "name": game.get("name", ""),
+                "appid": str(game.get("appid") or game.get("app_id", "")),
+                "image_url": gapi_gui._resolve_schedule_game_image_url(
+                    game=game,
+                    game_appid=str(game.get("appid") or game.get("app_id", "")),
+                    existing_url=game.get("image_url")),
+                "platform": game.get("platform", "steam"),
+                "playtime_hours": gapi_gui._safe_playtime_hours(game),
+                "genres": genres if isinstance(genres, list) else [],
+            })
+    except Exception as e:
+        gapi_gui.gui_logger.error('Game search failed for "%s": %s', query, e)
+        raise HTTPException(status_code=500, detail="Game search failed")
+    return {"results": clean, "count": len(clean)}
+
+
+@event_router.post("/search-attendees")
+def search_attendees(body: SearchIn, username: str = Depends(require_login),
+                     picker=Depends(_picker)):
+    """Fuzzy-search potential attendees from the multi-user roster."""
+    query = (body.query or "").strip()
+    limit = gapi_gui._parse_search_limit(body.limit)
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    try:
+        gapi_gui._ensure_multi_picker()
+        with gapi_gui.multi_picker_lock:
+            mp = gapi_gui.multi_picker
+            users_list = mp.users if mp else []
+            results = gapi_gui._fuzzy_search_users(query, users_list, limit=limit)
+        clean = [{"name": u.get("name", ""), "id": u.get("name", ""),
+                  "discord_id": u.get("discord_id", "")} for u in results]
+    except Exception as e:
+        gapi_gui.gui_logger.error('Attendee search failed for "%s": %s', query, e)
+        raise HTTPException(status_code=500, detail="Attendee search failed")
+    return {"results": clean, "count": len(clean)}
+
+
+@event_router.post("/common-games")
+def common_games(body: CommonGamesIn, username: str = Depends(require_login),
+                 picker=Depends(_picker)):
+    """Return games eligible for a schedule event's game picker."""
+    candidate_games, attendees, collection_id = _candidate_games(
+        picker, username, body.model_dump())
+    games = [_schedule_game_summary(g) for g in candidate_games[:100]]
+    return {
+        "games": games,
+        "count": len(games),
+        "attendees": attendees,
+        "collection_id": collection_id,
+    }
+
+
+@event_router.post("/common-games/random")
+def common_games_random(body: CommonGamesIn,
+                        username: str = Depends(require_login),
+                        picker=Depends(_picker)):
+    """Pick a random game from the eligible pool for a schedule event."""
+    import random
+    candidate_games, attendees, collection_id = _candidate_games(
+        picker, username, body.model_dump())
+    if not candidate_games:
+        raise HTTPException(status_code=404, detail="No games found in your library")
+    game = random.choice(candidate_games)
+    return {
+        "game": _schedule_game_summary(game),
+        "attendees": attendees,
+        "collection_id": collection_id,
+    }
