@@ -63,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(recommendations.router)
     app.include_router(permissions.router)
     app.include_router(users.router)
+    app.include_router(users.admin_router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.

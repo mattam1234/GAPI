@@ -11436,129 +11436,16 @@ def api_update_ab_test(experiment_id: int):
 # User Suspension / Account Status  (Item 5 — Advanced User Management)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/admin/users/search', methods=['GET'])
-@require_admin
-def api_admin_search_users():
-    """Search and filter users — admin only.
-
-    Query parameters:
-      ``q``       – partial username match
-      ``role``    – filter by role name
-      ``status``  – ``active``, ``suspended``, or ``banned``
-      ``limit``   – max results (default 50, max 200)
-      ``offset``  – pagination offset (default 0)
-
-    Response JSON:
-      ``users`` – list of ``{username, display_name, status, roles, created_at, last_seen}``
-      ``count`` – number of results returned
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'users': [], 'count': 0})
-    q = request.args.get('q', '').strip()
-    role = request.args.get('role', '').strip()
-    status = request.args.get('status', '').strip().lower()
-    try:
-        limit = max(1, min(200, int(request.args.get('limit', 50))))
-        offset = max(0, int(request.args.get('offset', 0)))
-    except (ValueError, TypeError):
-        limit, offset = 50, 0
-    try:
-        db = next(database.get_db())
-        users = database.search_users_admin(db, query=q, role=role,
-                                            status=status, limit=limit, offset=offset)
-        return jsonify({'users': users, 'count': len(users)})
-    except Exception as e:
-        gui_logger.error('api_admin_search_users error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/admin/users/search -> backend/routers/users.py
 
 
-@app.route('/api/admin/users/<username>/suspend', methods=['POST'])
-@require_admin
-def api_admin_suspend_user(username: str):
-    """Suspend or permanently ban a user (admin only).
-
-    Request JSON body:
-      ``reason``            – suspension reason (required)
-      ``duration_minutes``  – suspension duration in minutes; omit for permanent ban
-
-    Response JSON: suspension status dict.
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    data = request.get_json(silent=True, force=True) or {}
-    reason = str(data.get('reason', '')).strip()
-    if not reason:
-        return jsonify({'error': "'reason' is required"}), 400
-    duration = data.get('duration_minutes')
-    if duration is not None:
-        try:
-            duration = int(duration)
-            if duration <= 0:
-                return jsonify({'error': "'duration_minutes' must be a positive integer"}), 400
-        except (ValueError, TypeError):
-            return jsonify({'error': "'duration_minutes' must be an integer"}), 400
-    try:
-        db = next(database.get_db())
-        result = database.suspend_user(
-            db, username, reason=reason,
-            suspended_by=get_current_username(),
-            duration_minutes=duration,
-        )
-        if not result:
-            return jsonify({'error': f"User '{username}' not found"}), 404
-        action = 'suspend_user' if duration else 'ban_user'
-        _audit(action, resource_type='user', resource_id=username,
-               description=f'{"Temporary suspension" if duration else "Permanent ban"}: {reason}',
-               new_value={'reason': reason, 'duration_minutes': duration})
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error('api_admin_suspend_user error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: POST /api/admin/users/<username>/suspend -> backend/routers/users.py
 
 
-@app.route('/api/admin/users/<username>/suspend', methods=['DELETE'])
-@require_admin
-def api_admin_unsuspend_user(username: str):
-    """Lift a user's suspension or ban (admin only).
-
-    Response JSON:
-      ``ok``  – True on success
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    try:
-        db = next(database.get_db())
-        ok = database.unsuspend_user(db, username)
-        if not ok:
-            return jsonify({'error': f"User '{username}' not found or not suspended"}), 404
-        _audit('unsuspend_user', resource_type='user', resource_id=username,
-               description=f'Suspension/ban lifted for user "{username}"')
-        return jsonify({'ok': True, 'username': username})
-    except Exception as e:
-        gui_logger.error('api_admin_unsuspend_user error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: DELETE /api/admin/users/<username>/suspend -> backend/routers/users.py
 
 
-@app.route('/api/admin/users/<username>/status', methods=['GET'])
-@require_admin
-def api_admin_get_user_status(username: str):
-    """Get the account status for a user (admin only).
-
-    Response JSON:
-      ``username``, ``status`` (``active``/``suspended``/``banned``),
-      ``is_suspended``, ``suspended_until``, ``suspended_reason``, etc.
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    try:
-        db = next(database.get_db())
-        result = database.get_user_status(db, username)
-        if not result:
-            return jsonify({'error': f"User '{username}' not found"}), 404
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error('api_admin_get_user_status error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/admin/users/<username>/status -> backend/routers/users.py
 
 
 # ---------------------------------------------------------------------------

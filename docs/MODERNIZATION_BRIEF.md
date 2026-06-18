@@ -197,8 +197,10 @@ remain in Flask.
 prefixes (incl. `/api/permissions`). The FastAPI handler sets the same header
 explicitly so the public-cacheability contract is preserved.
 
-**users domain is multi-chunk** (24 routes): permissions (done); remaining —
-core user CRUD, email, suspension/status/search, reputation, list/profile/online.
+**users domain is multi-chunk** (24 routes). Done: permissions, per-user email
+(`backend/routers/users.py`), and admin suspension/status/search
+(`users.py` `admin_router`). Remaining — core user CRUD (`/api/users`, add/
+update/remove/role/roles/delete), reputation, list/profile/online.
 
 **✅ Recommendations fully migrated** (base + ml + smart + variant + ai). The ML/
 smart/variant test classes authenticated via `@patch('gapi_gui.current_user',...)`

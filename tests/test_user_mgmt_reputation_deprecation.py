@@ -17,8 +17,11 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
 import database
+from backend.main import app as _fastapi_app
 
 
 def _make_db():
@@ -31,14 +34,21 @@ def _make_db():
     return eng, Session()
 
 
+def _login(client, username):
+    if hasattr(client, 'session_transaction'):
+        with client.session_transaction() as sess:
+            sess['username'] = username
+    else:
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        client.cookies.set('session', ser.dumps({'username': username}))
+
+
 def _set_admin_session(client):
-    with client.session_transaction() as sess:
-        sess['username'] = 'admin'
+    _login(client, 'admin')
 
 
 def _set_user_session(client, username='bob'):
-    with client.session_transaction() as sess:
-        sess['username'] = username
+    _login(client, username)
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +259,7 @@ class TestSuspendEndpoints(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)  # migrated
 
     def test_suspend_requires_admin(self):
         resp = self.client.post('/api/admin/users/alice/suspend',
@@ -313,7 +323,7 @@ class TestSuspendEndpoints(unittest.TestCase):
                 resp = self.client.post('/api/admin/users/alice/suspend',
                                         json={'reason': 'abuse'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['is_suspended'])
 
     def test_unsuspend_requires_admin(self):
@@ -339,7 +349,7 @@ class TestSuspendEndpoints(unittest.TestCase):
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.delete('/api/admin/users/alice/suspend')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['ok'])
 
     def test_get_user_status_requires_admin(self):
@@ -370,7 +380,7 @@ class TestSuspendEndpoints(unittest.TestCase):
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/users/alice/status')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['status'], 'active')
 
 
@@ -382,7 +392,7 @@ class TestAdminSearchUsers(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)  # migrated
 
     def test_requires_admin(self):
         resp = self.client.get('/api/admin/users/search')
@@ -394,7 +404,7 @@ class TestAdminSearchUsers(unittest.TestCase):
             with patch.object(gapi_gui, 'DB_AVAILABLE', False):
                 resp = self.client.get('/api/admin/users/search')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['users'], [])
 
     def test_returns_users(self):
@@ -410,7 +420,7 @@ class TestAdminSearchUsers(unittest.TestCase):
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/users/search?q=alice')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('users', data)
         self.assertEqual(data['count'], 1)
 

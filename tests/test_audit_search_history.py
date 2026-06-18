@@ -16,8 +16,11 @@ from unittest.mock import patch, MagicMock, call
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
 import database
+from backend.main import app as _fastapi_app
 
 
 def _make_db():
@@ -293,11 +296,12 @@ class TestSuspendAuditWiring(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # /api/admin/users/<u>/suspend is migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
 
     def _admin_login(self):
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'admin'
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'admin'}))
 
     def test_suspend_triggers_audit(self):
         audit_calls = []
