@@ -470,7 +470,8 @@ class TestCacheControlHeaders(unittest.TestCase):
         self.client = gapi_gui.app.test_client()
 
     def test_public_endpoint_is_cacheable(self):
-        resp = self.client.get('/api/permissions')
+        # /api/permissions is migrated to FastAPI (still sets the cache header).
+        resp = _FastTestClient(_fastapi_app).get('/api/permissions')
         cc = resp.headers.get('Cache-Control', '')
         self.assertIn('public', cc)
         self.assertIn('max-age=60', cc)

@@ -63,7 +63,7 @@ class TestPermissionsList(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)  # migrated
 
     def test_public_endpoint_returns_200(self):
         resp = self.client.get('/api/permissions')
@@ -71,30 +71,30 @@ class TestPermissionsList(unittest.TestCase):
 
     def test_response_contains_permissions_list(self):
         resp = self.client.get('/api/permissions')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('permissions', data)
         self.assertIsInstance(data['permissions'], list)
 
     def test_response_contains_role_matrix(self):
         resp = self.client.get('/api/permissions')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('role_matrix', data)
         self.assertIsInstance(data['role_matrix'], dict)
 
     def test_admin_role_has_wildcard(self):
         resp = self.client.get('/api/permissions')
-        data = json.loads(resp.data)
+        data = resp.json()
         # role_matrix is only populated when DB_AVAILABLE is True
         with patch.object(gapi_gui, 'DB_AVAILABLE', True):
             resp2 = self.client.get('/api/permissions')
-        data2 = json.loads(resp2.data)
+        data2 = resp2.json()
         self.assertIn('admin', data2['role_matrix'])
         self.assertIn('*', data2['role_matrix']['admin'])
 
     def test_all_permissions_non_empty_when_db_available(self):
         with patch.object(gapi_gui, 'DB_AVAILABLE', True):
             resp = self.client.get('/api/permissions')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertGreater(len(data['permissions']), 0)
 
 
@@ -106,7 +106,7 @@ class TestGetUserPermissions(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)  # migrated
 
     def test_requires_login(self):
         resp = self.client.get('/api/users/alice/permissions')
@@ -133,7 +133,7 @@ class TestGetUserPermissions(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/users/alice/permissions')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         for key in ('effective', 'from_roles', 'granted', 'denied', 'is_admin'):
             self.assertIn(key, data)
 
@@ -151,7 +151,7 @@ class TestGetUserPermissions(unittest.TestCase):
              patch('database.get_user_permissions', return_value=fake_perms), \
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/users/admin/permissions')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['is_admin'])
 
 
@@ -163,7 +163,7 @@ class TestSetUserPermissions(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)  # migrated
 
     def test_requires_admin(self):
         resp = self.client.post('/api/admin/users/alice/permissions',
@@ -220,7 +220,7 @@ class TestSetUserPermissions(unittest.TestCase):
                     json={'permission': 'analytics_read', 'action': 'grant'},
                 )
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['ok'])
         self.assertIn('permissions', data)
 
@@ -249,7 +249,7 @@ class TestBulkAssignRole(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)  # migrated
 
     def test_requires_admin(self):
         resp = self.client.post('/api/admin/roles/bulk-assign',
@@ -298,7 +298,7 @@ class TestBulkAssignRole(unittest.TestCase):
                 resp = self.client.post('/api/admin/roles/bulk-assign',
                                         json={'role': 'vip', 'usernames': ['alice', 'bob']})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('assigned', data)
         self.assertIn('skipped', data)
         self.assertIn('errors', data)
@@ -311,7 +311,7 @@ class TestBulkAssignRole(unittest.TestCase):
             with patch.object(gapi_gui, 'DB_AVAILABLE', True):
                 resp = self.client.post('/api/admin/roles/bulk-assign',
                                         json={'role': 'vip', 'usernames': ['ghost']})
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['assigned'], [])
         self.assertIn('ghost', data['skipped'])
 

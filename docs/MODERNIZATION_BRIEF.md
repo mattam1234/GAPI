@@ -190,6 +190,15 @@ remain in Flask.
 | Admin notifications | `POST /api/admin/notifications/[broadcast\|send-digests]` | `backend/routers/admin_notifications.py` | ported broadcast/digest classes + `tests/test_backend_admin_notifications.py` |
 | Leaderboards | `GET /api/leaderboards`, `/seasonal`, `/api/leaderboard` | `backend/routers/leaderboards.py` | `tests/test_backend_leaderboards.py` |
 | Recommendations | `GET /api/recommendations[/ml\|/smart\|/variant\|/ai]` (5 routes) | `backend/routers/recommendations.py` | `tests/test_backend_recommendations.py` + ported ML/smart/variant classes |
+| Permissions (users chunk 1) | `GET /api/permissions`, `GET /api/users/{u}/permissions`, `POST /api/admin/users/{u}/permissions`, `POST /api/admin/roles/bulk-assign` | `backend/routers/permissions.py` | ported 4 classes in `test_permissions_notifprefs.py` |
+
+**Cache-Control carried over:** the legacy Flask `after_request` set
+`Cache-Control: public, max-age=60, stale-while-revalidate=120` on cacheable API
+prefixes (incl. `/api/permissions`). The FastAPI handler sets the same header
+explicitly so the public-cacheability contract is preserved.
+
+**users domain is multi-chunk** (24 routes): permissions (done); remaining —
+core user CRUD, email, suspension/status/search, reputation, list/profile/online.
 
 **✅ Recommendations fully migrated** (base + ml + smart + variant + ai). The ML/
 smart/variant test classes authenticated via `@patch('gapi_gui.current_user',...)`

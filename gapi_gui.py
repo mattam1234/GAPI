@@ -10999,130 +10999,16 @@ def _stream_file(path: str, chunk_size: int = 65536):
 # Fine-grained Permission endpoints  (Tier 2, item 5)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/permissions', methods=['GET'])
-def api_permissions_list():
-    """Return all defined permissions and the role-to-permission matrix (public).
-
-    Response JSON:
-      ``permissions``   – sorted list of all discrete permission strings
-      ``role_matrix``   – dict mapping role name → list of permissions
-    """
-    return jsonify({
-        'permissions': database.ALL_PERMISSIONS if DB_AVAILABLE else [],
-        'role_matrix': database.PERMISSIONS if DB_AVAILABLE else {},
-    })
+# MIGRATED to FastAPI: GET /api/permissions -> backend/routers/permissions.py
 
 
-@app.route('/api/users/<username>/permissions', methods=['GET'])
-@require_login
-def api_get_user_permissions(username: str):
-    """Return the effective permissions for *username* (login required).
-
-    Response JSON mirrors ``database.get_user_permissions``:
-      ``effective``   – currently active permissions
-      ``from_roles``  – permissions derived from roles
-      ``granted``     – explicit per-user grants
-      ``denied``      – explicit per-user denials
-      ``is_admin``    – True when user has wildcard access
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    try:
-        db = next(database.get_db())
-        perms = database.get_user_permissions(db, username)
-        return jsonify(perms)
-    except Exception as e:
-        gui_logger.error('api_get_user_permissions error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/users/<username>/permissions -> backend/routers/permissions.py
 
 
-@app.route('/api/admin/users/<username>/permissions', methods=['POST'])
-@require_admin
-def api_set_user_permissions(username: str):
-    """Grant, deny, or remove a permission override for *username* (admin only).
-
-    Request JSON body:
-      ``permission``   – permission string (required)
-      ``action``       – ``'grant'`` | ``'deny'`` | ``'remove'`` (required)
-
-    Response JSON:
-      ``ok``           – True on success
-      ``permissions``  – updated effective permissions dict
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    data = request.get_json(silent=True, force=True) or {}
-    permission = str(data.get('permission', '')).strip()
-    action = str(data.get('action', '')).strip().lower()
-    if not permission or action not in ('grant', 'deny', 'remove'):
-        return jsonify({'error': "Required fields: 'permission' and 'action' (grant/deny/remove)"}), 400
-    if permission not in database.ALL_PERMISSIONS:
-        return jsonify({'error': f"Unknown permission '{permission}'"}), 400
-    try:
-        db = next(database.get_db())
-        requesting_user = get_current_username()
-        if action == 'remove':
-            ok = database.remove_user_permission_override(db, username, permission)
-        else:
-            ok = database.set_user_permission_override(
-                db, username, permission,
-                granted=(action == 'grant'),
-                granted_by=requesting_user,
-            )
-        if not ok:
-            return jsonify({'error': 'Failed to update permission'}), 500
-        perms = database.get_user_permissions(db, username)
-        return jsonify({'ok': True, 'permissions': perms})
-    except Exception as e:
-        gui_logger.error('api_set_user_permissions error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: POST /api/admin/users/<username>/permissions -> backend/routers/permissions.py
 
 
-@app.route('/api/admin/roles/bulk-assign', methods=['POST'])
-@require_admin
-def api_admin_bulk_assign_role():
-    """Assign a role to multiple users at once (admin only).
-
-    Request JSON body:
-      ``role``       – role name to assign (required)
-      ``usernames``  – list of usernames (required, max 200)
-
-    Response JSON:
-      ``assigned``   – list of usernames that were updated
-      ``skipped``    – list of usernames that already had the role / not found
-      ``errors``     – list of ``{username, error}`` for failures
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    data = request.get_json(silent=True, force=True) or {}
-    role = str(data.get('role', '')).strip()
-    usernames = data.get('usernames', [])
-    if not role:
-        return jsonify({'error': "'role' is required"}), 400
-    if not isinstance(usernames, list) or len(usernames) == 0:
-        return jsonify({'error': "'usernames' must be a non-empty list"}), 400
-    if len(usernames) > 200:
-        return jsonify({'error': "'usernames' may not exceed 200 entries per request"}), 400
-    assigned, skipped, errors = [], [], []
-    try:
-        requesting_user = get_current_username()
-        for uname in usernames:
-            uname = str(uname).strip()
-            if not uname:
-                continue
-            ok, _ = user_manager.update_user_roles(uname, [role], requesting_user)
-            if ok:
-                assigned.append(uname)
-            else:
-                skipped.append(uname)
-        if assigned:
-            _audit('bulk_role_assign', resource_type='user_role', resource_id=role,
-                   description=f'Bulk assigned role "{role}" to {len(assigned)} user(s)',
-                   new_value={'role': role, 'assigned': assigned, 'skipped': skipped})
-    except Exception as e:
-        gui_logger.error('api_admin_bulk_assign_role error: %s', e)
-        errors.append({'error': str(e)})
-    return jsonify({'assigned': assigned, 'skipped': skipped, 'errors': errors})
+# MIGRATED to FastAPI: POST /api/admin/roles/bulk-assign -> backend/routers/permissions.py
 
 
 # ---------------------------------------------------------------------------
