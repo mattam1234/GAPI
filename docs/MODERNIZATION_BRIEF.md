@@ -177,11 +177,11 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 remain in Flask.
 
 | Achievements (hunts) | `GET /api/achievements`, `POST /api/achievement-hunt`, `PUT /api/achievement-hunt/{id}` | `backend/routers/achievements.py` | `tests/test_backend_achievements.py` |
+| Achievement challenges | `/api/achievement-challenges[/{id}][/join\|/progress]` (6 routes) | `backend/routers/challenges.py` | `tests/test_backend_challenges.py` |
 
-**Partial domain:** the achievement-*hunt* sub-group is migrated. Still in Flask:
-the Steam achievement stats/sync routes (`/api/achievements/{app_id}`, `/stats`,
-`/sync`, `/sync/platform`) and the multiplayer `/api/achievement-challenges/*`
-group.
+**Partial domain:** the achievement-*hunt* and multiplayer *challenges*
+sub-groups are migrated. Still in Flask: the Steam achievement stats/sync routes
+(`/api/achievements/{app_id}`, `/stats`, `/sync`, `/sync/platform`).
 
 **Partial-domain migration:** schedule is large (17 routes), migrated in chunks.
 Chunk 2 took the event list/update/RSVP routes (no Discord) and ported their
