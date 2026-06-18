@@ -29,6 +29,24 @@ def _self_or_admin(current: str, username: str) -> bool:
     return current == username or gapi_gui.user_manager.is_admin(current)
 
 
+@router.get("/{username}/reputation")
+def get_user_reputation(username: str, _user: str = Depends(require_login)):
+    """Return the reputation/trust score for ``username``."""
+    g = gapi_gui
+    if not g.DB_AVAILABLE:
+        return {"username": username, "score": 100, "violation_count": 0,
+                "last_updated": None, "last_action": None}
+    try:
+        db = next(g.database.get_db())
+        rep = g.database.get_reputation(db, username)
+        if not rep:
+            return _err(404, f"User '{username}' not found")
+        return rep
+    except Exception as e:
+        g.gui_logger.error("get_user_reputation error: %s", e)
+        return _err(500, str(e))
+
+
 @router.get("/{username}/email")
 def get_user_email(username: str, current: str = Depends(require_login)):
     """Retrieve a user's email (own account or admin)."""
@@ -165,4 +183,27 @@ def admin_get_user_status(username: str, _admin: str = Depends(require_admin_um)
         return result
     except Exception as e:
         g.gui_logger.error("admin_get_user_status error: %s", e)
+        return _err(500, str(e))
+
+
+@admin_router.get("/low-reputation")
+def admin_low_reputation_users(request: Request,
+                               _admin: str = Depends(require_admin_um)):
+    """List users at or below a reputation threshold."""
+    g = gapi_gui
+    if not g.DB_AVAILABLE:
+        return {"threshold": g.database.REPUTATION_AUTO_BAN_THRESHOLD, "users": []}
+    args = request.query_params
+    try:
+        threshold = int(args.get("threshold", g.database.REPUTATION_AUTO_BAN_THRESHOLD))
+        limit = max(1, min(200, int(args.get("limit", 50))))
+    except (ValueError, TypeError):
+        threshold = g.database.REPUTATION_AUTO_BAN_THRESHOLD
+        limit = 50
+    try:
+        db = next(g.database.get_db())
+        users = g.database.get_low_reputation_users(db, threshold=threshold, limit=limit)
+        return {"threshold": threshold, "users": users}
+    except Exception as e:
+        g.gui_logger.error("admin_low_reputation_users error: %s", e)
         return _err(500, str(e))

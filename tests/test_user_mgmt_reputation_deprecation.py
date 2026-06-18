@@ -803,7 +803,7 @@ class TestReputationEndpoints(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)  # migrated
 
     def test_reputation_requires_login(self):
         resp = self.client.get('/api/users/alice/reputation')
@@ -814,7 +814,7 @@ class TestReputationEndpoints(unittest.TestCase):
         with patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.get('/api/users/alice/reputation')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['score'], 100)
 
     def test_reputation_returns_data(self):
@@ -827,7 +827,7 @@ class TestReputationEndpoints(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/users/alice/reputation')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['score'], 85)
 
     def test_low_reputation_requires_admin(self):
@@ -847,7 +847,7 @@ class TestReputationEndpoints(unittest.TestCase):
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/users/low-reputation')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('users', data)
         self.assertIn('threshold', data)
 

@@ -11596,56 +11596,10 @@ def api_get_group_members(group_id: int):
 # User Reputation  (Item 7 — Content Moderation)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/users/<username>/reputation', methods=['GET'])
-@require_login
-def api_get_user_reputation(username: str):
-    """Return the reputation/trust score for *username* (login required).
-
-    Response JSON:
-      ``username``, ``score``, ``violation_count``, ``last_updated``, ``last_action``
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'username': username, 'score': 100, 'violation_count': 0,
-                        'last_updated': None, 'last_action': None})
-    try:
-        db = next(database.get_db())
-        rep = database.get_reputation(db, username)
-        if not rep:
-            return jsonify({'error': f"User '{username}' not found"}), 404
-        return jsonify(rep)
-    except Exception as e:
-        gui_logger.error('api_get_user_reputation error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/users/<username>/reputation -> backend/routers/users.py
 
 
-@app.route('/api/admin/users/low-reputation', methods=['GET'])
-@require_admin
-def api_admin_low_reputation_users():
-    """List users with reputation scores at or below a threshold (admin only).
-
-    Query parameters:
-      ``threshold``  – score threshold (default: REPUTATION_AUTO_BAN_THRESHOLD)
-      ``limit``      – max results (default 50, max 200)
-
-    Response JSON:
-      ``threshold``  – threshold used
-      ``users``      – list of ``{username, score, violation_count, last_action, last_updated}``
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'threshold': database.REPUTATION_AUTO_BAN_THRESHOLD, 'users': []})
-    try:
-        threshold = int(request.args.get('threshold', database.REPUTATION_AUTO_BAN_THRESHOLD))
-        limit = max(1, min(200, int(request.args.get('limit', 50))))
-    except (ValueError, TypeError):
-        threshold = database.REPUTATION_AUTO_BAN_THRESHOLD
-        limit = 50
-    try:
-        db = next(database.get_db())
-        users = database.get_low_reputation_users(db, threshold=threshold, limit=limit)
-        return jsonify({'threshold': threshold, 'users': users})
-    except Exception as e:
-        gui_logger.error('api_admin_low_reputation_users error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/admin/users/low-reputation -> backend/routers/users.py
 
 
 def create_templates():
