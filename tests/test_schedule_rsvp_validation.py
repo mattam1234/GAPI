@@ -12,7 +12,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient
+
 import gapi_gui
+from backend.main import app as fastapi_app
+
+
+def _session_cookie(username):
+    serializer = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    return serializer.dumps({'username': username})
 
 
 class _FakeSchedule:
@@ -37,7 +45,8 @@ class TestRsvpValidation(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # POST /api/schedule/<event_id>/rsvp is migrated to FastAPI.
+        self.client = TestClient(fastapi_app)
         self.event = {
             'id': 'ev1', 'title': 'Game Night', 'created_by': 'host',
             'invited_attendees': ['alice', 'bob'],
@@ -46,8 +55,7 @@ class TestRsvpValidation(unittest.TestCase):
         }
 
     def _login(self, username):
-        with self.client.session_transaction() as sess:
-            sess['username'] = username
+        self.client.cookies.set('session', _session_cookie(username))
 
     def _post(self, body, event='__default__'):
         ev = self.event if event == '__default__' else event

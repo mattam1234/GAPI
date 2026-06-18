@@ -18,9 +18,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import database
 import gapi_gui
+from fastapi.testclient import TestClient
+from backend.main import app as fastapi_app
 from openapi_spec import build_spec
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+
+def _schedule_session_cookie(username):
+    """Signed Flask session cookie read by the FastAPI auth bridge."""
+    serializer = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    return serializer.dumps({'username': username})
 
 
 # ---------------------------------------------------------------------------
@@ -494,9 +502,9 @@ class TestScheduleAgendaRoute(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # GET /api/schedule is migrated to FastAPI.
+        self.client = TestClient(fastapi_app)
+        self.client.cookies.set('session', _schedule_session_cookie('alice'))
 
     @staticmethod
     def _fake_picker():
@@ -512,7 +520,7 @@ class TestScheduleAgendaRoute(unittest.TestCase):
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
             resp = self.client.get('/api/schedule')
         self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
+        data = resp.json()
         self.assertEqual(data['events'], [])
         self.assertEqual(data['count'], 0)
         self.assertEqual(data['active_schedule_id'], 'personal:alice')
@@ -590,9 +598,10 @@ class TestScheduleRsvpPermissionAndFanoutRoutes(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'host'
+        # GET /api/schedule, PUT /api/schedule/<id>, and the rsvp route are
+        # migrated to FastAPI.
+        self.client = TestClient(fastapi_app)
+        self.client.cookies.set('session', _schedule_session_cookie('host'))
         self.event = {
             'id': 'ev1',
             'title': 'Game Night',
@@ -614,12 +623,11 @@ class TestScheduleRsvpPermissionAndFanoutRoutes(unittest.TestCase):
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
             resp = self.client.put('/api/schedule/ev1', json={'rsvp_statuses': {'alice': 'accepted'}})
         self.assertEqual(resp.status_code, 403)
-        self.assertIn('/api/schedule/<event_id>/rsvp', resp.get_data(as_text=True))
+        self.assertIn('/api/schedule/<event_id>/rsvp', resp.text)
 
     def test_invited_user_can_rsvp_for_self_and_triggers_fanout(self):
         picker = self._picker()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        self.client.cookies.set('session', _schedule_session_cookie('alice'))
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
             with patch.object(gapi_gui, '_send_schedule_in_app_notifications') as notif_mock:
                 with patch.object(gapi_gui, '_send_schedule_discord_dm', return_value=True) as dm_mock:
@@ -646,8 +654,7 @@ class TestScheduleRsvpPermissionAndFanoutRoutes(unittest.TestCase):
 
     def test_non_member_cannot_rsvp(self):
         picker = self._picker()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'mallory'
+        self.client.cookies.set('session', _schedule_session_cookie('mallory'))
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
             resp = self.client.post('/api/schedule/ev1/rsvp', json={'status': 'accepted'})
         self.assertEqual(resp.status_code, 403)

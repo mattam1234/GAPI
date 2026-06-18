@@ -18,3 +18,7 @@ class UpdateScheduleIn(BaseModel):
     name: Optional[str] = ""
     members: Any = None
     is_shared: Optional[bool] = None  # None => leave sharing unchanged
+
+
+class RsvpIn(BaseModel):
+    status: Optional[str] = ""

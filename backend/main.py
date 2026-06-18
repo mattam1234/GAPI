@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(sessions.router)
     app.include_router(schedule.router)
+    app.include_router(schedule.event_router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.

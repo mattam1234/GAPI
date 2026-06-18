@@ -4823,31 +4823,8 @@ def _send_invite_notifications(recipients: List[str], title: str, message: str,
 
 
 
-@app.route('/api/schedule', methods=['GET'])
-@require_login
-def api_get_schedule():
-    """Return all game night events sorted by date/time."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    requested_schedule_id = request.args.get('schedule_id')
-    with picker_lock:
-        schedules = p.schedule_service.list_schedules(username=username)
-        active_schedule_id = p.schedule_service.resolve_schedule_for_user(requested_schedule_id, username)
-        events = p.schedule_service.get_events(schedule_id=active_schedule_id, username=username)
-    for event in events:
-        if not event.get('game_image_url'):
-            event['game_image_url'] = _resolve_schedule_game_image_url(
-                game_appid=event.get('game_appid'),
-                existing_url=event.get('game_image_url')
-            )
-    return jsonify({
-        'events': events,
-        'count': len(events),
-        'schedules': schedules,
-        'active_schedule_id': active_schedule_id,
-    })
+# MIGRATED to FastAPI (chunk 2): GET /api/schedule -> see
+# backend/routers/schedule.py (event_router).
 
 
 # MIGRATED to FastAPI (chunk 1 of the schedule domain): see
@@ -5071,152 +5048,12 @@ def api_create_event():
     return jsonify(event), 201
 
 
-@app.route('/api/schedule/<event_id>', methods=['PUT'])
-@require_login
-def api_update_event(event_id: str):
-    """Update a game night event."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    data = request.json or {}
-    with picker_lock:
-        existing_event = p.schedule_service.get_event(event_id)
-    if existing_event is None:
-        return jsonify({'error': 'Event not found'}), 404
-
-    if 'rsvp_statuses' in data:
-        return jsonify({'error': 'Use /api/schedule/<event_id>/rsvp for attendee-driven RSVP updates.'}), 403
-
-    safe: Dict = {}
-    for k in ('title', 'date', 'time', 'game_name', 'notes', 'game_appid', 'game_image_url', 'discord_guild_id', 'timezone_name', 'schedule_id'):
-        if k in data:
-            safe[k] = str(data[k]).strip()
-    if 'duration_minutes' in data:
-        try:
-            safe['duration_minutes'] = int(data['duration_minutes']) if data['duration_minutes'] is not None else None
-        except (TypeError, ValueError):
-            safe['duration_minutes'] = None
-    if 'attendees' in data:
-        raw = data['attendees']
-        if isinstance(raw, str):
-            safe['attendees'] = [a.strip() for a in raw.split(',') if a.strip()]
-        else:
-            safe['attendees'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
-    if 'attendee_ids' in data:
-        raw = data['attendee_ids']
-        if isinstance(raw, str):
-            safe['attendee_ids'] = [a.strip() for a in raw.split(',') if a.strip()]
-        else:
-            safe['attendee_ids'] = [str(a).strip() for a in (raw or []) if str(a).strip()]
-    if 'rsvp_statuses' in data and isinstance(data.get('rsvp_statuses'), dict):
-        safe['rsvp_statuses'] = {
-            str(key).strip(): str(value or 'pending').strip().lower()
-            for key, value in (data.get('rsvp_statuses') or {}).items()
-            if str(key).strip()
-        }
-    if 'timezone_offset_minutes' in data:
-        try:
-            safe['timezone_offset_minutes'] = int(data['timezone_offset_minutes']) if data['timezone_offset_minutes'] is not None else None
-        except (TypeError, ValueError):
-            safe['timezone_offset_minutes'] = None
-    with picker_lock:
-        event = p.schedule_service.update_event(event_id, username=username, **safe)
-    if event is None:
-        return jsonify({'error': 'Event not found'}), 404
-
-    before_members = _schedule_event_members(existing_event)
-    after_members = _schedule_event_members(event)
-    newly_invited = [
-        after_members[key]
-        for key in after_members
-        if key not in before_members
-    ]
-    if newly_invited:
-        _send_schedule_in_app_notifications(
-            newly_invited,
-            title=f'📨 Schedule invite: {event.get("title", "Game Night")}',
-            message=f'{username} invited you to "{event.get("title", "Game Night")}" on {event.get("date", "")} at {event.get("time", "")}.',
-            exclude_usernames={username},
-            link=f'#schedule/{event_id}',
-        )
-    return jsonify(event)
+# MIGRATED to FastAPI (chunk 2): PUT /api/schedule/<event_id> -> see
+# backend/routers/schedule.py (event_router).
 
 
-@app.route('/api/schedule/<event_id>/rsvp', methods=['POST'])
-@require_login
-def api_update_schedule_rsvp(event_id: str):
-    """Allow invited attendees to update only their own RSVP."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-
-    data = request.json or {}
-    status = str(data.get('status', '')).strip().lower()
-    if status not in {'accepted', 'maybe', 'declined', 'pending'}:
-        return jsonify({'error': 'status must be accepted, maybe, declined, or pending'}), 400
-
-    with picker_lock:
-        event = p.schedule_service.get_event(event_id)
-    if event is None:
-        return jsonify({'error': 'Event not found'}), 404
-
-    invite_pairs = _schedule_invitee_pairs(event)
-    requester_key = _normalize_schedule_username(username)
-    resolved_attendee_id = None
-    for attendee_name, attendee_id in invite_pairs:
-        if _normalize_schedule_username(attendee_id) == requester_key or _normalize_schedule_username(attendee_name) == requester_key:
-            resolved_attendee_id = attendee_id
-            break
-    if not resolved_attendee_id:
-        return jsonify({'error': 'Only invited users can RSVP for this event'}), 403
-
-    with picker_lock:
-        updated_event = p.schedule_service.update_event_rsvp(event_id, resolved_attendee_id, status)
-    if updated_event is None:
-        return jsonify({'error': 'Event not found'}), 404
-
-    if status == 'accepted':
-        linked_members = _schedule_event_members(updated_event)
-        linked_recipients = list(linked_members.values())
-        title = f'✅ Invite accepted: {updated_event.get("title", "Game Night")}'
-        message = f'{username} accepted the invite for "{updated_event.get("title", "Game Night")}".'
-        _send_schedule_in_app_notifications(
-            linked_recipients,
-            title=title,
-            message=message,
-            exclude_usernames={username},
-        )
-
-        accepted_keys = {
-            _normalize_schedule_username(entry.get('id'))
-            for entry in [
-                {'id': attendee_id, 'status': str((updated_event.get('rsvp_statuses') or {}).get(attendee_id, 'pending')).strip().lower()}
-                for _, attendee_id in _schedule_invitee_pairs(updated_event)
-            ]
-            if entry['status'] == 'accepted'
-        }
-        host_username = str(updated_event.get('created_by') or '').strip()
-        host_key = _normalize_schedule_username(host_username)
-        dm_targets: List[str] = []
-        for key, value in linked_members.items():
-            if key in accepted_keys and key != requester_key:
-                dm_targets.append(value)
-        if host_key and host_key != requester_key:
-            dm_targets.append(host_username)
-        seen_dm = set()
-        for target in dm_targets:
-            dm_key = _normalize_schedule_username(target)
-            if not dm_key or dm_key in seen_dm:
-                continue
-            seen_dm.add(dm_key)
-            _send_schedule_discord_dm(
-                target,
-                f'{username} accepted "{updated_event.get("title", "Game Night")}" on {updated_event.get("date", "")} at {updated_event.get("time", "")}.'
-            )
-
-    return jsonify(updated_event)
+# MIGRATED to FastAPI (chunk 2): POST /api/schedule/<event_id>/rsvp -> see
+# backend/routers/schedule.py (event_router).
 
 
 @app.route('/api/schedule/<event_id>', methods=['DELETE'])
