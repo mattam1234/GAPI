@@ -13,11 +13,54 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+import gapi
 import gapi_gui
 from backend.dependencies import require_login
 from backend.schemas.achievements import HuntStartIn, HuntUpdateIn
 
 router = APIRouter(prefix="/api", tags=["achievements"])
+
+
+@router.get("/achievements/stats")
+def achievement_stats(username: str = Depends(require_login)):
+    """Return achievement statistics for the current user."""
+    if not gapi_gui.ensure_db_available():
+        raise HTTPException(status_code=503, detail="Database not available")
+    db = next(gapi_gui.database.get_db())
+    try:
+        stats = gapi_gui.database.get_achievement_stats(db, username)
+        by_platform = gapi_gui.database.get_achievement_stats_by_platform(db, username)
+    finally:
+        if db:
+            db.close()
+    if not stats:
+        return {
+            "total_tracked": 0, "total_unlocked": 0, "completion_percent": 0.0,
+            "rarest_achievement": None, "games": [], "by_platform": [],
+        }
+    stats["by_platform"] = by_platform
+    return stats
+
+
+@router.get("/achievements/{app_id:int}")
+def steam_achievements(app_id: int, username: str = Depends(require_login)):
+    """Get achievement completion stats for a Steam game (live Steam API)."""
+    picker = gapi_gui.ensure_picker_initialized(username)
+    if not picker:
+        raise HTTPException(status_code=400, detail="Not initialized")
+    if not picker.steam_client:
+        raise HTTPException(status_code=503, detail="Steam client not available")
+    steam_id = picker.config.get("steam_id", "")
+    if gapi.is_placeholder_value(steam_id):
+        raise HTTPException(status_code=503, detail="Steam ID not configured")
+    if not isinstance(picker.steam_client, gapi.SteamAPIClient):
+        raise HTTPException(status_code=400, detail="Steam client not initialized")
+    with gapi_gui.picker_lock:
+        stats = picker.steam_client.get_player_achievements(steam_id, app_id)
+    if stats is None:
+        raise HTTPException(
+            status_code=404, detail="Achievements unavailable for this game")
+    return {"app_id": app_id, **stats}
 
 
 @router.get("/achievements")

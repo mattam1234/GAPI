@@ -11,12 +11,14 @@ Run with:
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
 
+import gapi
 import gapi_gui
 from backend.main import app
 
@@ -128,6 +130,78 @@ class BackendAchievementsTest(unittest.TestCase):
         with patch.object(gapi_gui, '_achievement_service', _FakeAchSvc(update=None)):
             resp = self.client.put('/api/achievement-hunt/999',
                                    json={'status': 'completed'})
+        self.assertEqual(resp.status_code, 404)
+
+
+class BackendAchievementStatsTest(unittest.TestCase):
+    """GET /api/achievements/stats and GET /api/achievements/{app_id}."""
+
+    def setUp(self):
+        self.client = TestClient(app)
+        self.client.cookies.set('session', _session_cookie('alice'))
+
+    # --- /stats ----------------------------------------------------------
+
+    def test_stats_db_unavailable_503(self):
+        with patch.object(gapi_gui, 'ensure_db_available', return_value=False):
+            self.assertEqual(
+                self.client.get('/api/achievements/stats').status_code, 503)
+
+    def test_stats_empty_default(self):
+        with patch.object(gapi_gui, 'ensure_db_available', return_value=True), \
+             patch.object(gapi_gui.database, 'get_db', side_effect=lambda: iter([MagicMock()])), \
+             patch.object(gapi_gui.database, 'get_achievement_stats', return_value=None), \
+             patch.object(gapi_gui.database, 'get_achievement_stats_by_platform', return_value=[]):
+            resp = self.client.get('/api/achievements/stats')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['total_tracked'], 0)
+
+    def test_stats_populated_includes_by_platform(self):
+        stats = {'total_tracked': 10, 'total_unlocked': 4, 'games': []}
+        by_plat = [{'platform': 'steam', 'game_count': 2}]
+        with patch.object(gapi_gui, 'ensure_db_available', return_value=True), \
+             patch.object(gapi_gui.database, 'get_db', side_effect=lambda: iter([MagicMock()])), \
+             patch.object(gapi_gui.database, 'get_achievement_stats', return_value=stats), \
+             patch.object(gapi_gui.database, 'get_achievement_stats_by_platform', return_value=by_plat):
+            resp = self.client.get('/api/achievements/stats')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['by_platform'], by_plat)
+
+    # --- /{app_id} (Steam) ----------------------------------------------
+
+    def _picker(self, steam_client=None, steam_id='765'):
+        return SimpleNamespace(steam_client=steam_client, config={'steam_id': steam_id})
+
+    def test_app_id_not_initialized_400(self):
+        with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=None):
+            self.assertEqual(self.client.get('/api/achievements/620').status_code, 400)
+
+    def test_app_id_no_steam_client_503(self):
+        with patch.object(gapi_gui, 'ensure_picker_initialized',
+                          return_value=self._picker(steam_client=None)):
+            self.assertEqual(self.client.get('/api/achievements/620').status_code, 503)
+
+    def test_app_id_success(self):
+        client = gapi.SteamAPIClient.__new__(gapi.SteamAPIClient)
+        with patch.object(gapi, 'is_placeholder_value', return_value=False), \
+             patch.object(type(client), 'get_player_achievements',
+                          return_value={'unlocked': 5, 'total': 10}, create=True), \
+             patch.object(gapi_gui, 'ensure_picker_initialized',
+                          return_value=self._picker(steam_client=client)):
+            resp = self.client.get('/api/achievements/620')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body['app_id'], 620)
+        self.assertEqual(body['unlocked'], 5)
+
+    def test_app_id_unavailable_404(self):
+        client = gapi.SteamAPIClient.__new__(gapi.SteamAPIClient)
+        with patch.object(gapi, 'is_placeholder_value', return_value=False), \
+             patch.object(type(client), 'get_player_achievements',
+                          return_value=None, create=True), \
+             patch.object(gapi_gui, 'ensure_picker_initialized',
+                          return_value=self._picker(steam_client=client)):
+            resp = self.client.get('/api/achievements/620')
         self.assertEqual(resp.status_code, 404)
 
 

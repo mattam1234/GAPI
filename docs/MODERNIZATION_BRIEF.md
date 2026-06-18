@@ -179,9 +179,13 @@ remain in Flask.
 | Achievements (hunts) | `GET /api/achievements`, `POST /api/achievement-hunt`, `PUT /api/achievement-hunt/{id}` | `backend/routers/achievements.py` | `tests/test_backend_achievements.py` |
 | Achievement challenges | `/api/achievement-challenges[/{id}][/join\|/progress]` (6 routes) | `backend/routers/challenges.py` | `tests/test_backend_challenges.py` |
 
-**Partial domain:** the achievement-*hunt* and multiplayer *challenges*
-sub-groups are migrated. Still in Flask: the Steam achievement stats/sync routes
-(`/api/achievements/{app_id}`, `/stats`, `/sync`, `/sync/platform`).
+**Achievements nearly complete:** hunt, multiplayer challenges, `GET /stats`, and
+`GET /achievements/{app_id}` (live Steam) are migrated. Only the two heavy Steam
+*sync* POSTs (`/api/achievements/sync`, `/sync/platform`) remain in Flask.
+
+**Routing note:** `GET /api/achievements/{app_id:int}` uses the Starlette `:int`
+path convertor so non-integer siblings (`/stats`, `/sync`) don't collide with it
+and fall through correctly — the FastAPI equivalent of Flask's `<int:app_id>`.
 
 **Partial-domain migration:** schedule is large (17 routes), migrated in chunks.
 Chunk 2 took the event list/update/RSVP routes (no Discord) and ported their

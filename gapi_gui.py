@@ -4887,31 +4887,8 @@ def _serialize_backlog_summaries(backlogs: List[Dict], service, current_username
 # Achievement Tracking API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/achievements/<int:app_id>')
-@require_login
-def api_get_steam_achievements(app_id: int):
-    """Get achievement completion stats for a Steam game.
-
-    Requires a valid Steam ID to be configured; returns 503 otherwise.
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    if not p.steam_client:
-        return jsonify({'error': 'Steam client not available'}), 503
-    steam_id = p.config.get('steam_id', '')
-    if gapi.is_placeholder_value(steam_id):
-        return jsonify({'error': 'Steam ID not configured'}), 503
-
-    if not p.steam_client or not isinstance(p.steam_client, gapi.SteamAPIClient):
-        return jsonify({'error': 'Steam client not initialized'}), 400
-
-    with picker_lock:
-        stats = p.steam_client.get_player_achievements(steam_id, app_id)
-    if stats is None:
-        return jsonify({'error': 'Achievements unavailable for this game'}), 404
-    return jsonify({'app_id': app_id, **stats})
+# MIGRATED to FastAPI: GET /api/achievements/<int:app_id> -> see
+# backend/routers/achievements.py. The /sync POSTs remain in Flask.
 
 
 # ---------------------------------------------------------------------------
@@ -5131,52 +5108,8 @@ def api_sync_achievements_platform():
 # Achievement statistics dashboard
 # ---------------------------------------------------------------------------
 
-@app.route('/api/achievements/stats')
-@require_login
-def api_achievement_stats():
-    """Return achievement statistics for the current user.
-
-    Response JSON::
-
-        {
-          "total_tracked": 120,
-          "total_unlocked": 45,
-          "completion_percent": 37.5,
-          "rarest_achievement": { ... },
-          "games": [ ... ],
-          "by_platform": [
-            {
-              "platform": "steam",
-              "total_tracked": 100,
-              "total_unlocked": 40,
-              "completion_percent": 40.0,
-              "game_count": 12
-            }
-          ]
-        }
-    """
-    global current_user
-    username = get_current_username()
-
-    if not ensure_db_available():
-        return jsonify({'error': 'Database not available'}), 503
-
-    db = next(database.get_db())
-    try:
-        stats = database.get_achievement_stats(db, username)
-        by_platform = database.get_achievement_stats_by_platform(db, username)
-    finally:
-        if db:
-            db.close()
-
-    if not stats:
-        return jsonify({
-            'total_tracked': 0, 'total_unlocked': 0,
-            'completion_percent': 0.0, 'rarest_achievement': None,
-            'games': [], 'by_platform': [],
-        })
-    stats['by_platform'] = by_platform
-    return jsonify(stats)
+# MIGRATED to FastAPI: GET /api/achievements/stats -> see
+# backend/routers/achievements.py.
 
 
 # ---------------------------------------------------------------------------
