@@ -68,11 +68,16 @@ class AnalyticsService:
             return []
 
     def get_top_games(self, db, limit: int = 10):
-        """Get most-picked games."""
+        """Get most-picked games, including a human-readable name.
+
+        Pick audit entries store the game's display name in ``description``;
+        ``func.max`` gives a stable representative name per game id.
+        """
         try:
             results = db.query(
                 AuditLog.resource_id,
-                func.count(AuditLog.id).label('count')
+                func.count(AuditLog.id).label('count'),
+                func.max(AuditLog.description).label('name'),
             ).filter(
                 and_(
                     AuditLog.action == 'pick',
@@ -83,22 +88,15 @@ class AnalyticsService:
             ).limit(limit).all()
 
             return [
-                {'game_id': r[0], 'pick_count': r[1] or 0}
+                {
+                    'game_id': r[0],
+                    'game_name': r[2] or None,
+                    'pick_count': r[1] or 0,
+                }
                 for r in results
             ]
         except Exception:
             return []
-
-    def get_genre_popularity(self, db):
-        """Get picks broken down by genre."""
-        # This would require game detail lookups - return simplified version
-        return {
-            'action': 25,
-            'adventure': 18,
-            'rpg': 22,
-            'strategy': 15,
-            'other': 20,
-        }
 
     def get_platform_stats(self, db):
         """Get library distribution across platforms."""

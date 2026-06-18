@@ -39,11 +39,12 @@ async function openAnalyticsDashboard() {
 
         // Render top games
         if (data.top_games && data.top_games.length > 0) {
-            const gamesList = data.top_games.map(g => 
-                `<div style="padding:8px; border-bottom:1px solid #ddd;">
-                    <strong>Game #${g.game_id}</strong> - ${g.pick_count} picks
-                </div>`
-            ).join('');
+            const gamesList = data.top_games.map(g => {
+                const label = g.game_name || `Game #${g.game_id}`;
+                return `<div style="padding:8px; border-bottom:1px solid #ddd;">
+                    <strong>${escapeHtml(label)}</strong> - ${g.pick_count} picks
+                </div>`;
+            }).join('');
             document.getElementById('analytics-top-games').innerHTML = gamesList;
         }
 

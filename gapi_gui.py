@@ -2980,6 +2980,15 @@ def api_pick_game():
                 except Exception as _wh_exc:
                     gui_logger.debug("WebhookNotifier error: %s", _wh_exc)
 
+                # Record the pick for analytics (best-effort; never blocks the
+                # response). The analytics dashboard reads 'pick' audit entries
+                # for total picks, trends, and top-games metrics.
+                _audit(
+                    'pick', resource_type='game',
+                    resource_id=str(game_id) if game_id else (str(app_id) if app_id else None),
+                    description=name, actor=username,
+                )
+
                 return jsonify(response)
 
             except Exception as e:
@@ -4450,9 +4459,17 @@ def api_multiuser_pick():
         
         if not game:
             return jsonify({'error': 'No common games found matching filters'}), 404
-        
+
         app_id = game.get('appid')
-        
+        game_id = game.get('game_id') or (f'steam:{app_id}' if app_id else None)
+
+        # Record the pick for analytics (best-effort; never blocks the response).
+        _audit(
+            'pick', resource_type='game',
+            resource_id=str(game_id) if game_id else (str(app_id) if app_id else None),
+            description=game.get('name', 'Unknown'),
+        )
+
         return jsonify({
             'app_id': app_id,
             'name': game.get('name', 'Unknown'),
@@ -9727,10 +9744,12 @@ def api_analytics_dashboard():
             'timestamp': datetime.utcnow().isoformat(),
             'summary': _analytics_service.get_dashboard_summary(db),
             'pick_trends_7d': _analytics_service.get_pick_trends(db, 7),
+            'active_users_7d': _analytics_service.get_active_users(db, 7),
             'top_games': _analytics_service.get_top_games(db, 10),
             'platform_stats': _analytics_service.get_platform_stats(db),
             'engagement': _analytics_service.get_engagement_metrics(db),
             'chat_stats': _analytics_service.get_chat_stats(db),
+            'review_stats': _analytics_service.get_review_stats(db),
         }
         return jsonify(data)
     except Exception as e:
