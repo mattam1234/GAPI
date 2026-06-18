@@ -6196,99 +6196,12 @@ def api_create_discord_event_for_schedule(event_id: str):
 
 
 
-@app.route('/api/playlists', methods=['GET'])
-@require_login
-def api_list_playlists():
-    """List all playlists."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        return jsonify({'playlists': p.playlist_service.list_all()})
+# MIGRATED to FastAPI: see backend/routers/playlists.py. The /api/playlists
+# routes (list, create, delete, and games add/list/remove) are served
+# natively by the FastAPI app (backend.main:app), reusing the same per-user
+# picker playlist_service. Removed from the Flask layer per the strangler-fig
+# migration (docs/MODERNIZATION_BRIEF.md).
 
-
-@app.route('/api/playlists', methods=['POST'])
-@require_login
-def api_create_playlist():
-    """Create a new playlist. Expects JSON ``{"name": "..."}``."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    data = request.json or {}
-    name = (data.get('name') or '').strip()
-    if not name:
-        return jsonify({'error': 'name is required'}), 400
-    with picker_lock:
-        created = p.playlist_service.create(name)
-    if not created:
-        return jsonify({'error': 'Playlist already exists'}), 409
-    return jsonify({'success': True, 'name': name}), 201
-
-
-@app.route('/api/playlists/<name>', methods=['DELETE'])
-@require_login
-def api_delete_playlist(name: str):
-    """Delete a playlist by name."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        deleted = p.playlist_service.delete(name)
-    if not deleted:
-        return jsonify({'error': 'Playlist not found'}), 404
-    return jsonify({'success': True})
-
-
-@app.route('/api/playlists/<name>/games', methods=['GET'])
-@require_login
-def api_get_playlist_games(name: str):
-    """Get all games in a playlist."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        games = p.playlist_service.get_games(name, p.games)
-    if games is None:
-        return jsonify({'error': 'Playlist not found'}), 404
-    return jsonify({'name': name, 'games': games, 'count': len(games)})
-
-
-@app.route('/api/playlists/<name>/games', methods=['POST'])
-@require_login
-def api_add_to_playlist(name: str):
-    """Add a game to a playlist. Expects JSON ``{"game_id": "..."}``."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    data = request.json or {}
-    game_id = str(data.get('game_id', '')).strip()
-    if not game_id:
-        return jsonify({'error': 'game_id is required'}), 400
-    with picker_lock:
-        added = p.playlist_service.add_game(name, game_id)
-    if not added:
-        return jsonify({'error': 'Game already in playlist or invalid playlist'}), 409
-    return jsonify({'success': True})
-
-
-@app.route('/api/playlists/<name>/games/<game_id>', methods=['DELETE'])
-@require_login
-def api_remove_from_playlist(name: str, game_id: str):
-    """Remove a game from a playlist."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        removed = p.playlist_service.remove_game(name, game_id)
-    if not removed:
-        return jsonify({'error': 'Game or playlist not found'}), 404
-    return jsonify({'success': True})
 
 
 # ---------------------------------------------------------------------------
@@ -9455,58 +9368,10 @@ def api_get_user_activity(target_user):
 # ANALYTICS ENDPOINTS
 # ───────────────────────────────────────────────────────────────────────────
 
-@app.route('/api/analytics/dashboard', methods=['GET'])
-@require_login
-def api_analytics_dashboard():
-    """Get analytics dashboard data (admin only)."""
-    if not _analytics_service:
-        return jsonify({'error': 'Analytics service not available'}), 503
-    
-    username = get_current_username()
-    db = next(database.get_db())
-    try:
-        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        data = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'summary': _analytics_service.get_dashboard_summary(db),
-            'pick_trends_7d': _analytics_service.get_pick_trends(db, 7),
-            'active_users_7d': _analytics_service.get_active_users(db, 7),
-            'top_games': _analytics_service.get_top_games(db, 10),
-            'platform_stats': _analytics_service.get_platform_stats(db),
-            'engagement': _analytics_service.get_engagement_metrics(db),
-            'chat_stats': _analytics_service.get_chat_stats(db),
-            'review_stats': _analytics_service.get_review_stats(db),
-        }
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if db:
-            db.close()
-
-
-@app.route('/api/analytics/export', methods=['GET'])
-@require_login
-def api_analytics_export():
-    """Export all analytics as JSON (admin only)."""
-    if not _analytics_service:
-        return jsonify({'error': 'Analytics service not available'}), 503
-    
-    username = get_current_username()
-    db = next(database.get_db())
-    try:
-        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        data = _analytics_service.get_export_data(db)
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if db:
-            db.close()
+# MIGRATED to FastAPI: see backend/routers/analytics.py. The /api/analytics
+# dashboard + export routes are served natively by the FastAPI app
+# (backend.main:app), reusing the same AnalyticsService. Removed from the
+# Flask layer per the strangler-fig migration (docs/MODERNIZATION_BRIEF.md).
 
 
 # ───────────────────────────────────────────────────────────────────────────
