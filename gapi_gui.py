@@ -7181,58 +7181,12 @@ def api_unfollow_user(username):
 # Direct Messaging API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/messages/conversations', methods=['GET'])
-@require_login
-def api_get_conversations():
-    """Get DM conversations for the current user."""
-    username = get_current_username()
-    if DB_AVAILABLE and ensure_db_available():
-        db = next(database.get_db())
-        try:
-            convos = database.get_dm_conversations(db, username)
-            return jsonify({'conversations': convos})
-        finally:
-            if db:
-                db.close()
-    return jsonify({'conversations': []})
+# MIGRATED to FastAPI: see backend/routers/messages.py. The /api/messages
+# routes (conversations + per-user thread GET/POST) are served natively by
+# the FastAPI app (backend.main:app), reusing the same DB-backed DM helpers.
+# Removed from the Flask layer per the strangler-fig migration
+# (docs/MODERNIZATION_BRIEF.md).
 
-
-@app.route('/api/messages/<username>', methods=['GET', 'POST'])
-@require_login
-def api_messages(username):
-    """Get or send direct messages with another user."""
-    try:
-        decoded = unquote(username) if '%' in username else username
-        current = get_current_username()
-
-        if request.method == 'GET':
-            if DB_AVAILABLE and ensure_db_available():
-                db = next(database.get_db())
-                try:
-                    messages = database.get_direct_messages(db, current, decoded)
-                    return jsonify({'messages': messages})
-                finally:
-                    if db:
-                        db.close()
-            return jsonify({'messages': []})
-        else:  # POST
-            data = request.get_json() or {}
-            msg = data.get('message', '').strip()
-            if not msg:
-                return jsonify({'error': 'Message required'}), 400
-            if DB_AVAILABLE and ensure_db_available():
-                db = next(database.get_db())
-                try:
-                    result = database.create_direct_message(db, current, decoded, msg)
-                    if result:
-                        return jsonify({'success': True, 'message': result})
-                    return jsonify({'error': 'Failed to send message'}), 500
-                finally:
-                    if db:
-                        db.close()
-            return jsonify({'success': True, 'message': {'sender': current, 'message': msg}})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 # ---------------------------------------------------------------------------

@@ -162,6 +162,7 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Ignored-games | `/api/ignored-games` (list + toggle) | `backend/routers/ignored.py` | `tests/test_backend_ignored.py` |
 | Backlog | `/api/backlogs[...]` (collections) + `/api/backlog[...]` (status) | `backend/routers/backlog.py` | `tests/test_backend_backlog.py` + ported `tests/test_backlog_collections.py` |
 | Voting | `/api/voting/[create\|{id}/vote\|status\|close]` | `backend/routers/voting.py` | `tests/test_backend_voting.py` |
+| Messages (DM) | `/api/messages/conversations`, `/api/messages/{user}` | `backend/routers/messages.py` | `tests/test_backend_messages.py` |
 
 **Patterns proven so far:** admin-gated + service singleton (analytics);
 per-user picker-backed, 500-on-uninit (reviews, tags); picker-backed,
