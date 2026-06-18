@@ -7193,55 +7193,12 @@ def api_unfollow_user(username):
 # Library Comparison API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/library/compare/<username>', methods=['GET'])
-@require_login
-def api_compare_libraries(username):
-    """Compare the current user's game library with one other user's library.
+# MIGRATED to FastAPI: see backend/routers/library.py. The
+# /api/library/compare/{username} route is served natively by the FastAPI
+# app (backend.main:app), reusing the same cached-library helpers. Removed
+# from the Flask layer per the strangler-fig migration
+# (docs/MODERNIZATION_BRIEF.md).
 
-    Returns per-user game lists plus shared/exclusive sets.
-    """
-    current = get_current_username()
-    other = unquote(username) if '%' in username else username
-
-    if not ensure_db_available():
-        return jsonify({'error': 'Database not available'}), 503
-
-    try:
-        db = database.SessionLocal()
-        try:
-            if _library_service:
-                your_games_raw = _library_service.get_cached(db, current)
-                their_games_raw = _library_service.get_cached(db, other)
-            else:
-                your_games_raw = database.get_cached_library(db, current)
-                their_games_raw = database.get_cached_library(db, other)
-        finally:
-            db.close()
-
-        def _game_key(g):
-            return g.get('app_id') or g.get('name', '')
-
-        your_map = {_game_key(g): g.get('name', 'Unknown') for g in your_games_raw if _game_key(g)}
-        their_map = {_game_key(g): g.get('name', 'Unknown') for g in their_games_raw if _game_key(g)}
-
-        shared_keys = set(your_map) & set(their_map)
-        shared_games = sorted(your_map[k] for k in shared_keys)
-        your_only = sorted(your_map[k] for k in set(your_map) - shared_keys)
-        their_only = sorted(their_map[k] for k in set(their_map) - shared_keys)
-
-        return jsonify({
-            'your_games': sorted(your_map.values()),
-            'their_games': sorted(their_map.values()),
-            'shared_games': shared_games,
-            'your_only': your_only,
-            'their_only': their_only,
-            'your_count': len(your_map),
-            'their_count': len(their_map),
-            'shared_count': len(shared_games),
-        })
-    except Exception as e:
-        gui_logger.error(f"Error comparing libraries for {current} vs {other}: {e}")
-        return jsonify({'error': str(e)}), 500
 
 
 # ---------------------------------------------------------------------------
