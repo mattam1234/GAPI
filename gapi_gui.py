@@ -6597,98 +6597,12 @@ def api_delete_budget(game_id: str):
 # Wishlist & Sale Alerts API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/wishlist', methods=['GET'])
-@require_login
-def api_get_wishlist():
-    """Return all wishlist entries."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        entries = list(p.wishlist_service.get_all().values())
-    return jsonify({'entries': entries, 'count': len(entries)})
+# MIGRATED to FastAPI: see backend/routers/wishlist.py. The /api/wishlist
+# routes (list, add, remove, sale check) are now served natively by the
+# FastAPI app (backend.main:app), reusing the same per-user picker
+# wishlist_service. Removed from the Flask layer per the strangler-fig
+# migration (docs/MODERNIZATION_BRIEF.md).
 
-
-@app.route('/api/wishlist', methods=['POST'])
-@require_login
-def api_add_to_wishlist():
-    """Add or update a game in the wishlist.
-
-    Expected JSON body::
-
-        {
-            "game_id":      "steam:620",  // required
-            "name":         "Portal 2",   // required
-            "platform":     "steam",      // optional, default "steam"
-            "target_price": 4.99,         // optional – alert when price <= this
-            "notes":        "Want this"   // optional
-        }
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    data = request.json or {}
-    game_id = (data.get('game_id') or '').strip()
-    name = (data.get('name') or '').strip()
-    if not game_id:
-        return jsonify({'error': 'game_id is required'}), 400
-    if not name:
-        return jsonify({'error': 'name is required'}), 400
-    platform = str(data.get('platform', 'steam')).strip().lower() or 'steam'
-    notes = str(data.get('notes', ''))
-    target_price = data.get('target_price')
-    if target_price is not None:
-        try:
-            target_price = float(target_price)
-        except (TypeError, ValueError):
-            return jsonify({'error': 'target_price must be a number'}), 400
-    with picker_lock:
-        ok = p.wishlist_service.add(game_id, name, platform=platform,
-                                    target_price=target_price, notes=notes)
-    if not ok:
-        return jsonify({'error': 'target_price must not be negative'}), 400
-    return jsonify({'success': True, 'game_id': game_id}), 201
-
-
-@app.route('/api/wishlist/<path:game_id>', methods=['DELETE'])
-@require_login
-def api_remove_from_wishlist(game_id: str):
-    """Remove a game from the wishlist."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    with picker_lock:
-        removed = p.wishlist_service.remove(game_id)
-    if not removed:
-        return jsonify({'error': 'Game not found in wishlist'}), 404
-    return jsonify({'success': True})
-
-
-@app.route('/api/wishlist/sales', methods=['GET'])
-@require_login
-def api_check_wishlist_sales():
-    """Check current Steam prices and return wishlist items that are on sale
-    or at/below the user-set target price.
-
-    This makes live Steam Store API calls so may take a few seconds for large
-    wishlists.  Results are not cached.
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    if not p.wishlist_service.get_all():
-        return jsonify({'sales': [], 'checked': 0})
-    if not p.steam_client or not isinstance(p.steam_client, gapi.SteamAPIClient):
-        return jsonify({'error': 'Steam client not available; cannot check prices'}), 503
-    with picker_lock:
-        sales = p.wishlist_service.check_sales(p.steam_client)
-        checked = len([e for e in p.wishlist_service.get_all().values()
-                       if e.get('platform', 'steam') == 'steam'])
-    return jsonify({'sales': sales, 'checked': checked, 'on_sale_count': len(sales)})
 
 
 # ---------------------------------------------------------------------------
