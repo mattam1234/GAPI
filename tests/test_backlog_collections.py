@@ -8,9 +8,18 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient
+
 import gapi_gui
 from app.repositories.backlog_repository import BacklogRepository
 from app.services.backlog_service import BacklogService
+from backend.main import app as fastapi_app
+
+
+def _session_cookie(username):
+    """Forge the signed Flask session cookie the FastAPI auth bridge reads."""
+    serializer = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    return serializer.dumps({'username': username})
 
 
 def _read(*parts):
@@ -81,9 +90,11 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # The /api/backlog routes are migrated to FastAPI; drive them through the
+        # FastAPI app. Unmigrated paths (e.g. /api/library) fall through to the
+        # mounted Flask app. Auth uses the same signed Flask session cookie.
+        self.client = TestClient(fastapi_app)
+        self.client.cookies.set('session', _session_cookie('alice'))
 
     def _fake_picker(self):
         return SimpleNamespace(games=[
@@ -105,7 +116,7 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
                 'is_shared': True,
             })
             self.assertEqual(create_resp.status_code, 201)
-            backlog_id = create_resp.get_json()['id']
+            backlog_id = create_resp.json()['id']
 
             status_resp = self.client.post(f'/api/backlog/steam:620', json={
                 'status': 'playing',
@@ -113,12 +124,11 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
             })
             self.assertEqual(status_resp.status_code, 200)
 
-            with self.client.session_transaction() as sess:
-                sess['username'] = 'bob'
+            self.client.cookies.set('session', _session_cookie('bob'))
 
             list_resp = self.client.get(f'/api/backlog?collection_id={backlog_id}')
             self.assertEqual(list_resp.status_code, 200)
-            data = list_resp.get_json()
+            data = list_resp.json()
             self.assertEqual(data['active_backlog_id'], backlog_id)
             self.assertEqual(len(data['games']), 1)
             self.assertEqual(data['games'][0]['backlog_status'], 'playing')
@@ -131,8 +141,7 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
             members=['bob'],
             is_shared=True,
         )
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'bob'
+        self.client.cookies.set('session', _session_cookie('bob'))
         with patch.object(gapi_gui, '_shared_backlog_service', service), \
                 patch.object(gapi_gui, 'ensure_picker_initialized', return_value=self._fake_picker()):
             delete_resp = self.client.delete(f'/api/backlogs/{shared["id"]}')
@@ -142,7 +151,7 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
             self.assertEqual(leave_resp.status_code, 200)
 
             list_resp = self.client.get('/api/backlogs')
-            data = list_resp.get_json()
+            data = list_resp.json()
             self.assertNotIn(shared['id'], [backlog['id'] for backlog in data['backlogs']])
 
     def test_backlog_listing_includes_entry_and_invited_counts(self):
@@ -155,7 +164,7 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
                 'is_shared': True,
             })
             self.assertEqual(create_resp.status_code, 201)
-            backlog_id = create_resp.get_json()['id']
+            backlog_id = create_resp.json()['id']
             status_resp = self.client.post('/api/backlog/steam:620', json={
                 'status': 'want_to_play',
                 'collection_id': backlog_id,
@@ -164,7 +173,7 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
 
             list_resp = self.client.get('/api/backlogs')
             self.assertEqual(list_resp.status_code, 200)
-            payload = list_resp.get_json()
+            payload = list_resp.json()
             shared = next(item for item in payload['backlogs'] if item['id'] == backlog_id)
             self.assertEqual(shared['entry_count'], 1)
             self.assertEqual(shared['invited_count'], 1)
@@ -180,7 +189,7 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
 
             list_resp = self.client.get('/api/backlog')
             self.assertEqual(list_resp.status_code, 200)
-            payload = list_resp.get_json()
+            payload = list_resp.json()
             self.assertEqual(len(payload['games']), 1)
             self.assertEqual(payload['games'][0]['game_id'], 'steam:620')
             self.assertEqual(payload['games'][0]['backlog_status'], 'want_to_play')
@@ -194,17 +203,17 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
                 'notes': 'Remember co-op challenge mode',
             })
             self.assertEqual(status_resp.status_code, 200)
-            status_payload = status_resp.get_json()
+            status_payload = status_resp.json()
             self.assertEqual(status_payload['notes'], 'Remember co-op challenge mode')
 
             list_resp = self.client.get('/api/backlog')
             self.assertEqual(list_resp.status_code, 200)
-            list_payload = list_resp.get_json()
+            list_payload = list_resp.json()
             self.assertEqual(list_payload['games'][0]['backlog_notes'], 'Remember co-op challenge mode')
 
             entry_resp = self.client.get('/api/backlog/steam:620')
             self.assertEqual(entry_resp.status_code, 200)
-            entry_payload = entry_resp.get_json()
+            entry_payload = entry_resp.json()
             self.assertEqual(entry_payload['status'], 'playing')
             self.assertEqual(entry_payload['notes'], 'Remember co-op challenge mode')
 
@@ -212,7 +221,7 @@ class TestBacklogCollectionRoutes(unittest.TestCase):
         with patch.object(gapi_gui, 'ensure_db_available', return_value=False):
             response = self.client.get('/api/library')
         self.assertEqual(response.status_code, 200)
-        data = response.get_json()
+        data = response.json()
         self.assertTrue(data['games'])
         first = data['games'][0]
         self.assertIn('game_id', first)

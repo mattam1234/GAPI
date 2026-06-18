@@ -160,13 +160,21 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Playlists | `/api/playlists[...]` (+ games) | `backend/routers/playlists.py` | `tests/test_backend_playlists.py` |
 | Budget | `/api/budget[...]` | `backend/routers/budget.py` | `tests/test_backend_budget.py` |
 | Ignored-games | `/api/ignored-games` (list + toggle) | `backend/routers/ignored.py` | `tests/test_backend_ignored.py` |
+| Backlog | `/api/backlogs[...]` (collections) + `/api/backlog[...]` (status) | `backend/routers/backlog.py` | `tests/test_backend_backlog.py` + ported `tests/test_backlog_collections.py` |
 
 **Patterns proven so far:** admin-gated + service singleton (analytics);
 per-user picker-backed, 500-on-uninit (reviews, tags); picker-backed,
 400-on-uninit (wishlist, playlists, budget); **DB-backed via `SessionLocal` +
 service singletons** (ignored-games).
 
-**Next candidates:** larger slices — backlog and leaderboards.
+**Test porting:** when a domain has existing Flask HTTP tests (e.g. backlog's
+`test_backlog_collections.py`), they are repointed at the FastAPI `TestClient`
+in the same PR — the WSGI fallback means such tests can still reach any
+unmigrated routes they touch (e.g. `/api/library`).
+
+**Next candidates:** leaderboards (needs untangling — fragmented across 3
+locations, one route uses raw SQL instead of `leaderboard_service`), then the
+core multi-route domains (auth/setup, picks, schedule, achievements, chat).
 
 > Larger slices carry caveats: **backlog** has existing Flask HTTP tests
 > (`test_backlog_collections.py`, `test_dashboard_filters.py`) to port; the
