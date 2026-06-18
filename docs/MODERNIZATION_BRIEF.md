@@ -179,6 +179,13 @@ remain in Flask.
 | Achievements (hunts) | `GET /api/achievements`, `POST /api/achievement-hunt`, `PUT /api/achievement-hunt/{id}` | `backend/routers/achievements.py` | `tests/test_backend_achievements.py` |
 | Achievement challenges | `/api/achievement-challenges[/{id}][/join\|/progress]` (6 routes) | `backend/routers/challenges.py` | `tests/test_backend_challenges.py` |
 | Data export | `GET /api/export/[library\|favorites\|user-data]` | `backend/routers/export.py` | `tests/test_backend_export.py` |
+| Notification prefs/history | `GET/PUT /api/notifications/preferences`, `GET /api/notifications/history` | `backend/routers/notifications.py` | ported 3 classes in `test_permissions_notifprefs.py` |
+
+**Mixed-client test file:** `test_permissions_notifprefs.py` tests many
+endpoints, only 3 of which migrated. The session helper now detects the client
+type (Flask `session_transaction` vs FastAPI signed cookie), so the migrated
+classes use the FastAPI `TestClient` while the still-Flask classes (permissions,
+broadcast, error-rate) keep the Flask client — one file, two backends.
 
 **Partial:** the 3 export GETs (CSV/JSON) are migrated; `POST
 /api/import/user-data` stays in Flask (dual JSON/multipart upload — needs

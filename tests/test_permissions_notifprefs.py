@@ -30,18 +30,29 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
 import database
+from backend.main import app as _fastapi_app
+
+
+def _login(client, username):
+    """Set the logged-in user on either a Flask or FastAPI test client."""
+    if hasattr(client, 'session_transaction'):
+        with client.session_transaction() as sess:
+            sess['username'] = username
+    else:
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        client.cookies.set('session', ser.dumps({'username': username}))
 
 
 def _set_admin_session(client):
-    with client.session_transaction() as sess:
-        sess['username'] = 'admin'
+    _login(client, 'admin')
 
 
 def _set_user_session(client, username='bob'):
-    with client.session_transaction() as sess:
-        sess['username'] = username
+    _login(client, username)
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +324,8 @@ class TestGetNotificationPrefs(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # Migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
         resp = self.client.get('/api/notifications/preferences')
@@ -343,7 +355,7 @@ class TestGetNotificationPrefs(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/notifications/preferences')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         for f in ('email_enabled', 'push_enabled', 'digest_frequency'):
             self.assertIn(f, data)
 
@@ -354,7 +366,7 @@ class TestGetNotificationPrefs(unittest.TestCase):
              patch('database.get_notification_prefs', return_value=self._fake_prefs()), \
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/notifications/preferences')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['digest_frequency'], 'never')
 
 
@@ -366,7 +378,8 @@ class TestSetNotificationPrefs(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # Migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
         resp = self.client.put('/api/notifications/preferences', json={'push_enabled': False})
@@ -400,7 +413,7 @@ class TestSetNotificationPrefs(unittest.TestCase):
             # verify the update dict was forwarded
             self.assertIn('email_enabled', args[2] if len(args) > 2 else kwargs.get('updates', {}))
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['digest_frequency'], 'weekly')
 
     def test_db_failure_returns_500(self):
@@ -421,7 +434,8 @@ class TestNotificationHistory(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # Migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
         resp = self.client.get('/api/notifications/history')
@@ -432,7 +446,7 @@ class TestNotificationHistory(unittest.TestCase):
         with patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.get('/api/notifications/history')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['notifications'], [])
         self.assertEqual(data['total'], 0)
 
@@ -448,7 +462,7 @@ class TestNotificationHistory(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/notifications/history')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('notifications', data)
         self.assertIn('total', data)
         self.assertEqual(data['total'], 1)
@@ -463,7 +477,7 @@ class TestNotificationHistory(unittest.TestCase):
              patch('database.get_notifications', return_value=fake_notifs), \
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/notifications/history?limit=3&offset=2')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['total'], 10)
         self.assertEqual(len(data['notifications']), 3)
 

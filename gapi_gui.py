@@ -12358,92 +12358,10 @@ def api_admin_bulk_assign_role():
 # Notification Preferences  (Tier 2, item 6)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/notifications/preferences', methods=['GET'])
-@require_login
-def api_get_notification_prefs():
-    """Return the current user's notification preferences (login required).
-
-    Response JSON fields:
-      ``email_enabled``, ``push_enabled``, ``friend_requests``,
-      ``challenge_updates``, ``trade_offers``, ``team_events``,
-      ``system_announcements``, ``digest_frequency``, ``updated_at``
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    username = get_current_username()
-    try:
-        db = next(database.get_db())
-        prefs = database.get_notification_prefs(db, username)
-        return jsonify(prefs)
-    except Exception as e:
-        gui_logger.error('api_get_notification_prefs error: %s', e)
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/notifications/preferences', methods=['PUT'])
-@require_login
-def api_set_notification_prefs():
-    """Update the current user's notification preferences (login required).
-
-    Accepted JSON body fields (all optional):
-      ``email_enabled`` (bool), ``push_enabled`` (bool),
-      ``friend_requests`` (bool), ``challenge_updates`` (bool),
-      ``trade_offers`` (bool), ``team_events`` (bool),
-      ``system_announcements`` (bool),
-      ``digest_frequency`` (str: ``'never'``|``'daily'``|``'weekly'``)
-
-    Response JSON: updated preference dict.
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    username = get_current_username()
-    data = request.get_json(silent=True, force=True) or {}
-    try:
-        db = next(database.get_db())
-        updated = database.set_notification_prefs(db, username, data)
-        if not updated:
-            return jsonify({'error': 'Failed to save preferences'}), 500
-        return jsonify(updated)
-    except Exception as e:
-        gui_logger.error('api_set_notification_prefs error: %s', e)
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/notifications/history', methods=['GET'])
-@require_login
-def api_notification_history():
-    """Return paginated notification history for the current user (login required).
-
-    Query parameters:
-      ``limit``   – max results (default 50, max 200)
-      ``offset``  – skip N records (default 0)
-      ``unread``  – if ``'true'``, return only unread notifications
-
-    Response JSON:
-      ``notifications`` – list of notification objects
-      ``total``         – total count of notifications for this user
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'notifications': [], 'total': 0})
-    username = get_current_username()
-    try:
-        limit = max(1, min(200, int(request.args.get('limit', 50))))
-    except (ValueError, TypeError):
-        limit = 50
-    try:
-        offset = max(0, int(request.args.get('offset', 0)))
-    except (ValueError, TypeError):
-        offset = 0
-    unread_only = request.args.get('unread', '').lower() in ('true', '1', 'yes')
-    try:
-        db = next(database.get_db())
-        notifications = database.get_notifications(db, username, unread_only=unread_only)
-        total = len(notifications)
-        page = notifications[offset: offset + limit]
-        return jsonify({'notifications': page, 'total': total})
-    except Exception as e:
-        gui_logger.error('api_notification_history error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: see backend/routers/notifications.py. The
+# /api/notifications/preferences (GET/PUT) and /api/notifications/history (GET)
+# routes are served natively by the FastAPI app. The admin broadcast/send
+# /api/notifications/* routes remain in Flask.
 
 
 @app.route('/api/admin/notifications/broadcast', methods=['POST'])
