@@ -185,6 +185,8 @@ remain in Flask.
 | Multi-user pick | `POST /api/multiuser/pick` | `backend/routers/multiuser.py` | `tests/test_backend_multiuser.py` |
 
 | Pick (core) | `POST /api/pick` (the 314-line god-handler) | `backend/routers/pick.py` | `tests/test_backend_pick.py` + ported `test_analytics_service.py::TestPickAuditWiring` |
+| Game details | `GET /api/game/{app_id}/details` | `backend/routers/game.py` | `tests/test_backend_game.py` |
+| Friends | `GET /api/friends`, add/remove/follow | `backend/routers/friends.py` | `tests/test_backend_friends.py` |
 
 **Picks status:** `/api/pick` and `/api/multiuser/pick` migrated. The single
 biggest handler in the app (filters, rarity, collection resolution, Discord RPC,

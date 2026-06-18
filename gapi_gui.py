@@ -4381,97 +4381,7 @@ def _ical_escape(text) -> str:
 # Friend Activity API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/friends')
-@require_login
-def api_get_friends():
-    """Return the current user's Steam friends and their recent activity.
-
-    Response JSON::
-
-        {
-          "friends": [
-            {
-              "steamid": "...",
-              "personaname": "...",
-              "avatarfull": "...",
-              "personastate": 1,
-              "current_game": "...",    // present if in-game
-              "current_gameid": "...",  // present if in-game
-              "recently_played": [      // up to 5 games
-                {"appid": 620, "name": "Portal 2",
-                 "playtime_2weeks": 60, "playtime_forever": 2400}
-              ]
-            }
-          ]
-        }
-
-    Returns 503 if Steam is not configured or the profile is private.
-    """
-    username = get_current_username()
-    user_ids = user_manager.get_user_ids(username)
-    steam_id = user_ids.get('steam_id', '')
-
-    if not steam_id or gapi.is_placeholder_value(steam_id):
-        return jsonify({'error': 'Steam ID not configured'}), 503
-
-    p = ensure_picker_initialized(username)
-    if not p or not p.steam_client or not isinstance(p.steam_client, gapi.SteamAPIClient):
-        return jsonify({'error': 'Steam client not available'}), 503
-
-    steam_client: gapi.SteamAPIClient = p.steam_client
-
-    # Fetch friend list
-    friends_raw = steam_client.get_friend_list(steam_id)
-    if not friends_raw:
-        return jsonify({'friends': []}), 200
-
-    friend_ids = [f['steamid'] for f in friends_raw]
-
-    # Fetch profile summaries (names, avatars, current game)
-    summaries = steam_client.get_player_summaries(friend_ids)
-    summary_map = {s['steamid']: s for s in summaries}
-
-    # Build response, fetching recently-played for online/in-game friends first
-    result = []
-    for fid in friend_ids:
-        summary = summary_map.get(fid, {})
-        entry: Dict = {
-            'steamid': fid,
-            'personaname': summary.get('personaname', fid),
-            'avatarfull': summary.get('avatarfull', ''),
-            'personastate': summary.get('personastate', 0),
-        }
-        if summary.get('gameextrainfo'):
-            entry['current_game'] = summary['gameextrainfo']
-        if summary.get('gameid'):
-            entry['current_gameid'] = summary['gameid']
-
-        # Fetch recently played (best-effort)
-        try:
-            recent = steam_client.get_recently_played(fid, count=5)
-            entry['recently_played'] = [
-                {
-                    'appid': g['appid'],
-                    'name': g.get('name', ''),
-                    'playtime_2weeks': g.get('playtime_2weeks', 0),
-                    'playtime_forever': g.get('playtime_forever', 0),
-                }
-                for g in recent
-            ]
-        except Exception:
-            entry['recently_played'] = []
-
-        result.append(entry)
-
-    # Sort: in-game first, then online, then offline
-    def _sort_key(f):
-        if f.get('current_game'):
-            return 0
-        state = f.get('personastate', 0)
-        return 1 if state > 0 else 2
-
-    result.sort(key=_sort_key)
-    return jsonify({'friends': result})
+# MIGRATED to FastAPI: GET /api/friends -> backend/routers/friends.py
 
 
 # ---------------------------------------------------------------------------
@@ -4865,43 +4775,13 @@ def api_get_challenges():
     return jsonify({'challenges': challenges, 'total_xp': total_xp})
 
 
-@app.route('/api/friends/add', methods=['POST'])
-@require_login
-def api_add_friend():
-    """Send friend request to user"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    target = data.get('username', '')
-    
-    if not target:
-        return jsonify({'error': 'Username required'}), 400
-    
-    if target == username:
-        return jsonify({'error': 'Cannot friend yourself'}), 400
-    
-    return jsonify({'success': True, 'message': f'Friend request sent to {target}'})
+# MIGRATED to FastAPI: POST /api/friends/add -> backend/routers/friends.py
 
 
-@app.route('/api/friends/<username>', methods=['DELETE'])
-@require_login
-def api_remove_friend(username):
-    """Remove a friend"""
-    try:
-        decoded = unquote(username) if '%' in username else username
-        return jsonify({'success': True, 'message': f'Removed {decoded}'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: DELETE /api/friends/<username> -> backend/routers/friends.py
 
 
-@app.route('/api/friends/follow/<username>', methods=['DELETE'])
-@require_login
-def api_unfollow_user(username):
-    """Unfollow a user"""
-    try:
-        decoded = unquote(username) if '%' in username else username
-        return jsonify({'success': True, 'message': f'Unfollowed {decoded}'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: DELETE /api/friends/follow/<username> -> backend/routers/friends.py
 
 
 # ---------------------------------------------------------------------------
