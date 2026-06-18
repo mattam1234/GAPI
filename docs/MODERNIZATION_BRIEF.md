@@ -166,6 +166,14 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Library compare | `/api/library/compare/{username}` | `backend/routers/library.py` | `tests/test_backend_library.py` |
 | Profile | `/api/profile/me`, `/api/profile/update` | `backend/routers/profile.py` | `tests/test_backend_profile.py` |
 | Sessions | `/api/sessions/history` | `backend/routers/sessions.py` | `tests/test_backend_sessions.py` |
+| Schedule (chunk 1) | `/api/schedules` collections (list/create/update/delete) | `backend/routers/schedule.py` | `tests/test_backend_schedule.py` |
+
+**Partial-domain migration:** schedule is large (17 routes), so it migrates in
+chunks. Chunk 1 = the `/api/schedules` collection CRUD (no test coupling).
+Still in Flask pending follow-up chunks: the `/api/schedule[...]` event CRUD +
+RSVP, fuzzy search, Discord events, and iCal export — these have existing Flask
+HTTP tests (`test_achievement_schedule.py`, `test_schedule_rsvp_validation.py`,
+`test_schedule_discord_event.py`, `test_schedule_ical_export.py`) to port.
 
 **Patterns proven so far:** admin-gated + service singleton (analytics);
 per-user picker-backed, 500-on-uninit (reviews, tags); picker-backed,

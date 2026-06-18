@@ -4850,108 +4850,13 @@ def api_get_schedule():
     })
 
 
-@app.route('/api/schedules', methods=['GET'])
-@require_login
-def api_list_schedules():
-    """List schedule collections available to the current user."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    requested_schedule_id = request.args.get('schedule_id')
-    with picker_lock:
-        schedules = p.schedule_service.list_schedules(username=username)
-        active_schedule_id = p.schedule_service.resolve_schedule_for_user(requested_schedule_id, username)
-    return jsonify({
-        'schedules': schedules,
-        'count': len(schedules),
-        'active_schedule_id': active_schedule_id,
-    })
+# MIGRATED to FastAPI (chunk 1 of the schedule domain): see
+# backend/routers/schedule.py. The /api/schedules collection routes (list,
+# create, update, delete) are served natively by the FastAPI app
+# (backend.main:app), reusing the per-user picker schedule_service. The
+# /api/schedule event routes below remain in Flask pending follow-up chunks.
+# (docs/MODERNIZATION_BRIEF.md)
 
-
-@app.route('/api/schedules', methods=['POST'])
-@require_login
-def api_create_schedule():
-    """Create a personal or shared schedule collection."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    data = request.json or {}
-    name = str(data.get('name', '')).strip()
-    if not name:
-        return jsonify({'error': 'name is required'}), 400
-    raw_members = data.get('members', [])
-    if isinstance(raw_members, str):
-        members = [value.strip() for value in raw_members.split(',') if value.strip()]
-    else:
-        members = [str(value).strip() for value in (raw_members or []) if str(value).strip()]
-    is_shared = bool(data.get('is_shared', True))
-    with picker_lock:
-        schedule = p.schedule_service.create_schedule(
-            name=name,
-            owner_username=username,
-            members=members,
-            is_shared=is_shared,
-        )
-    return jsonify(schedule), 201
-
-
-@app.route('/api/schedules/<schedule_id>', methods=['PUT'])
-@require_login
-def api_update_schedule(schedule_id: str):
-    """Rename or update sharing for a schedule collection."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    data = request.json or {}
-    name = str(data.get('name', '')).strip()
-    if not name:
-        return jsonify({'error': 'name is required'}), 400
-    raw_members = data.get('members', [])
-    if isinstance(raw_members, str):
-        members = [value.strip() for value in raw_members.split(',') if value.strip()]
-    else:
-        members = [str(value).strip() for value in (raw_members or []) if str(value).strip()]
-    is_shared = data.get('is_shared')
-    with picker_lock:
-        schedule = p.schedule_service.update_schedule(
-            schedule_id=schedule_id,
-            username=username,
-            name=name,
-            members=members,
-            is_shared=bool(is_shared) if is_shared is not None else None,
-        )
-    if schedule is None:
-        return jsonify({'error': 'Schedule not found'}), 404
-    return jsonify(schedule)
-
-
-@app.route('/api/schedules/<schedule_id>', methods=['DELETE'])
-@require_login
-def api_delete_schedule(schedule_id: str):
-    """Delete a schedule collection owned by the current user."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p:
-        return jsonify({'error': 'Not initialized'}), 400
-    safe_schedule_id = str(schedule_id or '').strip()
-    if not safe_schedule_id:
-        return jsonify({'error': 'Schedule not found'}), 404
-    default_schedule_id = f'personal:{str(username or "").strip().lower()}'
-    with picker_lock:
-        schedule = p.schedule_service.get_schedule(safe_schedule_id)
-        if not schedule or not p.schedule_service._can_access_schedule(schedule, username):
-            return jsonify({'error': 'Schedule not found'}), 404
-        if str(schedule.get('owner') or '').strip().lower() != str(username or '').strip().lower():
-            return jsonify({'error': 'Only the schedule owner can delete it'}), 403
-        if safe_schedule_id == default_schedule_id:
-            return jsonify({'error': 'Your personal schedule cannot be deleted'}), 400
-        deleted = p.schedule_service.remove_schedule(safe_schedule_id, username=username)
-    if not deleted:
-        return jsonify({'error': 'Schedule not found'}), 404
-    return jsonify({'success': True})
 
 
 @app.route('/api/schedule', methods=['POST'])
