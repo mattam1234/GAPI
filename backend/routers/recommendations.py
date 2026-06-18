@@ -65,6 +65,50 @@ def get_recommendations(request: Request, username: str = Depends(require_login)
     return {"recommendations": recs}
 
 
+@router.get("/variant")
+def recommendation_variant(request: Request, username: str = Depends(require_login)):
+    """Return the A/B experiment variant assigned to the current user."""
+    experiment_name = str(request.query_params.get("experiment", "")).strip()
+    if not experiment_name:
+        return _err(400, "'experiment' query parameter is required")
+    if not gapi_gui.DB_AVAILABLE:
+        return {"experiment": experiment_name, "variant": None}
+    try:
+        db = next(gapi_gui.database.get_db())
+        variant = gapi_gui.database.get_or_assign_variant(db, username, experiment_name)
+        return {"experiment": experiment_name, "variant": variant}
+    except Exception as e:
+        gapi_gui.gui_logger.error("recommendation_variant error: %s", e)
+        return _err(500, str(e))
+
+
+@router.get("/ai")
+def ai_recommendations(username: str = Depends(require_login)):
+    """AI recommendations from the ai_recommendations table (raw SQL).
+
+    Note: like the legacy handler this reads via ``db_service`` (undefined in
+    production), so it falls back to the default recommendation set.
+    """
+    try:
+        db = gapi_gui.db_service.get_db()
+        user = gapi_gui.db_service.get_current_user(username)
+        rec_query = ("SELECT game_name, match_score, reason FROM ai_recommendations "
+                     "WHERE user_id = ? ORDER BY match_score DESC LIMIT 6")
+        rows = db.execute(rec_query, (user.id,)).fetchall()
+        recommendations = [
+            {"id": str(idx), "name": game, "match_score": score, "reason": reason}
+            for idx, (game, score, reason) in enumerate(rows, 1)]
+        return {"recommendations": recommendations}
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error getting AI recommendations: %s", e)
+        return {"recommendations": [
+            {"id": "1", "name": "Baldurs Gate 3", "match_score": 94,
+             "reason": "Similar to games you love"},
+            {"id": "2", "name": "Hollow Knight", "match_score": 87,
+             "reason": "Challenging & story-driven"},
+        ]}
+
+
 @router.get("/smart")
 def smart_recommendations(request: Request, username: str = Depends(require_login)):
     """AI-enhanced multi-factor recommendations (uses the global picker)."""

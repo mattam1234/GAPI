@@ -83,6 +83,27 @@ class BackendRecommendationsTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
         self.assertIn('Failed to generate', resp.json()['error'])
 
+    # --- /ai (db_service undefined in prod -> default set) --------------
+
+    def test_ai_returns_defaults(self):
+        # db_service is undefined in production, so /ai falls back to defaults.
+        resp = self.client.get('/api/recommendations/ai')
+        self.assertEqual(resp.status_code, 200)
+        names = [r['name'] for r in resp.json()['recommendations']]
+        self.assertIn('Baldurs Gate 3', names)
+
+    def test_ai_uses_db_service_when_available(self):
+        # When a db_service is wired, /ai reads the ai_recommendations table.
+        cursor = SimpleNamespace(
+            fetchall=lambda: [('Hades', 92, 'Roguelike you might like')])
+        db = SimpleNamespace(execute=lambda q, p=None: cursor)
+        svc = SimpleNamespace(get_db=lambda: db,
+                              get_current_user=lambda u: SimpleNamespace(id=1))
+        with patch.object(gapi_gui, 'db_service', svc, create=True):
+            resp = self.client.get('/api/recommendations/ai')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['recommendations'][0]['name'], 'Hades')
+
 
 if __name__ == '__main__':
     unittest.main()

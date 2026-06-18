@@ -5047,42 +5047,7 @@ def api_decline_trade(trade_id):
 
 
 # AI Recommendations
-@app.route('/api/recommendations/ai', methods=['GET'])
-@require_login
-def api_get_ai_recommendations():
-    """Get AI-powered game recommendations based on user history"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Get cached recommendations or generate new ones
-        rec_query = """
-            SELECT game_name, match_score, reason FROM ai_recommendations 
-            WHERE user_id = ? 
-            ORDER BY match_score DESC LIMIT 6
-        """
-        recs = db.execute(rec_query, (user.id,)).fetchall()
-        
-        recommendations = []
-        for idx, (game, score, reason) in enumerate(recs, 1):
-            recommendations.append({
-                'id': str(idx),
-                'name': game,
-                'match_score': score,
-                'reason': reason
-            })
-        
-        return jsonify({'recommendations': recommendations})
-    except Exception as e:
-        gui_logger.error(f"Error getting AI recommendations: {e}")
-        # Default recommendations
-        recommendations = [
-            {'id': '1', 'name': 'Baldurs Gate 3', 'match_score': 94, 'reason': 'Similar to games you love'},
-            {'id': '2', 'name': 'Hollow Knight', 'match_score': 87, 'reason': 'Challenging & story-driven'},
-        ]
-        return jsonify({'recommendations': recommendations})
+# MIGRATED to FastAPI: GET /api/recommendations/ai -> backend/routers/recommendations.py
 
 
 # Clans & Teams
@@ -11628,31 +11593,7 @@ def api_update_ab_test(experiment_id: int):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/recommendations/variant', methods=['GET'])
-@require_login
-def api_get_recommendation_variant():
-    """Return the A/B experiment variant assigned to the current user (login required).
-
-    Query parameters:
-      ``experiment``  – experiment name (required)
-
-    Response JSON:
-      ``experiment``  – experiment name
-      ``variant``     – assigned variant string, or ``null`` if no active experiment
-    """
-    experiment_name = request.args.get('experiment', '').strip()
-    if not experiment_name:
-        return jsonify({'error': "'experiment' query parameter is required"}), 400
-    if not DB_AVAILABLE:
-        return jsonify({'experiment': experiment_name, 'variant': None})
-    try:
-        db = next(database.get_db())
-        username = get_current_username()
-        variant = database.get_or_assign_variant(db, username, experiment_name)
-        return jsonify({'experiment': experiment_name, 'variant': variant})
-    except Exception as e:
-        gui_logger.error('api_get_recommendation_variant error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/recommendations/variant -> backend/routers/recommendations.py
 
 
 # ---------------------------------------------------------------------------

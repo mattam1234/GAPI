@@ -19,18 +19,28 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
 import database
+from backend.main import app as _fastapi_app
+
+
+def _login(client, username):
+    if hasattr(client, 'session_transaction'):
+        with client.session_transaction() as sess:
+            sess['username'] = username
+    else:
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        client.cookies.set('session', ser.dumps({'username': username}))
 
 
 def _set_admin_session(client):
-    with client.session_transaction() as sess:
-        sess['username'] = 'admin'
+    _login(client, 'admin')
 
 
 def _set_user_session(client, username='bob'):
-    with client.session_transaction() as sess:
-        sess['username'] = username
+    _login(client, username)
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +313,8 @@ class TestGetRecommendationVariant(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # /api/recommendations/variant is migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
         resp = self.client.get('/api/recommendations/variant?experiment=myexp')
@@ -319,7 +330,7 @@ class TestGetRecommendationVariant(unittest.TestCase):
         with patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.get('/api/recommendations/variant?experiment=myexp')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIsNone(data['variant'])
 
     def test_returns_assigned_variant(self):
@@ -330,7 +341,7 @@ class TestGetRecommendationVariant(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/recommendations/variant?experiment=myexp')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['variant'], 'ml')
         self.assertEqual(data['experiment'], 'myexp')
 
@@ -341,7 +352,7 @@ class TestGetRecommendationVariant(unittest.TestCase):
              patch('database.get_or_assign_variant', return_value=None), \
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/recommendations/variant?experiment=inactive_exp')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIsNone(data['variant'])
 
 

@@ -189,6 +189,14 @@ remain in Flask.
 | Friends | `GET /api/friends`, add/remove/follow | `backend/routers/friends.py` | `tests/test_backend_friends.py` |
 | Admin notifications | `POST /api/admin/notifications/[broadcast\|send-digests]` | `backend/routers/admin_notifications.py` | ported broadcast/digest classes + `tests/test_backend_admin_notifications.py` |
 | Leaderboards | `GET /api/leaderboards`, `/seasonal`, `/api/leaderboard` | `backend/routers/leaderboards.py` | `tests/test_backend_leaderboards.py` |
+| Recommendations | `GET /api/recommendations[/ml\|/smart\|/variant\|/ai]` (5 routes) | `backend/routers/recommendations.py` | `tests/test_backend_recommendations.py` + ported ML/smart/variant classes |
+
+**✅ Recommendations fully migrated** (base + ml + smart + variant + ai). The ML/
+smart/variant test classes authenticated via `@patch('gapi_gui.current_user',...)`
+— which only satisfies the Flask resolver; the ports swap that for a signed
+session cookie (FastAPI's `require_login` reads the cookie). `/ai` references the
+undefined `db_service` (same latent bug as leaderboards) so it returns the
+hardcoded default set in production — preserved.
 
 **Latent bug preserved (leaderboards):** the plural `/api/leaderboards` and
 `/seasonal` handlers reference a module-global `db_service` that is **never
