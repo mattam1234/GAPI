@@ -7681,121 +7681,17 @@ def _make_csv_response(rows: List[Dict], fieldnames: List[str], filename: str) -
     )
 
 
-@app.route('/api/export/library')
-@require_login
-def api_export_library():
-    """Download the full game library as a CSV file.
-
-    Columns: ``app_id``, ``name``, ``platform``, ``playtime_hours``,
-    ``is_favorite``, ``backlog_status``, ``tags``, ``review_rating``,
-    ``review_notes``.
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p or not p.games:
-        return jsonify({'error': 'Library not loaded'}), 400
-
-    with picker_lock:
-        rows = []
-        for game in sorted(p.games, key=lambda g: g.get('name', '').lower()):
-            app_id = game.get('appid') or game.get('id') or ''
-            game_id = game.get('game_id', f"steam:{app_id}")
-            review = p.review_service.get(game_id) or {}
-            rows.append({
-                'app_id': app_id,
-                'name': game.get('name', ''),
-                'platform': game.get('platform', 'steam'),
-                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
-                'is_favorite': 'yes' if p.favorites_service.contains(game_id) else 'no',
-                'backlog_status': (_get_shared_backlog_service().get_status(game_id, username=username)
-                                   if game_id else '') or '',
-                'tags': ','.join(p.tag_service.get(game_id)),
-                'review_rating': review.get('rating', ''),
-                'review_notes': review.get('notes', ''),
-            })
-
-    return _make_csv_response(
-        rows,
-        ['app_id', 'name', 'platform', 'playtime_hours', 'is_favorite',
-         'backlog_status', 'tags', 'review_rating', 'review_notes'],
-        'gapi_library.csv',
-    )
+# MIGRATED to FastAPI: GET /api/export/library -> see backend/routers/export.py
 
 
-@app.route('/api/export/favorites')
-@require_login
-def api_export_favorites():
-    """Download the favorites list as a CSV file.
-
-    Columns: ``app_id``, ``name``, ``platform``, ``playtime_hours``,
-    ``tags``, ``review_rating``, ``review_notes``.
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p or not p.games:
-        return jsonify({'error': 'Library not loaded'}), 400
-
-    with picker_lock:
-        rows = []
-        for game in p.games:
-            game_id = game.get('game_id', '')
-            app_id = game.get('appid') or game.get('id') or ''
-            if not p.favorites_service.contains(game_id):
-                continue
-            review = p.review_service.get(game_id) or {}
-            rows.append({
-                'app_id': app_id,
-                'name': game.get('name', ''),
-                'platform': game.get('platform', 'steam'),
-                'playtime_hours': round(game.get('playtime_forever', 0) / 60, 1),
-                'tags': ','.join(p.tag_service.get(game_id)),
-                'review_rating': review.get('rating', ''),
-                'review_notes': review.get('notes', ''),
-            })
-        rows.sort(key=lambda r: r['name'].lower())
-
-    return _make_csv_response(
-        rows,
-        ['app_id', 'name', 'platform', 'playtime_hours', 'tags',
-         'review_rating', 'review_notes'],
-        'gapi_favorites.csv',
-    )
+# MIGRATED to FastAPI: GET /api/export/favorites -> see backend/routers/export.py
 
 
 # ---------------------------------------------------------------------------
 # User data backup / restore
 # ---------------------------------------------------------------------------
 
-@app.route('/api/export/user-data')
-@require_login
-def api_export_user_data():
-    """Export all persisted data for the current user as a JSON file.
-
-    The downloaded file can be re-imported via ``POST /api/import/user-data``
-    to restore the data on the same or a different GAPI instance.
-
-    Response: ``application/json`` attachment named ``gapi_<username>_backup.json``.
-    """
-    global current_user
-    username = get_current_username()
-    db = next(database.get_db())
-    try:
-        export = database.get_user_data_export(db, username)
-    finally:
-        if db:
-            db.close()
-    if not export:
-        return jsonify({'error': 'No data found for user'}), 404
-    import json as _json
-    payload = _json.dumps(export, indent=2, default=str)
-    from flask import Response as _Response
-    return _Response(
-        payload,
-        mimetype='application/json',
-        headers={
-            'Content-Disposition': f'attachment; filename="gapi_{username}_backup.json"',
-        },
-    )
+# MIGRATED to FastAPI: GET /api/export/user-data -> see backend/routers/export.py
 
 
 @app.route('/api/import/user-data', methods=['POST'])

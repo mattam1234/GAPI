@@ -178,6 +178,11 @@ remain in Flask.
 
 | Achievements (hunts) | `GET /api/achievements`, `POST /api/achievement-hunt`, `PUT /api/achievement-hunt/{id}` | `backend/routers/achievements.py` | `tests/test_backend_achievements.py` |
 | Achievement challenges | `/api/achievement-challenges[/{id}][/join\|/progress]` (6 routes) | `backend/routers/challenges.py` | `tests/test_backend_challenges.py` |
+| Data export | `GET /api/export/[library\|favorites\|user-data]` | `backend/routers/export.py` | `tests/test_backend_export.py` |
+
+**Partial:** the 3 export GETs (CSV/JSON) are migrated; `POST
+/api/import/user-data` stays in Flask (dual JSON/multipart upload — needs
+`python-multipart` + `UploadFile`, deferred).
 
 **✅ Achievements domain fully migrated.** Hunt, multiplayer challenges,
 `GET /stats`, `GET /achievements/{app_id}` (live Steam), and the two Steam *sync*
