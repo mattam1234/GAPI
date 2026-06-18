@@ -1,0 +1,39 @@
+"""FastAPI application factory and ASGI entrypoint.
+
+This is the strangler-fig host: migrated domains are served by native FastAPI
+routers, and every path that has not been migrated yet falls through to the
+legacy Flask app, mounted as a WSGI sub-application.
+
+Run with:
+    uvicorn backend.main:app --reload
+    # or, in production:
+    gunicorn backend.main:app -k uvicorn.workers.UvicornWorker
+"""
+from a2wsgi import WSGIMiddleware
+from fastapi import FastAPI
+
+import gapi_gui
+from backend.routers import analytics
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="GAPI",
+        description="Game library management API (FastAPI modernization).",
+        version="2.0.0",
+    )
+
+    # --- Migrated domains (native FastAPI) -------------------------------
+    # Registered BEFORE the Flask fallback mount so their paths take
+    # precedence over the legacy routes of the same name.
+    app.include_router(analytics.router)
+
+    # --- Legacy fallback -------------------------------------------------
+    # Everything not matched above is handled by the existing Flask app.
+    # Removed domain-by-domain as routers replace it (see MODERNIZATION_BRIEF).
+    app.mount("/", WSGIMiddleware(gapi_gui.app))
+
+    return app
+
+
+app = create_app()
