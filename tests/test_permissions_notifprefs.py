@@ -500,7 +500,8 @@ class TestBroadcastNotification(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # Migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.post('/api/admin/notifications/broadcast',
@@ -544,7 +545,7 @@ class TestBroadcastNotification(unittest.TestCase):
                 resp = self.client.post('/api/admin/notifications/broadcast',
                                         json={'title': 'hi', 'message': 'there'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['sent'], 2)
         self.assertEqual(data['skipped'], 0)
 
@@ -559,7 +560,7 @@ class TestBroadcastNotification(unittest.TestCase):
                     '/api/admin/notifications/broadcast',
                     json={'title': 'hi', 'message': 'there', 'usernames': ['carol']},
                 )
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['sent'], 1)
 
     def test_invalid_type_defaults_to_info(self):

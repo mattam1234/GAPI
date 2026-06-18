@@ -187,6 +187,13 @@ remain in Flask.
 | Pick (core) | `POST /api/pick` (the 314-line god-handler) | `backend/routers/pick.py` | `tests/test_backend_pick.py` + ported `test_analytics_service.py::TestPickAuditWiring` |
 | Game details | `GET /api/game/{app_id}/details` | `backend/routers/game.py` | `tests/test_backend_game.py` |
 | Friends | `GET /api/friends`, add/remove/follow | `backend/routers/friends.py` | `tests/test_backend_friends.py` |
+| Admin notifications | `POST /api/admin/notifications/[broadcast\|send-digests]` | `backend/routers/admin_notifications.py` | ported broadcast/digest classes + `tests/test_backend_admin_notifications.py` |
+
+**Two admin checks:** the legacy app had two — `app_settings_service.is_admin`
+(used inline by analytics) and `user_manager.is_admin` (the `@require_admin`
+decorator). The backend has both as dependencies: `require_admin` (settings) and
+`require_admin_um` (user_manager). Each migrated route uses whichever its legacy
+form used.
 
 **Picks status:** `/api/pick` and `/api/multiuser/pick` migrated. The single
 biggest handler in the app (filters, rarity, collection resolution, Discord RPC,

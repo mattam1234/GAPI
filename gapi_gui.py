@@ -11594,51 +11594,7 @@ def api_admin_bulk_assign_role():
 # /api/notifications/* routes remain in Flask.
 
 
-@app.route('/api/admin/notifications/broadcast', methods=['POST'])
-@require_admin
-def api_admin_broadcast_notification():
-    """Broadcast a notification to all users or a specific subset (admin only).
-
-    Request JSON body:
-      ``title``      – notification title (required)
-      ``message``    – notification body (required)
-      ``type``       – notification type: ``'info'``|``'warning'``|``'success'``|``'error'``
-                       (default ``'info'``)
-      ``usernames``  – optional list of target usernames; if omitted all users receive it
-
-    Response JSON:
-      ``sent``       – number of notifications created
-      ``skipped``    – number of users skipped (not found in DB)
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    data = request.get_json(silent=True, force=True) or {}
-    title = str(data.get('title', '')).strip()
-    message = str(data.get('message', '')).strip()
-    notif_type = str(data.get('type', 'info')).strip()
-    if notif_type not in ('info', 'warning', 'success', 'error'):
-        notif_type = 'info'
-    if not title or not message:
-        return jsonify({'error': "'title' and 'message' are required"}), 400
-    target_usernames = data.get('usernames')
-    sent = skipped = 0
-    try:
-        db = next(database.get_db())
-        if target_usernames:
-            usernames = [str(u).strip() for u in target_usernames if str(u).strip()]
-        else:
-            all_users = database.get_all_users(db)
-            usernames = [u.username for u in all_users]
-        for uname in usernames:
-            ok = database.create_notification(db, uname, title, message, notif_type)
-            if ok:
-                sent += 1
-            else:
-                skipped += 1
-        return jsonify({'sent': sent, 'skipped': skipped})
-    except Exception as e:
-        gui_logger.error('api_admin_broadcast_notification error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: POST /api/admin/notifications/broadcast -> backend/routers/admin_notifications.py
 
 
 # ---------------------------------------------------------------------------
@@ -11743,86 +11699,7 @@ def api_admin_email_test():
     })
 
 
-@app.route('/api/admin/notifications/send-digests', methods=['POST'])
-@require_admin
-def api_admin_send_digests():
-    """Manually trigger digest email delivery for opted-in users (admin only).
-
-    Sends a digest of each user's unread notifications to the email
-    address stored in their profile, provided they have ``email_enabled``
-    and ``digest_frequency`` set to ``'daily'`` or ``'weekly'``.
-
-    Request JSON (optional):
-      ``period``   – ``'daily'`` or ``'weekly'`` (default ``'daily'``)
-      ``dry_run``  – ``true`` to simulate without sending (default ``false``)
-
-    Response JSON:
-      ``sent``      – number of digest emails successfully dispatched
-      ``skipped``   – number of users skipped (no email / not opted-in)
-      ``failed``    – number of send failures
-      ``dry_run``   – echoes the dry_run flag
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    if _email_service is None:
-        return jsonify({'error': 'EmailService not loaded'}), 503
-    if not _email_service.is_configured():
-        return jsonify({'error': 'SMTP not configured'}), 503
-
-    data = request.get_json(silent=True, force=True) or {}
-    period  = str(data.get('period', 'daily')).lower()
-    if period not in ('daily', 'weekly'):
-        period = 'daily'
-    dry_run = bool(data.get('dry_run', False))
-
-    sent = skipped = failed = 0
-    try:
-        db = next(database.get_db())
-        users = database.get_all_users(db)
-        for user in users:
-            username = user.username if hasattr(user, 'username') else str(user)
-            # Check notification preferences
-            prefs = database.get_notification_prefs(db, username)
-            if not prefs.get('email_enabled'):
-                skipped += 1
-                continue
-            freq = prefs.get('digest_frequency', 'never')
-            if freq not in ('daily', 'weekly'):
-                skipped += 1
-                continue
-            # Only send if digest frequency matches requested period
-            if freq != period:
-                skipped += 1
-                continue
-            # Get email address
-            email_addr = database.get_user_email(db, username)
-            if not _is_valid_email_address(email_addr):
-                skipped += 1
-                continue
-            # Get unread notifications
-            notifications = database.get_notifications(db, username, unread_only=True)
-            if not notifications:
-                skipped += 1
-                continue
-            if dry_run:
-                sent += 1
-                continue
-            ok = _email_service.send_digest_email(
-                email_addr, username, notifications, period=period
-            )
-            if ok:
-                sent += 1
-            else:
-                failed += 1
-        return jsonify({
-            'sent': sent,
-            'skipped': skipped,
-            'failed': failed,
-            'dry_run': dry_run,
-        })
-    except Exception as e:
-        gui_logger.error('api_admin_send_digests error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: POST /api/admin/notifications/send-digests -> backend/routers/admin_notifications.py
 
 
 @app.route('/api/users/<username>/email', methods=['PUT'])

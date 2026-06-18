@@ -24,9 +24,12 @@ from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 from app.services.email_service import EmailService
 import database
 import gapi_gui
+from backend.main import app as _fastapi_app
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -49,14 +52,21 @@ def _create_user(db, username='alice', email=None):
     return db.query(database.User).filter_by(username=username).first()
 
 
+def _login(client, username):
+    if hasattr(client, 'session_transaction'):
+        with client.session_transaction() as sess:
+            sess['username'] = username
+    else:
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        client.cookies.set('session', ser.dumps({'username': username}))
+
+
 def _set_admin_session(client):
-    with client.session_transaction() as sess:
-        sess['username'] = 'admin'
+    _login(client, 'admin')
 
 
 def _set_user_session(client, username='alice'):
-    with client.session_transaction() as sess:
-        sess['username'] = username
+    _login(client, username)
 
 
 # ===========================================================================
@@ -464,6 +474,10 @@ class TestEmailTestEndpoint(_AppBase):
 
 class TestSendDigestsEndpoint(_AppBase):
 
+    def setUp(self):
+        # send-digests is migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
+
     def test_requires_admin(self):
         resp = self.client.post('/api/admin/notifications/send-digests', json={})
         self.assertIn(resp.status_code, (401, 403))
@@ -499,7 +513,7 @@ class TestSendDigestsEndpoint(_AppBase):
             resp = self.client.post('/api/admin/notifications/send-digests',
                                     json={'dry_run': True, 'period': 'daily'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('sent', data)
         self.assertIn('skipped', data)
         self.assertIn('failed', data)

@@ -79,6 +79,19 @@ def get_picker(username: str = Depends(require_login)):
     return picker
 
 
+def require_admin_um(username: str = Depends(require_login)) -> str:
+    """Require admin, mirroring the legacy ``@require_admin`` decorator.
+
+    Unlike :func:`require_admin` (which uses ``app_settings_service.is_admin``),
+    this uses ``user_manager.is_admin`` — the check the legacy admin decorator
+    applied. Routes that were decorated with ``@require_admin`` use this.
+    """
+    if not gapi_gui.user_manager.is_admin(username):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+    return username
+
+
 def require_admin(
     username: str = Depends(require_login),
     db=Depends(get_db),
