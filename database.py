@@ -5569,7 +5569,7 @@ def record_search(db, username: str, query: str, filters: dict = None,
         all_ids = (
             db.query(SearchHistory.id)
             .filter(SearchHistory.username == username)
-            .order_by(SearchHistory.searched_at.desc())
+            .order_by(SearchHistory.searched_at.desc(), SearchHistory.id.desc())
             .all()
         )
         if len(all_ids) > SEARCH_HISTORY_MAX:
@@ -5593,7 +5593,7 @@ def get_search_history(db, username: str, limit: int = 20) -> list:
         rows = (
             db.query(SearchHistory)
             .filter(SearchHistory.username == username)
-            .order_by(SearchHistory.searched_at.desc())
+            .order_by(SearchHistory.searched_at.desc(), SearchHistory.id.desc())
             .limit(limit)
             .all()
         )

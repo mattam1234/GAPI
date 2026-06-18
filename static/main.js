@@ -1564,7 +1564,7 @@
                     const appIds = data.games.map(g => g.app_id);
                     preloadGameDetails(appIds).catch(err => console.log('Pre-load complete or errored'));
                 } else {
-                    listDiv.innerHTML = '<div class="loading">No games found</div>';
+                    listDiv.innerHTML = '<div class="empty-state">No games found</div>';
                 }
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading library</div>';
@@ -2385,7 +2385,7 @@
                     html += '</div>';
                     listDiv.innerHTML = html;
                 } else {
-                    listDiv.innerHTML = '<div class="loading">No users yet. Register using the login page!</div>';
+                    listDiv.innerHTML = '<div class="empty-state">No users yet. Register using the login page!</div>';
                 }
             } catch (error) {
                 listDiv.innerHTML = '<div class="error">Error loading users: ' + error.message + '</div>';
@@ -5844,19 +5844,19 @@ Event ID: ${result.discord_event_id}`);
             const activeBacklog = getActiveBacklog();
             updateBacklogSidebarMeta();
             if (!activeBacklog) {
-                list.innerHTML = '<div class="loading">No list selected yet. Create one from the sidebar to get started.</div>';
+                list.innerHTML = '<div class="empty-state">No list selected yet. Create one from the sidebar to get started.</div>';
                 activeBacklogEntryGameId = '';
                 closeBacklogEntryPreviewModal();
                 return;
             }
             if (!_backlogData.length) {
-                list.innerHTML = '<div class="loading">No list entries yet. Add games from your library using the panel on the right.</div>';
+                list.innerHTML = '<div class="empty-state">No list entries yet. Add games from your library using the panel on the right.</div>';
                 activeBacklogEntryGameId = '';
                 closeBacklogEntryPreviewModal();
                 return;
             }
             if (!games.length) {
-                list.innerHTML = '<div class="loading">No list entries match your current filters.</div>';
+                list.innerHTML = '<div class="empty-state">No list entries match your current filters.</div>';
                 activeBacklogEntryGameId = '';
                 closeBacklogEntryPreviewModal();
                 return;
@@ -10258,11 +10258,11 @@ Event ID: ${result.discord_event_id}`);
             const listDiv = document.getElementById('library-list');
             const filteredGames = filterGamesByControls(data.games || [], 'library-search', 'library-platform-filter');
             if (!data.games || data.games.length === 0) {
-                listDiv.innerHTML = '<div class="loading">No games found</div>';
+                listDiv.innerHTML = '<div class="empty-state">No games found</div>';
                 return;
             }
             if (!filteredGames.length) {
-                listDiv.innerHTML = '<div class="loading">No games match your current filters.</div>';
+                listDiv.innerHTML = '<div class="empty-state">No games match your current filters.</div>';
                 return;
             }
             if (_libraryView === 'grid') {

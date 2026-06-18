@@ -306,15 +306,31 @@ Discord Event Created with Image & Attendee List
 ## Deployment Checklist
 
 - [ ] Update database schema (optional - uses existing fields as JSON)
-- [ ] Test fuzzy search with sample games/friends
-- [ ] Verify Discord bot permissions
-- [ ] Test Discord event creation
-- [ ] Update user documentation
-- [ ] Set up logging for monitoring
-- [ ] Test on mobile devices
-- [ ] Validate image loading from all platforms
-- [ ] Test error handling scenarios
-- [ ] Monitor performance with real data
+- [x] Test fuzzy search with sample games/friends — `tests/test_schedule_fuzzy_search.py`
+- [ ] Verify Discord bot permissions — requires a live guild; see *Required bot permissions* below
+- [x] Test Discord event creation — `tests/test_schedule_discord_event.py` (REST layer mocked)
+- [x] Update user documentation — this file + troubleshooting below
+- [x] Set up logging for monitoring — failing paths now log via `gui_logger` / bot `print`
+- [ ] Test on mobile devices — manual
+- [x] Validate image loading from all platforms — `tests/test_schedule_image_resolution.py`
+- [x] Test error handling scenarios — search + event-creation error paths covered by tests
+- [ ] Monitor performance with real data — production
+
+### Required bot permissions
+
+| Feature | Permission | Symptom if missing |
+| --- | --- | --- |
+| Create scheduled event | **Manage Events** | event creation fails; bot logs "missing the Manage Events permission" |
+| Linked-session status messages | **Read Message History**, **Send Messages**, **Add Reactions** | bot can't edit its status message and logs a warning each sync cycle |
+
+### Cross-platform game images
+
+`_resolve_schedule_game_image_url` resolves art per platform: Steam uses
+`header_image`/`capsule_image` or a numeric appid via the Steam CDN; PSN uses
+`image_url`; Nintendo uses `boxart`. The Steam CDN fallback is gated to Steam
+games only — GOG/Epic ids (which can be numeric) are never resolved against the
+Steam CDN. Games without art resolve to an empty URL and fall back to the bot
+banner on Discord.
 
 ## Conclusion
 

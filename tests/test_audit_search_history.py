@@ -348,7 +348,7 @@ class TestPWAMetaTagsRegression(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'templates', 'index.html'
         )
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             return f.read()
 
     def test_apple_mobile_capable_present(self):

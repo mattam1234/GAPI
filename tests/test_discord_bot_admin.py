@@ -437,7 +437,7 @@ class TestDiscordBotEnvVar(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'discord_bot.py',
         )
-        with open(bot_path, 'r') as fh:
+        with open(bot_path, 'r', encoding='utf-8') as fh:
             src = fh.read()
         self.assertIn('GAPI_DISCORD_CONFIG', src,
                       'discord_bot.py should read the GAPI_DISCORD_CONFIG env var')
@@ -447,7 +447,7 @@ class TestDiscordBotEnvVar(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'discord_bot.py',
         )
-        with open(bot_path, 'r') as fh:
+        with open(bot_path, 'r', encoding='utf-8') as fh:
             src = fh.read()
         self.assertIn('DISCORD_BOT_TOKEN', src,
                       'discord_bot.py should read the DISCORD_BOT_TOKEN env var')

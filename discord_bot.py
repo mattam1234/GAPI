@@ -1045,7 +1045,16 @@ class GAPIBot(discord.Client):
             )
             
             return event
-            
+
+        except discord.Forbidden:
+            print(
+                f"❌ Cannot create Discord event in guild '{getattr(guild, 'name', guild)}': "
+                f"bot is missing the Manage Events permission"
+            )
+            return None
+        except discord.HTTPException as e:
+            print(f"❌ Discord rejected the scheduled event: {e}")
+            return None
         except Exception as e:
             print(f"Error creating Discord game night event: {e}")
             return None
