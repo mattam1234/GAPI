@@ -159,9 +159,14 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Wishlist | `/api/wishlist[...]`, `/api/wishlist/sales` | `backend/routers/wishlist.py` | `tests/test_backend_wishlist.py` |
 | Playlists | `/api/playlists[...]` (+ games) | `backend/routers/playlists.py` | `tests/test_backend_playlists.py` |
 | Budget | `/api/budget[...]` | `backend/routers/budget.py` | `tests/test_backend_budget.py` |
+| Ignored-games | `/api/ignored-games` (list + toggle) | `backend/routers/ignored.py` | `tests/test_backend_ignored.py` |
 
-**Next candidates:** ignored-games (DB-backed, 2 routes), then larger slices —
-backlog and leaderboards.
+**Patterns proven so far:** admin-gated + service singleton (analytics);
+per-user picker-backed, 500-on-uninit (reviews, tags); picker-backed,
+400-on-uninit (wishlist, playlists, budget); **DB-backed via `SessionLocal` +
+service singletons** (ignored-games).
+
+**Next candidates:** larger slices — backlog and leaderboards.
 
 > Larger slices carry caveats: **backlog** has existing Flask HTTP tests
 > (`test_backlog_collections.py`, `test_dashboard_filters.py`) to port; the

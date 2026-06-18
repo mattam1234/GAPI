@@ -3796,96 +3796,12 @@ def api_users_list():
 # Ignored Games Endpoints
 # ===========================================================================================
 
-@app.route('/api/ignored-games')
-@require_login
-def api_get_ignored_games():
-    """Get current user's ignored games list"""
-    global current_user
+# MIGRATED to FastAPI: see backend/routers/ignored.py. The /api/ignored-games
+# routes (list + toggle) are served natively by the FastAPI app
+# (backend.main:app), reusing the same DB-backed _ignored_games_service.
+# Removed from the Flask layer per the strangler-fig migration
+# (docs/MODERNIZATION_BRIEF.md).
 
-    username = get_current_username()
-
-    if not DB_AVAILABLE:
-        return jsonify({'ignored_games': []}), 200
-
-    try:
-        db = database.SessionLocal()
-        try:
-            if _ignored_games_service:
-                ignored = _ignored_games_service.get_detailed(db, username)
-            else:
-                user = database.get_user_by_username(db, username)
-                if not user:
-                    return jsonify({'ignored_games': []}), 200
-                ignored = [
-                    {
-                        'app_id': ig.app_id,
-                        'game_name': ig.game_name,
-                        'reason': ig.reason,
-                        'created_at': ig.created_at.isoformat() if ig.created_at else None
-                    }
-                    for ig in user.ignored_games
-                ]
-        finally:
-            db.close()
-        return jsonify({'ignored_games': ignored}), 200
-    except Exception as e:
-        gui_logger.error(f"Error getting ignored games: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/ignored-games', methods=['POST'])
-@require_login
-def api_toggle_ignored_game():
-    """Toggle game ignore status for current user"""
-    global current_user
-
-    username = get_current_username()
-
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-
-    data = request.json or {}
-    app_id = data.get('app_id')
-    game_name = data.get('game_name', '').strip() if isinstance(data.get('game_name'), str) else ''
-    reason = data.get('reason', '').strip() if isinstance(data.get('reason'), str) else ''
-
-    if not app_id:
-        return jsonify({'error': 'app_id required'}), 400
-
-    # Validate app_id is numeric, then normalize to string for consistency
-    try:
-        int(app_id)  # validate it's a valid integer
-        app_id = str(app_id)
-    except (ValueError, TypeError):
-        return jsonify({'error': 'app_id must be an integer'}), 400
-
-    try:
-        db = database.SessionLocal()
-
-        # Verify user exists in database
-        if _user_service:
-            exists = _user_service.user_exists(db, username)
-        else:
-            exists = database.user_exists(db, username)
-        if not exists:
-            db.close()
-            return jsonify({'error': 'User not found in database'}), 404
-
-        if _ignored_games_service:
-            success = _ignored_games_service.toggle(
-                db, username, app_id, game_name=game_name, reason=reason)
-        else:
-            success = database.toggle_ignore_game(db, username, app_id,
-                                                  game_name, reason)
-        db.close()
-
-        if success:
-            return jsonify({'message': f'Game ignore status toggled'}), 200
-        else:
-            return jsonify({'error': 'Failed to toggle ignore'}), 400
-    except Exception as e:
-        gui_logger.error(f"Error toggling ignore game: {e}")
-        return jsonify({'error': str(e)}), 500
 
 
 # ===========================================================================================
