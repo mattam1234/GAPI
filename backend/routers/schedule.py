@@ -689,3 +689,218 @@ def create_discord_event(event_id: str, body: CreateDiscordEventIn,
         gapi_gui.gui_logger.error("Error creating Discord event: %s", e)
         raise HTTPException(
             status_code=500, detail=f"Failed to create Discord event: {str(e)}")
+
+
+# ── Events (chunk 4c: create + delete, with inline Discord) ────────────────
+
+def _csv_or_list(raw):
+    if isinstance(raw, str):
+        return [a.strip() for a in raw.split(",") if a.strip()]
+    return [str(a).strip() for a in (raw or []) if str(a).strip()]
+
+
+@event_router.post("", status_code=201)
+def create_event(body: Optional[dict] = Body(default=None),
+                 username: str = Depends(require_login),
+                 picker=Depends(_picker)):
+    """Create a game-night event, optionally syncing a Discord scheduled event."""
+    import base64
+    import json as _json
+    import os
+    from datetime import timedelta
+
+    import requests
+
+    data = body or {}
+    title = str(data.get("title", "")).strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    date = str(data.get("date", "")).strip()
+    time_str = str(data.get("time", "")).strip()
+    attendees = _csv_or_list(data.get("attendees", ""))
+    attendee_ids = _csv_or_list(data.get("attendee_ids", ""))
+
+    rsvp_statuses = {}
+    rsvp_raw = data.get("rsvp_statuses", {})
+    if isinstance(rsvp_raw, dict):
+        for key, value in rsvp_raw.items():
+            safe_key = str(key or "").strip()
+            if safe_key:
+                rsvp_statuses[safe_key] = str(value or "pending").strip().lower()
+
+    game_name = str(data.get("game_name", "")).strip()
+    game_appid = str(data.get("game_appid", "")).strip() or None
+    game_image_url = str(data.get("game_image_url", "")).strip() or None
+    if not game_image_url:
+        with gapi_gui.picker_lock:
+            selected_game = next(
+                (g for g in picker.games
+                 if str(g.get("appid") or g.get("app_id") or "").strip()
+                 == str(game_appid or "").strip()),
+                None)
+        game_image_url = gapi_gui._resolve_schedule_game_image_url(
+            game=selected_game, game_appid=game_appid,
+            existing_url=game_image_url) or None
+
+    notes = str(data.get("notes", "")).strip()
+    try:
+        duration_minutes = (int(data["duration_minutes"])
+                            if data.get("duration_minutes") is not None else None)
+    except (TypeError, ValueError, KeyError):
+        duration_minutes = None
+    create_discord_event = data.get("create_discord_event", False)
+    discord_guild_id = data.get("discord_guild_id")
+    schedule_id = str(data.get("schedule_id", "")).strip() or None
+    timezone_name = str(data.get("timezone_name", "")).strip() or None
+    try:
+        timezone_offset_minutes = (
+            int(data["timezone_offset_minutes"])
+            if data.get("timezone_offset_minutes") is not None else None)
+    except (TypeError, ValueError, KeyError):
+        timezone_offset_minutes = None
+
+    with gapi_gui.picker_lock:
+        event = picker.schedule_service.add_event(
+            title, date, time_str, duration_minutes, attendees, game_name, notes,
+            game_appid=game_appid, attendee_ids=attendee_ids,
+            rsvp_statuses=rsvp_statuses, game_image_url=game_image_url,
+            schedule_id=schedule_id, owner_username=username,
+            discord_guild_id=str(discord_guild_id).strip() if discord_guild_id else None,
+            timezone_name=timezone_name,
+            timezone_offset_minutes=timezone_offset_minutes,
+        )
+
+    invite_recipients = [
+        str(invitee_id or invitee_name).strip()
+        for invitee_name, invitee_id in gapi_gui._schedule_invitee_pairs(event)
+        if str(invitee_id or invitee_name).strip()
+    ]
+    event_id = event.get("id", "")
+    gapi_gui._send_schedule_in_app_notifications(
+        invite_recipients,
+        title=f"📨 Schedule invite: {title}",
+        message=f'{username} invited you to "{title}" on {date} at {time_str}.',
+        exclude_usernames={username},
+        link=f"#schedule/{event_id}" if event_id else None,
+    )
+
+    discord_result = None
+    if create_discord_event and discord_guild_id:
+        try:
+            discord_token = None
+            config_path = os.environ.get("GAPI_DISCORD_CONFIG", "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    discord_token = _json.load(f).get("discord_bot_token")
+            if discord_token:
+                event_datetime = gapi_gui._schedule_local_to_utc(
+                    date, time_str, timezone_name=timezone_name,
+                    timezone_offset_minutes=timezone_offset_minutes)
+                end_time = event_datetime + timedelta(hours=2)
+                description = gapi_gui._build_discord_schedule_description(
+                    game_name=game_name, game_appid=game_appid,
+                    notes=notes, attendees=attendees)
+                payload = {
+                    "name": title[:100], "privacy_level": 2,
+                    "scheduled_start_time": event_datetime.isoformat(),
+                    "scheduled_end_time": end_time.isoformat(),
+                    "entity_type": 3,
+                    "entity_metadata": {"location": game_name[:100] if game_name else "Online"},
+                    "description": description[:1000],
+                }
+                if game_image_url:
+                    try:
+                        img_resp = requests.get(game_image_url, timeout=5)
+                        if img_resp.status_code == 200 and len(img_resp.content) < 10 * 1024 * 1024:
+                            ctype = img_resp.headers.get("content-type", "image/jpeg")
+                            b64 = base64.b64encode(img_resp.content).decode("utf-8")
+                            payload["image"] = f"data:{ctype};base64,{b64}"
+                    except Exception as img_err:
+                        gapi_gui.gui_logger.error("Error fetching game image: %s", img_err)
+                url = f"https://discord.com/api/v10/guilds/{discord_guild_id}/scheduled-events"
+                headers = {"Authorization": f"Bot {discord_token}",
+                           "Content-Type": "application/json"}
+                response = requests.post(url, json=payload, headers=headers, timeout=10)
+                if response.status_code in (200, 201):
+                    discord_event_id = response.json().get("id")
+                    with gapi_gui.picker_lock:
+                        picker.schedule_service.set_discord_event_info(
+                            event["id"], discord_event_id, str(discord_guild_id).strip())
+                    event["discord_event_id"] = discord_event_id
+                    event["discord_guild_id"] = str(discord_guild_id).strip()
+                    discord_result = {
+                        "success": True, "discord_event_id": discord_event_id,
+                        "discord_event_url":
+                            f"https://discord.com/events/{discord_guild_id}/{discord_event_id}",
+                    }
+                else:
+                    gapi_gui.gui_logger.error("Discord API error: %s", response.status_code)
+                    discord_result = {"success": False, "error": "Discord API error"}
+        except Exception as e:
+            gapi_gui.gui_logger.error("Error creating Discord event: %s", e)
+            discord_result = {"success": False, "error": str(e)}
+
+    if discord_result:
+        event["discord_result"] = discord_result
+    return event
+
+
+@event_router.delete("/{event_id}")
+def delete_event(event_id: str, body: Optional[dict] = Body(default=None),
+                 username: str = Depends(require_login), picker=Depends(_picker)):
+    """Delete a game-night event, cancelling any linked Discord event first."""
+    import json as _json
+    import os
+
+    import requests
+
+    data = body or {}
+    override_guild_id = str(data.get("guild_id", "")).strip()
+    with gapi_gui.picker_lock:
+        event = picker.schedule_service.get_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    discord_event_id = str(event.get("discord_event_id") or "").strip()
+    discord_guild_id = str(event.get("discord_guild_id") or "").strip() or override_guild_id
+
+    if discord_event_id:
+        if not discord_guild_id:
+            return JSONResponse(status_code=400, content={
+                "error": "Discord guild ID is required to cancel linked Discord event",
+                "requires_guild_id": True})
+        try:
+            discord_token = None
+            config_path = os.environ.get("GAPI_DISCORD_CONFIG", "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    discord_token = _json.load(f).get("discord_bot_token")
+            if not discord_token:
+                return JSONResponse(status_code=500, content={
+                    "error": "Discord bot token not found in config.json"})
+            url = (f"https://discord.com/api/v10/guilds/{discord_guild_id}"
+                   f"/scheduled-events/{discord_event_id}")
+            response = requests.delete(
+                url, headers={"Authorization": f"Bot {discord_token}"}, timeout=10)
+            if response.status_code not in (204, 404):
+                error_data = (response.json()
+                              if response.headers.get("content-type", "").startswith("application/json")
+                              else {})
+                error_msg = error_data.get("message", f"HTTP {response.status_code}")
+                gapi_gui.gui_logger.error("Failed to cancel Discord event %s: %s - %s",
+                                          discord_event_id, response.status_code, error_msg)
+                return JSONResponse(status_code=502, content={
+                    "error": f"Failed to cancel Discord event: {error_msg}",
+                    "status_code": response.status_code, "details": error_data})
+        except Exception as exc:
+            gapi_gui.gui_logger.error("Error cancelling Discord event %s: %s",
+                                      discord_event_id, exc)
+            return JSONResponse(status_code=502, content={
+                "error": f"Failed to cancel Discord event: {str(exc)}"})
+
+    with gapi_gui.picker_lock:
+        removed = picker.schedule_service.remove_event(event_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return {"success": True, "id": event_id,
+            "discord_cancelled": bool(discord_event_id)}
