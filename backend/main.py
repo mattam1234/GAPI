@@ -15,7 +15,7 @@ from fastapi import FastAPI
 import gapi_gui
 from backend.routers import (
     analytics, backlog, budget, ignored, library, messages, playlists, profile,
-    reviews, tags, voting, wishlist,
+    reviews, sessions, tags, voting, wishlist,
 )
 
 
@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(messages.router)
     app.include_router(library.router)
     app.include_router(profile.router)
+    app.include_router(sessions.router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.

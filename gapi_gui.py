@@ -7205,32 +7205,10 @@ def api_unfollow_user(username):
 # Session History API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/sessions/history', methods=['GET'])
-@require_login
-def api_session_history():
-    """Get user's session history"""
-    username = get_current_username()
-    
-    sessions = [
-        {
-            'name': 'Game Night',
-            'played_at': datetime.now().isoformat(),
-            'winning_pick': 'Portal 2',
-            'player_count': 4,
-            'your_vote': True,
-            'you_picked': False
-        },
-        {
-            'name': 'Co-op Night',
-            'played_at': (datetime.now().isoformat()),
-            'winning_pick': 'It Takes Two',
-            'player_count': 3,
-            'your_vote': False,
-            'you_picked': True
-        }
-    ]
-    
-    return jsonify({'sessions': sessions})
+# MIGRATED to FastAPI: see backend/routers/sessions.py. The
+# /api/sessions/history route is served natively by the FastAPI app
+# (backend.main:app). Removed from the Flask layer per the strangler-fig
+# migration (docs/MODERNIZATION_BRIEF.md).
 
 
 # ---------------------------------------------------------------------------

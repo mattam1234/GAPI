@@ -165,6 +165,7 @@ Domains served natively by FastAPI (legacy Flask routes deleted):
 | Messages (DM) | `/api/messages/conversations`, `/api/messages/{user}` | `backend/routers/messages.py` | `tests/test_backend_messages.py` |
 | Library compare | `/api/library/compare/{username}` | `backend/routers/library.py` | `tests/test_backend_library.py` |
 | Profile | `/api/profile/me`, `/api/profile/update` | `backend/routers/profile.py` | `tests/test_backend_profile.py` |
+| Sessions | `/api/sessions/history` | `backend/routers/sessions.py` | `tests/test_backend_sessions.py` |
 
 **Patterns proven so far:** admin-gated + service singleton (analytics);
 per-user picker-backed, 500-on-uninit (reviews, tags); picker-backed,
