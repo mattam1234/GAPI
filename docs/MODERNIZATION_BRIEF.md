@@ -180,6 +180,8 @@ remain in Flask.
 | Achievement challenges | `/api/achievement-challenges[/{id}][/join\|/progress]` (6 routes) | `backend/routers/challenges.py` | `tests/test_backend_challenges.py` |
 | Data export | `GET /api/export/[library\|favorites\|user-data]` | `backend/routers/export.py` | `tests/test_backend_export.py` |
 | Notification prefs/history | `GET/PUT /api/notifications/preferences`, `GET /api/notifications/history` | `backend/routers/notifications.py` | ported 3 classes in `test_permissions_notifprefs.py` |
+| Presence | `POST /api/presence`, `/presence/update`, `/presence/clear` | `backend/routers/presence.py` | `tests/test_backend_presence_duplicates.py` |
+| Duplicate detection | `GET /api/duplicates` | `backend/routers/duplicates.py` | `tests/test_backend_presence_duplicates.py` |
 
 **Mixed-client test file:** `test_permissions_notifprefs.py` tests many
 endpoints, only 3 of which migrated. The session helper now detects the client

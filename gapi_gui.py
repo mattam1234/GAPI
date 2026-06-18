@@ -3000,33 +3000,10 @@ def api_pick_game():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 
-@app.route('/api/presence/update', methods=['POST'])
-@require_login
-def api_presence_update():
-    """Update Discord Rich Presence for the current user's last-picked game."""
-    if not _discord_rpc or not _discord_rpc.enabled:
-        return jsonify({'ok': False, 'error': 'Discord Rich Presence not configured on server (DISCORD_CLIENT_ID not set)'}), 200
-    data = request.json or {}
-    game = data.get('game', '').strip()
-    if not game:
-        return jsonify({'ok': False, 'error': 'game name required'}), 400
-    playtime = data.get('playtime_hours')
-    try:
-        playtime_f = float(playtime) if playtime is not None else None
-    except (TypeError, ValueError):
-        playtime_f = None
-    updated = _discord_rpc.update(game, playtime_hours=playtime_f)
-    return jsonify({'ok': True, 'updated': updated})
+# MIGRATED to FastAPI: POST /api/presence/update -> backend/routers/presence.py
 
 
-@app.route('/api/presence/clear', methods=['POST'])
-@require_login
-def api_presence_clear():
-    """Clear the Discord Rich Presence status."""
-    if not _discord_rpc or not _discord_rpc.enabled:
-        return jsonify({'ok': False, 'error': 'Discord Rich Presence not configured'}), 200
-    cleared = _discord_rpc.clear()
-    return jsonify({'ok': True, 'cleared': cleared})
+# MIGRATED to FastAPI: POST /api/presence/clear -> backend/routers/presence.py
 
 
 @app.route('/api/game/<int:app_id>/details')
@@ -7622,44 +7599,7 @@ def api_get_hltb(game_name: str):
 # Duplicate Detection API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/duplicates')
-@require_login
-def api_get_duplicates():
-    """Return games that appear on more than one platform.
-
-    Each entry has ``name``, ``platforms`` (list), and ``games`` (list of
-    minimal game dicts).  Returns an empty list when only one platform is
-    configured or no duplicates are found.
-    """
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if not p or not p.games:
-        return jsonify({'duplicates': []}), 200
-
-    with picker_lock:
-        raw = p.find_duplicates()
-
-    # Slim down each game dict to what the UI needs
-    result = []
-    for group in raw:
-        slim_games = [
-            {
-                'app_id': g.get('appid'),
-                'game_id': g.get('game_id'),
-                'name': g.get('name', ''),
-                'platform': g.get('platform', 'steam'),
-                'playtime_hours': round(g.get('playtime_forever', 0) / 60, 1),
-            }
-            for g in group['games']
-        ]
-        result.append({
-            'name': group['name'],
-            'platforms': group['platforms'],
-            'games': slim_games,
-        })
-
-    result.sort(key=lambda g: g['name'].lower())
-    return jsonify({'duplicates': result})
+# MIGRATED to FastAPI: GET /api/duplicates -> backend/routers/duplicates.py
 
 
 # ---------------------------------------------------------------------------
@@ -7917,18 +7857,7 @@ def api_remove_app_friend():
 # User presence API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/presence', methods=['POST'])
-@require_login
-def api_update_presence():
-    """Heartbeat endpoint – update the current user's ``last_seen`` timestamp.
-
-    Clients should call this periodically (e.g. every 60 s) while the user
-    has the app open so that other users can see them as online.
-    """
-    global current_user
-    username = get_current_username()
-    if not DB_AVAILABLE:
-        return jsonify({'success': True})
+# MIGRATED to FastAPI: POST /api/presence -> backend/routers/presence.py
     db = next(database.get_db())
     try:
         database.update_user_presence(db, username)
