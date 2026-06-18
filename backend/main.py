@@ -17,7 +17,8 @@ from backend.routers import (
     achievements, admin_notifications, analytics, backlog, budget, challenges,
     downloads, duplicates, export, friends, game, ignored, leaderboards,
     library, messages, multiuser, notifications, pick, playlists, presence,
-    profile, reviews, schedule, sessions, tags, voting, wishlist,
+    profile, recommendations, reviews, schedule, sessions, tags, voting,
+    wishlist,
 )
 
 
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_notifications.router)
     app.include_router(downloads.router)
     app.include_router(leaderboards.router)
+    app.include_router(recommendations.router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.

@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
+from backend.main import app as _fastapi_app
 
 
 def _read(*parts):
@@ -78,9 +81,10 @@ class TestRecommendationsRefreshRoute(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # /api/recommendations is migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'alice'}))
 
     def test_refresh_seed_is_forwarded_to_picker(self):
         fake_picker = MagicMock()
