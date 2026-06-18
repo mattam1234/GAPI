@@ -188,6 +188,16 @@ remain in Flask.
 | Game details | `GET /api/game/{app_id}/details` | `backend/routers/game.py` | `tests/test_backend_game.py` |
 | Friends | `GET /api/friends`, add/remove/follow | `backend/routers/friends.py` | `tests/test_backend_friends.py` |
 | Admin notifications | `POST /api/admin/notifications/[broadcast\|send-digests]` | `backend/routers/admin_notifications.py` | ported broadcast/digest classes + `tests/test_backend_admin_notifications.py` |
+| Leaderboards | `GET /api/leaderboards`, `/seasonal`, `/api/leaderboard` | `backend/routers/leaderboards.py` | `tests/test_backend_leaderboards.py` |
+
+**Latent bug preserved (leaderboards):** the plural `/api/leaderboards` and
+`/seasonal` handlers reference a module-global `db_service` that is **never
+defined** in `gapi_gui` (used in ~10 places but `hasattr` is False) — so they
+always raised `NameError` -> 500 in production. No test ever hit them. The port
+reproduces this faithfully (referencing `gapi_gui.db_service`, caught -> 500);
+the SQL/shaping is preserved so the routes work the moment a real `db_service`
+is wired. Tests validate that logic via `create=True`. The singular
+`/api/leaderboard` (service-backed) is fully functional.
 
 **Two admin checks:** the legacy app had two — `app_settings_service.is_admin`
 (used inline by analytics) and `user_manager.is_admin` (the `@require_admin`

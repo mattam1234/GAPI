@@ -4472,109 +4472,7 @@ def api_get_recommendations():
 # Leaderboards API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/leaderboards', methods=['GET'])
-@require_login
-def api_get_leaderboards():
-    """Return leaderboard data for various user metrics.
-    
-    Query params:
-        category (str): Type of leaderboard - 'picks', 'acceptance', 'votes', 'accuracy'
-        limit (int): Number of entries to return (default 10, max 100)
-    
-    Response JSON::
-    
-        {
-          "leaderboard": [
-            {
-              "username": "player1",
-              "value": 42
-            },
-            ...
-          ]
-        }
-    """
-    try:
-        category = request.args.get('category', 'picks').lower()
-        limit = min(int(request.args.get('limit', 10)), 100)
-    except (ValueError, TypeError):
-        limit = 10
-    
-    if category not in ['picks', 'acceptance', 'votes', 'accuracy']:
-        category = 'picks'
-    
-    try:
-        db = db_service.get_db()
-        leaderboard = []
-        
-        if category == 'picks':
-            # Count how many games each user has picked in sessions
-            query = """
-                SELECT u.username, COUNT(DISTINCT ps.game_id) as value
-                FROM users u
-                LEFT JOIN live_sessions ls ON u.username = ls.host
-                LEFT JOIN picks ps ON ls.session_id = ps.session_id
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT ?
-            """
-        elif category == 'acceptance':
-            # Pick acceptance rate - how often a user's picks were voted for
-            query = """
-                SELECT u.username, 
-                    CAST(COUNT(CASE WHEN v.user != ps.user THEN 1 END) * 100.0 / 
-                    NULLIF(COUNT(DISTINCT ps.id), 0) AS INTEGER) as value
-                FROM users u
-                LEFT JOIN picks ps ON u.username = ps.user
-                LEFT JOIN votes v ON ps.id = v.pick_id
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                HAVING COUNT(DISTINCT ps.id) > 0
-                ORDER BY value DESC
-                LIMIT ?
-            """
-        elif category == 'votes':
-            # Total votes cast by user
-            query = """
-                SELECT u.username, COUNT(v.id) as value
-                FROM users u
-                LEFT JOIN votes v ON u.username = v.user
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT ?
-            """
-        elif category == 'accuracy':
-            # Voting accuracy - how often user voted for winning pick
-            query = """
-                SELECT u.username,
-                    CAST(COUNT(CASE WHEN v.user != ps.user AND ps.id IN (
-                        SELECT pick_id FROM votes WHERE session_id = ps.session_id 
-                        GROUP BY pick_id ORDER BY COUNT(*) DESC LIMIT 1
-                    ) THEN 1 END) * 100.0 / 
-                    NULLIF(COUNT(v.id), 0) AS INTEGER) as value
-                FROM users u
-                LEFT JOIN votes v ON u.username = v.user
-                LEFT JOIN picks ps ON v.pick_id = ps.id
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                HAVING COUNT(v.id) > 0
-                ORDER BY value DESC
-                LIMIT ?
-            """
-        
-        cursor = db.execute(query, (limit,))
-        for row in cursor.fetchall():
-            leaderboard.append({
-                'username': row[0],
-                'value': row[1]
-            })
-        
-        return jsonify({'leaderboard': leaderboard})
-    
-    except Exception as e:
-        gui_logger.error(f"Error getting leaderboards: {e}")
-        return jsonify({'error': f'Failed to get leaderboards: {str(e)}'}), 500
+# MIGRATED to FastAPI: GET /api/leaderboards -> backend/routers/leaderboards.py
 
 
 # ---------------------------------------------------------------------------
@@ -4833,73 +4731,7 @@ def api_get_challenges():
 # Seasonal Leaderboards API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/leaderboards/seasonal', methods=['GET'])
-@require_login
-def api_seasonal_leaderboards():
-    """Get seasonal leaderboards"""
-    try:
-        period = request.args.get('period', 'alltime').lower()
-        
-        if period not in ['alltime', 'monthly', 'weekly']:
-            period = 'alltime'
-        
-        db = db_service.get_db()
-        leaderboard = []
-        
-        # Query based on period
-        if period == 'weekly':
-            query = """
-                SELECT u.username, COUNT(DISTINCT ps.game_id) as value,
-                       CASE WHEN COUNT(DISTINCT ps.game_id) >= 5 THEN '🔥 Weekly Star' ELSE NULL END as seasonal_title
-                FROM users u
-                LEFT JOIN live_sessions ls ON u.username = ls.host
-                LEFT JOIN picks ps ON ls.session_id = ps.session_id
-                WHERE datetime(ls.created_at) >= datetime('now', '-7 days')
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 20
-            """
-            period_info = 'This Week\'s Top Performers'
-        elif period == 'monthly':
-            query = """
-                SELECT u.username, COUNT(DISTINCT ps.game_id) as value,
-                       CASE WHEN COUNT(DISTINCT ps.game_id) >= 15 THEN '⭐ Monthly Champion' ELSE NULL END as seasonal_title
-                FROM users u
-                LEFT JOIN live_sessions ls ON u.username = ls.host
-                LEFT JOIN picks ps ON ls.session_id = ps.session_id
-                WHERE datetime(ls.created_at) >= datetime('now', '-30 days')
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 20
-            """
-            period_info = 'This Month\'s Top Players'
-        else:  # alltime
-            query = """
-                SELECT u.username, COUNT(DISTINCT ps.game_id) as value,
-                       CASE WHEN COUNT(DISTINCT ps.game_id) >= 50 THEN '👑 Legendary' ELSE NULL END as seasonal_title
-                FROM users u
-                LEFT JOIN live_sessions ls ON u.username = ls.host
-                LEFT JOIN picks ps ON ls.session_id = ps.session_id
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 20
-            """
-            period_info = 'All-Time Rankings'
-        
-        cursor = db.execute(query)
-        for row in cursor.fetchall():
-            leaderboard.append({
-                'username': row[0],
-                'value': row[1],
-                'seasonal_title': row[2]
-            })
-        
-        return jsonify({'leaderboard': leaderboard, 'period_info': period_info})
-    
-    except Exception as e:
-        gui_logger.error(f"Error getting seasonal leaderboards: {e}")
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/leaderboards/seasonal -> backend/routers/leaderboards.py
 
 
 # ---------------------------------------------------------------------------
@@ -8370,30 +8202,7 @@ def _handle_chat_command(db, username: str, room: str, message: str) -> Dict:
 # Leaderboard API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/leaderboard')
-@require_login
-def api_leaderboard():
-    """Return a ranked leaderboard of users.
-
-    Query params:
-      - ``metric``: 'playtime' (default), 'games', or 'achievements'
-      - ``limit``:  max entries (default 20)
-    """
-    metric = request.args.get('metric', 'playtime')
-    try:
-        limit = int(request.args.get('limit', 20))
-    except ValueError:
-        limit = 20
-    db = next(database.get_db())
-    try:
-        if _leaderboard_service:
-            rows = _leaderboard_service.get_rankings(db, metric=metric, limit=limit)
-        else:
-            rows = database.get_leaderboard(db, metric=metric, limit=limit)
-    finally:
-        if db:
-            db.close()
-    return jsonify({'metric': metric, 'entries': rows})
+# MIGRATED to FastAPI: GET /api/leaderboard -> backend/routers/leaderboards.py
 
 
 # ---------------------------------------------------------------------------
