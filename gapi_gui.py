@@ -11129,60 +11129,10 @@ def api_admin_email_test():
 # MIGRATED to FastAPI: POST /api/admin/notifications/send-digests -> backend/routers/admin_notifications.py
 
 
-@app.route('/api/users/<username>/email', methods=['PUT'])
-@require_login
-def api_set_user_email(username: str):
-    """Update the email address for *username* (own account or admin).
-
-    Request JSON:
-      ``email``  – new email address (use ``""`` to clear)
-
-    Response JSON:
-      ``success``  – ``true`` on success
-      ``email``    – the stored email address
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    current_user = get_current_username()
-    if current_user != username and not user_manager.is_admin(current_user):
-        return jsonify({'error': 'Forbidden'}), 403
-    data = request.get_json(silent=True, force=True) or {}
-    email = str(data.get('email', '')).strip()
-    # Validate format when a non-empty email is provided
-    if email and not _is_valid_email_address(email):
-        return jsonify({'error': 'Invalid email address'}), 400
-    try:
-        db = next(database.get_db())
-        ok = database.set_user_email(db, username, email)
-        if not ok:
-            return jsonify({'error': 'User not found'}), 404
-        return jsonify({'success': True, 'email': email})
-    except Exception as e:
-        gui_logger.error('api_set_user_email error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: PUT /api/users/<username>/email -> backend/routers/users.py
 
 
-@app.route('/api/users/<username>/email', methods=['GET'])
-@require_login
-def api_get_user_email(username: str):
-    """Retrieve the email address for *username* (own account or admin).
-
-    Response JSON:
-      ``username``  – the queried username
-      ``email``     – email address (may be ``null`` when not set)
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    current_user = get_current_username()
-    if current_user != username and not user_manager.is_admin(current_user):
-        return jsonify({'error': 'Forbidden'}), 403
-    try:
-        db = next(database.get_db())
-        email = database.get_user_email(db, username)
-        return jsonify({'username': username, 'email': email or None})
-    except Exception as e:
-        gui_logger.error('api_get_user_email error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/users/<username>/email -> backend/routers/users.py
 
 
 # ---------------------------------------------------------------------------

@@ -536,6 +536,10 @@ class TestSendDigestsEndpoint(_AppBase):
 
 class TestUserEmailEndpoints(_AppBase):
 
+    def setUp(self):
+        # /api/users/<u>/email is migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
+
     def test_get_email_requires_login(self):
         resp = self.client.get('/api/users/alice/email')
         self.assertIn(resp.status_code, (401, 403))
@@ -560,7 +564,7 @@ class TestUserEmailEndpoints(_AppBase):
             _set_user_session(self.client, 'alice')
             resp = self.client.put('/api/users/alice/email', json={'email': 'alice@example.com'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['success'])
         self.assertEqual(data['email'], 'alice@example.com')
 
@@ -579,7 +583,7 @@ class TestUserEmailEndpoints(_AppBase):
             _set_admin_session(self.client)
             resp = self.client.put('/api/users/bob/email', json={'email': 'bob@example.com'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['success'])
 
     def test_get_email_own_account_succeeds(self):
@@ -590,7 +594,7 @@ class TestUserEmailEndpoints(_AppBase):
             _set_user_session(self.client, 'alice')
             resp = self.client.get('/api/users/alice/email')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['email'], 'alice@example.com')
         self.assertEqual(data['username'], 'alice')
 
@@ -601,7 +605,7 @@ class TestUserEmailEndpoints(_AppBase):
              patch('database.get_db', return_value=iter([mock_db])):
             _set_user_session(self.client, 'alice')
             resp = self.client.get('/api/users/alice/email')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIsNone(data['email'])
 
     def test_get_email_returns_503_when_db_unavailable(self):
