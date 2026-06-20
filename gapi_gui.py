@@ -2999,58 +2999,7 @@ def _ical_escape(text) -> str:
 # Challenges & Quests API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/challenges', methods=['GET'])
-@require_login
-def api_get_challenges():
-    """Return daily challenges for user"""
-    username = get_current_username()
-    
-    challenges = [
-        {
-            'id': '1',
-            'name': 'First Pick',
-            'description': 'Pick a game in a session',
-            'icon': '🎲',
-            'goal': 1,
-            'progress': 1,
-            'reward_xp': 10,
-            'completed': True
-        },
-        {
-            'id': '2',
-            'name': 'Vote Master',
-            'description': 'Cast 5 votes',
-            'icon': '⚖️',
-            'goal': 5,
-            'progress': 3,
-            'reward_xp': 25,
-            'completed': False
-        },
-        {
-            'id': '3',
-            'name': 'Session Host',
-            'description': 'Host a game session',
-            'icon': '🎭',
-            'goal': 1,
-            'progress': 0,
-            'reward_xp': 50,
-            'completed': False
-        },
-        {
-            'id': '4',
-            'name': 'Social Butterfly',
-            'description': 'Send 3 friend invites',
-            'icon': '🦋',
-            'goal': 3,
-            'progress': 1,
-            'reward_xp': 15,
-            'completed': False
-        }
-    ]
-    
-    total_xp = sum(c['reward_xp'] for c in challenges if c.get('completed'))
-    
-    return jsonify({'challenges': challenges, 'total_xp': total_xp})
+# MIGRATED to FastAPI: GET /api/challenges -> backend/routers/system_infra.py
 
 
 # MIGRATED to FastAPI: POST /api/friends/add -> backend/routers/friends.py

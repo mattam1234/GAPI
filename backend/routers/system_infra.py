@@ -388,3 +388,26 @@ def api_get_user_profile(username: str, _user: str = Depends(require_login)):
     finally:
         if db:
             db.close()
+
+
+# ── daily challenges (require_login) ─────────────────────────────────────────
+
+@router.get("/api/challenges")
+def api_get_challenges(_username: str = Depends(require_login)):
+    """Return the gamified *daily* challenges (static demo set).
+
+    Distinct from the DB-backed /api/achievement-challenges domain. Faithful
+    port of the legacy hardcoded payload.
+    """
+    challenges = [
+        {'id': '1', 'name': 'First Pick', 'description': 'Pick a game in a session',
+         'icon': '🎲', 'goal': 1, 'progress': 1, 'reward_xp': 10, 'completed': True},
+        {'id': '2', 'name': 'Vote Master', 'description': 'Cast 5 votes',
+         'icon': '⚖️', 'goal': 5, 'progress': 3, 'reward_xp': 25, 'completed': False},
+        {'id': '3', 'name': 'Session Host', 'description': 'Host a game session',
+         'icon': '🎭', 'goal': 1, 'progress': 0, 'reward_xp': 50, 'completed': False},
+        {'id': '4', 'name': 'Social Butterfly', 'description': 'Send 3 friend invites',
+         'icon': '🦋', 'goal': 3, 'progress': 1, 'reward_xp': 15, 'completed': False},
+    ]
+    total_xp = sum(c['reward_xp'] for c in challenges if c.get('completed'))
+    return _ok({'challenges': challenges, 'total_xp': total_xp})
