@@ -3862,6 +3862,64 @@ def _auto_start_discord_bot_if_configured(config_path: str = DEFAULT_CONFIG_PATH
         gui_logger.warning('Discord bot auto-start skipped: %s', error)
 
 
+_discord_autostart_lock_handle = None
+
+
+def _claim_discord_autostart_singleton() -> bool:
+    """Best-effort cross-process guard so only ONE process auto-starts the bot.
+
+    Holds an advisory ``flock`` on a lock file for the process lifetime; the OS
+    releases it automatically when the holder dies, so there are no stale locks
+    to clean up. Returns ``True`` when this process won the slot. Single-worker
+    deployments always win; multi-worker (gunicorn ``-w N``) deployments elect
+    exactly one bot owner. Non-POSIX hosts (Windows dev) assume single process.
+    """
+    global _discord_autostart_lock_handle
+    if _discord_autostart_lock_handle is not None:
+        return True
+    lock_path = os.path.join(BASE_DIR, '.discord_bot_autostart.lock')
+    try:
+        handle = open(lock_path, 'w')
+    except OSError:
+        # Can't create the lock file — don't block startup over it.
+        return True
+    try:
+        import fcntl
+    except ImportError:
+        _discord_autostart_lock_handle = handle  # POSIX-only lock; assume singleton
+        return True
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return False  # another worker already owns the bot
+    _discord_autostart_lock_handle = handle  # keep the handle alive to hold the lock
+    return True
+
+
+def auto_start_discord_bot_for_asgi(config_path: str = DEFAULT_CONFIG_PATH) -> None:
+    """Auto-start the managed Discord bot under the FastAPI/ASGI host.
+
+    The legacy Flask ``main()`` called :func:`_auto_start_discord_bot_if_configured`
+    on boot, but production runs ``gunicorn backend.main:app`` (the FastAPI host
+    that mounts Flask only as a WSGI fallback), so that path never executes and
+    the bot never launches. This restores the behaviour from a FastAPI startup
+    hook, guarded by :func:`_claim_discord_autostart_singleton` so only one
+    worker spawns the subprocess. Honours ``GAPI_DISABLE_DISCORD_AUTOSTART``.
+    """
+    if os.getenv('GAPI_DISABLE_DISCORD_AUTOSTART', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+        gui_logger.info('Discord bot auto-start disabled by environment')
+        return
+    if not _discord_bot_token_configured(_resolve_repo_path(config_path)):
+        gui_logger.info('Discord bot auto-start skipped: no token configured '
+                        '(set DISCORD_BOT_TOKEN in .env or discord_bot_token in config.json)')
+        return
+    if not _claim_discord_autostart_singleton():
+        gui_logger.info('Discord bot auto-start skipped: another worker owns the bot')
+        return
+    _auto_start_discord_bot_if_configured(config_path)
+
+
 def _get_discord_linked_users_from_db() -> List[Dict]:
     """Return Discord-linked users from the primary users table."""
     if not DB_AVAILABLE or not ensure_db_available():

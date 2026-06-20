@@ -7,7 +7,7 @@ Handles live updates for leaderboards, activity feeds, notifications, and trades
 import json
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Set, Callable
 from collections import defaultdict
 import logging
@@ -43,6 +43,14 @@ class SSEBroadcaster:
                 callback(event)
             except Exception as e:
                 logger.error(f"Error in subscriber callback: {e}")
+        # Persist to the polling cache so HTTP pollers and the SSE stream — which
+        # both read from ``polling_cache`` — actually receive this event. Without
+        # this, nothing ever populated the cache and /api/events/poll always
+        # returned an empty list.
+        try:
+            polling_cache.add_event(channel, event)
+        except Exception as e:
+            logger.error(f"Error caching broadcast event on {channel}: {e}")
     
     def broadcast_to_user(self, username: str, event: dict):
         """Send event to specific user"""
@@ -261,16 +269,39 @@ class PollingCache:
         if len(self.events[channel]) > self.max_events:
             self.events[channel] = self.events[channel][-self.max_events:]
     
-    def get_events_since(self, channel: str, timestamp: str) -> list:
-        """Get events since a specific timestamp"""
+    @staticmethod
+    def _to_naive_utc(value):
+        """Parse an ISO-8601 string to a naive-UTC datetime, tolerating a
+        trailing ``Z`` and explicit offsets (browsers send ``...Z`` via
+        ``Date.toISOString()``; cached events are written with a naive
+        ``utcnow().isoformat()``). Returns ``None`` when unparseable."""
+        if not value:
+            return None
+        text = str(value).strip()
+        if text.endswith('Z'):
+            text = text[:-1]
         try:
-            since = datetime.fromisoformat(timestamp)
-            return [
-                e for e in self.events.get(channel, [])
-                if datetime.fromisoformat(e['cached_at']) > since
-            ]
-        except:
-            return self.events.get(channel, [])[-10:]  # Last 10 if parsing fails
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    def get_events_since(self, channel: str, timestamp: str) -> list:
+        """Get events newer than *timestamp* on *channel*."""
+        since = self._to_naive_utc(timestamp)
+        events = self.events.get(channel, [])
+        if since is None:
+            # Unparseable/empty cursor: return only the most recent few so a
+            # fresh client gets context without replaying the whole buffer.
+            return events[-10:]
+        result = []
+        for e in events:
+            cached = self._to_naive_utc(e.get('cached_at'))
+            if cached is None or cached > since:
+                result.append(e)
+        return result
     
     def clear_old_events(self, max_age_seconds: int = 3600):
         """Clean up old events"""

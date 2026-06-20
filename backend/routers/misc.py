@@ -59,10 +59,13 @@ Routes:
   anticheat:
     GET    /api/anticheat
 """
+import asyncio
+import json
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import gapi_gui
 import database
@@ -226,6 +229,118 @@ def api_claim_event_reward(event_id: str, username: str = Depends(require_login)
     except Exception as e:
         gapi_gui.gui_logger.error("Error claiming event reward: %s", e)
         return _err(500, "Failed to claim reward")
+
+
+# ── events: real-time delivery (SSE + polling) ───────────────────────────────
+# These three routes back ``static/realtime-client.js``. They existed only as
+# Flask routes in ``realtime.setup_realtime_routes`` (registered on the legacy
+# app), so under the FastAPI server they 404'd — which is what spammed the
+# dashboard console with failed ``/api/events/poll`` and SSE requests. Ported
+# here so the live FastAPI app serves them. Auth is cookie-based (``require_login``
+# decodes the Flask session cookie), which works for both ``fetch`` and
+# ``EventSource`` (the latter cannot send custom headers but does send cookies).
+
+def _realtime_channels(username: str):
+    """The set of polling-cache channels relevant to one user."""
+    return [
+        "global", f"user:{username}", "leaderboard", "activity",
+        "rankings", "achievements", "sessions", "shop", "streams",
+    ]
+
+
+def _dedupe_events(events):
+    """Drop duplicate event payloads (some events are cached on >1 channel)."""
+    seen = set()
+    out = []
+    for ev in events:
+        key = json.dumps(ev, sort_keys=True, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ev)
+    return out
+
+
+@events_router.get("/poll")
+def api_events_poll(since: str = Query(default=""),
+                    username: str = Depends(require_login)):
+    """Polling fallback for real-time updates (used when SSE is unavailable)."""
+    g = gapi_gui
+    now = datetime.utcnow().isoformat()
+    if not getattr(g, "REALTIME_AVAILABLE", False):
+        return _ok({"success": True, "events": [], "timestamp": now})
+    cache = g.realtime.polling_cache
+    events = []
+    for channel in _realtime_channels(username):
+        events.extend(cache.get_events_since(channel, since))
+    return _ok({"success": True, "events": _dedupe_events(events),
+                "timestamp": now})
+
+
+@events_router.get("/status")
+def api_events_status(username: str = Depends(require_login)):
+    """Report real-time subsystem status for the calling user."""
+    g = gapi_gui
+    now = datetime.utcnow().isoformat()
+    if not getattr(g, "REALTIME_AVAILABLE", False):
+        return _ok({"user": username, "is_online": False, "connections": 0,
+                    "sse_available": False, "polling_available": True,
+                    "timestamp": now})
+    ws = g.realtime.ws_manager
+    return _ok({"user": username,
+                "is_online": ws.is_user_online(username),
+                "connections": ws.get_user_connection_count(username),
+                "sse_available": True, "polling_available": True,
+                "timestamp": now})
+
+
+@events_router.get("/stream")
+async def api_events_stream(request: Request,
+                            username: str = Depends(require_login)):
+    """Server-Sent Events stream for real-time dashboard updates.
+
+    Async generator (no blocking ``time.sleep``) so it doesn't tie up a worker
+    thread per connected client. Emits a comment heartbeat every ~15s to keep
+    intermediaries (e.g. Cloudflare) from dropping an idle stream.
+    """
+    g = gapi_gui
+
+    async def _generate():
+        yield (f"event: connected\n"
+               f"data: {json.dumps({'type': 'connected', 'username': username})}\n\n")
+        if not getattr(g, "REALTIME_AVAILABLE", False):
+            return
+        cache = g.realtime.polling_cache
+        channels = _realtime_channels(username)
+        since = datetime.utcnow().isoformat()
+        idle_ticks = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            new_events = []
+            for channel in channels:
+                new_events.extend(cache.get_events_since(channel, since))
+            new_events = _dedupe_events(new_events)
+            if new_events:
+                for ev in new_events:
+                    since = ev.get("cached_at", since)
+                    event_type = ev.get("type", "update")
+                    yield f"event: {event_type}\ndata: {json.dumps(ev)}\n\n"
+                idle_ticks = 0
+            else:
+                idle_ticks += 1
+                if idle_ticks >= 15:
+                    yield ": keep-alive\n\n"
+                    idle_ticks = 0
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache",
+                 "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
+    )
 
 
 # ── twitch ───────────────────────────────────────────────────────────────────

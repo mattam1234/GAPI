@@ -157,6 +157,18 @@ def create_app() -> FastAPI:
     if _SPA_DIST.is_dir():
         app.mount("/app", _SPAStaticFiles(directory=_SPA_DIST, html=True), name="spa")
 
+    # --- Startup hooks ---------------------------------------------------
+    # The legacy Flask ``main()`` auto-started the Discord bot on boot, but it
+    # never runs under ``gunicorn backend.main:app`` (Flask is only the WSGI
+    # fallback below). Restore it here. The helper is guarded against multiple
+    # workers and honours GAPI_DISABLE_DISCORD_AUTOSTART.
+    @app.on_event("startup")
+    def _start_discord_bot() -> None:  # pragma: no cover - process-level side effect
+        try:
+            gapi_gui.auto_start_discord_bot_for_asgi()
+        except Exception:
+            gapi_gui.gui_logger.exception("Discord bot auto-start failed")
+
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.
     # Removed domain-by-domain as routers replace it (see MODERNIZATION_BRIEF).

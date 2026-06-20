@@ -44,6 +44,9 @@ config.json
 gapi.db
 data/
 
+# Runtime
+.discord_bot_autostart.lock
+
 # Demo
 .demo_config.json
 .demo_config_gui.json
