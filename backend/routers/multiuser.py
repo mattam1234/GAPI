@@ -1,20 +1,26 @@
 """Multi-user picking domain (migrated to FastAPI).
 
-Mirrors the legacy Flask route:
-  * POST /api/multiuser/pick   (pick a common game for several users + filters)
+Mirrors the legacy Flask routes:
+  * POST /api/multiuser/pick    (pick a common game for several users + filters)
+  * GET  /api/multiuser/common  (common games for selected users)
+  * GET  /api/multiuser/stats   (multi-user library statistics)
 
 Reuses the legacy multi_picker machinery and records the pick to the audit log
-for analytics. Other /api/multiuser/* routes (stats, common-games) remain in
-Flask.
+for analytics.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 import gapi_gui
 from backend.dependencies import require_login
 
 router = APIRouter(prefix="/api/multiuser", tags=["multiuser"])
+
+
+def _users_param(request: Request):
+    user_names = request.query_params.get("users", "").split(",")
+    return [u.strip() for u in user_names if u.strip()]
 
 
 def _int_or(value, default=None):
@@ -84,3 +90,47 @@ def multiuser_pick(body: Optional[dict] = Body(default=None),
             "steam_url": f"https://store.steampowered.com/app/{app_id}/",
             "steamdb_url": f"https://steamdb.info/app/{app_id}/",
         }
+
+
+@router.get("/common")
+def multiuser_common(request: Request, _user: str = Depends(require_login)):
+    """Get common games for selected users."""
+    gapi_gui._ensure_multi_picker()
+    mp = gapi_gui.multi_picker
+    if not mp:
+        raise HTTPException(status_code=400,
+                            detail="Multi-user picker not initialized")
+
+    user_names = _users_param(request)
+
+    with gapi_gui.multi_picker_lock:
+        common_games = mp.find_common_games(user_names if user_names else None)
+
+        games_data = []
+        for game in common_games[:50]:  # Limit to 50 games
+            games_data.append({
+                "app_id": game.get("appid"),
+                "name": game.get("name", "Unknown"),
+                "playtime_hours": round(game.get("playtime_forever", 0) / 60, 1),
+                "owners": game.get("owners", []),
+            })
+
+        return {
+            "total_common": len(common_games),
+            "games": games_data,
+        }
+
+
+@router.get("/stats")
+def multiuser_stats(request: Request, _user: str = Depends(require_login)):
+    """Get multi-user library statistics."""
+    gapi_gui._ensure_multi_picker()
+    mp = gapi_gui.multi_picker
+    if not mp:
+        raise HTTPException(status_code=400,
+                            detail="Multi-user picker not initialized")
+
+    user_names = _users_param(request)
+
+    with gapi_gui.multi_picker_lock:
+        return mp.get_library_stats(user_names if user_names else None)
