@@ -3948,24 +3948,7 @@ def api_get_challenges():
 # ---------------------------------------------------------------------------
 
 
-# Tournaments & Brackets
-@app.route('/api/tournaments', methods=['GET'])
-@require_login
-def api_get_tournaments():
-    """Get active, upcoming, or completed tournaments"""
-    status = request.args.get('status', 'active').lower()
-    
-    tournaments = [
-        {'id': '1', 'name': 'Spring Showdown', 'type': 'Single Elimination', 'participants': 8, 'max_participants': 16, 'status': 'active', 'winner': None},
-        {'id': '2', 'name': 'Weekend Bash', 'type': 'Round Robin', 'participants': 12, 'max_participants': 12, 'status': 'active', 'winner': None},
-        {'id': '3', 'name': 'Summer Championship', 'type': 'Double Elimination', 'participants': 0, 'max_participants': 32, 'status': 'upcoming', 'winner': None},
-        {'id': '4', 'name': 'Winter League', 'type': 'Single Elimination', 'participants': 8, 'max_participants': 8, 'status': 'completed', 'winner': 'ProGamer42'},
-    ]
-    
-    if status != 'all':
-        tournaments = [t for t in tournaments if t['status'] == status]
-    
-    return jsonify({'tournaments': tournaments})
+# Tournaments & Brackets: MIGRATED to FastAPI -> backend/routers/tournaments.py
 
 
     titles = [
@@ -4591,78 +4574,8 @@ def api_claim_battlepass_reward(level):
         return jsonify({'success': True, 'message': f'Reward claimed (mock)'})
 
 
-# Tournaments
-@app.route('/api/tournaments', methods=['GET'])
-@require_login
-def api_list_tournaments():
-    """List active tournaments"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'tournaments': [
-                {
-                    'id': 1,
-                    'name': 'Spring Championship 2026',
-                    'game': 'Valorant',
-                    'participants': 64,
-                    'prize_pool': 50000,
-                    'status': 'registration',
-                    'days_left': 7,
-                    'user_registered': False
-                },
-                {
-                    'id': 2,
-                    'name': 'Weekly Quick Bracket',
-                    'game': 'Any',
-                    'participants': 32,
-                    'prize_pool': 5000,
-                    'status': 'active',
-                    'days_left': 2,
-                    'user_registered': True
-                },
-            ]
-        })
-    except Exception as e:
-        return jsonify({'tournaments': []})
-
-
-@app.route('/api/tournaments/<tournament_id>', methods=['GET'])
-@require_login
-def api_get_tournament(tournament_id):
-    """Get tournament bracket and details"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'tournament': {
-                'id': int(tournament_id),
-                'name': 'Spring Championship 2026',
-                'status': 'active',
-                'round': 'Quarterfinals',
-                'user_position': 8
-            },
-            'bracket': [
-                {'user': 'ProPlayer1', 'seed': 1, 'wins': 2},
-                {'user': username, 'seed': 16, 'wins': 1},
-                {'user': 'NoobMaster', 'seed': 8, 'wins': 1},
-            ]
-        })
-    except Exception as e:
-        return jsonify({'error': 'Tournament not found'}), 404
-
-
-@app.route('/api/tournaments/register/<tournament_id>', methods=['POST'])
-@require_login
-def api_register_tournament(tournament_id):
-    """Register for tournament"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    
-    try:
-        return jsonify({'success': True, 'message': 'Tournament registration successful', 'bracket_position': 32})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Registered (mock)'})
+# Tournaments: MIGRATED to FastAPI -> backend/routers/tournaments.py
+# (the dead duplicate GET /api/tournaments handler was dropped during migration)
 
 
 # Content Creator Program
