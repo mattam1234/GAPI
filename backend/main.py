@@ -19,8 +19,8 @@ from backend.routers import (
     game, ignored,
     leaderboards, library, live_session, messages, multiuser, notifications,
     permissions, pick, platforms, playlists, presence, profile,
-    recommendations, reviews, schedule, search, sessions, tags, tournaments,
-    trades, users, voting, wishlist,
+    recommendations, reviews, schedule, search, sessions, social_stats, tags,
+    tournaments, trades, users, voting, wishlist,
 )
 
 
@@ -68,6 +68,8 @@ def create_app() -> FastAPI:
     app.include_router(recommendations.router)
     app.include_router(permissions.router)
     app.include_router(search.router)
+    app.include_router(social_stats.app_friends_router)
+    app.include_router(social_stats.stats_router)
     app.include_router(tournaments.router)
     app.include_router(trades.router)
     app.include_router(platforms.psn_router)
