@@ -48,10 +48,12 @@ def _set_user_session(client, username='bob'):
 # ---------------------------------------------------------------------------
 
 class TestSimilarGames(unittest.TestCase):
+    # GET /api/games/<app_id>/similar migrated to FastAPI
+    # (backend/routers/catalog.py, games_router) — exercise the FastAPI app.
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
         resp = self.client.get('/api/games/123/similar')
@@ -62,7 +64,7 @@ class TestSimilarGames(unittest.TestCase):
         with patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.get('/api/games/123/similar')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['similar'], [])
 
     def test_returns_200_with_correct_shape(self):
@@ -77,7 +79,7 @@ class TestSimilarGames(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/games/123/similar')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('app_id', data)
         self.assertIn('platform', data)
         self.assertIn('similar', data)

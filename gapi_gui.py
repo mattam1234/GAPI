@@ -2194,41 +2194,7 @@ def api_history_legacy():
 # First-time Setup Endpoints
 # ===========================================================================================
 
-@app.route('/api/filters/platform-options', methods=['GET'])
-@require_login
-def api_filter_platform_options():
-    """Return platform/device filter options limited to user-configured platforms."""
-    username = get_current_username()
-
-    users_param = request.args.get('users', '').strip()
-    requested_users = [u.strip() for u in users_param.split(',') if u.strip()] if users_param else []
-    usernames = requested_users or ([username] if username else [])
-
-    platforms = _collect_available_platforms(usernames)
-    platform_items = [
-        {
-            'value': platform,
-            'label': platform.title(),
-            'device': classify_device_for_platform(platform)
-        }
-        for platform in platforms
-    ]
-
-    device_values = sorted({
-        item['device'] for item in platform_items if item['device'] in {'pc', 'console'}
-    })
-    device_items = [
-        {
-            'value': device,
-            'label': 'PC' if device == 'pc' else 'Console'
-        }
-        for device in device_values
-    ]
-
-    return jsonify({
-        'platforms': platform_items,
-        'devices': device_items
-    })
+# MIGRATED to FastAPI: GET /api/filters/platform-options -> backend/routers/catalog.py (filters_router)
 
 
 def _game_identity_tokens(game: Optional[Dict]) -> Set[str]:
@@ -2267,45 +2233,7 @@ def _game_identity_tokens(game: Optional[Dict]) -> Set[str]:
 # MIGRATED to FastAPI: GET /api/game/<int:app_id>/details -> backend/routers/game.py
 
 
-@app.route('/api/favorite/<int:app_id>', methods=['POST', 'DELETE'])
-@require_login
-def api_toggle_favorite(app_id):
-    """Add or remove a game from favorites"""
-    if not ensure_db_available():
-        return jsonify({'error': 'Database not available'}), 503
-
-    global current_user
-    username = get_current_username()
-
-    if not username:
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    try:
-        db = database.SessionLocal()
-        try:
-            if request.method == 'POST':
-                if _db_favorites_service:
-                    success = _db_favorites_service.add(db, username, str(app_id))
-                else:
-                    success = database.add_favorite(db, username, str(app_id))
-                if success:
-                    return jsonify({'success': True, 'action': 'added'})
-                else:
-                    return jsonify({'error': 'Failed to add favorite'}), 500
-            else:
-                if _db_favorites_service:
-                    success = _db_favorites_service.remove(db, username, str(app_id))
-                else:
-                    success = database.remove_favorite(db, username, str(app_id))
-                if success:
-                    return jsonify({'success': True, 'action': 'removed'})
-                else:
-                    return jsonify({'error': 'Failed to remove favorite'}), 500
-        finally:
-            db.close()
-    except Exception as e:
-        gui_logger.error(f"Error toggling favorite: {e}")
-        return jsonify({'error': 'Failed to toggle favorite'}), 500
+# MIGRATED to FastAPI: POST/DELETE /api/favorite/<int:app_id> -> backend/routers/catalog.py (favorite_router)
 
 
 @app.route('/api/library')
@@ -2567,61 +2495,7 @@ def api_run_migration():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/favorites')
-@require_login
-def api_favorites():
-    """Get all favorite games"""
-    if not ensure_db_available():
-        return jsonify({'error': 'Database not available'}), 503
-
-    global current_user
-    username = get_current_username()
-
-    if not username:
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    try:
-        db = database.SessionLocal()
-        try:
-            if _db_favorites_service:
-                favorite_ids = _db_favorites_service.get_all(db, username)
-            else:
-                favorite_ids = database.get_user_favorites(db, username)
-
-            # Get cached library to look up game details
-            if _library_service:
-                cached_games = _library_service.get_cached(db, username)
-            else:
-                cached_games = database.get_cached_library(db, username)
-        finally:
-            db.close()
-
-        favorites = []
-        for app_id in favorite_ids:
-            game = next((g for g in cached_games if str(g.get('app_id')) == str(app_id)), None)
-            if game:
-                favorites.append({
-                    'app_id': app_id,
-                    'game_id': game.get('game_id') or f"steam:{app_id}",
-                    'name': game.get('name', 'Unknown'),
-                    'playtime_hours': round(game.get('playtime_hours', 0), 1),
-                    'platform': game.get('platform', 'steam'),
-                    'tags': game.get('tags', []),
-                })
-            else:
-                favorites.append({
-                    'app_id': app_id,
-                    'game_id': f"steam:{app_id}",
-                    'name': f'App ID {app_id} (Not in library)',
-                    'playtime_hours': 0,
-                    'platform': 'steam',
-                    'tags': [],
-                })
-
-        return jsonify({'favorites': favorites})
-    except Exception as e:
-        gui_logger.error(f"Error loading favorites: {e}")
-        return jsonify({'error': 'Failed to load favorites'}), 500
+# MIGRATED to FastAPI: GET /api/favorites -> backend/routers/catalog.py (favorites_router)
 
 
 # MIGRATED to FastAPI: see backend/routers/social_stats.py. The /api/stats
@@ -3826,42 +3700,7 @@ def api_get_challenges():
 
 
 # Cosmetic Collections
-@app.route('/api/collections', methods=['GET'])
-@require_login
-def api_get_collections():
-    """Get cosmetic collections"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'collections': [
-                {
-                    'type': 'themes',
-                    'owned': 18,
-                    'total': 25,
-                    'completion': 72,
-                    'rarity_points': 450
-                },
-                {
-                    'type': 'titles',
-                    'owned': 12,
-                    'total': 30,
-                    'completion': 40,
-                    'rarity_points': 280
-                },
-                {
-                    'type': 'frames',
-                    'owned': 7,
-                    'total': 20,
-                    'completion': 35,
-                    'rarity_points': 180
-                },
-            ],
-            'total_completion': 49,
-            'mastery_tier': 'Silver'
-        })
-    except Exception as e:
-        return jsonify({'collections': [], 'total_completion': 0})
+# MIGRATED to FastAPI: GET /api/collections -> backend/routers/catalog.py (collections_router)
 
 
 # ==================== PERFORMANCE & CACHING ====================
@@ -3873,234 +3712,9 @@ def api_get_collections():
 
 # Optimized List Endpoints with Pagination
 
-@app.route('/api/optimized/users', methods=['GET'])
-@require_login
-def api_list_users_paginated():
-    """Get paginated user list"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        db = db_service.get_db()
-        
-        # Count total
-        total_query = "SELECT COUNT(*) FROM users"
-        total = db.execute(total_query).fetchone()[0]
-        
-        # Get paginated results
-        query = """
-            SELECT id, username, email, created_at 
-            FROM users 
-            ORDER BY created_at DESC 
-            LIMIT ? OFFSET ?
-        """
-        offset = (page - 1) * per_page
-        users = db.execute(query, (per_page, offset)).fetchall()
-        
-        result = performance.Paginator.paginate(
-            [{'id': u[0], 'username': u[1], 'email': u[2], 'created_at': str(u[3])} for u in users],
-            page=page,
-            per_page=per_page,
-            total_count=total
-        )
-        
-        result['endpoint'] = 'optimized-users'
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting paginated users: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/games', methods=['GET'])
-@require_login
-def api_list_games_paginated():
-    """Get paginated game library"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        # Load games (mock for now)
-        username = get_current_username()
-        p = ensure_picker_initialized(username)
-        all_games = p.games if p else []
-        
-        result = performance.Paginator.paginate(
-            all_games,
-            page=page,
-            per_page=per_page,
-            total_count=len(all_games)
-        )
-        
-        result['endpoint'] = 'optimized-games'
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting paginated games: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/leaderboard', methods=['GET'])
-@require_login
-def api_get_leaderboard_optimized():
-    """Get optimized leaderboard with pagination and caching"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        category = request.args.get('category', 'picks').lower()
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        # Use cache for leaderboard (10 minute TTL)
-        cache_key = f"leaderboard:{category}"
-        cached_data = performance.get_cache().get(cache_key)
-        
-        if cached_data is not None:
-            # Return from cache but still paginate
-            result = performance.Paginator.paginate(
-                cached_data,
-                page=page,
-                per_page=per_page,
-                total_count=len(cached_data)
-            )
-            result['cached'] = True
-            return jsonify(result)
-        
-        # Query database
-        db = db_service.get_db()
-        leaderboard = []
-        
-        if category == 'picks':
-            query = """
-                SELECT u.username, COUNT(DISTINCT ps.game_id) as value
-                FROM users u
-                LEFT JOIN live_sessions ls ON u.username = ls.host
-                LEFT JOIN picks ps ON ls.session_id = ps.session_id
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 200
-            """
-        else:
-            query = """
-                SELECT u.username, COUNT(v.id) as value
-                FROM users u
-                LEFT JOIN votes v ON u.username = v.user
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 200
-            """
-        
-        cursor = db.execute(query)
-        for row in cursor.fetchall():
-            leaderboard.append({
-                'username': row[0],
-                'value': row[1],
-                'rank': len(leaderboard) + 1
-            })
-        
-        # Cache for 10 minutes
-        performance.get_cache().set(cache_key, leaderboard, ttl=600)
-        
-        # Paginate
-        result = performance.Paginator.paginate(
-            leaderboard,
-            page=page,
-            per_page=per_page,
-            total_count=len(leaderboard)
-        )
-        result['cached'] = False
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting optimized leaderboard: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/chat/messages', methods=['GET'])
-@require_login
-def api_get_chat_messages_paginated():
-    """Get paginated chat messages"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        room = request.args.get('room', 'general')
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        db = db_service.get_db()
-        
-        # Count messages
-        count_query = "SELECT COUNT(*) FROM chat_messages WHERE chat_room = ?"
-        total = db.execute(count_query, (room,)).fetchone()[0]
-        
-        # Get paginated messages
-        query = """
-            SELECT id, username, message, created_at 
-            FROM chat_messages 
-            WHERE chat_room = ? 
-            ORDER BY created_at DESC 
-            LIMIT ? OFFSET ?
-        """
-        offset = (page - 1) * per_page
-        messages = db.execute(query, (room, per_page, offset)).fetchall()
-        
-        result = performance.Paginator.paginate(
-            [{
-                'id': m[0],
-                'username': m[1],
-                'message': m[2],
-                'created_at': str(m[3])
-            } for m in reversed(messages)],
-            page=page,
-            per_page=per_page,
-            total_count=total
-        )
-        
-        result['room'] = room
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting paginated messages: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/games/search', methods=['GET'])
-@require_login
-def api_search_games_optimized():
-    """Search games with pagination and result limiting"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        query = request.args.get('q', '').lower()
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        if not query or len(query) < 2:
-            return jsonify({'items': [], 'page': 1, 'total': 0})
-        
-        # Search in loaded games (optimized for client-side loading)
-        username = get_current_username()
-        p = ensure_picker_initialized(username)
-        if not p or not p.games:
-            return jsonify({'items': [], 'page': 1, 'total': 0})
-
-        # Filter games by query
-        results = [g for g in p.games if query in g.get('name', '').lower()]
-        
-        result = performance.Paginator.paginate(
-            results,
-            page=page,
-            per_page=per_page,
-            total_count=len(results)
-        )
-        
-        result['query'] = query
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error searching games: {e}")
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/optimized/users, /api/optimized/games,
+# /api/optimized/leaderboard, /api/optimized/chat/messages,
+# /api/optimized/games/search -> backend/routers/catalog.py (optimized_router)
 
 
 # HowLongToBeat API
@@ -4364,31 +3978,7 @@ def api_update_profanity_filter():
 # HowLongToBeat API
 
 
-@app.route('/api/hltb/<path:game_name>')
-@require_login
-def api_get_hltb(game_name: str):
-    """Return HowLongToBeat completion-time estimates for *game_name*.
-
-    Uses the ``howlongtobeatpy`` library (optional).  If the library is not
-    installed or the HLTB website is unreachable, returns HTTP 503.
-
-    Response JSON::
-
-        {
-          "game_name": "Portal 2",
-          "similarity": 0.95,
-          "main": 8.5,
-          "main_extra": 13.0,
-          "completionist": 17.5
-        }
-
-    ``main``, ``main_extra``, and ``completionist`` are floats (hours) or
-    ``null`` when HLTB has no data for that category.
-    """
-    data = gapi.get_hltb_data(game_name)
-    if data is None:
-        return jsonify({'error': 'No HLTB data available for this game'}), 503
-    return jsonify(data)
+# MIGRATED to FastAPI: GET /api/hltb/<path:game_name> -> backend/routers/catalog.py (hltb_router)
 
 
 # ---------------------------------------------------------------------------
@@ -6606,34 +6196,7 @@ def api_admin_push_broadcast():
 # Similar Games endpoint  (Item 8)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/games/<app_id>/similar', methods=['GET'])
-@require_login
-def api_similar_games(app_id: str):
-    """Return games similar to *app_id* based on genre/tag overlap (login required).
-
-    Query parameters:
-      ``platform``  – game platform (default ``'steam'``)
-      ``limit``     – max results (default 10, max 50)
-
-    Response JSON:
-      ``app_id``    – queried game id
-      ``platform``  – queried platform
-      ``similar``   – list of ``{app_id, game_name, platform, similarity_score}``
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'app_id': app_id, 'similar': []})
-    platform = request.args.get('platform', 'steam').strip().lower()
-    try:
-        limit = max(1, min(50, int(request.args.get('limit', 10))))
-    except (ValueError, TypeError):
-        limit = 10
-    try:
-        db = next(database.get_db())
-        similar = database.get_similar_games(db, app_id, platform=platform, limit=limit)
-        return jsonify({'app_id': app_id, 'platform': platform, 'similar': similar})
-    except Exception as e:
-        gui_logger.error('api_similar_games error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/games/<app_id>/similar -> backend/routers/catalog.py (games_router)
 
 
 # ---------------------------------------------------------------------------
