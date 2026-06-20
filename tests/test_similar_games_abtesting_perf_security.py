@@ -137,10 +137,11 @@ class TestSimilarGames(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestCreateABTest(unittest.TestCase):
+    # POST /api/admin/ab-tests migrated to FastAPI (backend/routers/admin_growth.py).
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.post('/api/admin/ab-tests',
@@ -148,7 +149,7 @@ class TestCreateABTest(unittest.TestCase):
         self.assertIn(resp.status_code, (401, 403))
 
     def test_503_when_db_unavailable(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', False):
                 resp = self.client.post('/api/admin/ab-tests',
@@ -156,7 +157,7 @@ class TestCreateABTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
     def test_missing_name_returns_400(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True):
                 resp = self.client.post('/api/admin/ab-tests',
@@ -164,7 +165,7 @@ class TestCreateABTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_single_variant_returns_400(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True):
                 resp = self.client.post('/api/admin/ab-tests',
@@ -172,7 +173,7 @@ class TestCreateABTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_non_list_variants_returns_400(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True):
                 resp = self.client.post('/api/admin/ab-tests',
@@ -185,7 +186,7 @@ class TestCreateABTest(unittest.TestCase):
                     'status': 'draft', 'description': '',
                     'created_by': 'admin', 'created_at': '2026-03-01T00:00:00',
                     'started_at': None, 'ended_at': None}
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.create_experiment', return_value=fake_exp), \
@@ -193,13 +194,13 @@ class TestCreateABTest(unittest.TestCase):
                 resp = self.client.post('/api/admin/ab-tests',
                                         json={'name': 'test_exp', 'variants': ['control', 'ml']})
         self.assertEqual(resp.status_code, 201)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['name'], 'test_exp')
         self.assertIn('variants', data)
 
     def test_conflict_returns_409(self):
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.create_experiment', return_value={}), \
@@ -214,10 +215,11 @@ class TestCreateABTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestListABTests(unittest.TestCase):
+    # GET /api/admin/ab-tests migrated to FastAPI (backend/routers/admin_growth.py).
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.get('/api/admin/ab-tests')
@@ -229,7 +231,7 @@ class TestListABTests(unittest.TestCase):
                       'status': 'active', 'description': '',
                       'created_by': 'admin', 'created_at': '2026-01-01T00:00:00',
                       'started_at': None, 'ended_at': None}]
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.list_experiments', return_value=fake_exps), \
@@ -237,18 +239,18 @@ class TestListABTests(unittest.TestCase):
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/ab-tests')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('experiments', data)
         self.assertEqual(len(data['experiments']), 1)
         self.assertIn('variant_counts', data['experiments'][0])
 
     def test_empty_db_returns_empty_list(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', False):
                 resp = self.client.get('/api/admin/ab-tests')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['experiments'], [])
 
 
@@ -257,24 +259,25 @@ class TestListABTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestUpdateABTest(unittest.TestCase):
+    # PATCH /api/admin/ab-tests/<id> migrated to FastAPI (backend/routers/admin_growth.py).
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.patch('/api/admin/ab-tests/1', json={'status': 'active'})
         self.assertIn(resp.status_code, (401, 403))
 
     def test_503_when_db_unavailable(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', False):
                 resp = self.client.patch('/api/admin/ab-tests/1', json={'status': 'active'})
         self.assertEqual(resp.status_code, 503)
 
     def test_invalid_status_returns_400(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True):
                 resp = self.client.patch('/api/admin/ab-tests/1', json={'status': 'running'})
@@ -282,7 +285,7 @@ class TestUpdateABTest(unittest.TestCase):
 
     def test_not_found_returns_404(self):
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.update_experiment_status', return_value={}), \
@@ -296,14 +299,14 @@ class TestUpdateABTest(unittest.TestCase):
                     'status': 'active', 'description': '',
                     'created_by': 'admin', 'created_at': '2026-01-01T00:00:00',
                     'started_at': '2026-01-02T00:00:00', 'ended_at': None}
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.update_experiment_status', return_value=fake_exp), \
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.patch('/api/admin/ab-tests/1', json={'status': 'active'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['status'], 'active')
 
 

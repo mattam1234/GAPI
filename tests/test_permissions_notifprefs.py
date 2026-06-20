@@ -591,37 +591,36 @@ class TestBroadcastNotification(unittest.TestCase):
 
 class TestErrorRate(unittest.TestCase):
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # /api/admin/errors/rate is migrated to FastAPI (admin_ops).
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.get('/api/admin/errors/rate')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_returns_24_buckets(self):
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/errors/rate')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('buckets', data)
         self.assertEqual(len(data['buckets']), 24)
 
     def test_buckets_have_hour_and_count(self):
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/errors/rate')
-        data = json.loads(resp.data)
+        data = resp.json()
         for b in data['buckets']:
             self.assertIn('hour', b)
             self.assertIn('count', b)
 
     def test_total_keys_present(self):
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/errors/rate')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('total_24h', data)
         self.assertIn('total_all', data)
 
@@ -633,23 +632,23 @@ class TestErrorRate(unittest.TestCase):
             {'timestamp': recent_ts, 'message': 'err2'},
             {'timestamp': old_ts, 'message': 'old err'},
         ], maxlen=200)
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             with patch.object(gapi_gui, '_client_errors', fake_errors), \
                  patch.object(gapi_gui, '_client_errors_lock', threading.Lock()):
                 resp = self.client.get('/api/admin/errors/rate')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['total_24h'], 2)
         self.assertEqual(data['total_all'], 3)
 
     def test_empty_buffer_returns_zeros(self):
         fake_errors = collections.deque([], maxlen=200)
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             with patch.object(gapi_gui, '_client_errors', fake_errors), \
                  patch.object(gapi_gui, '_client_errors_lock', threading.Lock()):
                 resp = self.client.get('/api/admin/errors/rate')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['total_24h'], 0)
         self.assertEqual(data['total_all'], 0)
         self.assertTrue(all(b['count'] == 0 for b in data['buckets']))

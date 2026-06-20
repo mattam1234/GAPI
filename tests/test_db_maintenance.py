@@ -21,20 +21,27 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
 import database
+from backend.main import app as _fastapi_app
 
 
 def _set_admin_session(client):
-    with client.session_transaction() as sess:
-        sess['username'] = 'admin'
+    """Log in as admin on either a Flask or FastAPI test client."""
+    if hasattr(client, 'session_transaction'):
+        with client.session_transaction() as sess:
+            sess['username'] = 'admin'
+    else:
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        client.cookies.set('session', ser.dumps({'username': 'admin'}))
 
 
 class _AppBase(unittest.TestCase):
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # The db-maintenance admin endpoints are migrated to FastAPI (admin_ops).
+        self.client = _FastTestClient(_fastapi_app)
 
 
 # ===========================================================================
@@ -43,9 +50,8 @@ class _AppBase(unittest.TestCase):
 
 class TestDbStats(unittest.TestCase):
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # migrated to FastAPI (admin_ops)
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.get('/api/admin/db/stats')
@@ -69,7 +75,7 @@ class TestDbStats(unittest.TestCase):
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/db/stats')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('tables', data)
         self.assertIn('total_size_bytes', data)
         self.assertIn('db_available', data)
@@ -87,7 +93,7 @@ class TestDbStats(unittest.TestCase):
                  patch('database.get_db_size_bytes', return_value=0), \
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/db/stats')
-        data = json.loads(resp.data)
+        data = resp.json()
         for entry in data['tables']:
             self.assertIn('table', entry)
             self.assertIn('rows', entry)
@@ -140,9 +146,8 @@ class TestLegacyUserSchemaMigration(unittest.TestCase):
 
 class TestApplyIndexes(unittest.TestCase):
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # migrated to FastAPI (admin_ops)
+        self.client = _FastTestClient(_fastapi_app)
 
     def _fake_result(self, dry_run=True):
         return {
@@ -183,7 +188,7 @@ class TestApplyIndexes(unittest.TestCase):
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/db/apply-indexes')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('applied', data)
         self.assertIn('skipped', data)
         self.assertIn('errors', data)
@@ -200,7 +205,7 @@ class TestApplyIndexes(unittest.TestCase):
                 resp = self.client.post('/api/admin/db/apply-indexes')
                 mock_fn.assert_called_once_with(mock_db, dry_run=False)
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertFalse(data['dry_run'])
 
     def test_dryrun_calls_apply_indexes_with_dry_run_true(self):
@@ -220,9 +225,8 @@ class TestApplyIndexes(unittest.TestCase):
 
 class TestArchiveOldPicks(unittest.TestCase):
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # migrated to FastAPI (admin_ops)
+        self.client = _FastTestClient(_fastapi_app)
 
     def _fake_result(self, days=365, deleted_picks=3, deleted_sessions=1):
         from datetime import datetime, timedelta
@@ -255,10 +259,9 @@ class TestArchiveOldPicks(unittest.TestCase):
                 resp = self.client.post(
                     '/api/admin/db/archive-old-picks',
                     json={'days': 365},
-                    content_type='application/json',
                 )
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         for field in ('deleted_picks', 'deleted_sessions', 'cutoff_date', 'days'):
             self.assertIn(field, data)
 
@@ -283,7 +286,6 @@ class TestArchiveOldPicks(unittest.TestCase):
                 self.client.post(
                     '/api/admin/db/archive-old-picks',
                     json={'days': 90},
-                    content_type='application/json',
                 )
                 args, kwargs = mock_fn.call_args
                 actual_days = kwargs.get('days', args[1] if len(args) > 1 else None)
@@ -299,7 +301,6 @@ class TestArchiveOldPicks(unittest.TestCase):
                 self.client.post(
                     '/api/admin/db/archive-old-picks',
                     json={'days': 'oops'},
-                    content_type='application/json',
                 )
                 args, kwargs = mock_fn.call_args
                 actual_days = kwargs.get('days', args[1] if len(args) > 1 else None)
@@ -315,7 +316,6 @@ class TestArchiveOldPicks(unittest.TestCase):
                 self.client.post(
                     '/api/admin/db/archive-old-picks',
                     json={'days': -10},
-                    content_type='application/json',
                 )
                 args, kwargs = mock_fn.call_args
                 actual_days = kwargs.get('days', args[1] if len(args) > 1 else None)
@@ -328,9 +328,8 @@ class TestArchiveOldPicks(unittest.TestCase):
 
 class TestDbBackup(unittest.TestCase):
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # migrated to FastAPI (admin_ops)
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.get('/api/admin/db/backup')
@@ -353,7 +352,7 @@ class TestDbBackup(unittest.TestCase):
                  patch.object(database, 'engine', mock_engine):
                 resp = self.client.get('/api/admin/db/backup')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('message', data)
         self.assertIn('dialect', data)
         self.assertEqual(data['dialect'], 'postgresql')
@@ -374,8 +373,8 @@ class TestDbBackup(unittest.TestCase):
                      patch.object(database, 'engine', mock_engine):
                     resp = self.client.get('/api/admin/db/backup')
             self.assertEqual(resp.status_code, 200)
-            self.assertIn('attachment', resp.headers.get('Content-Disposition', ''))
-            self.assertGreater(len(resp.data), 0)
+            self.assertIn('attachment', resp.headers.get('content-disposition', ''))
+            self.assertGreater(len(resp.content), 0)
         finally:
             os.unlink(tmp_path)
 

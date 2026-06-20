@@ -435,6 +435,31 @@ optimized users/leaderboard/chat.
 
 Full suite after integration: **2347 passed**. Flask routes remaining: **79**.
 
+## 12. The admin cluster — ops + console + growth (48 routes)
+
+The `/api/admin` elephant, split across three agents and integrated together.
+
+**✅ admin ops/observability** → `backend/routers/admin_ops.py` (18): migrations,
+audit-logs(+export), user-activity, security-info, api-stats(+reset),
+client-errors(+clear), db/stats|apply-indexes|archive-old-picks|backup,
+errors/rate, email/status|test. Audit-logs/user-activity keep the legacy
+"audit-service 503 *before* admin 403" ordering (inline check, not the dependency).
+
+**✅ admin console** → `backend/routers/admin_console.py` (20): the 11 discord-bot
+routes, moderation/profanity, settings (+ **`settings/public` kept unauthenticated**),
+password-reset-requests. Discord-bot subprocess mgmt preserved.
+
+**✅ admin growth** → `backend/routers/admin_growth.py` (10): ab-tests, user-groups
+(+members), push/broadcast. All `@require_admin` → `require_admin` (settings check).
+
+**Two admin checks throughout:** each route uses whichever it had —
+`require_admin_um` (user_manager) vs `require_admin`/inline `app_settings_service`.
+Many legacy Flask-client tests repointed to the FastAPI client (api-stats,
+client-errors, db-maintenance, email, security-info, discord-bot-admin,
+ab-tests, user-groups, push-broadcast).
+
+Full suite after integration: **2476 passed**. Flask routes remaining: **31**.
+
 ---
 
 ## Frontend (Phase 4, started)
