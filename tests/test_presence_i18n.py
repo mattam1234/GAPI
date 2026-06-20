@@ -188,13 +188,19 @@ class TestDiscordPresenceEnabled(unittest.TestCase):
 # ===========================================================================
 
 class TestI18nEndpoints(unittest.TestCase):
-    """Integration tests for GET /api/i18n and GET /api/i18n/<lang>."""
+    """Integration tests for GET /api/i18n and GET /api/i18n/<lang>.
+
+    Migrated to FastAPI: backend/routers/misc.py i18n_router. These routes are
+    UNAUTHENTICATED (public locale data) — mirrors the legacy lack of a
+    ``@require_login`` decorator — so no session cookie is set.
+    """
 
     def setUp(self):
-        # Import the Flask app in test mode
         import gapi_gui
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
         gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        self.client = TestClient(fastapi_app)  # anonymous — i18n is public
 
     def test_list_locales_returns_200(self):
         resp = self.client.get('/api/i18n')
@@ -202,14 +208,14 @@ class TestI18nEndpoints(unittest.TestCase):
 
     def test_list_locales_contains_en_and_es(self):
         resp = self.client.get('/api/i18n')
-        data = json.loads(resp.data)
+        data = resp.json()
         langs = [item['lang'] for item in data['locales']]
         self.assertIn('en', langs)
         self.assertIn('es', langs)
 
     def test_list_locales_has_lang_name(self):
         resp = self.client.get('/api/i18n')
-        data = json.loads(resp.data)
+        data = resp.json()
         by_lang = {item['lang']: item for item in data['locales']}
         self.assertEqual(by_lang['en']['lang_name'], 'English')
         self.assertEqual(by_lang['es']['lang_name'], 'Español')
@@ -217,7 +223,7 @@ class TestI18nEndpoints(unittest.TestCase):
     def test_get_english_locale(self):
         resp = self.client.get('/api/i18n/en')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['lang'], 'en')
         self.assertIn('nav', data)
         self.assertIn('pick', data)
@@ -226,26 +232,25 @@ class TestI18nEndpoints(unittest.TestCase):
     def test_get_spanish_locale(self):
         resp = self.client.get('/api/i18n/es')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['lang'], 'es')
         self.assertEqual(data['lang_name'], 'Español')
 
     def test_missing_locale_returns_404(self):
         resp = self.client.get('/api/i18n/zz')
         self.assertEqual(resp.status_code, 404)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('error', data)
 
     def test_path_traversal_rejected(self):
         """Requesting ../../etc/passwd must not succeed."""
         resp = self.client.get('/api/i18n/../../etc/passwd')
-        # Flask routing treats extra slashes as different URLs, so either
-        # a 404 (not found) or 400 (bad request) is acceptable.
-        self.assertIn(resp.status_code, (400, 404))
+        # Path traversal must not yield a successful locale load.
+        self.assertNotEqual(resp.status_code, 200)
 
     def test_english_locale_has_expected_keys(self):
         resp = self.client.get('/api/i18n/en')
-        data = json.loads(resp.data)
+        data = resp.json()
         expected_sections = ['nav', 'pick', 'library', 'reviews', 'tags',
                               'backlog', 'playlists', 'schedule', 'budget',
                               'wishlist', 'stats', 'auth', 'common']
@@ -255,8 +260,8 @@ class TestI18nEndpoints(unittest.TestCase):
     def test_spanish_locale_has_same_structure_as_english(self):
         en_resp = self.client.get('/api/i18n/en')
         es_resp = self.client.get('/api/i18n/es')
-        en = json.loads(en_resp.data)
-        es = json.loads(es_resp.data)
+        en = en_resp.json()
+        es = es_resp.json()
         for section in en:
             if section in ('lang', 'lang_name'):
                 continue

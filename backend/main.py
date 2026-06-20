@@ -16,8 +16,8 @@ import gapi_gui
 from backend.routers import (
     achievements, admin_notifications, analytics, auth, backlog, batch, budget,
     challenges, chat, community, downloads, duplicates, engagement, export,
-    extensibility, friends, game, ignored,
-    leaderboards, library, live_session, messages, multiuser, notifications,
+    extensibility, friends, game, ignored, leaderboards, library, live_session,
+    messages, misc, multiuser, notifications,
     permissions, pick, platforms, playlists, presence, profile,
     recommendations, reviews, schedule, search, sessions, social_stats, tags,
     tournaments, trades, users, voting, wishlist,
@@ -94,6 +94,12 @@ def create_app() -> FastAPI:
     app.include_router(engagement.streaming_router)
     app.include_router(engagement.progression_router)
     app.include_router(engagement.ranked_router)
+    app.include_router(misc.i18n_router)
+    app.include_router(misc.shop_router)
+    app.include_router(misc.events_router)
+    app.include_router(misc.twitch_router)
+    app.include_router(misc.cosmetics_router)
+    app.include_router(misc.anticheat_router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.
