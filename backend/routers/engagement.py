@@ -1,6 +1,6 @@
-"""Engagement cluster (migrated to FastAPI).
+"""Engagement cluster (real, persistent FastAPI features).
 
-Six small legacy domains migrated together, one ``APIRouter`` per URL prefix:
+Six small engagement domains, one ``APIRouter`` per URL prefix:
 
   * ``creator_router``      — ``/api/creator``
   * ``battlepass_router``   — ``/api/battlepass``
@@ -9,27 +9,35 @@ Six small legacy domains migrated together, one ``APIRouter`` per URL prefix:
   * ``progression_router``  — ``/api/progression``
   * ``ranked_router``       — ``/api/ranked``
 
-Faithful ports — latent legacy behaviour is preserved exactly:
+These were previously success-faking stubs (hard-coded data + an undefined
+``gapi_gui.db_service`` mock-fallback). They are now real features persisting to
+per-user tables (see ``backend/models/engagement.py``) through a SQLAlchemy
+session opened from ``database.SessionLocal()``. The old ``db_service`` /
+mock-fallback behaviour has been removed entirely. Business rules live in
+``app/services/engagement_service.py``.
 
-* The ``/api/streaming`` and ``/api/ranked`` handlers reference a module-global
-  ``db_service`` that is never defined in ``gapi_gui`` (the same undefined
-  global behind trades / the leaderboards 500s). Every handler wraps the access
-  in ``try/except`` and returns a success-faking mock response, so in
-  production these routes never actually persist anything — they always fall
-  through to the mock branch. Referenced here via ``gapi_gui.db_service`` so the
-  ``AttributeError`` still fires and the mock fallback still runs.
-* The ``/api/creator``, ``/api/battlepass``, ``/api/referral`` and
-  ``/api/progression`` handlers are pure success-faking stubs returning
-  hard-coded data; their ``try/except`` blocks are effectively dead code. The
-  one exception is ``GET /api/battlepass/current`` and ``GET /api/creator/dashboard``
-  and ``GET /api/referral/code`` whose ``except`` branches return a 500 — ported
-  as-is even though the ``try`` body cannot raise in practice.
+Per-domain semantics
+--------------------
+battlepass
+    ``GET /current`` returns a current season (config) + the user's xp/tier
+    (lazily created with defaults). ``POST /claim/{level}`` grants a level's
+    reward iff the user's tier >= level and the level has a reward and it isn't
+    already claimed (404 unknown level, 403 tier too low, 409 already claimed).
+creator
+    ``GET /dashboard`` returns the user's creator-application status + basic
+    stats. ``POST /apply`` creates/returns a pending application (idempotent).
+referral
+    ``GET /code`` get-or-creates the user's unique referral code.
+    ``POST /use/{code}`` redeems someone's code once per user (400 self/own
+    code, 404 unknown code, 409 already redeemed).
+streaming
+    ``GET /vods`` lists the user's stream sessions. ``POST /start`` opens a
+    ``live`` session (400 missing title).
+progression / ranked
+    GET-only views derived from a lazily-created per-user state row.
 
-All six prefixes are absent from the legacy ``_CACHEABLE_API_PREFIXES``
-allowlist (which only contains ``/api/permissions``, ``/api/changelog``,
-``/api/health``), so every response here received ``Cache-Control: no-store``
-from the legacy ``after_request``. That header is set explicitly to preserve
-behaviour.
+All six prefixes are absent from the cacheable-prefix allowlist, so every
+response keeps the legacy ``Cache-Control: no-store`` header (set explicitly).
 
 Routes:
   creator:
@@ -55,7 +63,14 @@ from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
 
 import gapi_gui
+import database
 from backend.dependencies import require_login
+from app.services import engagement_service
+from app.services.engagement_service import EngagementError
+
+# Importing the model module registers the engagement tables on the shared Base
+# so the create_all hook in backend.main builds them.
+import backend.models.engagement  # noqa: F401
 
 creator_router = APIRouter(prefix="/api/creator", tags=["creator"])
 battlepass_router = APIRouter(prefix="/api/battlepass", tags=["battlepass"])
@@ -76,254 +91,206 @@ def _ok(content, status_code=200):
     return JSONResponse(status_code=status_code, content=content, headers=_NO_STORE)
 
 
+def _open_session():
+    """Open a real DB session, or raise a 503-mapped error if unavailable."""
+    if getattr(database, "SessionLocal", None) is None:
+        raise EngagementError(503, "Database not available")
+    return database.SessionLocal()
+
+
 # ── creator ─────────────────────────────────────────────────────────────────
 
 @creator_router.get("/dashboard")
 def api_creator_dashboard(username: str = Depends(require_login)):
-    """Creator program dashboard stats."""
+    """Creator program dashboard (the user's application status + stats)."""
     try:
-        return _ok({
-            'tier': 'gold',
-            'followers': 125800,
-            'total_views': 2450000,
-            'revenue_share': 30,
-            'this_month_earnings': 3250,
-            'status': 'verified',
-            'next_tier_followers': 500000
-        })
-    except Exception:
-        return _err(500, 'Creator data not available')
+        db = _open_session()
+        try:
+            data = engagement_service.get_creator_dashboard(db, username)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error loading creator dashboard: %s", e)
+        return _err(500, "Creator data not available")
 
 
 @creator_router.post("/apply")
 def api_apply_creator(body: Optional[dict] = Body(default=None),
                       username: str = Depends(require_login)):
-    """Apply for creator program."""
-    data = body or {}
-
+    """Apply for the creator program (idempotent)."""
     try:
-        return _ok({'success': True, 'message': 'Application submitted for review', 'status': 'pending'})
-    except Exception:
-        return _ok({'success': True, 'message': 'Applied (mock)'})
+        db = _open_session()
+        try:
+            data = engagement_service.apply_creator(db, username)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error applying for creator program: %s", e)
+        return _err(500, "Failed to submit application")
 
 
 # ── battlepass ──────────────────────────────────────────────────────────────
 
 @battlepass_router.get("/current")
 def api_get_current_battlepass(username: str = Depends(require_login)):
-    """Get current battle pass info."""
-    g = gapi_gui
+    """Get current battle pass info + the user's progress."""
     try:
-        return _ok({
-            'battle_pass': {
-                'name': 'Season 5: Storm Rising',
-                'season': 5,
-                'current_level': 47,
-                'experience': 8250,
-                'exp_to_next': 1750,
-                'max_level': 100,
-                'has_premium': True,
-                'days_remaining': 23
-            },
-            'rewards': [
-                {'level': 10, 'reward': '[Title] Storm Chaser', 'type': 'title'},
-                {'level': 25, 'reward': '500 Points', 'type': 'currency'},
-                {'level': 50, 'reward': '[Theme] Dark Storm', 'type': 'cosmetic'},
-                {'level': 100, 'reward': '[Frame] Legendary Guardian', 'type': 'cosmetic'},
-            ]
-        })
+        db = _open_session()
+        try:
+            data = engagement_service.get_current_battlepass(db, username)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
     except Exception as e:
-        g.gui_logger.error(f"Error getting battle pass: {e}")
-        return _err(500, 'Failed to load battle pass')
+        gapi_gui.gui_logger.error("Error getting battle pass: %s", e)
+        return _err(500, "Failed to load battle pass")
 
 
 @battlepass_router.post("/claim/{level}")
 def api_claim_battlepass_reward(level: str, username: str = Depends(require_login)):
-    """Claim battle pass reward."""
+    """Claim a battle pass reward for a given level."""
     try:
-        return _ok({'success': True, 'message': f'Reward for level {level} claimed!', 'item': '[Title] Storm Chaser'})
-    except Exception:
-        return _ok({'success': True, 'message': f'Reward claimed (mock)'})
+        db = _open_session()
+        try:
+            data = engagement_service.claim_battlepass_reward(db, username, level)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error claiming battle pass reward: %s", e)
+        return _err(500, "Failed to claim reward")
 
 
 # ── referral ────────────────────────────────────────────────────────────────
 
 @referral_router.get("/code")
 def api_get_referral_code(username: str = Depends(require_login)):
-    """Get user's referral code."""
+    """Get (or create) the user's referral code."""
     try:
-        return _ok({
-            'code': f'REFER{username.upper()}123',
-            'reward_per_use': 500,
-            'total_uses': 12,
-            'total_earned': 6000,
-            'active': True
-        })
-    except Exception:
-        return _err(500, 'Referral system not available')
+        db = _open_session()
+        try:
+            data = engagement_service.get_or_create_referral_code(db, username)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error loading referral code: %s", e)
+        return _err(500, "Referral system not available")
 
 
 @referral_router.post("/use/{code}")
 def api_use_referral_code(code: str, username: str = Depends(require_login)):
-    """Use a referral code."""
+    """Redeem a referral code (once per user)."""
     try:
-        return _ok({'success': True, 'message': f'Gained 500 points from referral!', 'points_gained': 500})
-    except Exception:
-        return _ok({'success': True, 'message': 'Referral applied (mock)'})
+        db = _open_session()
+        try:
+            data = engagement_service.redeem_referral_code(db, username, code)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error using referral code: %s", e)
+        return _err(500, "Failed to redeem referral code")
 
 
 # ── streaming ───────────────────────────────────────────────────────────────
 
 @streaming_router.get("/vods")
 def api_get_vods(username: str = Depends(require_login)):
-    """Get user's video library (VODs)."""
-    g = gapi_gui
+    """Get the user's video library (VODs / stream sessions)."""
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
-
-        vod_query = """
-            SELECT id, title, duration, views FROM stream_vods
-            WHERE user_id = ?
-            ORDER BY created_at DESC LIMIT 20
-        """
-        vods_rows = db.execute(vod_query, (user.id,)).fetchall()
-
-        vods = []
-        for vod_id, title, duration, views in vods_rows:
-            vods.append({
-                'id': str(vod_id),
-                'title': title,
-                'duration': duration,
-                'views': views
-            })
-
-        return _ok({'vods': vods})
+        db = _open_session()
+        try:
+            vods = engagement_service.list_vods(db, username)
+        finally:
+            db.close()
+        return _ok({"vods": vods})
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
     except Exception as e:
-        g.gui_logger.error(f"Error loading VODs: {e}")
-        # Mock data fallback
-        vods = [
-            {'id': '1', 'title': 'Epic Gaming Session', 'duration': '2:45:30', 'views': 234},
-            {'id': '2', 'title': 'Tournament Highlights', 'duration': '1:15:45', 'views': 567},
-        ]
-        return _ok({'vods': vods})
+        gapi_gui.gui_logger.error("Error loading VODs: %s", e)
+        return _err(500, "Failed to load VODs")
 
 
 @streaming_router.post("/start")
 def api_start_stream(body: Optional[dict] = Body(default=None),
                      username: str = Depends(require_login)):
     """Start a live stream."""
-    g = gapi_gui
     data = body or {}
-    title = data.get('title', '')
-
-    if not title:
-        return _err(400, 'Stream title required')
+    title = data.get("title", "")
 
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
-
-        # Create stream VOD record
-        insert_query = "INSERT INTO stream_vods (user_id, title, duration, vod_url) VALUES (?, ?, ?, ?)"
-        db.execute(insert_query, (user.id, title, '0:00:00', 'rtmp://twitch.tv/...'))
-        db.commit()
-
-        # Broadcast stream started event
-        if g.REALTIME_AVAILABLE:
-            try:
-                g.realtime.RealtimeEvents.stream_started(
-                    username=username,
-                    title=title,
-                    url='rtmp://twitch.tv/...'
-                )
-            except Exception as e:
-                g.gui_logger.warning(f'Failed to broadcast stream start: {e}')
-
-        return _ok({'success': True, 'message': 'Stream started', 'stream_url': 'rtmp://twitch.tv/...'})
+        db = _open_session()
+        try:
+            result = engagement_service.start_stream(db, username, title)
+        finally:
+            db.close()
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
     except Exception as e:
-        g.gui_logger.error(f"Error starting stream: {e}")
-        return _ok({'success': True, 'message': 'Stream started (mock)', 'stream_url': 'rtmp://twitch.tv/...'})
+        gapi_gui.gui_logger.error("Error starting stream: %s", e)
+        return _err(500, "Failed to start stream")
+
+    # Best-effort realtime notification (never affects the response).
+    g = gapi_gui
+    if getattr(g, "REALTIME_AVAILABLE", False):
+        try:
+            g.realtime.RealtimeEvents.stream_started(
+                username=username, title=result["title"],
+                url=result["stream_url"])
+        except Exception as e:  # pragma: no cover - notification is non-critical
+            g.gui_logger.warning("Failed to broadcast stream start: %s", e)
+
+    return _ok(result)
 
 
 # ── progression ─────────────────────────────────────────────────────────────
 
 @progression_router.get("")
 def api_get_progression_paths(username: str = Depends(require_login)):
-    """Get available progression paths."""
+    """Get the user's progression paths (lazy-created defaults)."""
     try:
-        return _ok({
-            'paths': [
-                {
-                    'id': 1,
-                    'name': 'Competitive Player',
-                    'description': 'Master competitive gameplay',
-                    'current_step': 5,
-                    'total_steps': 10,
-                    'progress': 50,
-                    'next_reward': '[Title] Rank Master'
-                },
-                {
-                    'id': 2,
-                    'name': 'Streamer Path',
-                    'description': 'Build your streaming career',
-                    'current_step': 2,
-                    'total_steps': 10,
-                    'progress': 20,
-                    'next_reward': '[Frame] Broadcaster Elite'
-                },
-                {
-                    'id': 3,
-                    'name': 'Collector',
-                    'description': 'Collect all cosmetics',
-                    'current_step': 8,
-                    'total_steps': 15,
-                    'progress': 53,
-                    'next_reward': '[Theme] Collector\'s Gold'
-                },
-            ]
-        })
-    except Exception:
-        return _ok({'paths': []})
+        db = _open_session()
+        try:
+            data = engagement_service.get_progression(db, username)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error loading progression: %s", e)
+        return _err(500, "Failed to load progression")
 
 
 # ── ranked ──────────────────────────────────────────────────────────────────
 
 @ranked_router.get("")
 def api_get_ranked(username: str = Depends(require_login)):
-    """Get ranked tier information."""
-    g = gapi_gui
+    """Get the user's ranked tier information (lazy-created defaults)."""
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
-
-        # Get or create ranked rating
-        ranked_query = "SELECT tier, tier_level FROM ranked_ratings WHERE user_id = ?"
-        ranked = db.execute(ranked_query, (user.id,)).fetchone()
-
-        if ranked:
-            tier, tier_level = ranked
-        else:
-            tier, tier_level = 'bronze', 1
-
-        tiers = ['Bronze', 'Silver', 'Gold', 'Diamond', 'Master']
-        tier_index = tiers.index(tier.capitalize()) if tier.lower() in [t.lower() for t in tiers] else 0
-
-        return _ok({
-            'current_tier_index': tier_index,
-            'current_rank': f'{tier.capitalize()} {tier_level}',
-            'current_rank_emoji': ['🥚', '🥈', '🥇', '💎', '👑'][tier_index],
-            'rating_points': 2450,
-            'rating_points_needed': 3000,
-            'tiers': tiers
-        })
+        db = _open_session()
+        try:
+            data = engagement_service.get_ranked(db, username)
+        finally:
+            db.close()
+        return _ok(data)
+    except EngagementError as e:
+        return _err(e.status_code, e.message)
     except Exception as e:
-        g.gui_logger.error(f"Error loading ranked: {e}")
-        return _ok({
-            'current_tier_index': 1,
-            'current_rank': 'Silver II',
-            'current_rank_emoji': '🥈',
-            'rating_points': 2450,
-            'rating_points_needed': 3000,
-            'tiers': ['Bronze', 'Silver', 'Gold', 'Diamond', 'Master']
-        })
+        gapi_gui.gui_logger.error("Error loading ranked: %s", e)
+        return _err(500, "Failed to load ranked")
