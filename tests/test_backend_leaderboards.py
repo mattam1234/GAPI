@@ -2,8 +2,10 @@
 """
 Tests for the migrated leaderboards domain (backend/routers/leaderboards.py).
 
-The raw-SQL routes' db_service is stubbed with a fake cursor; the service-backed
-route stubs _leaderboard_service.
+The plural category/seasonal routes now compute real rankings via the
+SQLAlchemy-layer helpers ``database.get_category_leaderboard`` /
+``get_seasonal_leaderboard`` (patched here); the service-backed singular route
+stubs ``_leaderboard_service``.
 
 Run with:
     python -m pytest tests/test_backend_leaderboards.py
@@ -27,10 +29,10 @@ def _session_cookie(username):
     return serializer.dumps({'username': username})
 
 
-def _db_service(rows):
-    cursor = SimpleNamespace(fetchall=lambda: rows)
-    db = SimpleNamespace(execute=lambda query, params=None: cursor)
-    return SimpleNamespace(get_db=lambda: db)
+def _session_local():
+    """Patch database.SessionLocal so the route's session usage is a no-op."""
+    return patch.object(gapi_gui.database, 'SessionLocal',
+                        return_value=MagicMock())
 
 
 class BackendLeaderboardsTest(unittest.TestCase):
@@ -41,25 +43,35 @@ class BackendLeaderboardsTest(unittest.TestCase):
     def test_requires_login(self):
         self.assertEqual(TestClient(app).get('/api/leaderboards').status_code, 401)
 
-    # --- /api/leaderboards (category, raw SQL) --------------------------
+    # --- /api/leaderboards (category) -----------------------------------
 
     def test_category_default_picks(self):
-        with patch.object(gapi_gui, 'db_service',
-                          _db_service([('alice', 42), ('bob', 10)]), create=True):
+        rows = [{'username': 'alice', 'value': 42}, {'username': 'bob', 'value': 10}]
+        with _session_local(), \
+             patch.object(gapi_gui.database, 'get_category_leaderboard',
+                          return_value=rows) as m:
             resp = self.client.get('/api/leaderboards')
         self.assertEqual(resp.status_code, 200)
         lb = resp.json()['leaderboard']
         self.assertEqual(lb[0], {'username': 'alice', 'value': 42})
+        # default category is 'picks'
+        self.assertEqual(m.call_args.kwargs['category'], 'picks')
 
-    def test_invalid_category_coerced(self):
-        with patch.object(gapi_gui, 'db_service', _db_service([]), create=True):
+    def test_invalid_category_passed_through(self):
+        # The helper coerces unknown categories to 'picks'; the route forwards
+        # whatever was requested and trusts the helper.
+        with _session_local(), \
+             patch.object(gapi_gui.database, 'get_category_leaderboard',
+                          return_value=[]) as m:
             resp = self.client.get('/api/leaderboards?category=bogus&limit=5')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()['leaderboard'], [])
+        self.assertEqual(m.call_args.kwargs['limit'], 5)
 
     def test_error_is_500(self):
-        bad = SimpleNamespace(get_db=lambda: (_ for _ in ()).throw(RuntimeError('db')))
-        with patch.object(gapi_gui, 'db_service', bad, create=True):
+        with _session_local(), \
+             patch.object(gapi_gui.database, 'get_category_leaderboard',
+                          side_effect=RuntimeError('db')):
             resp = self.client.get('/api/leaderboards')
         self.assertEqual(resp.status_code, 500)
         self.assertIn('Failed to get leaderboards', resp.json()['error'])
@@ -67,16 +79,25 @@ class BackendLeaderboardsTest(unittest.TestCase):
     # --- /api/leaderboards/seasonal -------------------------------------
 
     def test_seasonal_weekly(self):
-        rows = [('alice', 5, '🔥 Weekly Star')]
-        with patch.object(gapi_gui, 'db_service', _db_service(rows), create=True):
+        result = {'leaderboard': [{'username': 'alice', 'value': 5,
+                                   'seasonal_title': '🔥 Weekly Star'}],
+                  'period_info': "This Week's Top Performers"}
+        with _session_local(), \
+             patch.object(gapi_gui.database, 'get_seasonal_leaderboard',
+                          return_value=result) as m:
             resp = self.client.get('/api/leaderboards/seasonal?period=weekly')
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body['period_info'], "This Week's Top Performers")
         self.assertEqual(body['leaderboard'][0]['seasonal_title'], '🔥 Weekly Star')
+        self.assertEqual(m.call_args.kwargs['period'], 'weekly')
 
     def test_seasonal_invalid_period_defaults_alltime(self):
-        with patch.object(gapi_gui, 'db_service', _db_service([]), create=True):
+        # The helper maps unknown periods to 'alltime'.
+        result = {'leaderboard': [], 'period_info': 'All-Time Rankings'}
+        with _session_local(), \
+             patch.object(gapi_gui.database, 'get_seasonal_leaderboard',
+                          return_value=result):
             resp = self.client.get('/api/leaderboards/seasonal?period=decade')
         self.assertEqual(resp.json()['period_info'], 'All-Time Rankings')
 

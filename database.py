@@ -5768,3 +5768,241 @@ def get_all_push_subscriptions(db, push_enabled_only: bool = True) -> list:
     except Exception as e:
         logger.error('get_all_push_subscriptions error: %s', e)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Pick / vote / live-session activity helpers
+#
+# The ``picks``, ``votes`` and ``live_sessions`` tables predate the SQLAlchemy
+# ORM models and have no mapped class. They are queried with parameterised raw
+# SQL (named ``:params`` so the statement works on both SQLite and Postgres) and
+# every query is guarded by a table-existence check so a database that has never
+# created these tables degrades to zeros instead of raising.
+# ---------------------------------------------------------------------------
+
+def _existing_table_names(db) -> set:
+    """Return the set of table names that currently exist in the database."""
+    try:
+        from sqlalchemy import inspect as _inspect
+        bind = db.get_bind() if db is not None else engine
+        if bind is None:
+            return set()
+        return set(_inspect(bind).get_table_names())
+    except Exception as e:
+        logger.error('_existing_table_names error: %s', e)
+        return set()
+
+
+def get_user_activity_counts(db, username: str) -> dict:
+    """Return pick / vote / live-session-host counts for *username*.
+
+    Returns ``{'picks': int, 'votes': int, 'sessions': int}``. Tables that do
+    not exist contribute 0.
+    """
+    result = {'picks': 0, 'votes': 0, 'sessions': 0}
+    if not db or not username:
+        return result
+    try:
+        from sqlalchemy import text as _text
+        tables = _existing_table_names(db)
+        if 'picks' in tables:
+            result['picks'] = int(db.execute(
+                _text("SELECT COUNT(*) FROM picks WHERE user = :u"),
+                {'u': username}).scalar() or 0)
+        if 'votes' in tables:
+            result['votes'] = int(db.execute(
+                _text("SELECT COUNT(*) FROM votes WHERE user = :u"),
+                {'u': username}).scalar() or 0)
+        if 'live_sessions' in tables:
+            result['sessions'] = int(db.execute(
+                _text("SELECT COUNT(*) FROM live_sessions WHERE host = :u"),
+                {'u': username}).scalar() or 0)
+    except Exception as e:
+        logger.error('get_user_activity_counts error: %s', e)
+    return result
+
+
+def get_user_vote_accuracy(db, username: str) -> int:
+    """Return *username*'s voting accuracy (percent of their votes that backed
+
+    the most-voted pick). Returns 0 when the data is missing.
+    """
+    if not db or not username:
+        return 0
+    try:
+        from sqlalchemy import text as _text
+        if 'votes' not in _existing_table_names(db):
+            return 0
+        accuracy_query = _text("""
+            SELECT
+                CAST(COUNT(CASE WHEN v.pick_id IN (
+                    SELECT pick_id FROM votes
+                    GROUP BY pick_id ORDER BY COUNT(*) DESC LIMIT 1
+                ) THEN 1 END) * 100.0 /
+                NULLIF(COUNT(v.id), 0) AS INTEGER)
+            FROM votes v WHERE v.user = :u
+        """)
+        value = db.execute(accuracy_query, {'u': username}).scalar()
+        return int(value or 0)
+    except Exception as e:
+        logger.error('get_user_vote_accuracy error: %s', e)
+        return 0
+
+
+_CATEGORY_LEADERBOARD_SQL = {
+    'picks': """
+        SELECT u.username, COUNT(DISTINCT ps.game_id) as value
+        FROM users u
+        LEFT JOIN live_sessions ls ON u.username = ls.host
+        LEFT JOIN picks ps ON ls.session_id = ps.session_id
+        WHERE u.username IS NOT NULL
+        GROUP BY u.username ORDER BY value DESC LIMIT :lim
+    """,
+    'acceptance': """
+        SELECT u.username,
+            CAST(COUNT(CASE WHEN v.user != ps.user THEN 1 END) * 100.0 /
+            NULLIF(COUNT(DISTINCT ps.id), 0) AS INTEGER) as value
+        FROM users u
+        LEFT JOIN picks ps ON u.username = ps.user
+        LEFT JOIN votes v ON ps.id = v.pick_id
+        WHERE u.username IS NOT NULL
+        GROUP BY u.username HAVING COUNT(DISTINCT ps.id) > 0
+        ORDER BY value DESC LIMIT :lim
+    """,
+    'votes': """
+        SELECT u.username, COUNT(v.id) as value
+        FROM users u
+        LEFT JOIN votes v ON u.username = v.user
+        WHERE u.username IS NOT NULL
+        GROUP BY u.username ORDER BY value DESC LIMIT :lim
+    """,
+    'accuracy': """
+        SELECT u.username,
+            CAST(COUNT(CASE WHEN v.user != ps.user AND ps.id IN (
+                SELECT pick_id FROM votes WHERE session_id = ps.session_id
+                GROUP BY pick_id ORDER BY COUNT(*) DESC LIMIT 1
+            ) THEN 1 END) * 100.0 /
+            NULLIF(COUNT(v.id), 0) AS INTEGER) as value
+        FROM users u
+        LEFT JOIN votes v ON u.username = v.user
+        LEFT JOIN picks ps ON v.pick_id = ps.id
+        WHERE u.username IS NOT NULL
+        GROUP BY u.username HAVING COUNT(v.id) > 0
+        ORDER BY value DESC LIMIT :lim
+    """,
+}
+
+
+def get_category_leaderboard(db, category: str = 'picks', limit: int = 10) -> list:
+    """Return a category leaderboard as ``[{'username', 'value'}, ...]``.
+
+    Supported categories: ``picks`` / ``acceptance`` / ``votes`` / ``accuracy``;
+    unknown categories fall back to ``picks``. Returns ``[]`` when the required
+    ``picks`` / ``votes`` / ``live_sessions`` tables are absent.
+    """
+    if not db:
+        return []
+    if category not in _CATEGORY_LEADERBOARD_SQL:
+        category = 'picks'
+    try:
+        from sqlalchemy import text as _text
+        tables = _existing_table_names(db)
+        if not {'picks', 'votes', 'live_sessions'}.intersection(tables):
+            return []
+        rows = db.execute(_text(_CATEGORY_LEADERBOARD_SQL[category]),
+                          {'lim': int(limit)}).fetchall()
+        return [{'username': r[0], 'value': r[1]} for r in rows]
+    except Exception as e:
+        logger.error('get_category_leaderboard error: %s', e)
+        return []
+
+
+_SEASONAL_LEADERBOARD_SQL = {
+    'weekly': ("""
+        SELECT u.username, COUNT(DISTINCT ps.game_id) as value,
+               CASE WHEN COUNT(DISTINCT ps.game_id) >= 5 THEN '🔥 Weekly Star' ELSE NULL END as seasonal_title
+        FROM users u
+        LEFT JOIN live_sessions ls ON u.username = ls.host
+        LEFT JOIN picks ps ON ls.session_id = ps.session_id
+        WHERE datetime(ls.created_at) >= datetime('now', '-7 days')
+        GROUP BY u.username ORDER BY value DESC LIMIT 20
+    """, "This Week's Top Performers"),
+    'monthly': ("""
+        SELECT u.username, COUNT(DISTINCT ps.game_id) as value,
+               CASE WHEN COUNT(DISTINCT ps.game_id) >= 15 THEN '⭐ Monthly Champion' ELSE NULL END as seasonal_title
+        FROM users u
+        LEFT JOIN live_sessions ls ON u.username = ls.host
+        LEFT JOIN picks ps ON ls.session_id = ps.session_id
+        WHERE datetime(ls.created_at) >= datetime('now', '-30 days')
+        GROUP BY u.username ORDER BY value DESC LIMIT 20
+    """, "This Month's Top Players"),
+    'alltime': ("""
+        SELECT u.username, COUNT(DISTINCT ps.game_id) as value,
+               CASE WHEN COUNT(DISTINCT ps.game_id) >= 50 THEN '👑 Legendary' ELSE NULL END as seasonal_title
+        FROM users u
+        LEFT JOIN live_sessions ls ON u.username = ls.host
+        LEFT JOIN picks ps ON ls.session_id = ps.session_id
+        WHERE u.username IS NOT NULL
+        GROUP BY u.username ORDER BY value DESC LIMIT 20
+    """, "All-Time Rankings"),
+}
+
+
+def get_seasonal_leaderboard(db, period: str = 'alltime') -> dict:
+    """Return a seasonal leaderboard for *period* (weekly / monthly / alltime).
+
+    Returns ``{'leaderboard': [{'username', 'value', 'seasonal_title'}, ...],
+    'period_info': str}``. Unknown periods fall back to ``alltime``. The list is
+    empty when the underlying tables are absent.
+
+    Note: the period filters use the SQLite-specific ``datetime('now', ...)``
+    syntax (as in the legacy handler); on non-SQLite backends an exception is
+    caught and an empty leaderboard returned for the dated periods.
+    """
+    if period not in _SEASONAL_LEADERBOARD_SQL:
+        period = 'alltime'
+    query, period_info = _SEASONAL_LEADERBOARD_SQL[period]
+    if not db:
+        return {'leaderboard': [], 'period_info': period_info}
+    try:
+        from sqlalchemy import text as _text
+        tables = _existing_table_names(db)
+        if not {'picks', 'live_sessions'}.intersection(tables):
+            return {'leaderboard': [], 'period_info': period_info}
+        rows = db.execute(_text(query)).fetchall()
+        leaderboard = [{'username': r[0], 'value': r[1], 'seasonal_title': r[2]}
+                       for r in rows]
+        return {'leaderboard': leaderboard, 'period_info': period_info}
+    except Exception as e:
+        logger.error('get_seasonal_leaderboard error: %s', e)
+        return {'leaderboard': [], 'period_info': period_info}
+
+
+def get_ai_recommendations(db, username: str, limit: int = 6) -> list:
+    """Return cached AI recommendations for *username* from ``ai_recommendations``.
+
+    Returns ``[{'id', 'name', 'match_score', 'reason'}, ...]`` ordered by
+    descending match score. Returns ``[]`` when the user is unknown or has no
+    cached recommendations.
+    """
+    if not db or not username:
+        return []
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return []
+        rows = (
+            db.query(AIRecommendationCache)
+            .filter(AIRecommendationCache.user_id == user.id)
+            .order_by(AIRecommendationCache.match_score.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {'id': str(idx), 'name': r.game_name,
+             'match_score': r.match_score, 'reason': r.reason}
+            for idx, r in enumerate(rows, 1)
+        ]
+    except Exception as e:
+        logger.error('get_ai_recommendations error: %s', e)
+        return []
