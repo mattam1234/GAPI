@@ -3747,18 +3747,7 @@ def api_get_challenges():
     return jsonify({'themes': themes, 'titles': titles})
 
 
-@app.route('/api/cosmetics/apply-theme', methods=['POST'])
-@require_login
-def api_apply_theme():
-    """Apply a theme to user profile"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    theme_id = data.get('theme_id')
-    
-    if not theme_id:
-        return jsonify({'error': 'Theme ID required'}), 400
-    
-    return jsonify({'success': True, 'message': 'Theme applied'})
+# MIGRATED to FastAPI: POST /api/cosmetics/apply-theme -> backend/routers/misc.py (cosmetics_router)
 
 
 # ---------------------------------------------------------------------------
@@ -3766,89 +3755,8 @@ def api_apply_theme():
 # ---------------------------------------------------------------------------
 
 # Shop & Marketplace
-@app.route('/api/shop', methods=['GET'])
-@require_login
-def api_shop():
-    """Get shop items for purchase"""
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(get_current_username())
-        
-        # Get all shop items
-        items_query = "SELECT id, name, icon, price, currency, premium FROM shop_items ORDER BY premium DESC"
-        items = db.execute(items_query).fetchall()
-        
-        # Get user's owned items
-        owned_query = "SELECT item_id FROM user_inventory WHERE user_id = ?"
-        owned_ids = set(row[0] for row in db.execute(owned_query, (user.id,)).fetchall())
-        
-        result = []
-        for item_id, name, icon, price, currency, premium in items:
-            result.append({
-                'id': str(item_id),
-                'icon': icon,
-                'name': name,
-                'price': price,
-                'currency': currency,
-                'premium': premium,
-                'owned': item_id in owned_ids
-            })
-        return jsonify({'items': result})
-    except Exception as e:
-        gui_logger.error(f"Error loading shop: {e}")
-        # Return mock data if DB unavailable
-        items = [
-            {'id': '1', 'icon': '🎨', 'name': 'Dark Neon Theme', 'price': 500, 'currency': 'xp', 'premium': False, 'owned': False},
-            {'id': '2', 'icon': '👑', 'name': 'Legendary Title', 'price': 100, 'currency': 'coins', 'premium': True, 'owned': False},
-        ]
-        return jsonify({'items': items})
-
-
-@app.route('/api/shop/purchase', methods=['POST'])
-@require_login
-def api_purchase_item():
-    """Purchase item from shop"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    item_id = data.get('item_id', '')
-    
-    if not item_id:
-        return jsonify({'error': 'Item ID required'}), 400
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Check if already owned
-        owned_query = "SELECT 1 FROM user_inventory WHERE user_id = ? AND item_id = ?"
-        if db.execute(owned_query, (user.id, int(item_id))).fetchone():
-            return jsonify({'error': 'Already owned'}), 400
-        
-        # Get item details
-        item_query = "SELECT name FROM shop_items WHERE id = ?"
-        item_result = db.execute(item_query, (int(item_id),)).fetchone()
-        item_name = item_result[0] if item_result else f'Item {item_id}'
-        
-        # Add to inventory
-        insert_query = "INSERT INTO user_inventory (user_id, item_id) VALUES (?, ?)"
-        db.execute(insert_query, (user.id, int(item_id)))
-        db.commit()
-        
-        # Broadcast shop purchase event
-        if REALTIME_AVAILABLE:
-            try:
-                realtime.RealtimeEvents.shop_purchase(
-                    username=username,
-                    item=item_name,
-                    item_type='cosmetic'
-                )
-            except Exception as e:
-                gui_logger.warning(f'Failed to broadcast shop purchase: {e}')
-        
-        return jsonify({'success': True, 'message': 'Purchase successful', 'new_balance': 1000})
-    except Exception as e:
-        gui_logger.error(f"Error purchasing item: {e}")
-        return jsonify({'success': True, 'message': 'Purchase successful (mock)', 'new_balance': 1000})
+# MIGRATED to FastAPI: GET /api/shop, POST /api/shop/purchase
+# -> backend/routers/misc.py (shop_router)
 
 
 # Streaming Center
@@ -3983,41 +3891,7 @@ def api_get_ranked():
 
 
 # Anti-Cheat Dashboard
-@app.route('/api/anticheat', methods=['GET'])
-@require_login
-def api_get_anticheat_info():
-    """Get anti-cheat integrity information"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        
-        # Calculate integrity score (simplified)
-        picks_query = "SELECT COUNT(*) FROM picks WHERE username = ?"
-        total_picks = db.execute(picks_query, (username,)).fetchone()[0]
-        
-        # Assume mostly clean picks (variance < 5%)
-        flagged_count = max(0, int(total_picks * 0.01))  # 1% flagged
-        integrity = 100 - (flagged_count / max(total_picks, 1) * 100)
-        
-        flagged_picks = [
-            {'session': 'Game Night #42', 'variance': 8.5, 'pick': 'Portal 2'},
-        ] if flagged_count > 0 else []
-        
-        return jsonify({
-            'integrity_score': round(integrity, 1),
-            'accuracy_variance': 2.1,
-            'response_time_ms': 145,
-            'flagged_picks': flagged_picks
-        })
-    except Exception as e:
-        gui_logger.error(f"Error getting anti-cheat info: {e}")
-        return jsonify({
-            'integrity_score': 99.2,
-            'accuracy_variance': 2.1,
-            'response_time_ms': 145,
-            'flagged_picks': []
-        })
+# MIGRATED to FastAPI: GET /api/anticheat -> backend/routers/misc.py (anticheat_router)
 
 
 # ==================== PHASE 7: Advanced Features ====================
@@ -4135,50 +4009,8 @@ def api_use_referral_code(code):
 
 
 # Seasonal Events
-@app.route('/api/events/seasonal', methods=['GET'])
-@require_login
-def api_get_seasonal_events():
-    """Get active seasonal events"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'active_events': [
-                {
-                    'id': 1,
-                    'name': 'Spring Festival 2026',
-                    'season': 'spring',
-                    'progress': 65,
-                    'reward': '🌸 Spring Bloom Theme',
-                    'days_left': 15,
-                    'completed': False
-                },
-                {
-                    'id': 2,
-                    'name': 'Anniversary Celebration',
-                    'season': 'year',
-                    'progress': 100,
-                    'reward': '🎂 Anniversary Badge',
-                    'days_left': 5,
-                    'completed': True,
-                    'reward_claimed': False
-                }
-            ]
-        })
-    except Exception as e:
-        return jsonify({'active_events': []})
-
-
-@app.route('/api/events/<event_id>/claim', methods=['POST'])
-@require_login
-def api_claim_event_reward(event_id):
-    """Claim seasonal event reward"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({'success': True, 'message': 'Event reward claimed!', 'reward': '🎂 Anniversary Badge'})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Reward claimed (mock)'})
+# MIGRATED to FastAPI: GET /api/events/seasonal, POST /api/events/<event_id>/claim
+# -> backend/routers/misc.py (events_router)
 
 
 # Guild System
@@ -6032,36 +5864,8 @@ def _load_locale(lang: str) -> Optional[Dict]:
         return None
 
 
-@app.route('/api/i18n')
-def api_i18n_list():
-    """List all available locales.
-
-    Returns a JSON array of objects with ``lang`` and ``lang_name`` fields,
-    e.g. ``[{"lang": "en", "lang_name": "English"}, ...]``.
-    """
-    locales = []
-    try:
-        for fname in sorted(os.listdir(_LOCALES_DIR)):
-            if not fname.endswith('.json'):
-                continue
-            data = _load_locale(fname[:-5])
-            if data and 'lang' in data:
-                locales.append({'lang': data['lang'], 'lang_name': data.get('lang_name', data['lang'])})
-    except Exception as exc:
-        gui_logger.error('Error listing locales: %s', exc)
-    return jsonify({'locales': locales})
-
-
-@app.route('/api/i18n/<lang>')
-def api_i18n_get(lang: str):
-    """Return the translation strings for *lang* (e.g. ``en``, ``es``).
-
-    A ``404`` is returned when the requested language is not available.
-    """
-    data = _load_locale(lang)
-    if data is None:
-        return jsonify({'error': f"Locale '{lang}' not found"}), 404
-    return jsonify(data)
+# MIGRATED to FastAPI: GET /api/i18n, GET /api/i18n/<lang> (both UNAUTHENTICATED)
+# -> backend/routers/misc.py (i18n_router)
 
 
 # ---------------------------------------------------------------------------
@@ -6329,137 +6133,8 @@ def _get_twitch_client():
         return None
 
 
-@app.route('/api/twitch/trending')
-@require_login
-def api_twitch_trending():
-    """Return the top games currently live on Twitch.
-
-    Query params:
-        count (int, 1-100, default 20): Number of trending games to return.
-
-    Response JSON::
-
-        {
-          "trending": [
-            {
-              "id": "32982",
-              "name": "Grand Theft Auto V",
-              "viewer_count": 87452,
-              "box_art_url": "https://...",
-              "twitch_url": "https://www.twitch.tv/directory/game/..."
-            },
-            ...
-          ]
-        }
-
-    Returns 503 when Twitch credentials are not configured.
-    """
-    from twitch_client import TwitchAuthError, TwitchAPIError
-
-    client = _get_twitch_client()
-    if client is None:
-        return jsonify({
-            'error': (
-                'Twitch credentials not configured. '
-                'Add twitch_client_id and twitch_client_secret to config.json '
-                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
-            )
-        }), 503
-
-    try:
-        count = max(1, min(int(request.args.get('count', 20)), 100))
-    except (ValueError, TypeError):
-        count = 20
-
-    try:
-        trending = client.get_top_games(count=count)
-    except TwitchAuthError as exc:
-        gui_logger.error("Twitch auth error: %s", exc)
-        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
-    except TwitchAPIError as exc:
-        gui_logger.error("Twitch API error: %s", exc)
-        return jsonify({'error': f'Twitch API error: {exc}'}), 502
-    except Exception as exc:
-        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
-        return jsonify({'error': 'Unexpected error'}), 500
-
-    return jsonify({'trending': trending})
-
-
-@app.route('/api/twitch/library-overlap')
-@require_login
-def api_twitch_library_overlap():
-    """Return user library games that are currently trending on Twitch.
-
-    Fetches the top trending games and cross-references them against the
-    user's loaded game library by normalised name.  Useful for prompting
-    the user to pick a game they own that has an active Twitch community.
-
-    Query params:
-        count (int, 1-100, default 20): Number of trending Twitch games to
-            compare against.
-
-    Response JSON::
-
-        {
-          "overlap": [
-            {
-              "appid": 730,
-              "name": "Counter-Strike 2",
-              "playtime_forever": 4560,
-              "twitch_id": "32399",
-              "viewer_count": 75000,
-              "box_art_url": "https://...",
-              "twitch_url": "https://www.twitch.tv/directory/game/...",
-              "trending_rank": 3
-            },
-            ...
-          ],
-          "trending_count": 20
-        }
-
-    Returns 503 when Twitch credentials are not configured.
-    Returns 400 when the picker is not initialised.
-    """
-    from twitch_client import TwitchAuthError, TwitchAPIError
-
-    if not picker:
-        return jsonify({'error': 'Not initialized. Please log in.'}), 400
-
-    client = _get_twitch_client()
-    if client is None:
-        return jsonify({
-            'error': (
-                'Twitch credentials not configured. '
-                'Add twitch_client_id and twitch_client_secret to config.json '
-                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
-            )
-        }), 503
-
-    try:
-        count = max(1, min(int(request.args.get('count', 20)), 100))
-    except (ValueError, TypeError):
-        count = 20
-
-    try:
-        trending = client.get_top_games(count=count)
-    except TwitchAuthError as exc:
-        gui_logger.error("Twitch auth error: %s", exc)
-        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
-    except TwitchAPIError as exc:
-        gui_logger.error("Twitch API error: %s", exc)
-        return jsonify({'error': f'Twitch API error: {exc}'}), 502
-    except Exception as exc:
-        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
-        return jsonify({'error': 'Unexpected error'}), 500
-
-    with picker_lock:
-        username = get_current_username()
-        _p = ensure_picker_initialized(username)
-        user_games = list(_p.games) if _p and _p.games else []
-
-    overlap = client.find_library_overlap(trending, user_games)
-    return jsonify({'overlap': overlap, 'trending_count': len(trending)})
+# MIGRATED to FastAPI: GET /api/twitch/trending, GET /api/twitch/library-overlap
+# -> backend/routers/misc.py (twitch_router)
 
 
 # ---------------------------------------------------------------------------
