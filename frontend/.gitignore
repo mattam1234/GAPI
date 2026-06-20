@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.local
 .vite/
+
+# The repo-root .gitignore (a Python template) ignores `lib/`, which would
+# otherwise swallow this app's source at src/lib/. Re-include it.
+!src/lib/
+!src/lib/**
