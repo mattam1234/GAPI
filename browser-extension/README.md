@@ -60,19 +60,17 @@ updates the toolbar badge (green = connected, red ● = disconnected).
 
 ## Building Icons
 
-The extension ships without bundled icons (they must be generated).
-Run the helper script to create PNG icons from an SVG source:
+The extension ships with bundled icons in `icons/` (`icon16.png`, `icon32.png`,
+`icon48.png`, `icon128.png`). To regenerate them — no third-party dependencies
+required, pure Python stdlib:
 
 ```bash
-# Requires Inkscape or rsvg-convert
-for size in 16 32 48 128; do
-  rsvg-convert -w $size -h $size icon.svg > icons/icon${size}.png
-done
+python generate_icons.py
 ```
 
-Or use any image-editing tool to export 16×16, 32×32, 48×48, and 128×128 PNG
-files named `icon16.png`, `icon32.png`, `icon48.png`, and `icon128.png` in the
-`browser-extension/icons/` directory.
+This redraws the green game-controller badge at all four sizes. Edit
+`generate_icons.py` to tweak the artwork or palette, or replace the PNGs with
+any 16×16 / 32×32 / 48×48 / 128×128 images of your own.
 
 ## API Compatibility
 
