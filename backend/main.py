@@ -9,8 +9,13 @@ Run with:
     # or, in production:
     gunicorn backend.main:app -k uvicorn.workers.UvicornWorker
 """
+from pathlib import Path
+
 from a2wsgi import WSGIMiddleware
 from fastapi import FastAPI
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import FileResponse
+from starlette.staticfiles import StaticFiles
 
 import gapi_gui
 from backend.routers import (
@@ -24,6 +29,28 @@ from backend.routers import (
     system_infra, tags,
     tournaments, trades, users, voting, wishlist,
 )
+
+
+# The built SPA (frontend/dist) is served under /app when present. It's a build
+# artifact (gitignored), so this mount is conditional — absent in CI/tests, the
+# app behaves exactly as before. Build it with `cd frontend && npm run build`.
+_SPA_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+
+class _SPAStaticFiles(StaticFiles):
+    """StaticFiles that falls back to index.html for client-side routes.
+
+    A hard refresh on /app/admin must serve the SPA shell (React Router handles
+    the path), not 404. Missing real assets still 404.
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return FileResponse(self.directory / "index.html")
+            raise
 
 
 def create_app() -> FastAPI:
@@ -113,6 +140,12 @@ def create_app() -> FastAPI:
     app.include_router(catalog.filters_router)
     app.include_router(catalog.hltb_router)
     app.include_router(system_infra.router)
+
+    # --- Modern SPA console (Phase 4) ------------------------------------
+    # Served under /app, BEFORE the catch-all Flask mount so it takes
+    # precedence. Conditional: only mounts when the frontend has been built.
+    if _SPA_DIST.is_dir():
+        app.mount("/app", _SPAStaticFiles(directory=_SPA_DIST, html=True), name="spa")
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.
