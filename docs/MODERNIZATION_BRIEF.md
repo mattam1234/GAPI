@@ -313,4 +313,38 @@ achievements, chat).
 
 > Reusable seam: per-user picker-backed domains (reviews, tags) share the
 > `get_picker` dependency in `backend/dependencies.py`.
+
+---
+
+## 7. Parallel batch — auth/setup + chat + live-session
+
+Migrated as a parallel batch (two worktree-isolated agents for chat and
+live-session, auth/setup done directly), then integrated together.
+
+**✅ auth + setup fully migrated** → `backend/routers/auth.py` (`router` +
+`setup_router`). The **session seam**: `login` signs the *same* Flask session
+cookie via `gapi_gui.app.session_interface` and sets it on the FastAPI response
+(Flask-configured cookie attributes), so a login on the new route authenticates
+every FastAPI router and the still-mounted Flask fallback; `logout` clears it and
+resets the picker globals + Discord RPC. Faithful quirks preserved: `update-ids`
+runs the discord-numeric check *after* the update; `register`/`initial-admin`
+don't log the user in; background Steam library-sync threads retained. Tests:
+`tests/test_backend_auth.py` (incl. a cookie round-trip through `require_login`).
+Repointed legacy tests that asserted Flask internals (audit wiring → FastAPI
+client; rate-limit → route-registration; api-stats → still-Flask `/api/changelog`).
+**Gap logged:** legacy `@limiter.limit` on login/register was commented out, so
+rate limiting was never active — to be re-added on the FastAPI routes.
+
+**✅ chat fully migrated** → `backend/routers/chat.py` (12 routes, all
+`require_login`). Preserved `Cache-Control: no-store` (legacy `_add_cache_control`
+default for non-cacheable `/api/*`). Tests: `tests/test_backend_chat.py`.
+
+**✅ live-session fully migrated** → `backend/routers/live_session.py` (11 routes).
+Literal paths (`/active`, `/discord-locations`) registered before the catch-all
+`/{session_id}` so they aren't shadowed. SSE `/events` ported to a
+`StreamingResponse`. Flask-context hazard handled: the legacy username resolution
+(`get_current_user_record` → demo-user fallback under FastAPI) replaced with an
+explicit by-username DB lookup. Tests: `tests/test_backend_live_session.py`.
+
+Full suite after integration: **1989 passed**.
 </content>

@@ -86,3 +86,6 @@ test_results.txt
 discord_bot_changes.txt
 .coverage
 coverage.xml
+
+# Claude Code agent worktrees
+.claude/worktrees/

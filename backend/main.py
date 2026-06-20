@@ -14,11 +14,11 @@ from fastapi import FastAPI
 
 import gapi_gui
 from backend.routers import (
-    achievements, admin_notifications, analytics, backlog, budget, challenges,
-    downloads, duplicates, export, friends, game, ignored, leaderboards,
-    library, messages, multiuser, notifications, permissions, pick, playlists,
-    presence, profile, recommendations, reviews, schedule, sessions, tags,
-    users, voting, wishlist,
+    achievements, admin_notifications, analytics, auth, backlog, budget,
+    challenges, chat, downloads, duplicates, export, friends, game, ignored,
+    leaderboards, library, live_session, messages, multiuser, notifications,
+    permissions, pick, playlists, presence, profile, recommendations, reviews,
+    schedule, sessions, tags, users, voting, wishlist,
 )
 
 
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     # Registered BEFORE the Flask fallback mount so their paths take
     # precedence over the legacy routes of the same name.
     app.include_router(analytics.router)
+    app.include_router(chat.router)
     app.include_router(reviews.router)
     app.include_router(tags.router)
     app.include_router(wishlist.router)
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(library.router)
     app.include_router(profile.router)
     app.include_router(sessions.router)
+    app.include_router(live_session.router)
     app.include_router(schedule.router)
     app.include_router(schedule.event_router)
     app.include_router(achievements.router)
@@ -65,6 +67,8 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(users.admin_router)
     app.include_router(users.extra_router)
+    app.include_router(auth.router)
+    app.include_router(auth.setup_router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.

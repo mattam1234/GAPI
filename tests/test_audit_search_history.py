@@ -244,25 +244,25 @@ class TestAuditHelper(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestLoginAuditWiring(unittest.TestCase):
+    # Login migrated to FastAPI (backend/routers/auth.py); the _audit wiring is
+    # preserved there, so these drive the FastAPI TestClient.
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        from backend.main import app
+        self.client = _FastTestClient(app)
 
     def test_successful_login_triggers_audit(self):
         """A successful login should call _audit with action='login'."""
         audit_calls = []
-        original_audit = gapi_gui._audit
 
         def mock_audit(action, **kwargs):
             audit_calls.append((action, kwargs))
 
         with patch.object(gapi_gui, '_audit', side_effect=mock_audit):
             with patch.object(gapi_gui.user_manager, 'login', return_value=(True, 'ok')), \
-                 patch.object(gapi_gui.user_manager, 'get_user_ids', return_value={}):
+                 patch.object(gapi_gui.user_manager, 'get_user_ids', return_value={}), \
+                 patch.object(gapi_gui, 'DB_AVAILABLE', False):
                 self.client.post('/api/auth/login',
-                                 json={'username': 'alice', 'password': 'pw'},
-                                 content_type='application/json')
+                                 json={'username': 'alice', 'password': 'pw'})
         # Should have at least one login audit call
         login_calls = [c for c in audit_calls if c[0] == 'login']
         self.assertGreater(len(login_calls), 0)
@@ -281,8 +281,7 @@ class TestLoginAuditWiring(unittest.TestCase):
             with patch.object(gapi_gui.user_manager, 'login',
                               return_value=(False, 'Bad credentials')):
                 self.client.post('/api/auth/login',
-                                 json={'username': 'alice', 'password': 'wrong'},
-                                 content_type='application/json')
+                                 json={'username': 'alice', 'password': 'wrong'})
         failure_calls = [c for c in audit_calls
                          if c[0] == 'login' and c[1].get('status') == 'failure']
         self.assertGreater(len(failure_calls), 0)

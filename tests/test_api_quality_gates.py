@@ -75,12 +75,14 @@ class TestApiStats(unittest.TestCase):
         self.assertIn('endpoint_count', data)
 
     def test_stats_increments_on_requests(self):
-        # Make a couple of requests to a known endpoint
-        self.client.get('/api/auth/current')
-        self.client.get('/api/auth/current')
+        # Make a couple of requests to a known still-Flask endpoint. (/api/auth/*
+        # migrated to FastAPI, whose stats are tracked outside this Flask
+        # after_request mechanism, so use the changelog route here.)
+        self.client.get('/api/changelog')
+        self.client.get('/api/changelog')
         with gapi_gui._api_stats_lock:
-            entry = gapi_gui._api_endpoint_stats.get('api_auth_current')
-        self.assertIsNotNone(entry, 'api_auth_current should be tracked')
+            entry = gapi_gui._api_endpoint_stats.get('api_changelog')
+        self.assertIsNotNone(entry, 'api_changelog should be tracked')
         self.assertGreaterEqual(entry['calls'], 2)
 
     def test_stats_tracks_errors(self):
