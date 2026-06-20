@@ -374,4 +374,38 @@ Repointed legacy Flask-client tests that hit moved routes: search-history
 (`test_audit_search_history.py`) and webhook-test (`test_smart_recommendations_webhooks.py`).
 
 Full suite after integration: **2064 passed**. Flask routes remaining: ~160.
+
+## 9. Parallel batch — tournaments + trades + platform integrations
+
+Three more domains via parallel worktree agents, integrated together.
+
+**✅ tournaments** → `backend/routers/tournaments.py` (3 routes). Mock handlers
+(hardcoded data, no DB). The agent found a **duplicate dead GET handler** bound to
+the same path (Werkzeug served only the first); dropped the unreachable one.
+
+**✅ trades** → `backend/routers/trades.py` (4 routes). All reference the undefined
+`db_service` → caught → success-faking mock bodies (never persist); preserved.
+
+**✅ platform integrations** → `backend/routers/platforms.py` — one router per
+platform: psn/xbox/epic/gog/nintendo (15 routes). The **OAuth seam** is the notable
+part: the legacy routes wrote `session['<plat>_oauth_state']` and 302'd; the FastAPI
+versions merge the state into the Flask session payload and re-sign the same cookie
+onto a `RedirectResponse` (reusing `auth._set_session_cookie`), with the redirect
+URI derived from `request.base_url`. `/api/platform/status` + the shared
+`_get_platform_client` helper intentionally stay in Flask (referenced at call time).
+
+**Gaps logged:** trades + tournaments are mock stubs needing real backends.
+
+Full suite after integration: **2133 passed**. Flask routes remaining: **137**.
+
+---
+
+## Frontend (Phase 4, started)
+
+The hybrid SPA scaffold landed (`frontend/`, React 18 + Vite + TS) — see
+[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) and `frontend/README.md`. Dashboard +
+Analytics consume `GET /api/analytics/dashboard` with Recharts + TanStack Table;
+Admin/Profile are wired/stubbed. The session cookie is shared (same-origin), so no
+separate login. Next: serve `dist/` under `/app`, deepen Admin once that domain
+migrates.
 </content>
