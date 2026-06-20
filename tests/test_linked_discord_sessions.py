@@ -23,6 +23,18 @@ import discord_bot
 import gapi_gui
 
 
+def _fastapi_client(username):
+    """A FastAPI TestClient authenticated as *username* (live-session domain
+    was migrated off Flask; its routes are now served by FastAPI)."""
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+    client = TestClient(app)
+    serializer = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    client.cookies.set('session', serializer.dumps({'username': username}))
+    return client
+
+
 class _FakeUser:
     def __init__(self, user_id: int):
         self.id = user_id
@@ -117,36 +129,33 @@ class LinkedDiscordSessionTestCase(unittest.TestCase):
         self.assertEqual(view['pending_joins'][0]['status'], 'completed')
 
     def test_discord_locations_api_returns_cached_guilds(self):
-        db = self.Session()
-        try:
-            database.refresh_discord_location_cache(db, [{
-                'guild_id': '1',
-                'name': 'Guild One',
-                'icon_url': '',
-                'channels': [{'channel_id': '10', 'name': 'general', 'channel_type': 'text', 'can_send': True}],
-                'members': [{'discord_user_id': '42', 'display_name': 'Alice'}],
-            }])
-        finally:
-            db.close()
+        cached_guilds = [{
+            'guild_id': '1',
+            'guild_name': 'Guild One',
+            'icon_url': '',
+            'channels': [{'channel_id': '10', 'channel_name': 'general'}],
+        }]
 
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        client = gapi_gui.app.test_client()
-        with client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        # Route migrated to FastAPI: exercise it through the FastAPI TestClient.
+        # The TestClient runs the route on a worker thread, so the per-connection
+        # in-memory DB can't be shared; patch at the DB-call boundary instead
+        # (the assertion is "route returns the cached guilds for the linked user").
+        client = _fastapi_client('alice')
+        fake_user = SimpleNamespace(username='alice', discord_id='42',
+                                    steam_id='76561190000000001')
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch.object(gapi_gui, 'ensure_db_available', return_value=True), \
              patch.object(gapi_gui.database, 'SessionLocal', self.Session), \
-             patch.object(gapi_gui, '_get_current_user_record', return_value={
-                 'username': 'alice',
-                 'discord_id': '42',
-                 'steam_id': '76561190000000001',
-             }):
+             patch.object(gapi_gui.database, 'get_user_by_username',
+                          return_value=fake_user), \
+             patch.object(gapi_gui.database, 'list_discord_locations_for_user',
+                          return_value=cached_guilds):
             resp = client.get('/api/live-session/discord-locations')
-        data = resp.get_json()
+        data = resp.json()
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(data['guilds']), 1)
         self.assertEqual(data['guilds'][0]['guild_id'], '1')
+        self.assertEqual(data['discord_id'], '42')
 
 
 class TestDiscordBotLinkedSessionHelpers(unittest.IsolatedAsyncioTestCase):
@@ -252,11 +261,8 @@ class TestLiveSessionSyncEnhancements(unittest.TestCase):
         self.assertEqual(view['common_game_count'], 1)
 
     def test_admin_can_disband_live_session(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        client = gapi_gui.app.test_client()
-        with client.session_transaction() as sess:
-            sess['username'] = 'admin'
+        # Route migrated to FastAPI: exercise it through the FastAPI TestClient.
+        client = _fastapi_client('admin')
 
         session_id = 'sess-disband'
         gapi_gui.live_sessions[session_id] = {
@@ -273,7 +279,7 @@ class TestLiveSessionSyncEnhancements(unittest.TestCase):
             with patch.object(gapi_gui, 'DB_AVAILABLE', False), \
                  patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
                 resp = client.post(f'/api/live-session/{session_id}/disband')
-            data = resp.get_json()
+            data = resp.json()
             self.assertEqual(resp.status_code, 200)
             self.assertTrue(data.get('success'))
             self.assertNotIn(session_id, gapi_gui.live_sessions)
