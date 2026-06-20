@@ -15,8 +15,16 @@ Faithful ports — latent legacy behaviour is preserved exactly:
   returns a success-faking mock response, so in production these routes never
   actually persist anything. Referenced here via ``gapi_gui.db_service`` so the
   ``AttributeError`` still fires and the mock fallback still runs.
-* The ``/api/guilds`` and ``/api/market`` handlers are pure success-faking
-  stubs returning hard-coded data; their ``try/except`` never trips.
+* The ``/api/guilds`` handlers are real, persistent features backed by the
+  ``backend.models.community`` ORM models and ``community_service``.
+* The ``/api/market`` handlers are a real, persistent feature backed by the
+  ``backend.models.market`` ORM models and ``app.services.market_service``. A
+  listing has a seller, item, integer coin price, optional category, and status
+  ``active`` -> ``sold`` | ``cancelled``. ``sell`` creates an ``active`` listing
+  (400 on missing item / invalid price); ``offer`` records a buyer's coin offer
+  on a listing (404 if the listing is missing; 400 if the buyer is the seller or
+  the listing is not active); ``GET /api/market`` lists active listings,
+  optionally filtered by the ``category`` query param.
 * The ``/api/system`` handlers gate on ``PERFORMANCE_AVAILABLE`` and use the
   optional ``performance`` module; ``api_clear_cache`` additionally enforces an
   inline ``username == 'admin'`` check (not the admin decorator).
@@ -56,7 +64,11 @@ from backend.dependencies import require_login
 # Importing the model module registers the community ORM models on the shared
 # Base so the create_all hook in backend.main creates their tables.
 from backend.models import community as community_models  # noqa: F401
+# Importing the market model module registers its ORM models on the shared Base.
+from backend.models import market as market_models  # noqa: F401
 from app.services import community_service
+from app.services import market_service
+from app.services.market_service import MarketError
 
 guilds_router = APIRouter(prefix="/api/guilds", tags=["guilds"])
 teams_router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -219,57 +231,81 @@ def api_join_team(team_id: int, username: str = Depends(require_login)):
 @market_router.get("")
 def api_market_list(category: str = Query(default='all'),
                     username: str = Depends(require_login)):
-    """Browse trading market."""
+    """List active marketplace listings, optionally filtered by category.
+
+    The ``category`` query param defaults to the legacy sentinel ``'all'``,
+    which (along with blank/missing) means "no filter".
+    """
+    db = database.SessionLocal()
     try:
-        return _ok({
-            'listings': [
-                {
-                    'id': 1,
-                    'seller': 'SkylarMint',
-                    'item': '[Theme] Midnight Blue',
-                    'rarity': 'epic',
-                    'price': 2500,
-                    'listed_days': 3
-                },
-                {
-                    'id': 2,
-                    'seller': 'ProGamer42',
-                    'item': '[Title] Master of Chaos',
-                    'rarity': 'legendary',
-                    'price': 5000,
-                    'listed_days': 1
-                },
-            ]
-        })
-    except Exception:
-        return _ok({'listings': []})
+        listings = market_service.list_listings(db, category=category)
+        return _ok({'listings': listings})
+    except MarketError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error loading market listings: %s", e)
+        return _err(500, 'Failed to load listings')
+    finally:
+        db.close()
 
 
 @market_router.post("/sell")
 def api_market_sell(body: Optional[dict] = Body(default=None),
                     username: str = Depends(require_login)):
-    """List item for sale."""
+    """Create an active listing for sale (400 on missing item / invalid price)."""
     data = body or {}
+    item = data.get('item')
+    price = data.get('price')
+    category = data.get('category')
 
+    db = database.SessionLocal()
     try:
-        item = data.get('item', '')
-        price = data.get('price', 0)
-        return _ok({'success': True, 'message': f'Item listed for {price} points!', 'listing_id': 123})
-    except Exception:
-        return _ok({'success': True, 'message': 'Listed (mock)'})
+        listing = market_service.create_listing(
+            db, seller=username, item=item, price=price, category=category)
+        return _ok({
+            'success': True,
+            'message': f'Item listed for {listing["price"]} coins!',
+            'listing_id': listing['id'],
+            'listing': listing,
+        }, status_code=201)
+    except MarketError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error creating listing: %s", e)
+        return _err(500, 'Failed to create listing')
+    finally:
+        db.close()
 
 
 @market_router.post("/{listing_id}/offer")
 def api_market_offer(listing_id: str, body: Optional[dict] = Body(default=None),
                      username: str = Depends(require_login)):
-    """Make offer on marketplace item."""
-    data = body or {}
-    offer_price = data.get('offer_price', 0)
+    """Record a buyer's offer on a listing.
 
+    Accepts the offered amount as ``amount`` (new) or ``offer_price`` (legacy).
+    404 if the listing is missing; 400 if the buyer is the seller, the listing
+    is not active, or the amount is invalid.
+    """
+    data = body or {}
+    amount = data.get('amount', data.get('offer_price'))
+
+    db = database.SessionLocal()
     try:
-        return _ok({'success': True, 'message': f'Offer of {offer_price} points submitted!', 'offer_id': 456})
-    except Exception:
-        return _ok({'success': True, 'message': 'Offer made (mock)'})
+        offer = market_service.make_offer(
+            db, listing_id=listing_id, buyer=username, amount=amount)
+        return _ok({
+            'success': True,
+            'message': f'Offer of {offer["amount"]} coins submitted!',
+            'offer_id': offer['id'],
+            'offer': offer,
+        }, status_code=201)
+    except MarketError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error making offer: %s", e)
+        return _err(500, 'Failed to make offer')
+    finally:
+        db.close()
 
 
 # ── system ──────────────────────────────────────────────────────────────────
