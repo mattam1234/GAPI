@@ -477,9 +477,10 @@ class TestPlatformStatusRoute(unittest.TestCase):
     def setUp(self):
         import gapi_gui
         gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        # /api/platform/status migrated to FastAPI; auth is the Flask-signed
+        # session cookie that backend.dependencies decodes.
+        self.client = _fastapi_client()
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_status_returns_all_platforms(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -487,7 +488,7 @@ class TestPlatformStatusRoute(unittest.TestCase):
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.client.get('/api/platform/status')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         for plat in ('steam', 'epic', 'gog', 'xbox'):
             self.assertIn(plat, data['platforms'])
 

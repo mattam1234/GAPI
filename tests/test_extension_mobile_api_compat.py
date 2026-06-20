@@ -16,11 +16,18 @@ import gapi_gui
 from backend.main import app as _fastapi_app
 
 
+def _fastapi_session_cookie(username):
+    ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    return ser.dumps({'username': username})
+
+
 class TestExtensionMobileApiCompat(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # /api/health and /api/history migrated to FastAPI; auth is the
+        # Flask-signed session cookie that backend.dependencies decodes.
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_resolve_pick_filter_type_accepts_mode_aliases(self):
         self.assertEqual(gapi_gui._resolve_pick_filter_type({'mode': 'random'}), 'all')
@@ -31,7 +38,7 @@ class TestExtensionMobileApiCompat(unittest.TestCase):
     def test_health_endpoint_is_public(self):
         resp = self.client.get('/api/health')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['ok'])
         self.assertEqual(data['status'], 'healthy')
 
@@ -54,8 +61,8 @@ class TestExtensionMobileApiCompat(unittest.TestCase):
         resp = self.client.get('/api/history')
         self.assertEqual(resp.status_code, 401)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_history_endpoint_returns_recent_entries(self):
+        self.client.cookies.set('session', _fastapi_session_cookie('testuser'))
         picker = SimpleNamespace(
             history=['steam:20', 'steam:10'],
             games=[
@@ -66,7 +73,7 @@ class TestExtensionMobileApiCompat(unittest.TestCase):
         with patch.object(gapi_gui, 'ensure_picker_initialized', return_value=picker):
             resp = self.client.get('/api/history')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('history', data)
         self.assertEqual(len(data['history']), 2)
         self.assertEqual(data['history'][0]['game_id'], 'steam:10')

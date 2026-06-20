@@ -20,7 +20,8 @@ from backend.routers import (
     export, extensibility, friends, game, ignored, leaderboards, library,
     live_session, messages, misc, multiuser, notifications,
     permissions, pick, platforms, playlists, presence, profile,
-    recommendations, reviews, schedule, search, sessions, social_stats, tags,
+    recommendations, reviews, schedule, search, sessions, social_stats,
+    system_infra, tags,
     tournaments, trades, users, voting, wishlist,
 )
 
@@ -111,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog.games_router)
     app.include_router(catalog.filters_router)
     app.include_router(catalog.hltb_router)
+    app.include_router(system_infra.router)
 
     # --- Legacy fallback -------------------------------------------------
     # Everything not matched above is handled by the existing Flask app.

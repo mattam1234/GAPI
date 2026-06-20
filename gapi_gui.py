@@ -349,33 +349,7 @@ def _generate_csrf_token() -> str:
     return secrets.token_hex(32)
 
 
-@app.route('/api/csrf-token', methods=['GET'])
-def api_get_csrf_token():
-    """Issue (or refresh) a CSRF token for the current browser session.
-
-    Sets a ``csrf_token`` cookie (SameSite=Lax, HttpOnly=False so JavaScript
-    can read it) and returns the same value in the JSON body so SPAs can store
-    it and send it as the ``X-CSRF-Token`` request header.
-
-    Response JSON:
-      ``token``  – CSRF token string
-    """
-    token = _generate_csrf_token()
-    resp = jsonify({'token': token})
-    # Use HTTPS-only cookies in production; allow HTTP in development.
-    # Set GAPI_CSRF_SECURE=true (or any truthy value) in the environment to
-    # enforce the Secure flag when the app is deployed behind TLS.
-    _csrf_secure = os.environ.get('GAPI_CSRF_SECURE', '').lower() in ('1', 'true', 'yes')
-    resp.set_cookie(
-        _CSRF_COOKIE_NAME,
-        token,
-        samesite='Lax',
-        httponly=False,     # must be readable by JS to send as header
-        secure=_csrf_secure,
-        max_age=86400,      # 1 day
-        path='/',
-    )
-    return resp
+# MIGRATED to FastAPI: GET /api/csrf-token -> backend/routers/system_infra.py
 
 
 @app.before_request
@@ -2049,36 +2023,7 @@ def ensure_picker_initialized(username: str = None) -> Optional[gapi.GamePicker]
     return p
 
 
-@app.route('/api/status')
-def api_status():
-    """Get application status"""
-    username = get_current_username()
-
-    # Check if user is logged in
-    if not username:
-        return jsonify({
-            'ready': False,
-            'logged_in': False,
-            'message': 'Please log in'
-        })
-
-    p = ensure_picker_initialized(username)
-
-    if p is None:
-        return jsonify({
-            'ready': False,
-            'logged_in': True,
-            'message': 'Loading games...'
-        })
-
-    return jsonify({
-        'ready': True,
-        'logged_in': True,
-        'current_user': username,
-        'is_admin': user_manager.is_admin(username),
-        'total_games': len(p.games) if p.games else 0,
-        'favorites': len(p.favorites) if p.favorites else 0
-    })
+# MIGRATED to FastAPI: GET /api/status -> backend/routers/system_infra.py
 
 
 def _resolve_pick_filter_type(payload: Dict) -> str:
@@ -2132,58 +2077,13 @@ def _legacy_pick_payload(game: Dict) -> Dict:
     return payload
 
 
-@app.route('/api/health', methods=['GET'])
-def api_health():
-    """Public lightweight health endpoint for external clients."""
-    username = get_current_username()
-    return jsonify({
-        'ok': True,
-        'status': 'healthy',
-        'authenticated': bool(username),
-        'current_user': username if username else None,
-    })
+# MIGRATED to FastAPI: GET /api/health -> backend/routers/system_infra.py
 
 
 # MIGRATED to FastAPI: GET /api/random-game -> backend/routers/pick.py
 
 
-@app.route('/api/history', methods=['GET'])
-@require_login
-def api_history_legacy():
-    """Return recent pick history for mobile client compatibility."""
-    username = get_current_username()
-    p = ensure_picker_initialized(username)
-    if p is None:
-        return jsonify({'history': []})
-
-    games_by_id = {
-        str(g.get('game_id')): g
-        for g in (p.games or [])
-        if g.get('game_id')
-    }
-
-    entries = []
-    recent_ids = list(p.history[-50:]) if getattr(p, 'history', None) else []
-    now_iso = datetime.now(timezone.utc).isoformat()
-    for idx, game_id in enumerate(reversed(recent_ids), start=1):
-        game = games_by_id.get(str(game_id), {})
-        platform = game.get('platform', '')
-        app_id = game.get('appid')
-        if not platform and isinstance(game_id, str) and ':' in game_id:
-            platform = game_id.split(':', 1)[0]
-        if app_id is None and isinstance(game_id, str) and ':' in game_id:
-            app_id = game_id.split(':', 1)[1]
-        entries.append({
-            'id': idx,
-            'game_name': game.get('name') or str(game_id),
-            'game_id': str(game_id),
-            'platform': platform or 'steam',
-            'picked_at': now_iso,
-            'playtime_at_pick': int(game.get('playtime_forever', 0) or 0),
-            'app_id': app_id,
-        })
-
-    return jsonify({'history': entries})
+# MIGRATED to FastAPI: GET /api/history -> backend/routers/system_infra.py
 
 
 # ===========================================================================================
@@ -2311,31 +2211,7 @@ def _run_sql_statements(db, sql: str) -> None:
 # Password-reset request endpoints
 # ---------------------------------------------------------------------------
 
-@app.route('/api/password-reset-request', methods=['POST'])
-def api_password_reset_request():
-    """Submit a password reset request (public, no authentication required)."""
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    data = request.json or {}
-    username = (data.get('username') or '').strip()
-    if not username:
-        return jsonify({'error': 'Username is required'}), 400
-    try:
-        db = database.SessionLocal()
-        user = db.query(database.User).filter(database.User.username == username).first()
-        if not user:
-            db.close()
-            # Generic response to avoid username enumeration
-            return jsonify({'message': 'If that username exists, your request has been recorded.'}), 200
-        entry = database.PasswordResetRequest(username=username)
-        db.add(entry)
-        db.commit()
-        db.close()
-        gui_logger.info('Password reset requested for user: %s', username)
-        return jsonify({'message': 'Password reset request submitted. An admin will contact you.'}), 200
-    except Exception as e:
-        gui_logger.exception('Error creating password reset request: %s', e)
-        return jsonify({'error': 'Failed to submit request'}), 500
+# MIGRATED to FastAPI: POST /api/password-reset-request -> backend/routers/system_infra.py
 
 
 # MIGRATED to FastAPI: GET /api/admin/password-reset-requests,
@@ -3378,35 +3254,7 @@ def api_get_challenges():
 # MODERATION ENDPOINTS
 # ───────────────────────────────────────────────────────────────────────────
 
-@app.route('/api/moderation/report', methods=['POST'])
-@require_login
-def api_report_content():
-    """Report user content for moderation."""
-    if not _moderation_service:
-        return jsonify({'error': 'Moderation service not available'}), 503
-    
-    username = get_current_username()
-    db = next(database.get_db())
-    try:
-        data = request.get_json() or {}
-        report_type = data.get('type', 'user')  # user, chat, review
-        reason = data.get('reason', '')
-        description = data.get('description', '')
-        reported_user = data.get('reported_user')
-        resource_id = data.get('resource_id')
-        
-        if not reason:
-            return jsonify({'error': 'Reason required'}), 400
-        
-        report_id = _moderation_service.report_user_content(
-            db, username, report_type, reason, description, reported_user, resource_id
-        )
-        return jsonify({'success': bool(report_id), 'report_id': report_id})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if db:
-            db.close()
+# MIGRATED to FastAPI: POST /api/moderation/report -> backend/routers/system_infra.py
 
 
 # MIGRATED to FastAPI: GET /api/admin/moderation/reports,
@@ -3513,26 +3361,7 @@ def api_import_user_data():
 # User profile card API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/user/<username>/card')
-@require_login
-def api_user_card(username):
-    """Return the profile card for *username*.
-
-    Response JSON includes display_name, bio, avatar_url, roles, stats
-    (total_games, total_playtime_hours, total_achievements), and joined date.
-    """
-    db = next(database.get_db())
-    try:
-        if _leaderboard_service:
-            card = _leaderboard_service.get_user_card(db, username)
-        else:
-            card = database.get_user_card(db, username)
-    finally:
-        if db:
-            db.close()
-    if not card:
-        return jsonify({'error': 'User not found'}), 404
-    return jsonify(card)
+# MIGRATED to FastAPI: GET /api/user/<username>/card -> backend/routers/system_infra.py
 
 
 # ---------------------------------------------------------------------------
@@ -3954,33 +3783,7 @@ def _handle_chat_command(db, username: str, room: str, message: str) -> Dict:
 # Chat API
 # ---------------------------------------------------------------------------
 
-@app.route('/api/user-profile/<username>')
-@require_login
-def api_get_user_profile(username):
-    """Get user profile card (display name, bio, avatar, stats, roles, etc).
-    
-    URL params:
-      - ``username``: target username (required)
-    
-    Returns user profile card with:
-      - username, display_name, bio, avatar_url
-      - roles (list)
-      - stats (total_games, total_playtime_hours, total_achievements)
-      - joined date
-      - platform IDs
-    """
-    if not username:
-        return jsonify({'error': 'username is required'}), 400
-    
-    db = next(database.get_db())
-    try:
-        user_card = database.get_user_card(db, username)
-        if not user_card:
-            return jsonify({'error': f'User "{username}" not found'}), 404
-        return jsonify(user_card)
-    finally:
-        if db:
-            db.close()
+# MIGRATED to FastAPI: GET /api/user-profile/<username> -> backend/routers/system_infra.py
 
 
 # ---------------------------------------------------------------------------
@@ -4451,72 +4254,7 @@ def _get_platform_client(platform: str):
 #   backend/routers/platforms.py (epic_router / gog_router / xbox_router)
 
 
-@app.route('/api/platform/status')
-@require_login
-def api_platform_status():
-    """Return authentication / configuration status of all connected platforms.
-
-    Response JSON::
-
-        {
-          "platforms": {
-            "steam":     {"configured": true,  "authenticated": true},
-            "epic":      {"configured": true,  "authenticated": false},
-            "gog":       {"configured": false, "authenticated": false},
-            "xbox":      {"configured": false, "authenticated": false},
-            "psn":       {"configured": false, "authenticated": false},
-            "nintendo":  {"configured": false, "authenticated": false}
-          }
-        }
-    """
-    from platform_clients import EpicOAuthClient, GOGOAuthClient, XboxAPIClient, PSNClient, NintendoEShopClient
-    clients = picker.clients if picker else {}
-    status: Dict[str, Any] = {}
-
-    # Steam
-    steam = clients.get('steam')
-    status['steam'] = {
-        'configured': steam is not None,
-        'authenticated': steam is not None,
-    }
-
-    # Epic
-    epic = clients.get('epic')
-    status['epic'] = {
-        'configured': epic is not None,
-        'authenticated': isinstance(epic, EpicOAuthClient) and epic.is_authenticated,
-    }
-
-    # GOG
-    gog = clients.get('gog')
-    status['gog'] = {
-        'configured': gog is not None,
-        'authenticated': isinstance(gog, GOGOAuthClient) and gog.is_authenticated,
-    }
-
-    # Xbox
-    xbox = clients.get('xbox')
-    status['xbox'] = {
-        'configured': xbox is not None,
-        'authenticated': isinstance(xbox, XboxAPIClient) and xbox._xsts_token is not None,
-    }
-
-    # PSN
-    psn = clients.get('psn')
-    status['psn'] = {
-        'configured': psn is not None,
-        'authenticated': isinstance(psn, PSNClient) and psn.is_authenticated,
-    }
-
-    # Nintendo (catalog only — always "authenticated" when configured)
-    nintendo = clients.get('nintendo')
-    status['nintendo'] = {
-        'configured': nintendo is not None,
-        'authenticated': isinstance(nintendo, NintendoEShopClient),
-        'note': 'catalog only — no library API available',
-    }
-
-    return jsonify({'platforms': status})
+# MIGRATED to FastAPI: GET /api/platform/status -> backend/routers/system_infra.py
 
 
 # ---------------------------------------------------------------------------
@@ -4624,38 +4362,7 @@ def api_swagger_ui():
 # Client-Side Error Reporting  (Phase 9C)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/errors/report', methods=['POST'])
-def api_errors_report():
-    """Accept a JavaScript error report from the browser.
-
-    Expected JSON body (all fields optional):
-      ``message``    – error message string
-      ``stack``      – stack trace string
-      ``url``        – page URL where the error occurred
-      ``line``       – line number (int)
-      ``col``        – column number (int)
-      ``user_agent`` – browser user-agent string
-
-    The report is stored in a fixed-size ring buffer (most recent
-    ``_CLIENT_ERROR_MAX`` entries) and logged at WARNING level.
-    """
-    data = request.get_json(silent=True, force=True) or {}
-    entry = {
-        'timestamp': datetime.now(timezone.utc).isoformat(),
-        'message': str(data.get('message', ''))[:500],
-        'stack': str(data.get('stack', ''))[:2000],
-        'url': str(data.get('url', ''))[:500],
-        'line': data.get('line'),
-        'col': data.get('col'),
-        'user_agent': str(
-            data.get('user_agent') or request.headers.get('User-Agent', '')
-        )[:300],
-        'username': get_current_username(),
-    }
-    gui_logger.warning('Client-side error reported: %s at %s', entry['message'], entry['url'])
-    with _client_errors_lock:
-        _client_errors.append(entry)
-    return jsonify({'recorded': True}), 201
+# MIGRATED to FastAPI: POST /api/errors/report -> backend/routers/system_infra.py
 
 
 # MIGRATED to FastAPI: GET /api/admin/client-errors,
@@ -4717,22 +4424,9 @@ _API_CHANGELOG = [
 ]
 
 
-@app.route('/api/changelog', methods=['GET'])
-def api_changelog():
-    """Return a structured API changelog.
-
-    Query params:
-      ``limit`` – max versions to return (default all)
-    """
-    try:
-        limit = int(request.args.get('limit', len(_API_CHANGELOG)))
-        limit = max(1, min(limit, len(_API_CHANGELOG)))
-    except (ValueError, TypeError):
-        limit = len(_API_CHANGELOG)
-    return jsonify({
-        'changelog': _API_CHANGELOG[:limit],
-        'total_versions': len(_API_CHANGELOG),
-    })
+# MIGRATED to FastAPI: GET /api/changelog -> backend/routers/system_infra.py.
+# The _API_CHANGELOG constant above is retained — the FastAPI handler reads it
+# via gapi_gui._API_CHANGELOG.
 
 
 # ---------------------------------------------------------------------------

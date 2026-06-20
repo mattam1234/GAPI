@@ -60,10 +60,11 @@ class TestApiStats(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        # Flask client: still-Flask routes (/api/changelog) populate the shared
-        # in-memory _api_endpoint_stats via after_request. FastAPI client: the
-        # migrated admin read/reset endpoints (admin_ops). Both read/write the
-        # same gapi_gui module globals.
+        # Flask client: still-Flask routes (/api/openapi.json) populate the
+        # shared in-memory _api_endpoint_stats via after_request. FastAPI
+        # client: the migrated admin read/reset endpoints (admin_ops). Both
+        # read/write the same gapi_gui module globals. (/api/changelog moved to
+        # FastAPI, whose stats are tracked outside this Flask after_request.)
         self.client = gapi_gui.app.test_client()
         self.api = _FastTestClient(_fastapi_app)
         with gapi_gui._api_stats_lock:
@@ -89,13 +90,14 @@ class TestApiStats(unittest.TestCase):
 
     def test_stats_increments_on_requests(self):
         # Make a couple of requests to a known still-Flask endpoint. (/api/auth/*
-        # migrated to FastAPI, whose stats are tracked outside this Flask
-        # after_request mechanism, so use the changelog route here.)
-        self.client.get('/api/changelog')
-        self.client.get('/api/changelog')
+        # and /api/changelog migrated to FastAPI, whose stats are tracked
+        # outside this Flask after_request mechanism, so use the still-Flask
+        # /api/openapi.json route here.)
+        self.client.get('/api/openapi.json')
+        self.client.get('/api/openapi.json')
         with gapi_gui._api_stats_lock:
-            entry = gapi_gui._api_endpoint_stats.get('api_changelog')
-        self.assertIsNotNone(entry, 'api_changelog should be tracked')
+            entry = gapi_gui._api_endpoint_stats.get('api_openapi_spec')
+        self.assertIsNotNone(entry, 'api_openapi_spec should be tracked')
         self.assertGreaterEqual(entry['calls'], 2)
 
     def test_stats_tracks_errors(self):
@@ -111,59 +113,60 @@ class TestApiStats(unittest.TestCase):
             self.assertGreaterEqual(entry['errors'], 0)
 
     def test_stats_entry_fields(self):
-        self.client.get('/api/changelog')
+        self.client.get('/api/openapi.json')
         with gapi_gui._api_stats_lock:
-            entry = gapi_gui._api_endpoint_stats.get('api_changelog')
+            entry = gapi_gui._api_endpoint_stats.get('api_openapi_spec')
         self.assertIsNotNone(entry)
         for field in ('calls', 'errors', 'total_ms', 'min_ms', 'max_ms'):
             self.assertIn(field, entry, f'missing field: {field}')
 
     def test_stats_avg_ms_in_admin_response(self):
-        self.client.get('/api/changelog')
+        self.client.get('/api/openapi.json')
         _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             resp = self.api.get('/api/admin/api-stats')
         data = resp.json()
-        # changelog endpoint should appear in stats
+        # openapi-spec endpoint should appear in stats
         stats_list = data['stats']
         endpoints = {e['endpoint']: e for e in stats_list}
-        self.assertIn('api_changelog', endpoints)
-        self.assertIn('avg_ms', endpoints['api_changelog'])
+        self.assertIn('api_openapi_spec', endpoints)
+        self.assertIn('avg_ms', endpoints['api_openapi_spec'])
 
     def test_stats_reset_requires_admin(self):
         resp = self.api.post('/api/admin/api-stats/reset')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_stats_reset_clears_data(self):
-        self.client.get('/api/changelog')
+        self.client.get('/api/openapi.json')
         # Confirm data exists
         with gapi_gui._api_stats_lock:
-            self.assertIn('api_changelog', gapi_gui._api_endpoint_stats)
+            self.assertIn('api_openapi_spec', gapi_gui._api_endpoint_stats)
         _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             resp = self.api.post('/api/admin/api-stats/reset')
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertTrue(data['reset'])
-        # The changelog entry (from before reset) must be gone; the reset
+        # The openapi-spec entry (from before reset) must be gone; the reset
         # endpoint itself may have been added after the clear.
         with gapi_gui._api_stats_lock:
-            self.assertNotIn('api_changelog', gapi_gui._api_endpoint_stats)
+            self.assertNotIn('api_openapi_spec', gapi_gui._api_endpoint_stats)
 
     def test_stats_sorted_by_call_count(self):
-        # Hit changelog 3x, auth/current 1x
+        # Hit openapi-spec 3x, docs 1x (both still-Flask).
         for _ in range(3):
-            self.client.get('/api/changelog')
-        self.client.get('/api/auth/current')
+            self.client.get('/api/openapi.json')
+        self.client.get('/api/docs')
         _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
             resp = self.api.get('/api/admin/api-stats')
         data = resp.json()
         stats_list = data['stats']
-        # changelog (3 calls) must appear before auth_current (1 call)
+        # openapi_spec (3 calls) must appear before swagger_ui (1 call)
         ep_names = [e['endpoint'] for e in stats_list]
-        if 'api_changelog' in ep_names and 'api_auth_current' in ep_names:
-            self.assertLess(ep_names.index('api_changelog'), ep_names.index('api_auth_current'))
+        if 'api_openapi_spec' in ep_names and 'api_swagger_ui' in ep_names:
+            self.assertLess(ep_names.index('api_openapi_spec'),
+                            ep_names.index('api_swagger_ui'))
         # Verify the list is sorted descending by calls
         calls_list = [e['calls'] for e in stats_list]
         self.assertEqual(calls_list, sorted(calls_list, reverse=True))
@@ -179,11 +182,11 @@ class TestClientErrors(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        # Flask client: POST /api/errors/report is still Flask. FastAPI client:
-        # the migrated admin view/clear endpoints (admin_ops). Both share the
-        # gapi_gui._client_errors ring buffer.
-        self.client = gapi_gui.app.test_client()
+        # POST /api/errors/report migrated to FastAPI, as are the admin
+        # view/clear endpoints (admin_ops). Both share the gapi_gui._client_errors
+        # ring buffer, so a single FastAPI client drives both.
         self.api = _FastTestClient(_fastapi_app)
+        self.client = self.api
         with gapi_gui._client_errors_lock:
             gapi_gui._client_errors.clear()
 
@@ -196,11 +199,7 @@ class TestClientErrors(unittest.TestCase):
             'col': 7,
         }
         payload.update(kwargs)
-        return self.client.post(
-            '/api/errors/report',
-            json=payload,
-            content_type='application/json',
-        )
+        return self.api.post('/api/errors/report', json=payload)
 
     def test_report_returns_201(self):
         resp = self._report()
@@ -208,7 +207,7 @@ class TestClientErrors(unittest.TestCase):
 
     def test_report_response_body(self):
         resp = self._report()
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['recorded'])
 
     def test_report_stored_in_buffer(self):
@@ -233,8 +232,8 @@ class TestClientErrors(unittest.TestCase):
     def test_report_accepts_empty_body(self):
         resp = self.client.post(
             '/api/errors/report',
-            data='{}',
-            content_type='application/json',
+            content='{}',
+            headers={'content-type': 'application/json'},
         )
         self.assertEqual(resp.status_code, 201)
 
@@ -313,7 +312,11 @@ class TestApiChangelog(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # /api/changelog migrated to FastAPI; drive it with the FastAPI client.
+        self.client = _FastTestClient(_fastapi_app)
+        # A still-Flask client for the security-header check (those headers are
+        # added by the legacy after_request, which doesn't run for FastAPI).
+        self.flask_client = gapi_gui.app.test_client()
 
     def test_changelog_is_public(self):
         resp = self.client.get('/api/changelog')
@@ -321,13 +324,13 @@ class TestApiChangelog(unittest.TestCase):
 
     def test_changelog_response_shape(self):
         resp = self.client.get('/api/changelog')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('changelog', data)
         self.assertIn('total_versions', data)
 
     def test_changelog_entries_have_required_fields(self):
         resp = self.client.get('/api/changelog')
-        data = json.loads(resp.data)
+        data = resp.json()
         for entry in data['changelog']:
             self.assertIn('version', entry)
             self.assertIn('date', entry)
@@ -337,41 +340,42 @@ class TestApiChangelog(unittest.TestCase):
 
     def test_changelog_limit_param(self):
         resp = self.client.get('/api/changelog?limit=1')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(len(data['changelog']), 1)
 
     def test_changelog_limit_defaults_to_all(self):
         resp_all = self.client.get('/api/changelog')
         resp_lim = self.client.get(f'/api/changelog?limit={len(gapi_gui._API_CHANGELOG)}')
-        data_all = json.loads(resp_all.data)
-        data_lim = json.loads(resp_lim.data)
+        data_all = resp_all.json()
+        data_lim = resp_lim.json()
         self.assertEqual(data_all['changelog'], data_lim['changelog'])
 
     def test_changelog_total_versions_matches_data(self):
         resp = self.client.get('/api/changelog')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['total_versions'], len(gapi_gui._API_CHANGELOG))
 
     def test_changelog_invalid_limit_returns_all(self):
         resp = self.client.get('/api/changelog?limit=abc')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(len(data['changelog']), data['total_versions'])
 
     def test_changelog_most_recent_version_listed_first(self):
         resp = self.client.get('/api/changelog')
-        data = json.loads(resp.data)
+        data = resp.json()
         versions = [e['version'] for e in data['changelog']]
         # First entry must be the highest version in the changelog constant
         self.assertEqual(versions[0], gapi_gui._API_CHANGELOG[0]['version'])
 
     def test_changelog_data_type_is_list(self):
         resp = self.client.get('/api/changelog')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIsInstance(data['changelog'], list)
 
     def test_changelog_security_headers_present(self):
-        """Changelog response should still carry security headers."""
-        resp = self.client.get('/api/changelog')
+        """The legacy after_request still carries security headers on Flask
+        routes (changelog itself is now FastAPI; use a still-Flask endpoint)."""
+        resp = self.flask_client.get('/api/openapi.json')
         self.assertEqual(resp.headers.get('X-Content-Type-Options'), 'nosniff')
 
 
