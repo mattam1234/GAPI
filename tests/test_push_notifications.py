@@ -26,11 +26,19 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import database
 import gapi_gui
 from app.services.push_notification_service import PushNotificationService
+from backend.main import app as _fastapi_app
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+
+def _fast_login(client, username='alice'):
+    ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    client.cookies.set('session', ser.dumps({'username': username}))
 
 
 # ---------------------------------------------------------------------------
@@ -387,11 +395,11 @@ class TestGetAllPushSubscriptions(unittest.TestCase):
 # ===========================================================================
 
 class TestPushVapidPublicKey(unittest.TestCase):
+    # /api/push/* migrated to FastAPI (backend/routers/extensibility.py); these
+    # now drive the FastAPI TestClient against the same Flask session cookie.
 
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_returns_200(self):
         resp = self.client.get('/api/push/vapid-public-key')
@@ -399,7 +407,7 @@ class TestPushVapidPublicKey(unittest.TestCase):
 
     def test_response_has_public_key_and_configured(self):
         resp = self.client.get('/api/push/vapid-public-key')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('public_key', data)
         self.assertIn('configured', data)
 
@@ -409,7 +417,7 @@ class TestPushVapidPublicKey(unittest.TestCase):
         mock_svc.get_public_key.return_value = ''
         with patch.object(gapi_gui, '_push_service', mock_svc):
             resp = self.client.get('/api/push/vapid-public-key')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertFalse(data['configured'])
         self.assertEqual(data['public_key'], '')
 
@@ -419,7 +427,7 @@ class TestPushVapidPublicKey(unittest.TestCase):
         mock_svc.get_public_key.return_value = 'BFake_Public_Key'
         with patch.object(gapi_gui, '_push_service', mock_svc):
             resp = self.client.get('/api/push/vapid-public-key')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['configured'])
         self.assertEqual(data['public_key'], 'BFake_Public_Key')
 
@@ -427,22 +435,20 @@ class TestPushVapidPublicKey(unittest.TestCase):
 class TestPushSubscribeEndpoint(unittest.TestCase):
 
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
         resp = self.client.post('/api/push/subscribe', json=_SAMPLE_SUB)
         self.assertIn(resp.status_code, (401, 403))
 
     def test_503_when_db_unavailable(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         with patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.post('/api/push/subscribe', json=_SAMPLE_SUB)
         self.assertEqual(resp.status_code, 503)
 
     def test_400_when_missing_endpoint(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         bad = {'keys': {'p256dh': 'x', 'auth': 'y'}}
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([MagicMock()])):
@@ -450,7 +456,7 @@ class TestPushSubscribeEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_400_when_missing_keys(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         bad = {'endpoint': 'https://push.example.com/x'}
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([MagicMock()])):
@@ -458,18 +464,18 @@ class TestPushSubscribeEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_201_on_success(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         mock_db = MagicMock()
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([mock_db])), \
              patch('database.add_push_subscription', return_value=True):
             resp = self.client.post('/api/push/subscribe', json=_SAMPLE_SUB)
         self.assertEqual(resp.status_code, 201)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['subscribed'])
 
     def test_500_when_db_add_fails(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         mock_db = MagicMock()
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([mock_db])), \
@@ -481,58 +487,54 @@ class TestPushSubscribeEndpoint(unittest.TestCase):
 class TestPushUnsubscribeEndpoint(unittest.TestCase):
 
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
-        resp = self.client.delete('/api/push/unsubscribe',
-                                  json={'endpoint': 'https://x.com/y'})
+        resp = self.client.request('DELETE', '/api/push/unsubscribe',
+                                   json={'endpoint': 'https://x.com/y'})
         self.assertIn(resp.status_code, (401, 403))
 
     def test_400_when_endpoint_missing(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([MagicMock()])):
-            resp = self.client.delete('/api/push/unsubscribe', json={})
+            resp = self.client.request('DELETE', '/api/push/unsubscribe', json={})
         self.assertEqual(resp.status_code, 400)
 
     def test_200_when_removed(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         mock_db = MagicMock()
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([mock_db])), \
              patch('database.remove_push_subscription', return_value=True):
-            resp = self.client.delete('/api/push/unsubscribe',
-                                      json={'endpoint': 'https://push.example.com/del'})
+            resp = self.client.request('DELETE', '/api/push/unsubscribe',
+                                       json={'endpoint': 'https://push.example.com/del'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['unsubscribed'])
 
     def test_404_when_not_found(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         mock_db = MagicMock()
         with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([mock_db])), \
              patch('database.remove_push_subscription', return_value=False):
-            resp = self.client.delete('/api/push/unsubscribe',
-                                      json={'endpoint': 'https://push.example.com/gone'})
+            resp = self.client.request('DELETE', '/api/push/unsubscribe',
+                                       json={'endpoint': 'https://push.example.com/gone'})
         self.assertEqual(resp.status_code, 404)
 
 
 class TestPushSubscriptionsListEndpoint(unittest.TestCase):
 
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_login(self):
         resp = self.client.get('/api/push/subscriptions')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_200_returns_list(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         fake_subs = [
             {'id': 1, 'endpoint': 'https://push.example.com/1',
              'p256dh': 'pk1', 'auth': 'a1', 'user_agent': 'Chrome', 'created_at': '2026-01-01T00:00:00'},
@@ -543,14 +545,14 @@ class TestPushSubscriptionsListEndpoint(unittest.TestCase):
              patch('database.get_user_push_subscriptions', return_value=fake_subs):
             resp = self.client.get('/api/push/subscriptions')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('subscriptions', data)
         self.assertIn('count', data)
         self.assertEqual(data['count'], 1)
 
     def test_keys_do_not_include_p256dh_or_auth(self):
         """Sensitive key material must not be returned to the caller."""
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         fake_subs = [
             {'id': 1, 'endpoint': 'https://push.example.com/s',
              'p256dh': 'secret_key', 'auth': 'secret_auth',
@@ -561,17 +563,17 @@ class TestPushSubscriptionsListEndpoint(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])), \
              patch('database.get_user_push_subscriptions', return_value=fake_subs):
             resp = self.client.get('/api/push/subscriptions')
-        data = json.loads(resp.data)
+        data = resp.json()
         entry = data['subscriptions'][0]
         self.assertNotIn('p256dh', entry)
         self.assertNotIn('auth', entry)
 
     def test_graceful_when_db_unavailable(self):
-        _set_user_session(self.client, 'alice')
+        _fast_login(self.client, 'alice')
         with patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.get('/api/push/subscriptions')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['subscriptions'], [])
 
 
