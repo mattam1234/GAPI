@@ -15,10 +15,16 @@ Covers all routes across six prefixes:
   anticheat:
     GET /api/anticheat
 
-The ``/api/shop`` and ``/api/anticheat`` handlers reference a never-defined
+The ``/api/shop``, ``/api/events/*`` and ``/api/cosmetics/apply-theme`` routes
+are REAL persistent features: they are exercised against an in-memory SQLite
+database (StaticPool so every connection shares one schema/data set), with
+``database.SessionLocal`` patched to a session factory bound to that engine. No
+mock-success fallbacks remain for these three domains.
+
+The ``/api/anticheat`` handler still references a never-defined
 ``gapi_gui.db_service``; the resulting ``AttributeError`` is caught and a
 success-faking mock response is returned. That latent behaviour is preserved
-and exercised (the "mock fallback" tests). The persist path is exercised by
+and exercised (the "mock fallback" tests). Its persist path is exercised by
 patching ``gapi_gui.db_service`` to a MagicMock — no real database is touched.
 Twitch routes mock ``gapi_gui._get_twitch_client`` / ``gapi_gui.picker`` — no
 network I/O.
@@ -36,9 +42,14 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 import gapi_gui
+import database
 from backend.main import app
+import backend.models.storefront as storefront_models  # noqa: F401
 
 
 def _session_cookie(username):
@@ -50,6 +61,48 @@ class _AuthedCase(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
         self.client.cookies.set('session', _session_cookie('alice'))
+
+
+# Storefront tables built into the in-memory test DB.
+_STOREFRONT_TABLES = [
+    storefront_models.StorefrontShopItem.__table__,
+    storefront_models.StorefrontPurchase.__table__,
+    storefront_models.StorefrontSeasonalEvent.__table__,
+    storefront_models.StorefrontEventClaim.__table__,
+    storefront_models.StorefrontUserCosmetics.__table__,
+]
+
+
+def _make_storefront_session():
+    """In-memory SQLite engine + session factory with the storefront tables."""
+    engine = create_engine(
+        'sqlite://',
+        connect_args={'check_same_thread': False},
+        poolclass=StaticPool,
+    )
+    database.Base.metadata.create_all(bind=engine, tables=_STOREFRONT_TABLES)
+    Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    return engine, Session
+
+
+class _StorefrontCase(unittest.TestCase):
+    """Authed case with a fresh in-memory DB patched over SessionLocal."""
+
+    def setUp(self):
+        self.engine, self.Session = _make_storefront_session()
+        self._patch = patch.object(database, 'SessionLocal', self.Session)
+        self._patch.start()
+        self.client = TestClient(app)
+        self.client.cookies.set('session', _session_cookie('alice'))
+
+    def tearDown(self):
+        self._patch.stop()
+        self.engine.dispose()
+
+    def _client_for(self, username):
+        c = TestClient(app)
+        c.cookies.set('session', _session_cookie(username))
+        return c
 
 
 # ── i18n (UNAUTHENTICATED) ───────────────────────────────────────────────────
@@ -128,94 +181,114 @@ class AuthGatingTest(unittest.TestCase):
 
 # ── shop ─────────────────────────────────────────────────────────────────────
 
-class ShopListTest(_AuthedCase):
-    def test_success_persisted(self):
-        db = MagicMock()
-        # items query then owned query
-        db.execute.return_value.fetchall.side_effect = [
-            [(1, 'Cool Theme', '🎨', 500, 'xp', False)],  # shop_items
-            [(1,)],                                          # owned ids
-        ]
-        svc = MagicMock()
-        svc.get_db.return_value = db
-        svc.get_current_user.return_value = MagicMock(id=7)
-        with patch.object(gapi_gui, 'db_service', svc, create=True):
-            resp = self.client.get('/api/shop')
-        self.assertEqual(resp.status_code, 200)
-        item = resp.json()['items'][0]
-        self.assertEqual(item['id'], '1')
-        self.assertEqual(item['name'], 'Cool Theme')
-        self.assertTrue(item['owned'])
-        self.assertEqual(resp.headers['cache-control'], 'no-store')
-
-    def test_mock_fallback_when_db_service_undefined(self):
+class ShopListTest(_StorefrontCase):
+    def test_lists_seeded_items_not_owned(self):
         resp = self.client.get('/api/shop')
         self.assertEqual(resp.status_code, 200)
         items = resp.json()['items']
-        self.assertEqual(items[0]['name'], 'Dark Neon Theme')
+        # Two default items are seeded on first use.
         self.assertEqual(len(items), 2)
+        names = {it['name'] for it in items}
+        self.assertIn('Dark Neon Theme', names)
+        self.assertIn('Legendary Title', names)
+        self.assertTrue(all(it['owned'] is False for it in items))
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
+    def test_owned_flag_after_purchase(self):
+        item_id = self.client.get('/api/shop').json()['items'][0]['id']
+        self.client.post('/api/shop/purchase', json={'item_id': item_id})
+        items = self.client.get('/api/shop').json()['items']
+        owned = next(it for it in items if it['id'] == item_id)
+        self.assertTrue(owned['owned'])
 
-class ShopPurchaseTest(_AuthedCase):
+    def test_ownership_is_per_user(self):
+        item_id = self.client.get('/api/shop').json()['items'][0]['id']
+        self.client.post('/api/shop/purchase', json={'item_id': item_id})
+        bob = self._client_for('bob')
+        items = bob.get('/api/shop').json()['items']
+        self.assertTrue(all(it['owned'] is False for it in items))
+
+
+class ShopPurchaseTest(_StorefrontCase):
+    def _first_item_id(self):
+        return self.client.get('/api/shop').json()['items'][0]['id']
+
     def test_missing_item_id_400(self):
         resp = self.client.post('/api/shop/purchase', json={})
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['error'], 'Item ID required')
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
-    def test_already_owned_400(self):
-        db = MagicMock()
-        db.execute.return_value.fetchone.return_value = (1,)  # already owned
-        svc = MagicMock()
-        svc.get_db.return_value = db
-        svc.get_current_user.return_value = MagicMock(id=7)
-        with patch.object(gapi_gui, 'db_service', svc, create=True):
-            resp = self.client.post('/api/shop/purchase', json={'item_id': '3'})
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()['error'], 'Already owned')
+    def test_unknown_item_404(self):
+        resp = self.client.post('/api/shop/purchase', json={'item_id': '999999'})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Item not found')
 
-    def test_success_persisted(self):
-        db = MagicMock()
-        db.execute.return_value.fetchone.return_value = None  # not owned
-        svc = MagicMock()
-        svc.get_db.return_value = db
-        svc.get_current_user.return_value = MagicMock(id=7)
-        with patch.object(gapi_gui, 'db_service', svc, create=True), \
-                patch.object(gapi_gui, 'REALTIME_AVAILABLE', False):
-            resp = self.client.post('/api/shop/purchase', json={'item_id': '3'})
+    def test_purchase_success_persists(self):
+        item_id = self._first_item_id()
+        with patch.object(gapi_gui, 'REALTIME_AVAILABLE', False):
+            resp = self.client.post('/api/shop/purchase', json={'item_id': item_id})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(
             resp.json(),
             {'success': True, 'message': 'Purchase successful', 'new_balance': 1000})
+        # Persisted: re-listing shows it owned.
+        items = self.client.get('/api/shop').json()['items']
+        self.assertTrue(next(it for it in items if it['id'] == item_id)['owned'])
 
-    def test_mock_fallback_when_db_service_undefined(self):
-        resp = self.client.post('/api/shop/purchase', json={'item_id': '3'})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            resp.json(),
-            {'success': True, 'message': 'Purchase successful (mock)', 'new_balance': 1000})
+    def test_already_owned_409(self):
+        item_id = self._first_item_id()
+        with patch.object(gapi_gui, 'REALTIME_AVAILABLE', False):
+            self.client.post('/api/shop/purchase', json={'item_id': item_id})
+            resp = self.client.post('/api/shop/purchase', json={'item_id': item_id})
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()['error'], 'Already owned')
 
 
 # ── events ───────────────────────────────────────────────────────────────────
 
-class EventsTest(_AuthedCase):
-    def test_seasonal(self):
+class EventsTest(_StorefrontCase):
+    def test_seasonal_lists_seeded_events(self):
         resp = self.client.get('/api/events/seasonal')
         self.assertEqual(resp.status_code, 200)
         events = resp.json()['active_events']
         self.assertEqual(len(events), 2)
-        self.assertEqual(events[0]['name'], 'Spring Festival 2026')
+        names = {e['name'] for e in events}
+        self.assertIn('Spring Festival 2026', names)
+        self.assertTrue(all(e['reward_claimed'] is False for e in events))
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
-    def test_claim(self):
-        resp = self.client.post('/api/events/2/claim')
+    def test_claim_success_persists(self):
+        eid = self.client.get('/api/events/seasonal').json()['active_events'][0]['id']
+        resp = self.client.post(f'/api/events/{eid}/claim')
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            resp.json(),
-            {'success': True, 'message': 'Event reward claimed!',
-             'reward': '🎂 Anniversary Badge'})
+        body = resp.json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['message'], 'Event reward claimed!')
+        self.assertIn('reward', body)
         self.assertEqual(resp.headers['cache-control'], 'no-store')
+        # Persisted: re-listing flags it claimed.
+        events = self.client.get('/api/events/seasonal').json()['active_events']
+        self.assertTrue(next(e for e in events if e['id'] == eid)['reward_claimed'])
+
+    def test_claim_unknown_event_404(self):
+        resp = self.client.post('/api/events/999999/claim')
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Event not found')
+
+    def test_claim_twice_409(self):
+        eid = self.client.get('/api/events/seasonal').json()['active_events'][0]['id']
+        self.assertEqual(self.client.post(f'/api/events/{eid}/claim').status_code, 200)
+        resp = self.client.post(f'/api/events/{eid}/claim')
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()['error'], 'Reward already claimed')
+
+    def test_claim_is_per_user(self):
+        eid = self.client.get('/api/events/seasonal').json()['active_events'][0]['id']
+        self.client.post(f'/api/events/{eid}/claim')
+        bob = self._client_for('bob')
+        # bob can still claim the same event.
+        self.assertEqual(bob.post(f'/api/events/{eid}/claim').status_code, 200)
 
 
 # ── twitch ───────────────────────────────────────────────────────────────────
@@ -315,20 +388,40 @@ class TwitchOverlapTest(_AuthedCase):
 
 # ── cosmetics ────────────────────────────────────────────────────────────────
 
-class CosmeticsTest(_AuthedCase):
+class CosmeticsTest(_StorefrontCase):
     def test_missing_theme_id_400(self):
         resp = self.client.post('/api/cosmetics/apply-theme', json={})
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['error'], 'Theme ID required')
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
-    def test_apply_success(self):
+    def test_invalid_theme_400(self):
+        resp = self.client.post('/api/cosmetics/apply-theme',
+                                json={'theme_id': 'nonsense'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'Invalid theme')
+        self.assertEqual(resp.headers['cache-control'], 'no-store')
+
+    def test_apply_success_persists_and_upserts(self):
         resp = self.client.post('/api/cosmetics/apply-theme',
                                 json={'theme_id': 'neon'})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(
             resp.json(), {'success': True, 'message': 'Theme applied'})
         self.assertEqual(resp.headers['cache-control'], 'no-store')
+
+        # Upsert: applying a second theme updates the same user's row.
+        from app.services import storefront_service
+        self.client.post('/api/cosmetics/apply-theme', json={'theme_id': 'dark'})
+        db = self.Session()
+        try:
+            self.assertEqual(
+                storefront_service.get_theme(db, 'alice'), {'theme_id': 'dark'})
+            rows = db.query(storefront_models.StorefrontUserCosmetics).filter(
+                storefront_models.StorefrontUserCosmetics.username == 'alice').count()
+            self.assertEqual(rows, 1)  # upsert, not insert
+        finally:
+            db.close()
 
 
 # ── anticheat ────────────────────────────────────────────────────────────────
