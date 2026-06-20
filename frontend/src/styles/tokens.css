@@ -1,0 +1,61 @@
+/* GAPI design tokens — a single source of truth for color, type, space, motion.
+   Themed via [data-theme] on <html>. Charts read these via CSS variables too. */
+:root {
+  /* Typography */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --fs-display: clamp(1.6rem, 1.2rem + 1.4vw, 2.25rem);
+  --fs-h2: 1.25rem;
+  --fs-body: 0.9375rem;
+  --fs-small: 0.8125rem;
+  --fs-micro: 0.6875rem;
+
+  /* Spacing scale (4px base) */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+
+  /* Radius & elevation */
+  --radius-sm: 8px; --radius: 12px; --radius-lg: 18px; --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.16), 0 1px 1px rgba(0,0,0,.10);
+  --shadow-2: 0 8px 24px rgba(0,0,0,.22);
+
+  /* Brand accent ramp (indigo→violet) — theme-independent */
+  --accent: #6d5efc;
+  --accent-strong: #8b7dff;
+  --accent-weak: rgba(109,94,252,.14);
+
+  /* Categorical chart palette (colorblind-aware) */
+  --c1: #6d5efc; --c2: #2dd4bf; --c3: #f59e0b;
+  --c4: #fb7185; --c5: #38bdf8; --c6: #a78bfa;
+
+  --ok: #22c55e; --warn: #f59e0b; --danger: #ef4444;
+  --motion-fast: 120ms ease; --motion: 200ms cubic-bezier(.2,.7,.3,1);
+}
+
+/* Dark (default) */
+[data-theme="dark"] {
+  --bg: #0c0d12;
+  --bg-elev: #14161f;
+  --surface: #181b26;
+  --surface-2: #1f2330;
+  --border: #2a2f3e;
+  --text: #e8eaf2;
+  --text-muted: #9aa1b4;
+  --text-faint: #6b7080;
+  --grid: rgba(255,255,255,.06);
+}
+
+/* Light */
+[data-theme="light"] {
+  --bg: #f6f7fb;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f1f3f9;
+  --border: #e3e7f0;
+  --text: #1a1d27;
+  --text-muted: #5a6175;
+  --text-faint: #8a90a2;
+  --grid: rgba(0,0,0,.06);
+  --shadow-1: 0 1px 2px rgba(20,24,40,.08), 0 1px 1px rgba(20,24,40,.04);
+  --shadow-2: 0 12px 30px rgba(20,24,40,.12);
+}
