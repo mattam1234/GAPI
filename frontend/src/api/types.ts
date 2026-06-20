@@ -35,3 +35,60 @@ export interface AnalyticsDashboard {
   engagement: EngagementMetrics
   review_stats: ReviewStats
 }
+
+// ── Auth / profile ──────────────────────────────────────────────────────────
+export interface CurrentUser {
+  username: string | null
+  role?: string | null
+  roles?: string[]
+}
+
+export interface UserProfile {
+  username: string
+  email?: string | null
+  role?: string | null
+  roles?: string[]
+  created_at?: string | null
+  bio?: string | null
+  pick_count?: number | null
+  review_count?: number | null
+  reputation?: number | null
+  [key: string]: unknown
+}
+
+// ── Admin ───────────────────────────────────────────────────────────────────
+export interface AdminUser {
+  username: string
+  role?: string | null
+  roles?: string[]
+  status?: string | null
+  email?: string | null
+  created_at?: string | null
+}
+
+export interface AdminUserSearchResponse {
+  users: AdminUser[]
+  count: number
+}
+
+export interface ApiEndpointStat {
+  endpoint: string
+  calls: number
+  errors: number
+  avg_ms: number
+  [key: string]: unknown
+}
+
+export interface ApiStatsResponse {
+  stats: ApiEndpointStat[]
+  endpoint_count: number
+}
+
+export interface AuditLogEntry {
+  timestamp?: string | null
+  actor?: string | null
+  action?: string | null
+  target?: string | null
+  detail?: string | null
+  [key: string]: unknown
+}
