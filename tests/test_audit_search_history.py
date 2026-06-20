@@ -133,18 +133,18 @@ class TestSearchHistoryHelpers(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Flask search history endpoints
+# Search history endpoints
 # ---------------------------------------------------------------------------
 
 class TestSearchHistoryEndpoints(unittest.TestCase):
+    # /api/search/* migrated to FastAPI (backend/routers/search.py); these now
+    # drive the FastAPI TestClient against the same Flask session cookie.
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        self.client = _FastTestClient(_fastapi_app)
 
     def _login(self):
-        with self.client.session_transaction() as sess:
-            sess['username'] = 'alice'
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'alice'}))
 
     def test_get_history_requires_login(self):
         resp = self.client.get('/api/search/history')
@@ -155,7 +155,7 @@ class TestSearchHistoryEndpoints(unittest.TestCase):
         with patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.get('/api/search/history')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['history'], [])
         self.assertEqual(data['count'], 0)
 
@@ -171,7 +171,7 @@ class TestSearchHistoryEndpoints(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.get('/api/search/history')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['count'], 1)
         self.assertEqual(data['history'][0]['query'], 'portal')
 
@@ -197,7 +197,7 @@ class TestSearchHistoryEndpoints(unittest.TestCase):
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.delete('/api/search/history')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['ok'])
 
 
