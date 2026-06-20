@@ -295,17 +295,31 @@ class TestNintendoEShopClient(unittest.TestCase):
 
 
 # ===========================================================================
-# Flask routes — PSN
+# Routes — PSN (migrated to FastAPI: backend/routers/platforms.py psn_router)
 # ===========================================================================
+
+def _fastapi_client():
+    """A FastAPI TestClient authenticated as ``testuser`` via signed cookie.
+
+    The /api/psn|nintendo/* routes are migrated to FastAPI; auth is the
+    Flask-signed session cookie that backend.dependencies decodes — not the
+    legacy ``@patch('gapi_gui.current_user')`` seam.
+    """
+    import gapi_gui
+    from fastapi.testclient import TestClient
+    from backend.main import app as fastapi_app
+    gapi_gui.app.config['TESTING'] = True
+    client = TestClient(fastapi_app)
+    ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    client.cookies.set('session', ser.dumps({'username': 'testuser'}))
+    return client
+
 
 class TestPSNRoutes(unittest.TestCase):
 
     def setUp(self):
-        import gapi_gui
-        gapi_gui.app.config['TESTING'] = True
-        self.app_client = gapi_gui.app.test_client()
+        self.app_client = _fastapi_client()
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_library_503_not_configured(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -314,7 +328,6 @@ class TestPSNRoutes(unittest.TestCase):
             resp = self.app_client.get('/api/psn/library')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_library_503_not_authenticated(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -324,7 +337,6 @@ class TestPSNRoutes(unittest.TestCase):
             resp = self.app_client.get('/api/psn/library')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_library_200_when_authenticated(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -338,11 +350,10 @@ class TestPSNRoutes(unittest.TestCase):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.app_client.get('/api/psn/library')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['platform'], 'psn')
         self.assertEqual(data['count'], 1)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_connect_400_missing_npsso(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -350,14 +361,9 @@ class TestPSNRoutes(unittest.TestCase):
         fake_picker.clients = {'psn': psn_client}
         fake_picker.API_TIMEOUT = 10
         with patch.object(gapi_gui, 'picker', fake_picker):
-            resp = self.app_client.post(
-                '/api/psn/connect',
-                json={},
-                content_type='application/json',
-            )
+            resp = self.app_client.post('/api/psn/connect', json={})
         self.assertEqual(resp.status_code, 400)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_connect_400_bad_npsso(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -372,7 +378,6 @@ class TestPSNRoutes(unittest.TestCase):
                 )
         self.assertEqual(resp.status_code, 400)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_connect_200_good_npsso(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -386,11 +391,10 @@ class TestPSNRoutes(unittest.TestCase):
                     json={'npsso': 'validtoken123'},
                 )
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['success'])
         self.assertEqual(data['platform'], 'psn')
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_trophies_503_not_authenticated(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -400,7 +404,6 @@ class TestPSNRoutes(unittest.TestCase):
             resp = self.app_client.get('/api/psn/trophies')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_trophies_200_when_authenticated(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -414,23 +417,20 @@ class TestPSNRoutes(unittest.TestCase):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.app_client.get('/api/psn/trophies')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['count'], 1)
         self.assertEqual(data['platform'], 'psn')
 
 
 # ===========================================================================
-# Flask routes — Nintendo
+# Routes — Nintendo (migrated to FastAPI: platforms.py nintendo_router)
 # ===========================================================================
 
 class TestNintendoRoutes(unittest.TestCase):
 
     def setUp(self):
-        import gapi_gui
-        gapi_gui.app.config['TESTING'] = True
-        self.app_client = gapi_gui.app.test_client()
+        self.app_client = _fastapi_client()
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_nintendo_search_200_autocreates_client(self):
         """Route uses NintendoEShopClient when none is pre-configured in picker."""
         import gapi_gui
@@ -445,14 +445,12 @@ class TestNintendoRoutes(unittest.TestCase):
                 resp = self.app_client.get('/api/nintendo/search?q=mario')
         self.assertEqual(resp.status_code, 200)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_nintendo_search_503_no_picker(self):
         import gapi_gui
         with patch.object(gapi_gui, 'picker', None):
             resp = self.app_client.get('/api/nintendo/search?q=mario')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_nintendo_search_with_configured_client(self):
         import gapi_gui
         nintendo_client = NintendoEShopClient()
@@ -466,11 +464,10 @@ class TestNintendoRoutes(unittest.TestCase):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.app_client.get('/api/nintendo/search?q=mario&per_page=5')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['platform'], 'nintendo')
         self.assertEqual(data['nbHits'], 1)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_nintendo_prices_400_missing_nsuids(self):
         import gapi_gui
         nintendo_client = NintendoEShopClient()
@@ -480,7 +477,6 @@ class TestNintendoRoutes(unittest.TestCase):
             resp = self.app_client.get('/api/nintendo/prices')
         self.assertEqual(resp.status_code, 400)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_nintendo_prices_200(self):
         import gapi_gui
         nintendo_client = NintendoEShopClient()
@@ -491,10 +487,9 @@ class TestNintendoRoutes(unittest.TestCase):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.app_client.get('/api/nintendo/prices?nsuids=70010000000025')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('70010000000025', data['prices'])
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_nintendo_game_404_not_cached(self):
         import gapi_gui
         nintendo_client = NintendoEShopClient()
