@@ -60,7 +60,7 @@ All tests passed successfully:
 1. [database.py](database.py) - Added password field and auth functions
 2. [gapi_gui.py](gapi_gui.py) - Refactored UserManager to use database
 3. [migrate_database.py](../scripts/migrate_database.py) - New migration script (created)
-4. [migrate_add_password.sql](migrate_add_password.sql) - SQL migration (created)
+4. [migrate_add_password.sql](../scripts/sql/migrate_add_password.sql) - SQL migration (created)
 
 ## Backward Compatibility
 

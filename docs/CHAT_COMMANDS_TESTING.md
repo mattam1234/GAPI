@@ -19,7 +19,7 @@
 - Regular chat messages are visible to all room members
 
 ### 4. Database Migration
-- Created `migrate_add_command_only.sql` for SQL Server
+- Created `scripts/sql/migrate_add_command_only.sql` for SQL Server
 - SQLAlchemy will auto-create the column on startup with default value
 
 ## Testing Instructions
@@ -96,4 +96,4 @@ Then restart the application.
 - `database.py`: Added `command_only` column to ChatMessage model
 - `gapi_gui.py`: Updated command handlers and responses
 - `app/services/chat_service.py`: Added `command_only` parameter support
-- `migrate_add_command_only.sql`: Migration file for existing databases
+- `scripts/sql/migrate_add_command_only.sql`: Migration file for existing databases
