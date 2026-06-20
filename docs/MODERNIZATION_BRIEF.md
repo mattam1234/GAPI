@@ -496,6 +496,11 @@ The hybrid SPA scaffold landed (`frontend/`, React 18 + Vite + TS) — see
 [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) and `frontend/README.md`. Dashboard +
 Analytics consume `GET /api/analytics/dashboard` with Recharts + TanStack Table;
 Admin/Profile are wired/stubbed. The session cookie is shared (same-origin), so no
-separate login. Next: serve `dist/` under `/app`, deepen Admin once that domain
-migrates.
+separate login.
+
+**Serving (Phase 4 wiring, done):** `backend/main.py` mounts the built
+`frontend/dist` under `/app` (a `StaticFiles` subclass with index.html fallback
+for client-side deep links), registered *before* the Flask catch-all so it wins.
+The mount is conditional on the build existing, so CI/tests are unaffected. Build
+with `cd frontend && npm run build`, then the console is live at `/app`.
 </content>
