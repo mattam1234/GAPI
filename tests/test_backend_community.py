@@ -8,13 +8,14 @@ Covers all routes across four prefixes:
   system:  GET /api/system/cache/stats, POST /api/system/cache/clear,
            GET /api/system/indexes
 
-Guilds and teams are now REAL, persistent features backed by the
-``backend.models.community`` ORM models and the ``app.services.community_service``
-business layer. The guild/team tests below run against a fresh in-memory SQLite
-database (created per test via :class:`_CommunityDbCase`, which patches
-``database.SessionLocal`` to a session bound to that engine), so create/join
-behaviour is exercised end-to-end without touching the real database. Market and
-system remain stubs / mock-backed and are tested unchanged.
+Guilds, teams, and market are now REAL, persistent features backed by ORM
+models (``backend.models.community`` / ``backend.models.market``) and their
+business layers (``app.services.community_service`` /
+``app.services.market_service``). Those tests run against a fresh in-memory
+SQLite database (created per test via :class:`_CommunityDbCase`, which patches
+``database.SessionLocal`` to a session bound to that engine), so create/join/
+sell/offer behaviour is exercised end-to-end without touching the real
+database. System remains mock-backed and is tested unchanged.
 
 Run with:
     python -m pytest tests/test_backend_community.py
@@ -34,8 +35,9 @@ from sqlalchemy.pool import StaticPool
 import database
 import gapi_gui
 from backend.main import app
-# Ensure the community models are registered on the shared Base metadata.
+# Ensure the community + market models are registered on the shared Base metadata.
 from backend.models import community as community_models  # noqa: F401
+from backend.models import market as market_models  # noqa: F401
 
 
 def _session_cookie(username):
@@ -302,45 +304,138 @@ class JoinTeamTest(_CommunityDbCase):
 
 # ── market ──────────────────────────────────────────────────────────────────
 
-class MarketTest(_AuthedCase):
-    def test_list(self):
+class MarketListTest(_CommunityDbCase):
+    def test_list_empty(self):
         resp = self.client.get('/api/market')
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.json()['listings']), 2)
+        self.assertEqual(resp.json()['listings'], [])
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
-    def test_list_with_category(self):
-        resp = self.client.get('/api/market', params={'category': 'themes'})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['listings'][0]['seller'], 'SkylarMint')
+    def test_sell_then_appears_in_list(self):
+        sell = self.client.post(
+            '/api/market/sell', json={'item': 'Sword', 'price': 100})
+        self.assertEqual(sell.status_code, 201)
+        body = sell.json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['message'], 'Item listed for 100 coins!')
+        self.assertIsInstance(body['listing_id'], int)
+        self.assertEqual(body['listing']['seller'], 'alice')
+        self.assertEqual(body['listing']['status'], 'active')
 
-    def test_sell(self):
-        resp = self.client.post('/api/market/sell',
-                                json={'item': 'X', 'price': 999})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            resp.json(),
-            {'success': True, 'message': 'Item listed for 999 points!',
-             'listing_id': 123})
+        listings = self.client.get('/api/market').json()['listings']
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(listings[0]['item'], 'Sword')
+        self.assertEqual(listings[0]['price'], 100)
+        self.assertEqual(listings[0]['seller'], 'alice')
 
-    def test_sell_empty_body(self):
+    def test_category_filter(self):
+        self.client.post(
+            '/api/market/sell',
+            json={'item': 'Theme', 'price': 50, 'category': 'themes'})
+        self.client.post(
+            '/api/market/sell',
+            json={'item': 'Title', 'price': 75, 'category': 'titles'})
+
+        themes = self.client.get(
+            '/api/market', params={'category': 'themes'}).json()['listings']
+        self.assertEqual(len(themes), 1)
+        self.assertEqual(themes[0]['item'], 'Theme')
+
+        # Default sentinel 'all' returns everything.
+        all_listings = self.client.get('/api/market').json()['listings']
+        self.assertEqual(len(all_listings), 2)
+
+    def test_category_filter_no_match(self):
+        self.client.post(
+            '/api/market/sell',
+            json={'item': 'Theme', 'price': 50, 'category': 'themes'})
+        nomatch = self.client.get(
+            '/api/market', params={'category': 'frames'}).json()['listings']
+        self.assertEqual(nomatch, [])
+
+
+class MarketSellTest(_CommunityDbCase):
+    def test_missing_item_400(self):
+        resp = self.client.post('/api/market/sell', json={'price': 100})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'Item is required')
+        self.assertEqual(resp.headers['cache-control'], 'no-store')
+
+    def test_empty_body_400(self):
         resp = self.client.post('/api/market/sell', json={})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['message'], 'Item listed for 0 points!')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'Item is required')
 
-    def test_offer(self):
-        resp = self.client.post('/api/market/55/offer',
-                                json={'offer_price': 1500})
-        self.assertEqual(resp.status_code, 200)
+    def test_invalid_price_400(self):
+        resp = self.client.post(
+            '/api/market/sell', json={'item': 'X', 'price': 'free'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'Invalid price')
+
+    def test_negative_price_400(self):
+        resp = self.client.post(
+            '/api/market/sell', json={'item': 'X', 'price': -5})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'Invalid price')
+
+
+class MarketOfferTest(_CommunityDbCase):
+    def _create_listing(self, seller='bob', item='Sword', price=100):
+        client = self._client_as(seller)
+        return client.post(
+            '/api/market/sell',
+            json={'item': item, 'price': price}).json()['listing_id']
+
+    def test_offer_persists(self):
+        listing_id = self._create_listing(seller='bob')
+        resp = self.client.post(
+            f'/api/market/{listing_id}/offer', json={'amount': 150})
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['message'], 'Offer of 150 coins submitted!')
+        self.assertIsInstance(body['offer_id'], int)
+        self.assertEqual(body['offer']['buyer'], 'alice')
+        self.assertEqual(body['offer']['amount'], 150)
+        self.assertEqual(body['offer']['listing_id'], listing_id)
+        self.assertEqual(body['offer']['status'], 'pending')
+        self.assertEqual(resp.headers['cache-control'], 'no-store')
+
+    def test_offer_legacy_offer_price_key(self):
+        listing_id = self._create_listing(seller='bob')
+        resp = self.client.post(
+            f'/api/market/{listing_id}/offer', json={'offer_price': 200})
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()['offer']['amount'], 200)
+
+    def test_offer_missing_listing_404(self):
+        resp = self.client.post('/api/market/99999/offer', json={'amount': 10})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Listing not found')
+        self.assertEqual(resp.headers['cache-control'], 'no-store')
+
+    def test_offer_non_numeric_listing_404(self):
+        resp = self.client.post('/api/market/abc/offer', json={'amount': 10})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Listing not found')
+
+    def test_offer_on_own_listing_400(self):
+        # alice creates and offers on her own listing.
+        listing_id = self.client.post(
+            '/api/market/sell',
+            json={'item': 'Mine', 'price': 100}).json()['listing_id']
+        resp = self.client.post(
+            f'/api/market/{listing_id}/offer', json={'amount': 50})
+        self.assertEqual(resp.status_code, 400)
         self.assertEqual(
-            resp.json(),
-            {'success': True, 'message': 'Offer of 1500 points submitted!',
-             'offer_id': 456})
+            resp.json()['error'], 'Cannot make an offer on your own listing')
 
-    def test_offer_empty_body(self):
-        resp = self.client.post('/api/market/55/offer', json={})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['message'], 'Offer of 0 points submitted!')
+    def test_offer_invalid_amount_400(self):
+        listing_id = self._create_listing(seller='bob')
+        resp = self.client.post(
+            f'/api/market/{listing_id}/offer', json={'amount': 'lots'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'Invalid price')
 
 
 # ── system ──────────────────────────────────────────────────────────────────
