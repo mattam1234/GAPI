@@ -1783,7 +1783,6 @@ def sync_library_to_db(username: str, force: bool = False) -> Tuple[bool, str]:
         return False, str(e)
 
 
-
 def initialize_picker(config_path: str = 'config.json'):
     """Initialize the game picker"""
     global picker, multi_picker
@@ -1953,7 +1952,6 @@ self.addEventListener('notificationclick', (event) => {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Service-Worker-Allowed': '/',
     }
-
 
 
 def _invalidate_picker_for_user(username: str) -> None:
@@ -2652,7 +2650,6 @@ def _game_identity_tokens(game: Optional[Dict]) -> Set[str]:
 # MIGRATED to FastAPI: GET /api/game/<int:app_id>/details -> backend/routers/game.py
 
 
-
 @app.route('/api/favorite/<int:app_id>', methods=['POST', 'DELETE'])
 @require_login
 def api_toggle_favorite(app_id):
@@ -3285,7 +3282,6 @@ def api_users_list():
 # (docs/MODERNIZATION_BRIEF.md).
 
 
-
 # ===========================================================================================
 # Achievement Hunting Endpoints
 # ===========================================================================================
@@ -3295,7 +3291,6 @@ def api_users_list():
 # /api/achievement-hunt/<id> (update) routes are served natively by the
 # FastAPI app (backend.main:app), reusing the DB-backed achievement_service.
 # Other /api/achievements/* routes (Steam stats/sync) remain in Flask.
-
 
 
 @app.route('/api/users/all')
@@ -3394,92 +3389,6 @@ def api_admin_password_reset_dismiss(request_id):
         return jsonify({'error': 'Failed to dismiss request'}), 500
 
 
-@app.route('/api/users/delete/<username>', methods=['DELETE'])
-@require_admin
-def api_users_delete(username):
-    """Delete a user (admin only)"""
-    requesting_user = get_current_username()
-    
-    if not requesting_user:
-        return jsonify({'error': 'Not logged in'}), 401
-    
-    success, message = user_manager.delete_user(username, requesting_user)
-    
-    if not success:
-        return jsonify({'error': message}), 400
-    
-    return jsonify({'message': message})
-
-
-@app.route('/api/users/role', methods=['POST'])
-@require_admin
-def api_users_update_role():
-    """Update user role (admin only)"""
-    requesting_user = get_current_username()
-    
-    if not requesting_user:
-        return jsonify({'error': 'Not logged in'}), 401
-    
-    data = request.json or {}
-    username = data.get('username', '').strip()
-    role = data.get('role', '').strip()
-    
-    if not username or not role:
-        return jsonify({'error': 'Username and role required'}), 400
-    
-    success, message = user_manager.update_user_role(username, role, requesting_user)
-    
-    if not success:
-        return jsonify({'error': message}), 400
-    
-    return jsonify({'message': message})
-
-
-@app.route('/api/users/roles', methods=['POST'])
-@require_admin
-def api_users_update_roles():
-    """Update user roles (admin only)"""
-    requesting_user = get_current_username()
-
-    if not requesting_user:
-        return jsonify({'error': 'Not logged in'}), 401
-
-    data = request.json or {}
-    username = data.get('username', '').strip()
-    roles = data.get('roles', [])
-
-    if not username or not isinstance(roles, list):
-        return jsonify({'error': 'Username and roles list required'}), 400
-
-    success, message = user_manager.update_user_roles(username, roles, requesting_user)
-
-    if not success:
-        return jsonify({'error': message}), 400
-
-    return jsonify({'message': message})
-
-
-@app.route('/api/roles', methods=['GET'])
-@require_admin
-def api_roles_list():
-    """List available roles (admin only)."""
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    try:
-        db = database.SessionLocal()
-        try:
-            if _user_service:
-                roles = _user_service.get_all_roles(db)
-            else:
-                roles = database.get_roles(db)
-        finally:
-            db.close()
-        return jsonify({'roles': roles})
-    except Exception as e:
-        gui_logger.exception('Error listing roles: %s', e)
-        return jsonify({'error': str(e)}), 500
-
-
 # ===========================================================================================
 # Legacy Multi-User Endpoints (deprecated - use authenticated users instead)
 # ===========================================================================================
@@ -3495,103 +3404,6 @@ def api_users_list_legacy():
     
     with multi_picker_lock:
         return jsonify({'users': multi_picker.users})
-
-
-@app.route('/api/users/add', methods=['POST'])
-@require_admin
-def api_users_add():
-    """Add a new user"""
-    global multi_picker
-    
-    if not multi_picker:
-        return jsonify({'error': 'Multi-user picker not initialized'}), 400
-    
-    data = request.json or {}
-    name = data.get('name', '').strip()
-    email = data.get('email', '').strip()
-    steam_id = data.get('steam_id', '').strip()
-    discord_id = data.get('discord_id', '').strip()
-    
-    if not name:
-        return jsonify({'error': 'Name is required'}), 400
-    
-    if not steam_id:
-        return jsonify({'error': 'Steam ID is required'}), 400
-    
-    with multi_picker_lock:
-        success = multi_picker.add_user(
-            name=name,
-            steam_id=steam_id,
-            email=email,
-            discord_id=discord_id
-        )
-        
-        if success:
-            # Reload from disk to ensure we have the latest data
-            multi_picker.load_users()
-            # Return the newly added user data to confirm it was saved
-            new_user = next((u for u in multi_picker.users if u['name'] == name), None)
-            if new_user:
-                print(f'DEBUG: Added user {name} with steam_id={new_user.get("platforms", {}).get("steam")}')
-            return jsonify({
-                'success': True, 
-                'message': f'User {name} added successfully',
-                'user': new_user
-            })
-        else:
-            return jsonify({'error': 'User already exists'}), 400
-
-
-@app.route('/api/users/update', methods=['POST'])
-@require_admin
-def api_users_update():
-    """Update user information"""
-    global multi_picker
-    
-    if not multi_picker:
-        return jsonify({'error': 'Multi-user picker not initialized'}), 400
-    
-    data = request.json or {}
-    identifier = data.get('identifier', '').strip()
-    updates = data.get('updates', {})
-    
-    if not identifier:
-        return jsonify({'error': 'Identifier is required'}), 400
-    
-    if not updates:
-        return jsonify({'error': 'No updates provided'}), 400
-    
-    with multi_picker_lock:
-        success = multi_picker.update_user(identifier, **updates)
-        
-        if success:
-            return jsonify({'success': True, 'message': 'User updated successfully'})
-        else:
-            return jsonify({'error': 'User not found'}), 404
-
-
-@app.route('/api/users/remove', methods=['POST'])
-@require_admin
-def api_users_remove():
-    """Remove a user"""
-    global multi_picker
-    
-    if not multi_picker:
-        return jsonify({'error': 'Multi-user picker not initialized'}), 400
-    
-    data = request.json or {}
-    name = data.get('name', '').strip()
-    
-    if not name:
-        return jsonify({'error': 'Name is required'}), 400
-    
-    with multi_picker_lock:
-        success = multi_picker.remove_user(name)
-        
-        if success:
-            return jsonify({'success': True, 'message': f'User {name} removed successfully'})
-        else:
-            return jsonify({'error': 'User not found'}), 404
 
 
 @app.route('/api/multiuser/common')
@@ -3628,7 +3440,6 @@ def api_multiuser_common():
 # MIGRATED to FastAPI: POST /api/multiuser/pick -> backend/routers/multiuser.py
 
 
-
 @app.route('/api/multiuser/stats')
 @require_login
 def api_multiuser_stats():
@@ -3656,7 +3467,6 @@ def api_multiuser_stats():
 # (backend.main:app), reusing the same multi_picker voting-session machinery.
 # Removed from the Flask layer per the strangler-fig migration
 # (docs/MODERNIZATION_BRIEF.md).
-
 
 
 # -----------------------------------------------------------------------
@@ -4058,7 +3868,6 @@ def _send_invite_notifications(recipients: List[str], title: str, message: str,
             gui_logger.warning('Invite notification failed for %s: %s', recipient, exc)
 
 
-
 # MIGRATED to FastAPI (chunk 2): GET /api/schedule -> see
 # backend/routers/schedule.py (event_router).
 
@@ -4069,7 +3878,6 @@ def _send_invite_notifications(recipients: List[str], title: str, message: str,
 # (backend.main:app), reusing the per-user picker schedule_service. The
 # /api/schedule event routes below remain in Flask pending follow-up chunks.
 # (docs/MODERNIZATION_BRIEF.md)
-
 
 
 # MIGRATED to FastAPI (chunk 4c, completing the schedule domain): POST
@@ -4203,7 +4011,6 @@ def _fuzzy_search_users(query: str, users: List[Dict], limit: int = 10) -> List[
 # natively by the FastAPI app (backend/routers/schedule.py event_router).
 
 
-
 # MIGRATED to FastAPI (chunk 4b): GET /api/schedule/discord-guilds and
 # POST /api/schedule/<event_id>/create-discord-event are served natively by
 # the FastAPI app (backend/routers/schedule.py event_router).
@@ -4214,13 +4021,11 @@ def _fuzzy_search_users(query: str, users: List[Dict], limit: int = 10) -> List[
 # ---------------------------------------------------------------------------
 
 
-
 # MIGRATED to FastAPI: see backend/routers/playlists.py. The /api/playlists
 # routes (list, create, delete, and games add/list/remove) are served
 # natively by the FastAPI app (backend.main:app), reusing the same per-user
 # picker playlist_service. Removed from the Flask layer per the strangler-fig
 # migration (docs/MODERNIZATION_BRIEF.md).
-
 
 
 # ---------------------------------------------------------------------------
@@ -4256,7 +4061,6 @@ def _serialize_backlog_summaries(backlogs: List[Dict], service, current_username
 # migration (docs/MODERNIZATION_BRIEF.md).
 
 
-
 # ---------------------------------------------------------------------------
 # Budget Tracking API
 # ---------------------------------------------------------------------------
@@ -4268,7 +4072,6 @@ def _serialize_backlog_summaries(backlogs: List[Dict], service, current_username
 # (docs/MODERNIZATION_BRIEF.md).
 
 
-
 # ---------------------------------------------------------------------------
 # Wishlist & Sale Alerts API
 # ---------------------------------------------------------------------------
@@ -4278,7 +4081,6 @@ def _serialize_backlog_summaries(backlogs: List[Dict], service, current_username
 # FastAPI app (backend.main:app), reusing the same per-user picker
 # wishlist_service. Removed from the Flask layer per the strangler-fig
 # migration (docs/MODERNIZATION_BRIEF.md).
-
 
 
 # ---------------------------------------------------------------------------
@@ -4376,7 +4178,6 @@ def _ical_escape(text) -> str:
 # the same DB challenge helpers.
 
 
-
 # ---------------------------------------------------------------------------
 # Friend Activity API
 # ---------------------------------------------------------------------------
@@ -4401,125 +4202,6 @@ def _ical_escape(text) -> str:
 # ---------------------------------------------------------------------------
 # User Profiles API
 # ---------------------------------------------------------------------------
-
-@app.route('/api/users/list', methods=['GET'])
-@require_login
-def api_users_list_with_stats():
-    """Return list of all users with basic stats"""
-    try:
-        users = user_manager.get_all_users()
-        db = db_service.get_db()
-        
-        user_list = []
-        for user in users:
-            if not user.get('username'):
-                continue
-            
-            # Get basic stats
-            picks_query = """
-                SELECT COUNT(*) FROM picks WHERE user = ?
-            """
-            votes_query = """
-                SELECT COUNT(*) FROM votes WHERE user = ?
-            """
-            
-            picks_cursor = db.execute(picks_query, (user['username'],))
-            votes_cursor = db.execute(votes_query, (user['username'],))
-            
-            picks_count = picks_cursor.fetchone()[0] if picks_cursor else 0
-            votes_count = votes_cursor.fetchone()[0] if votes_cursor else 0
-            
-            user_list.append({
-                'username': user['username'],
-                'created_at': user.get('created_at'),
-                'stats': {
-                    'picks': picks_count,
-                    'votes': votes_count,
-                    'sessions': 0
-                }
-            })
-        
-        return jsonify({'users': user_list})
-    
-    except Exception as e:
-        gui_logger.error(f"Error listing users: {e}")
-        return jsonify({'error': f'Failed to list users: {str(e)}'}), 500
-
-
-@app.route('/api/users/<username>/profile', methods=['GET'])
-@require_login
-def api_user_profile(username: str):
-    """Return detailed profile for a user"""
-    try:
-        decoded_username = unquote(username) if '%' in username else username
-        
-        # Get user from manager
-        users = user_manager.get_all_users()
-        user_data = next((u for u in users if u.get('username') == decoded_username), None)
-        
-        if not user_data:
-            return jsonify({'error': 'User not found'}), 404
-        
-        db = db_service.get_db()
-        
-        # Calculate stats
-        picks_query = "SELECT COUNT(*) FROM picks WHERE user = ?"
-        votes_query = "SELECT COUNT(*) FROM votes WHERE user = ?"
-        sessions_query = "SELECT COUNT(*) FROM live_sessions WHERE host = ?"
-        
-        picks_cursor = db.execute(picks_query, (decoded_username,))
-        votes_cursor = db.execute(votes_query, (decoded_username,))
-        sessions_cursor = db.execute(sessions_query, (decoded_username,))
-        
-        picks_count = picks_cursor.fetchone()[0] if picks_cursor else 0
-        votes_count = votes_cursor.fetchone()[0] if votes_cursor else 0
-        sessions_count = sessions_cursor.fetchone()[0] if sessions_cursor else 0
-        
-        # Calculate voting accuracy
-        accuracy_query = """
-            SELECT 
-                CAST(COUNT(CASE WHEN v.pick_id IN (
-                    SELECT pick_id FROM votes 
-                    GROUP BY pick_id ORDER BY COUNT(*) DESC LIMIT 1
-                ) THEN 1 END) * 100.0 / 
-                NULLIF(COUNT(v.id), 0) AS INTEGER)
-            FROM votes v WHERE v.user = ?
-        """
-        accuracy_cursor = db.execute(accuracy_query, (decoded_username,))
-        accuracy = accuracy_cursor.fetchone()[0] if accuracy_cursor else 0
-        
-        # Generate achievements based on stats
-        achievements = []
-        if picks_count >= 10:
-            achievements.append({'icon': '🎲', 'name': 'First 10 Picks'})
-        if picks_count >= 50:
-            achievements.append({'icon': '🎯', 'name': '50 Picks Expert'})
-        if votes_count >= 25:
-            achievements.append({'icon': '⚖️', 'name': 'Decision Maker'})
-        if sessions_count >= 5:
-            achievements.append({'icon': '🎭', 'name': 'Session Host'})
-        if accuracy >= 80:
-            achievements.append({'icon': '🎪', 'name': 'Voting Legend'})
-        
-        profile = {
-            'username': decoded_username,
-            'status': 'Active player',
-            'created_at': user_data.get('created_at'),
-            'stats': {
-                'sessions_hosted': sessions_count,
-                'picks': picks_count,
-                'votes': votes_count,
-                'accuracy': accuracy
-            },
-            'achievements': achievements
-        }
-        
-        return jsonify(profile)
-    
-    except Exception as e:
-        gui_logger.error(f"Error getting user profile: {e}")
-        return jsonify({'error': f'Failed to get user profile: {str(e)}'}), 500
-
 
 # ---------------------------------------------------------------------------
 # Notifications API
@@ -4616,7 +4298,6 @@ def api_get_challenges():
 # (docs/MODERNIZATION_BRIEF.md).
 
 
-
 # ---------------------------------------------------------------------------
 # Library Comparison API
 # ---------------------------------------------------------------------------
@@ -4626,7 +4307,6 @@ def api_get_challenges():
 # app (backend.main:app), reusing the same cached-library helpers. Removed
 # from the Flask layer per the strangler-fig migration
 # (docs/MODERNIZATION_BRIEF.md).
-
 
 
 # ---------------------------------------------------------------------------
@@ -4649,7 +4329,6 @@ def api_get_challenges():
 # migration (docs/MODERNIZATION_BRIEF.md).
 
 
-
 # ---------------------------------------------------------------------------
 # Seasonal Leaderboards API
 # ---------------------------------------------------------------------------
@@ -4660,7 +4339,6 @@ def api_get_challenges():
 # ---------------------------------------------------------------------------
 # Phase 6: Advanced Features APIs
 # ---------------------------------------------------------------------------
-
 
 
 # Tournaments & Brackets
@@ -6723,43 +6401,6 @@ def api_user_card(username):
     if not card:
         return jsonify({'error': 'User not found'}), 404
     return jsonify(card)
-
-
-@app.route('/api/user/profile', methods=['POST'])
-@require_login
-def api_update_profile():
-    """Update the current user's profile card fields.
-
-    Request JSON (all optional):
-      - ``display_name``: display name shown on cards
-      - ``bio``:          short bio / status line (max 500 chars)
-      - ``avatar_url``:   URL to a profile picture
-    """
-    global current_user
-    username = get_current_username()
-    data = request.get_json() or {}
-    db = next(database.get_db())
-    try:
-        if _leaderboard_service:
-            ok = _leaderboard_service.update_profile(
-                db, username,
-                display_name=data.get('display_name'),
-                bio=data.get('bio'),
-                avatar_url=data.get('avatar_url'),
-            )
-        else:
-            ok = database.update_user_profile(
-                db, username,
-                display_name=data.get('display_name'),
-                bio=data.get('bio'),
-                avatar_url=data.get('avatar_url'),
-            )
-    finally:
-        if db:
-            db.close()
-    if ok:
-        return jsonify({'success': True})
-    return jsonify({'error': 'Failed to update profile'}), 500
 
 
 # ---------------------------------------------------------------------------
