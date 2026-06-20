@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 import gapi_gui
 from backend.dependencies import require_admin_um, require_login
 
+# NOTE: GET /api/users/legacy is intentionally left in Flask (deprecated).
+
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 # Admin user-management routes live under /api/admin/users.
@@ -28,6 +30,71 @@ def _err(status_code, message):
 
 def _self_or_admin(current: str, username: str) -> bool:
     return current == username or gapi_gui.user_manager.is_admin(current)
+
+
+# ── Literal-path list routes (declared before /{username}* so they win) ──────
+
+@router.get("")
+def api_users_list(request: Request, current: str = Depends(require_login)):
+    """Get users for the multi-user game picker.
+
+    Query params:
+      scope: 'all' (default) | 'friends' | 'me_and_friends'
+    """
+    g = gapi_gui
+    username = current
+    scope = (request.query_params.get("scope") or "all").strip().lower()
+    users = g.user_manager.get_all_users()
+
+    if scope in ("friends", "me_and_friends"):
+        allowed_usernames = set()
+        if scope == "me_and_friends" and username:
+            allowed_usernames.add(str(username).strip().lower())
+
+        if g.ensure_db_available() and username:
+            db = g.database.SessionLocal()
+            try:
+                friends_data = g.database.get_app_friends_with_platforms(db, username)
+                for friend in friends_data.get("friends", []):
+                    friend_username = str(friend.get("username") or "").strip().lower()
+                    if friend_username:
+                        allowed_usernames.add(friend_username)
+            finally:
+                db.close()
+
+        users = [
+            u for u in users
+            if str(u.get("username") or "").strip().lower() in allowed_usernames
+        ]
+
+    if scope == "all":
+        users = [
+            u for u in users
+            if u.get("steam_id") or u.get("epic_id") or u.get("gog_id")
+        ]
+
+    return {"users": users}
+
+
+@router.get("/all")
+def api_users_all(_admin: str = Depends(require_admin_um)):
+    """Get all users with full details (admin only)."""
+    return {"users": gapi_gui.user_manager.get_all_users()}
+
+
+@router.get("/online")
+def api_online_users(_user: str = Depends(require_login)):
+    """Return users who have been active within the last 5 minutes."""
+    g = gapi_gui
+    if not g.DB_AVAILABLE:
+        return {"users": []}
+    db = next(g.database.get_db())
+    try:
+        users = g.database.get_online_users(db)
+    finally:
+        if db:
+            db.close()
+    return {"users": users}
 
 
 @router.get("/{username}/reputation")
