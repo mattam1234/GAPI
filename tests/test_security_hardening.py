@@ -137,25 +137,45 @@ class TestSecurityInfoEndpoint(unittest.TestCase):
 class TestRateLimiting(unittest.TestCase):
     """Rate-limiting decorators must be present on auth endpoints."""
 
-    def test_login_has_rate_limit_decorator(self):
-        """Login migrated to FastAPI (backend/routers/auth.py): assert the route
-        is registered on the ASGI app (a missing-body POST yields 400, not 404).
+    def test_login_is_rate_limited(self):
+        """Login on FastAPI now enforces a real per-IP rate limit (backend.ratelimit).
+        The limiter auto-disables under pytest, so we force-enable it here and
+        confirm a burst eventually yields 429."""
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        from backend.main import app as fastapi_app
+        import backend.ratelimit as rl
+        rl.reset()
+        client = TestClient(fastapi_app)
+        with patch.object(rl, '_enabled', return_value=True), \
+             patch.object(gapi_gui.user_manager, 'login', return_value=(False, 'bad')), \
+             patch.object(gapi_gui, '_audit', lambda *a, **k: None):
+            statuses = [client.post('/api/auth/login', json={'username': 'u', 'password': 'p'}).status_code
+                        for _ in range(25)]
+        rl.reset()
+        self.assertIn(429, statuses, 'login must 429 once the per-IP limit is exceeded')
 
-        NOTE: the legacy Flask route's @limiter.limit was commented out
-        ("Temporarily disabled for debugging"), so login was never actually
-        rate-limited. Re-adding real rate limiting is tracked as a feature gap."""
+    def test_register_is_rate_limited(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        from backend.main import app as fastapi_app
+        import backend.ratelimit as rl
+        rl.reset()
+        client = TestClient(fastapi_app)
+        with patch.object(rl, '_enabled', return_value=True), \
+             patch.object(gapi_gui.user_manager, 'register', return_value=(False, 'taken')):
+            statuses = [client.post('/api/auth/register', json={'username': 'u', 'password': 'pw'}).status_code
+                        for _ in range(15)]
+        rl.reset()
+        self.assertIn(429, statuses, 'register must 429 once the per-IP limit is exceeded')
+
+    def test_routes_registered_and_not_limited_under_pytest(self):
+        """Sanity: under pytest the limiter is disabled, so normal calls are 4xx (not 429/404)."""
         from fastapi.testclient import TestClient
         from backend.main import app as fastapi_app
-        resp = TestClient(fastapi_app).post('/api/auth/login', json={})
-        self.assertNotEqual(resp.status_code, 404)
-
-    def test_register_has_rate_limit_decorator(self):
-        """Register migrated to FastAPI; assert route registration (see note in
-        test_login_has_rate_limit_decorator re: rate-limiting gap)."""
-        from fastapi.testclient import TestClient
-        from backend.main import app as fastapi_app
-        resp = TestClient(fastapi_app).post('/api/auth/register', json={})
-        self.assertNotEqual(resp.status_code, 404)
+        c = TestClient(fastapi_app)
+        self.assertEqual(c.post('/api/auth/login', json={}).status_code, 400)
+        self.assertEqual(c.post('/api/auth/register', json={}).status_code, 400)
 
     def test_limiter_attribute_exists_on_module(self):
         self.assertTrue(hasattr(gapi_gui, 'limiter'),
