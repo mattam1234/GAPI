@@ -393,32 +393,30 @@ def delete_user(username: str, admin: str = Depends(require_admin_um)):
 def list_users_with_stats(_user: str = Depends(require_login)):
     """List all users with basic pick/vote stats.
 
-    NOTE: faithfully preserves a latent production bug — the legacy handler
-    referenced a module-global ``db_service`` that is never defined in
-    ``gapi_gui`` (the same undefined global behind the leaderboards/`/ai`
-    500s), so this endpoint always raised ``NameError`` -> 500. Reproduced via
-    ``gapi_gui.db_service``; the surrounding query/shaping is preserved so the
-    route works the moment a real ``db_service`` is wired.
+    Counts come from the ``picks`` / ``votes`` tables via the SQLAlchemy layer
+    (``database.get_user_activity_counts``), which works on both SQLite and
+    Postgres and returns zeros when those legacy tables are absent. (The legacy
+    handler read these counts through an undefined module-global ``db_service``,
+    so it always 500'd in production.)
     """
     g = gapi_gui
     try:
         users = g.user_manager.get_all_users()
-        db = g.db_service.get_db()  # NameError in prod -> caught -> 500 (preserved)
-        user_list = []
-        for user in users:
-            if not user.get("username"):
-                continue
-            picks_cursor = db.execute(
-                "SELECT COUNT(*) FROM picks WHERE user = ?", (user["username"],))
-            votes_cursor = db.execute(
-                "SELECT COUNT(*) FROM votes WHERE user = ?", (user["username"],))
-            picks_count = picks_cursor.fetchone()[0] if picks_cursor else 0
-            votes_count = votes_cursor.fetchone()[0] if votes_cursor else 0
-            user_list.append({
-                "username": user["username"],
-                "created_at": user.get("created_at"),
-                "stats": {"picks": picks_count, "votes": votes_count, "sessions": 0},
-            })
+        db = g.database.SessionLocal()
+        try:
+            user_list = []
+            for user in users:
+                if not user.get("username"):
+                    continue
+                counts = g.database.get_user_activity_counts(db, user["username"])
+                user_list.append({
+                    "username": user["username"],
+                    "created_at": user.get("created_at"),
+                    "stats": {"picks": counts["picks"], "votes": counts["votes"],
+                              "sessions": 0},
+                })
+        finally:
+            db.close()
         return {"users": user_list}
     except Exception as e:
         g.gui_logger.error("list_users error: %s", e)
@@ -429,10 +427,13 @@ def list_users_with_stats(_user: str = Depends(require_login)):
 def get_user_profile(username: str, _user: str = Depends(require_login)):
     """Return a detailed profile (stats + derived achievements) for a user.
 
-    Like :func:`list_users_with_stats`, the stats block depends on the
-    never-defined ``db_service``: a *missing* user 404s (checked first), an
-    *existing* user 500s in production (preserved). Starlette already URL-decodes
-    the path param, so the legacy ``unquote`` is unnecessary.
+    A *missing* user 404s (checked first). For an existing user the pick / vote /
+    session counts and voting accuracy are computed through the SQLAlchemy layer
+    (``database.get_user_activity_counts`` / ``get_user_vote_accuracy``) — works
+    on SQLite and Postgres, and yields zeros when the legacy activity tables are
+    absent. (The legacy handler read these through an undefined module-global
+    ``db_service`` and always 500'd.) Starlette already URL-decodes the path
+    param, so the legacy ``unquote`` is unnecessary.
     """
     g = gapi_gui
     try:
@@ -440,23 +441,15 @@ def get_user_profile(username: str, _user: str = Depends(require_login)):
         user_data = next((u for u in users if u.get("username") == username), None)
         if not user_data:
             return _err(404, "User not found")
-        db = g.db_service.get_db()  # NameError in prod -> caught -> 500 (preserved)
-        picks_count = db.execute(
-            "SELECT COUNT(*) FROM picks WHERE user = ?", (username,)).fetchone()[0]
-        votes_count = db.execute(
-            "SELECT COUNT(*) FROM votes WHERE user = ?", (username,)).fetchone()[0]
-        sessions_count = db.execute(
-            "SELECT COUNT(*) FROM live_sessions WHERE host = ?", (username,)).fetchone()[0]
-        accuracy_query = """
-            SELECT
-                CAST(COUNT(CASE WHEN v.pick_id IN (
-                    SELECT pick_id FROM votes
-                    GROUP BY pick_id ORDER BY COUNT(*) DESC LIMIT 1
-                ) THEN 1 END) * 100.0 /
-                NULLIF(COUNT(v.id), 0) AS INTEGER)
-            FROM votes v WHERE v.user = ?
-        """
-        accuracy = db.execute(accuracy_query, (username,)).fetchone()[0]
+        db = g.database.SessionLocal()
+        try:
+            counts = g.database.get_user_activity_counts(db, username)
+            picks_count = counts["picks"]
+            votes_count = counts["votes"]
+            sessions_count = counts["sessions"]
+            accuracy = g.database.get_user_vote_accuracy(db, username)
+        finally:
+            db.close()
         achievements = []
         if picks_count >= 10:
             achievements.append({"icon": "🎲", "name": "First 10 Picks"})

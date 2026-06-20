@@ -84,29 +84,30 @@ def recommendation_variant(request: Request, username: str = Depends(require_log
 
 @router.get("/ai")
 def ai_recommendations(username: str = Depends(require_login)):
-    """AI recommendations from the ai_recommendations table (raw SQL).
+    """AI recommendations from the ``ai_recommendations`` table.
 
-    Note: like the legacy handler this reads via ``db_service`` (undefined in
-    production), so it falls back to the default recommendation set.
+    Reads the user's cached recommendations through the SQLAlchemy layer
+    (``database.get_ai_recommendations``). When the user has no cached
+    recommendations (or the lookup fails), falls back to a default set so the
+    UI always has something to show. (The legacy handler read via an undefined
+    module-global ``db_service`` and therefore always hit the fallback.)
     """
     try:
-        db = gapi_gui.db_service.get_db()
-        user = gapi_gui.db_service.get_current_user(username)
-        rec_query = ("SELECT game_name, match_score, reason FROM ai_recommendations "
-                     "WHERE user_id = ? ORDER BY match_score DESC LIMIT 6")
-        rows = db.execute(rec_query, (user.id,)).fetchall()
-        recommendations = [
-            {"id": str(idx), "name": game, "match_score": score, "reason": reason}
-            for idx, (game, score, reason) in enumerate(rows, 1)]
-        return {"recommendations": recommendations}
+        db = gapi_gui.database.SessionLocal()
+        try:
+            recommendations = gapi_gui.database.get_ai_recommendations(db, username)
+        finally:
+            db.close()
+        if recommendations:
+            return {"recommendations": recommendations}
     except Exception as e:
         gapi_gui.gui_logger.error("Error getting AI recommendations: %s", e)
-        return {"recommendations": [
-            {"id": "1", "name": "Baldurs Gate 3", "match_score": 94,
-             "reason": "Similar to games you love"},
-            {"id": "2", "name": "Hollow Knight", "match_score": 87,
-             "reason": "Challenging & story-driven"},
-        ]}
+    return {"recommendations": [
+        {"id": "1", "name": "Baldurs Gate 3", "match_score": 94,
+         "reason": "Similar to games you love"},
+        {"id": "2", "name": "Hollow Knight", "match_score": 87,
+         "reason": "Challenging & story-driven"},
+    ]}
 
 
 @router.get("/smart")

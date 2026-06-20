@@ -18,14 +18,15 @@ allowlist (which only contains ``/api/permissions``, ``/api/changelog``,
 from the legacy ``after_request``. That header is set explicitly to preserve
 behaviour.
 
-Faithful ports — latent legacy behaviour is preserved exactly:
+Data sources:
 
 * The ``/api/optimized/users``, ``/api/optimized/leaderboard`` and
-  ``/api/optimized/chat/messages`` handlers reference a module-global
-  ``db_service`` that is never defined on ``gapi_gui``. Referenced here via
-  ``gapi_gui.db_service`` so the ``AttributeError`` still fires inside the
-  ``try`` and the handler returns 500 (``{"error": "..."}``) — exactly as in
-  production.
+  ``/api/optimized/chat/messages`` handlers query real data through the
+  SQLAlchemy layer (ORM models + ``database.get_category_leaderboard``), which
+  works on both SQLite and Postgres. The legacy handlers read these through a
+  module-global ``db_service`` that is never defined on ``gapi_gui``, so they
+  always raised ``AttributeError`` -> 500 in production; that latent bug is now
+  fixed.
 * The ``/api/collections`` handler is a pure success-faking stub returning
   hard-coded data; its ``try/except`` never trips.
 
@@ -92,24 +93,24 @@ def api_list_users_paginated(request: Request, username: str = Depends(require_l
         page, per_page = g.performance.LazyLoadHelper.extract_pagination_params(
             request.query_params)
 
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> 500 (preserved)
-
-        # Count total
-        total_query = "SELECT COUNT(*) FROM users"
-        total = db.execute(total_query).fetchone()[0]
-
-        # Get paginated results
-        query = """
-            SELECT id, username, email, created_at
-            FROM users
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """
-        offset = (page - 1) * per_page
-        users = db.execute(query, (per_page, offset)).fetchall()
+        # Query the users table through the SQLAlchemy ORM (works on SQLite and
+        # Postgres). The legacy handler read these rows through an undefined
+        # module-global ``db_service`` and always 500'd.
+        User = g.database.User
+        db = g.database.SessionLocal()
+        try:
+            total = db.query(User).count()
+            offset = (page - 1) * per_page
+            rows = (db.query(User)
+                    .order_by(User.created_at.desc())
+                    .limit(per_page).offset(offset).all())
+            items = [{'id': u.id, 'username': u.username, 'email': u.email,
+                      'created_at': str(u.created_at)} for u in rows]
+        finally:
+            db.close()
 
         result = g.performance.Paginator.paginate(
-            [{'id': u[0], 'username': u[1], 'email': u[2], 'created_at': str(u[3])} for u in users],
+            items,
             page=page,
             per_page=per_page,
             total_count=total
@@ -215,37 +216,23 @@ def api_get_leaderboard_optimized(request: Request, username: str = Depends(requ
             result['cached'] = True
             return _ok(result)
 
-        # Query database
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> 500 (preserved)
+        # Query database through the SQLAlchemy layer (works on SQLite and
+        # Postgres). The legacy handler read this through an undefined
+        # module-global ``db_service`` and always 500'd. 'picks' uses the
+        # session/pick join; any other category uses the vote-count ranking.
+        helper_category = 'picks' if category == 'picks' else 'votes'
+        db = g.database.SessionLocal()
+        try:
+            rows = g.database.get_category_leaderboard(
+                db, category=helper_category, limit=200)
+        finally:
+            db.close()
+
         leaderboard = []
-
-        if category == 'picks':
-            query = """
-                SELECT u.username, COUNT(DISTINCT ps.game_id) as value
-                FROM users u
-                LEFT JOIN live_sessions ls ON u.username = ls.host
-                LEFT JOIN picks ps ON ls.session_id = ps.session_id
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 200
-            """
-        else:
-            query = """
-                SELECT u.username, COUNT(v.id) as value
-                FROM users u
-                LEFT JOIN votes v ON u.username = v.user
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 200
-            """
-
-        cursor = db.execute(query)
-        for row in cursor.fetchall():
+        for row in rows:
             leaderboard.append({
-                'username': row[0],
-                'value': row[1],
+                'username': row['username'],
+                'value': row['value'],
                 'rank': len(leaderboard) + 1
             })
 
@@ -279,30 +266,30 @@ def api_get_chat_messages_paginated(request: Request,
         page, per_page = g.performance.LazyLoadHelper.extract_pagination_params(
             request.query_params)
 
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> 500 (preserved)
-
-        # Count messages
-        count_query = "SELECT COUNT(*) FROM chat_messages WHERE chat_room = ?"
-        total = db.execute(count_query, (room,)).fetchone()[0]
-
-        # Get paginated messages
-        query = """
-            SELECT id, username, message, created_at
-            FROM chat_messages
-            WHERE chat_room = ?
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """
-        offset = (page - 1) * per_page
-        messages = db.execute(query, (room, per_page, offset)).fetchall()
+        # Query chat_messages through the SQLAlchemy ORM (works on SQLite and
+        # Postgres). The legacy handler read this through an undefined
+        # module-global ``db_service`` and always 500'd. The ORM stores the room
+        # in ``ChatMessage.room`` and the author via the ``sender`` relationship.
+        ChatMessage = g.database.ChatMessage
+        db = g.database.SessionLocal()
+        try:
+            base = db.query(ChatMessage).filter(ChatMessage.room == room)
+            total = base.count()
+            offset = (page - 1) * per_page
+            messages = (base
+                        .order_by(ChatMessage.created_at.desc())
+                        .limit(per_page).offset(offset).all())
+            items = [{
+                'id': m.id,
+                'username': m.sender.username if m.sender else None,
+                'message': m.message,
+                'created_at': str(m.created_at)
+            } for m in reversed(messages)]
+        finally:
+            db.close()
 
         result = g.performance.Paginator.paginate(
-            [{
-                'id': m[0],
-                'username': m[1],
-                'message': m[2],
-                'created_at': str(m[3])
-            } for m in reversed(messages)],
+            items,
             page=page,
             per_page=per_page,
             total_count=total

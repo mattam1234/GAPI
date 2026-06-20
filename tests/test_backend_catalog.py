@@ -62,6 +62,29 @@ def _patch_session_local(db=None):
                         return_value=db if db is not None else _fake_db())
 
 
+def _patch_session_local_error(msg):
+    """Patch database.SessionLocal so calling it raises (simulates a DB error)."""
+    return patch.object(gapi_gui.database, 'SessionLocal',
+                        side_effect=RuntimeError(msg))
+
+
+def _query_db(count=0, rows=None):
+    """A fake session whose ``query(...).order_by(...).limit(...).offset(...).all()``
+
+    returns *rows* and whose ``query(...).count()`` returns *count*.
+    """
+    rows = rows or []
+    db = MagicMock()
+    q = db.query.return_value
+    q.count.return_value = count
+    q.filter.return_value = q
+    q.order_by.return_value = q
+    q.limit.return_value = q
+    q.offset.return_value = q
+    q.all.return_value = rows
+    return db
+
+
 class _AuthedCase(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
@@ -121,31 +144,38 @@ class OptimizedUsersTest(_AuthedCase):
         self.assertEqual(resp.json()['error'], 'Performance module not available')
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
-    def test_latent_db_service_bug_500(self):
-        # db_service is never defined on gapi_gui -> AttributeError -> 500 (preserved).
+    def test_db_error_500(self):
+        # A failure in the SQLAlchemy layer surfaces as a 500 (no-store).
         perf = MagicMock()
         perf.LazyLoadHelper.extract_pagination_params.return_value = (1, 20)
         with patch.object(gapi_gui, 'PERFORMANCE_AVAILABLE', True), \
-                patch.object(gapi_gui, 'performance', perf):
+                patch.object(gapi_gui, 'performance', perf), \
+                _patch_session_local_error('boom'):
             resp = self.client.get('/api/optimized/users')
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
-    def test_success_with_db_service_present(self):
+    def test_success_real_data(self):
         perf = MagicMock()
         perf.LazyLoadHelper.extract_pagination_params.return_value = (1, 20)
-        perf.Paginator.paginate.return_value = {'items': [], 'page': 1}
-        db = MagicMock()
-        db.execute.return_value.fetchone.return_value = [0]
-        db.execute.return_value.fetchall.return_value = []
-        db_service = MagicMock()
-        db_service.get_db.return_value = db
+
+        def _paginate(items, page, per_page, total_count):
+            return {'items': items, 'page': page, 'total': total_count}
+        perf.Paginator.paginate.side_effect = _paginate
+
+        u = MagicMock(id=7, username='alice', email='a@x.io', created_at='2026-01-01')
+        db = _query_db(count=1, rows=[u])
         with patch.object(gapi_gui, 'PERFORMANCE_AVAILABLE', True), \
                 patch.object(gapi_gui, 'performance', perf), \
-                patch.object(gapi_gui, 'db_service', db_service, create=True):
+                _patch_session_local(db):
             resp = self.client.get('/api/optimized/users')
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['endpoint'], 'optimized-users')
+        body = resp.json()
+        self.assertEqual(body['endpoint'], 'optimized-users')
+        self.assertEqual(body['total'], 1)
+        self.assertEqual(body['items'][0], {
+            'id': 7, 'username': 'alice', 'email': 'a@x.io',
+            'created_at': '2026-01-01'})
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
 
@@ -201,13 +231,40 @@ class OptimizedLeaderboardTest(_AuthedCase):
         self.assertTrue(resp.json()['cached'])
         self.assertEqual(resp.headers['cache-control'], 'no-store')
 
-    def test_cache_miss_hits_db_service_bug_500(self):
-        # On cache miss, db_service (undefined) -> AttributeError -> 500 (preserved).
+    def test_cache_miss_queries_real_data(self):
+        # On cache miss, the route queries the SQLAlchemy layer and caches it.
+        perf = MagicMock()
+        perf.LazyLoadHelper.extract_pagination_params.return_value = (1, 20)
+        perf.get_cache.return_value.get.return_value = None
+
+        def _paginate(items, page, per_page, total_count):
+            return {'items': items, 'page': page, 'total': total_count}
+        perf.Paginator.paginate.side_effect = _paginate
+
+        rows = [{'username': 'alice', 'value': 9}, {'username': 'bob', 'value': 4}]
+        with patch.object(gapi_gui, 'PERFORMANCE_AVAILABLE', True), \
+                patch.object(gapi_gui, 'performance', perf), \
+                _patch_session_local(), \
+                patch.object(gapi_gui.database, 'get_category_leaderboard',
+                             return_value=rows):
+            resp = self.client.get('/api/optimized/leaderboard')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertFalse(body['cached'])
+        self.assertEqual(body['items'][0],
+                         {'username': 'alice', 'value': 9, 'rank': 1})
+        # The computed leaderboard was cached for next time.
+        perf.get_cache.return_value.set.assert_called_once()
+
+    def test_cache_miss_db_error_500(self):
         perf = MagicMock()
         perf.LazyLoadHelper.extract_pagination_params.return_value = (1, 20)
         perf.get_cache.return_value.get.return_value = None
         with patch.object(gapi_gui, 'PERFORMANCE_AVAILABLE', True), \
-                patch.object(gapi_gui, 'performance', perf):
+                patch.object(gapi_gui, 'performance', perf), \
+                _patch_session_local(), \
+                patch.object(gapi_gui.database, 'get_category_leaderboard',
+                             side_effect=RuntimeError('boom')):
             resp = self.client.get('/api/optimized/leaderboard')
         self.assertEqual(resp.status_code, 500)
 
@@ -220,29 +277,37 @@ class OptimizedChatMessagesTest(_AuthedCase):
             resp = self.client.get('/api/optimized/chat/messages')
         self.assertEqual(resp.status_code, 503)
 
-    def test_latent_db_service_bug_500(self):
+    def test_db_error_500(self):
         perf = MagicMock()
         perf.LazyLoadHelper.extract_pagination_params.return_value = (1, 20)
         with patch.object(gapi_gui, 'PERFORMANCE_AVAILABLE', True), \
-                patch.object(gapi_gui, 'performance', perf):
+                patch.object(gapi_gui, 'performance', perf), \
+                _patch_session_local_error('boom'):
             resp = self.client.get('/api/optimized/chat/messages')
         self.assertEqual(resp.status_code, 500)
 
-    def test_success_with_db_service(self):
+    def test_success_real_data(self):
         perf = MagicMock()
         perf.LazyLoadHelper.extract_pagination_params.return_value = (1, 20)
-        perf.Paginator.paginate.return_value = {'items': [], 'page': 1}
-        db = MagicMock()
-        db.execute.return_value.fetchone.return_value = [0]
-        db.execute.return_value.fetchall.return_value = []
-        db_service = MagicMock()
-        db_service.get_db.return_value = db
+
+        def _paginate(items, page, per_page, total_count):
+            return {'items': items, 'page': page, 'total': total_count}
+        perf.Paginator.paginate.side_effect = _paginate
+
+        msg = MagicMock(id=3, message='hi', created_at='2026-01-02')
+        msg.sender = MagicMock(username='alice')
+        db = _query_db(count=1, rows=[msg])
         with patch.object(gapi_gui, 'PERFORMANCE_AVAILABLE', True), \
                 patch.object(gapi_gui, 'performance', perf), \
-                patch.object(gapi_gui, 'db_service', db_service, create=True):
+                _patch_session_local(db):
             resp = self.client.get('/api/optimized/chat/messages?room=general')
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['room'], 'general')
+        body = resp.json()
+        self.assertEqual(body['room'], 'general')
+        self.assertEqual(body['total'], 1)
+        self.assertEqual(body['items'][0], {
+            'id': 3, 'username': 'alice', 'message': 'hi',
+            'created_at': '2026-01-02'})
 
 
 # ── GET /api/optimized/games/search ─────────────────────────────────────────

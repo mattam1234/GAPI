@@ -5,8 +5,8 @@
   * POST   /api/users/role | /roles             (user_manager, admin)
   * DELETE /api/users/delete/{username}          (user_manager, admin)
   * GET    /api/roles                            (admin)
-  * GET    /api/users/list                       (login; latent db_service 500)
-  * GET    /api/users/{username}/profile         (login; 404 / latent 500)
+  * GET    /api/users/list                       (login; real pick/vote stats)
+  * GET    /api/users/{username}/profile         (login; 404 / real stats)
   * POST   /api/user/profile                     (login)
 
 Run with:
@@ -216,14 +216,30 @@ class RolesListTest(_AuthedCase):
         self.assertEqual(resp.json()['roles'], ['admin', 'user'])
 
 
-# ── /api/users/list and /{username}/profile (latent db_service 500 preserved) ─
+# ── /api/users/list and /{username}/profile (real pick/vote/session stats) ────
 
 class UserListAndProfileTest(_AuthedCase):
-    def test_list_users_preserves_latent_500(self):
-        # db_service is never defined on gapi_gui -> AttributeError -> 500.
-        self.assertFalse(hasattr(gapi_gui, 'db_service'))
+    def test_list_users_returns_real_counts(self):
+        # Counts come from database.get_user_activity_counts via the ORM layer.
         with patch.object(gapi_gui.user_manager, 'get_all_users',
-                          return_value=[{'username': 'a', 'created_at': None}]):
+                          return_value=[{'username': 'a', 'created_at': None}]), \
+             patch.object(gapi_gui.database, 'SessionLocal',
+                          return_value=MagicMock()), \
+             patch.object(gapi_gui.database, 'get_user_activity_counts',
+                          return_value={'picks': 4, 'votes': 7, 'sessions': 2}):
+            resp = self.client.get('/api/users/list')
+        self.assertEqual(resp.status_code, 200)
+        users = resp.json()['users']
+        self.assertEqual(users[0]['username'], 'a')
+        # /list reports picks/votes from the DB; sessions is fixed at 0.
+        self.assertEqual(users[0]['stats'],
+                         {'picks': 4, 'votes': 7, 'sessions': 0})
+
+    def test_list_users_error_500(self):
+        with patch.object(gapi_gui.user_manager, 'get_all_users',
+                          return_value=[{'username': 'a', 'created_at': None}]), \
+             patch.object(gapi_gui.database, 'SessionLocal',
+                          side_effect=RuntimeError('boom')):
             resp = self.client.get('/api/users/list')
         self.assertEqual(resp.status_code, 500)
         self.assertIn('Failed to list users', resp.json()['error'])
@@ -233,9 +249,33 @@ class UserListAndProfileTest(_AuthedCase):
             resp = self.client.get('/api/users/ghost/profile')
         self.assertEqual(resp.status_code, 404)
 
-    def test_profile_existing_user_latent_500(self):
+    def test_profile_existing_user_returns_stats(self):
         with patch.object(gapi_gui.user_manager, 'get_all_users',
-                          return_value=[{'username': 'bob', 'created_at': None}]):
+                          return_value=[{'username': 'bob', 'created_at': None}]), \
+             patch.object(gapi_gui.database, 'SessionLocal',
+                          return_value=MagicMock()), \
+             patch.object(gapi_gui.database, 'get_user_activity_counts',
+                          return_value={'picks': 12, 'votes': 30, 'sessions': 6}), \
+             patch.object(gapi_gui.database, 'get_user_vote_accuracy',
+                          return_value=85):
+            resp = self.client.get('/api/users/bob/profile')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body['username'], 'bob')
+        self.assertEqual(body['stats'], {
+            'sessions_hosted': 6, 'picks': 12, 'votes': 30, 'accuracy': 85})
+        # Derived achievements: 10+ picks, 25+ votes, 5+ sessions, 80+ accuracy.
+        names = {a['name'] for a in body['achievements']}
+        self.assertIn('First 10 Picks', names)
+        self.assertIn('Decision Maker', names)
+        self.assertIn('Session Host', names)
+        self.assertIn('Voting Legend', names)
+
+    def test_profile_error_500(self):
+        with patch.object(gapi_gui.user_manager, 'get_all_users',
+                          return_value=[{'username': 'bob', 'created_at': None}]), \
+             patch.object(gapi_gui.database, 'SessionLocal',
+                          side_effect=RuntimeError('boom')):
             resp = self.client.get('/api/users/bob/profile')
         self.assertEqual(resp.status_code, 500)
 

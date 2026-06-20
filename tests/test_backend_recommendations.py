@@ -83,26 +83,41 @@ class BackendRecommendationsTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
         self.assertIn('Failed to generate', resp.json()['error'])
 
-    # --- /ai (db_service undefined in prod -> default set) --------------
+    # --- /ai (reads ai_recommendations via the SQLAlchemy layer) --------
 
-    def test_ai_returns_defaults(self):
-        # db_service is undefined in production, so /ai falls back to defaults.
-        resp = self.client.get('/api/recommendations/ai')
+    def test_ai_returns_defaults_when_no_cached_recs(self):
+        # No cached recommendations -> fall back to the default set.
+        from unittest.mock import MagicMock
+        with patch.object(gapi_gui.database, 'SessionLocal',
+                          return_value=MagicMock()), \
+             patch.object(gapi_gui.database, 'get_ai_recommendations',
+                          return_value=[]):
+            resp = self.client.get('/api/recommendations/ai')
         self.assertEqual(resp.status_code, 200)
         names = [r['name'] for r in resp.json()['recommendations']]
         self.assertIn('Baldurs Gate 3', names)
 
-    def test_ai_uses_db_service_when_available(self):
-        # When a db_service is wired, /ai reads the ai_recommendations table.
-        cursor = SimpleNamespace(
-            fetchall=lambda: [('Hades', 92, 'Roguelike you might like')])
-        db = SimpleNamespace(execute=lambda q, p=None: cursor)
-        svc = SimpleNamespace(get_db=lambda: db,
-                              get_current_user=lambda u: SimpleNamespace(id=1))
-        with patch.object(gapi_gui, 'db_service', svc, create=True):
+    def test_ai_returns_cached_recommendations(self):
+        # When the ai_recommendations table has rows for the user, return them.
+        from unittest.mock import MagicMock
+        recs = [{'id': '1', 'name': 'Hades', 'match_score': 92,
+                 'reason': 'Roguelike you might like'}]
+        with patch.object(gapi_gui.database, 'SessionLocal',
+                          return_value=MagicMock()), \
+             patch.object(gapi_gui.database, 'get_ai_recommendations',
+                          return_value=recs):
             resp = self.client.get('/api/recommendations/ai')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()['recommendations'][0]['name'], 'Hades')
+
+    def test_ai_returns_defaults_on_db_error(self):
+        # A DB error during the lookup still yields the safe default set (200).
+        with patch.object(gapi_gui.database, 'SessionLocal',
+                          side_effect=RuntimeError('boom')):
+            resp = self.client.get('/api/recommendations/ai')
+        self.assertEqual(resp.status_code, 200)
+        names = [r['name'] for r in resp.json()['recommendations']]
+        self.assertIn('Baldurs Gate 3', names)
 
 
 if __name__ == '__main__':
