@@ -514,6 +514,24 @@ active.
 
 Latent-500/stub fakery removed from these routers. Full suite: **2579 passed**.
 
+### Batch 2 — marketplace + engagement + storefront
+
+**✅ marketplace** → `backend/models/market.py` + `market_service.py`: real listings +
+offers (`Feature*`-prefixed to avoid legacy `MarketOffer` collision).
+
+**✅ engagement** (battlepass, creator, referral, streaming, progression, ranked) →
+`backend/models/engagement.py` + `engagement_service.py`: lazy-created per-user state,
+real claim/redeem rules (403/404/409), `Engagement*`-prefixed models.
+
+**✅ storefront** (shop, events, cosmetics) → `backend/models/storefront.py` +
+`storefront_service.py`: seeded catalogs, one-time purchase/claim (409), theme upsert,
+`Storefront*`-prefixed models.
+
+**All stub domains are now real persistent features.** Each prefixed its ORM
+classes/tables to coexist with same-named legacy classes on the shared `Base`.
+Full suite: **2604 passed**. (`i18n`, `twitch`, `anticheat` remain simple read/
+config endpoints by design.)
+
 ---
 
 ## Frontend (Phase 4, started)
