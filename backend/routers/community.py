@@ -50,8 +50,13 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
 
+import database
 import gapi_gui
 from backend.dependencies import require_login
+# Importing the model module registers the community ORM models on the shared
+# Base so the create_all hook in backend.main creates their tables.
+from backend.models import community as community_models  # noqa: F401
+from app.services import community_service
 
 guilds_router = APIRouter(prefix="/api/guilds", tags=["guilds"])
 teams_router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -74,173 +79,139 @@ def _ok(content, status_code=200):
 
 @guilds_router.get("")
 def api_list_guilds(username: str = Depends(require_login)):
-    """List guilds."""
+    """List guilds: the user's own guild plus recommendations."""
+    db = database.SessionLocal()
     try:
-        return _ok({
-            'my_guild': {
-                'name': 'Shadow Legends',
-                'level': 15,
-                'members': 48,
-                'treasury': 250000,
-                'role': 'officer',
-                'tax_rate': 15
-            },
-            'recommended_guilds': [
-                {'name': 'Phoenix Union', 'level': 12, 'members': 50, 'recruiting': True},
-                {'name': 'Dragon Slayers', 'level': 18, 'members': 45, 'recruiting': True},
-            ]
-        })
-    except Exception:
+        data = community_service.list_guilds_for_user(db, username)
+        return _ok(data)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error loading guilds: %s", e)
         return _err(500, 'Guild data unavailable')
+    finally:
+        db.close()
 
 
 @guilds_router.post("/create")
 def api_create_guild(body: Optional[dict] = Body(default=None),
                      username: str = Depends(require_login)):
-    """Create a new guild."""
+    """Create a new guild (creator auto-joins as owner)."""
     data = body or {}
-    name = data.get('name', '')
+    name = str(data.get('name', '') or '').strip()
+    description = str(data.get('description', '') or '')
 
+    db = database.SessionLocal()
     try:
-        return _ok({'success': True, 'message': f'Guild "{name}" created!', 'guild_id': 99})
-    except Exception:
-        return _ok({'success': True, 'message': 'Guild created (mock)'})
+        guild = community_service.create_guild(db, username, name, description)
+        return _ok({'success': True, 'message': f'Guild "{guild.name}" created!',
+                    'guild_id': guild.id})
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error creating guild: %s", e)
+        return _err(500, 'Failed to create guild')
+    finally:
+        db.close()
 
 
 @guilds_router.post("/{guild_id}/join")
-def api_join_guild(guild_id: str, username: str = Depends(require_login)):
-    """Join a guild."""
+def api_join_guild(guild_id: int, username: str = Depends(require_login)):
+    """Join a guild (idempotent)."""
+    db = database.SessionLocal()
     try:
+        community_service.join_guild(db, guild_id, username)
         return _ok({'success': True, 'message': 'Guild joined successfully!'})
-    except Exception:
-        return _ok({'success': True, 'message': 'Joined guild (mock)'})
+    except LookupError:
+        return _err(404, 'Guild not found')
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error joining guild: %s", e)
+        return _err(500, 'Failed to join guild')
+    finally:
+        db.close()
 
 
 # ── teams ───────────────────────────────────────────────────────────────────
 
 @teams_router.get("")
 def api_get_teams(username: str = Depends(require_login)):
-    """Get available teams."""
-    g = gapi_gui
+    """Get available teams with membership info for the current user."""
+    db = database.SessionLocal()
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
-
-        # Get all teams with member count
-        teams_query = """
-            SELECT t.id, t.name, t.leader_id, t.max_members, t.win_rate,
-                   COUNT(DISTINCT tm.user_id) as member_count,
-                   (SELECT COUNT(*) FROM team_memberships WHERE team_id = t.id AND user_id = ?) as is_member
-            FROM teams t
-            LEFT JOIN team_memberships tm ON t.id = tm.team_id
-            GROUP BY t.id, t.name, t.leader_id, t.max_members, t.win_rate
-            LIMIT 10
-        """
-        teams_rows = db.execute(teams_query, (user.id,)).fetchall()
-
-        teams = []
-        colors = ['#667eea', '#764ba2', '#f39c12', '#e74c3c', '#1abc9c']
-        for idx, row in enumerate(teams_rows):
-            team_id, name, leader_id, max_members, win_rate, member_count, is_member = row
-            teams.append({
-                'id': str(team_id),
-                'name': name,
-                'color': colors[idx % len(colors)],
-                'members': list(range(member_count)),  # simplified
-                'max_members': max_members,
-                'winrate': int(win_rate) if win_rate else 50,
-                'is_member': bool(is_member)
-            })
-
+        teams = community_service.list_teams_for_user(db, username)
         return _ok({'teams': teams})
     except Exception as e:
-        g.gui_logger.error(f"Error loading teams: {e}")
-        # Mock teams
-        teams = [
-            {'id': '1', 'name': 'Elite Gaming Squad', 'color': '#667eea', 'members': ['user1', 'user2', 'user3'], 'max_members': 5, 'winrate': 68, 'is_member': True},
-        ]
-        return _ok({'teams': teams})
+        gapi_gui.gui_logger.error("Error loading teams: %s", e)
+        return _ok({'teams': []})
+    finally:
+        db.close()
 
 
 @teams_router.post("/create")
 def api_create_team(body: Optional[dict] = Body(default=None),
                     username: str = Depends(require_login)):
-    """Create a new team."""
+    """Create a new team (creator auto-joins as a member)."""
     g = gapi_gui
     data = body or {}
-    name = data.get('name', '')
+    name = str(data.get('name', '') or '').strip()
 
     if not name:
         return _err(400, 'Team name required')
 
+    db = database.SessionLocal()
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
+        team = community_service.create_team(db, username, name)
+        team_id = str(team.id)
 
-        # Create team
-        insert_query = "INSERT INTO teams (name, leader_id) VALUES (?, ?)"
-        result = db.execute(insert_query, (name, user.id))
-        db.commit()
-
-        team_id = result.lastrowid
-
-        # Add creator as leader
-        member_query = "INSERT INTO team_memberships (user_id, team_id, role) VALUES (?, ?, 'leader')"
-        db.execute(member_query, (user.id, team_id))
-        db.commit()
-
-        # Broadcast team creation event
+        # Broadcast team creation event (preserved best-effort behaviour).
         if g.REALTIME_AVAILABLE:
             try:
                 g.realtime.RealtimeEvents.team_notification(
                     username=username,
                     event_type='team_created',
-                    team_name=name,
-                    data={'team_id': str(team_id), 'leader': username}
+                    team_name=team.name,
+                    data={'team_id': team_id, 'leader': username}
                 )
             except Exception as e:
                 g.gui_logger.warning(f'Failed to broadcast team creation: {e}')
 
-        return _ok({'success': True, 'message': f'Team "{name}" created', 'team_id': str(team_id)})
+        return _ok({'success': True, 'message': f'Team "{team.name}" created',
+                    'team_id': team_id})
+    except ValueError as e:
+        return _err(400, str(e))
     except Exception as e:
         g.gui_logger.error(f"Error creating team: {e}")
-        return _ok({'success': True, 'message': f'Team created (mock)', 'team_id': '4'})
+        return _err(500, 'Failed to create team')
+    finally:
+        db.close()
 
 
 @teams_router.post("/{team_id}/join")
-def api_join_team(team_id: str, username: str = Depends(require_login)):
-    """Join a team."""
+def api_join_team(team_id: int, username: str = Depends(require_login)):
+    """Join a team (idempotent)."""
     g = gapi_gui
+    db = database.SessionLocal()
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
+        team = community_service.join_team(db, team_id, username)
 
-        # Add user to team
-        insert_query = "INSERT INTO team_memberships (user_id, team_id, role) VALUES (?, ?, 'member')"
-        db.execute(insert_query, (user.id, int(team_id)))
-        db.commit()
-
-        # Get team name for notification
-        team_query = "SELECT name FROM teams WHERE id = ?"
-        team_result = db.execute(team_query, (int(team_id),)).fetchone()
-        team_name = team_result[0] if team_result else f'Team {team_id}'
-
-        # Broadcast team join event
+        # Broadcast team join event (preserved best-effort behaviour).
         if g.REALTIME_AVAILABLE:
             try:
                 g.realtime.RealtimeEvents.team_notification(
                     username=username,
                     event_type='team_joined',
-                    team_name=team_name,
+                    team_name=team.name,
                     data={'team_id': str(team_id), 'member': username}
                 )
             except Exception as e:
                 g.gui_logger.warning(f'Failed to broadcast team join: {e}')
 
         return _ok({'success': True, 'message': 'Joined team successfully'})
+    except LookupError:
+        return _err(404, 'Team not found')
     except Exception as e:
         g.gui_logger.error(f"Error joining team: {e}")
-        return _ok({'success': True, 'message': 'Joined team (mock)'})
+        return _err(500, 'Failed to join team')
+    finally:
+        db.close()
 
 
 # ── market ──────────────────────────────────────────────────────────────────
