@@ -197,10 +197,22 @@ remain in Flask.
 prefixes (incl. `/api/permissions`). The FastAPI handler sets the same header
 explicitly so the public-cacheability contract is preserved.
 
-**users domain is multi-chunk** (24 routes). Done: permissions, per-user email
-(`backend/routers/users.py`), and admin suspension/status/search
-(`users.py` `admin_router`). Remaining — core user CRUD (`/api/users`, add/
-update/remove/role/roles/delete), reputation, list/profile/online.
+**✅ users domain fully migrated** (multi-chunk). Done across chunks 1–5:
+permissions, per-user email, admin suspension/status/search, reputation, and the
+core user-management CRUD — `add`/`update`/`remove` (multi-picker), `role`/`roles`/
+`delete` (user_manager), `GET /api/roles`, `GET /api/users/list`,
+`GET /api/users/{username}/profile`, and `POST /api/user/profile`
+(`backend/routers/users.py`: `router` + `admin_router` + `extra_router`). No
+`/api/users*`, `/api/roles`, or `/api/user/profile` routes remain in Flask — the
+deprecated `/api/users/legacy` (multi_picker dump) is intentionally left behind.
+
+**Latent bug preserved (users list/profile):** `GET /api/users/list` and
+`GET /api/users/{username}/profile` reference the same never-defined module-global
+`db_service` behind the leaderboards/`/ai` 500s, so both always raised
+`NameError` -> 500 in production (profile 404s first for a missing user). The
+ports reproduce this via `gapi_gui.db_service` (AttributeError -> caught -> 500)
+while preserving the query/shaping for when a real `db_service` is wired; tests
+assert the 500 and the 404-precedence. Chunk 5 tests: `tests/test_backend_users_crud.py`.
 
 **✅ Recommendations fully migrated** (base + ml + smart + variant + ai). The ML/
 smart/variant test classes authenticated via `@patch('gapi_gui.current_user',...)`
