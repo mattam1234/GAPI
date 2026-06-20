@@ -88,40 +88,48 @@ class TestSecurityHeaders(unittest.TestCase):
 
 
 class TestSecurityInfoEndpoint(unittest.TestCase):
-    """GET /api/admin/security-info returns security feature flags."""
+    """GET /api/admin/security-info returns security feature flags.
+
+    Migrated to FastAPI (backend/routers/admin_ops.py); drives the FastAPI
+    TestClient against the shared Flask session cookie.
+    """
 
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
+        self.client = TestClient(fastapi_app)
+
+    def _login_admin(self):
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'admin'}))
 
     def test_security_info_requires_admin(self):
         resp = self.client.get('/api/admin/security-info')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_security_info_returns_flags(self):
+        self._login_admin()
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/security-info')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('compression_enabled', data)
         self.assertIn('rate_limiting_enabled', data)
         self.assertIn('security_headers_enabled', data)
 
     def test_security_headers_always_enabled(self):
+        self._login_admin()
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/security-info')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['security_headers_enabled'])
 
     def test_security_info_booleans(self):
         """All values in the response must be booleans."""
+        self._login_admin()
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/security-info')
-        data = json.loads(resp.data)
+        data = resp.json()
         for key, value in data.items():
             self.assertIsInstance(value, bool, f'{key} should be bool')
 
