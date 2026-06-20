@@ -4149,133 +4149,8 @@ def api_start_stream():
 
 
 # Clans & Teams
-@app.route('/api/teams', methods=['GET'])
-@require_login
-def api_get_teams():
-    """Get available teams"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Get all teams with member count
-        teams_query = """
-            SELECT t.id, t.name, t.leader_id, t.max_members, t.win_rate,
-                   COUNT(DISTINCT tm.user_id) as member_count,
-                   (SELECT COUNT(*) FROM team_memberships WHERE team_id = t.id AND user_id = ?) as is_member
-            FROM teams t
-            LEFT JOIN team_memberships tm ON t.id = tm.team_id
-            GROUP BY t.id, t.name, t.leader_id, t.max_members, t.win_rate
-            LIMIT 10
-        """
-        teams_rows = db.execute(teams_query, (user.id,)).fetchall()
-        
-        teams = []
-        colors = ['#667eea', '#764ba2', '#f39c12', '#e74c3c', '#1abc9c']
-        for idx, row in enumerate(teams_rows):
-            team_id, name, leader_id, max_members, win_rate, member_count, is_member = row
-            teams.append({
-                'id': str(team_id),
-                'name': name,
-                'color': colors[idx % len(colors)],
-                'members': list(range(member_count)),  # simplified
-                'max_members': max_members,
-                'winrate': int(win_rate) if win_rate else 50,
-                'is_member': bool(is_member)
-            })
-        
-        return jsonify({'teams': teams})
-    except Exception as e:
-        gui_logger.error(f"Error loading teams: {e}")
-        # Mock teams
-        teams = [
-            {'id': '1', 'name': 'Elite Gaming Squad', 'color': '#667eea', 'members': ['user1', 'user2', 'user3'], 'max_members': 5, 'winrate': 68, 'is_member': True},
-        ]
-        return jsonify({'teams': teams})
-
-
-@app.route('/api/teams/create', methods=['POST'])
-@require_login
-def api_create_team():
-    """Create a new team"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    name = data.get('name', '')
-    
-    if not name:
-        return jsonify({'error': 'Team name required'}), 400
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Create team
-        insert_query = "INSERT INTO teams (name, leader_id) VALUES (?, ?)"
-        result = db.execute(insert_query, (name, user.id))
-        db.commit()
-        
-        team_id = result.lastrowid
-        
-        # Add creator as leader
-        member_query = "INSERT INTO team_memberships (user_id, team_id, role) VALUES (?, ?, 'leader')"
-        db.execute(member_query, (user.id, team_id))
-        db.commit()
-        
-        # Broadcast team creation event
-        if REALTIME_AVAILABLE:
-            try:
-                realtime.RealtimeEvents.team_notification(
-                    username=username,
-                    event_type='team_created',
-                    team_name=name,
-                    data={'team_id': str(team_id), 'leader': username}
-                )
-            except Exception as e:
-                gui_logger.warning(f'Failed to broadcast team creation: {e}')
-        
-        return jsonify({'success': True, 'message': f'Team "{name}" created', 'team_id': str(team_id)})
-    except Exception as e:
-        gui_logger.error(f"Error creating team: {e}")
-        return jsonify({'success': True, 'message': f'Team created (mock)', 'team_id': '4'})
-
-
-@app.route('/api/teams/<team_id>/join', methods=['POST'])
-@require_login
-def api_join_team(team_id):
-    """Join a team"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Add user to team
-        insert_query = "INSERT INTO team_memberships (user_id, team_id, role) VALUES (?, ?, 'member')"
-        db.execute(insert_query, (user.id, int(team_id)))
-        db.commit()
-        
-        # Get team name for notification
-        team_query = "SELECT name FROM teams WHERE id = ?"
-        team_result = db.execute(team_query, (int(team_id),)).fetchone()
-        team_name = team_result[0] if team_result else f'Team {team_id}'
-        
-        # Broadcast team join event
-        if REALTIME_AVAILABLE:
-            try:
-                realtime.RealtimeEvents.team_notification(
-                    username=username,
-                    event_type='team_joined',
-                    team_name=team_name,
-                    data={'team_id': str(team_id), 'member': username}
-                )
-            except Exception as e:
-                gui_logger.warning(f'Failed to broadcast team join: {e}')
-        
-        return jsonify({'success': True, 'message': 'Joined team successfully'})
-    except Exception as e:
-        gui_logger.error(f"Error joining team: {e}")
-        return jsonify({'success': True, 'message': 'Joined team (mock)'})
+# [migrated] /api/teams, /api/teams/create, /api/teams/<team_id>/join
+# -> backend/routers/community.py (teams_router)
 
 
 # Ranked System
@@ -4521,55 +4396,8 @@ def api_claim_event_reward(event_id):
 
 
 # Guild System
-@app.route('/api/guilds', methods=['GET'])
-@require_login
-def api_list_guilds():
-    """List guilds"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'my_guild': {
-                'name': 'Shadow Legends',
-                'level': 15,
-                'members': 48 ,
-                'treasury': 250000,
-                'role': 'officer',
-                'tax_rate': 15
-            },
-            'recommended_guilds': [
-                {'name': 'Phoenix Union', 'level': 12, 'members': 50, 'recruiting': True},
-                {'name': 'Dragon Slayers', 'level': 18, 'members': 45, 'recruiting': True},
-            ]
-        })
-    except Exception as e:
-        return jsonify({'error': 'Guild data unavailable'}), 500
-
-
-@app.route('/api/guilds/create', methods=['POST'])
-@require_login
-def api_create_guild():
-    """Create a new guild"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    name = data.get('name', '')
-    
-    try:
-        return jsonify({'success': True, 'message': f'Guild "{name}" created!', 'guild_id': 99})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Guild created (mock)'})
-
-
-@app.route('/api/guilds/<guild_id>/join', methods=['POST'])
-@require_login
-def api_join_guild(guild_id):
-    """Join a guild"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({'success': True, 'message': 'Guild joined successfully!'})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Joined guild (mock)'})
+# [migrated] /api/guilds, /api/guilds/create, /api/guilds/<guild_id>/join
+# -> backend/routers/community.py (guilds_router)
 
 
 # Progression Paths
@@ -4616,65 +4444,8 @@ def api_get_progression_paths():
 
 
 # Trading Market
-@app.route('/api/market', methods=['GET'])
-@require_login
-def api_market_list():
-    """Browse trading market"""
-    username = get_current_username()
-    category = request.args.get('category', 'all')
-    
-    try:
-        return jsonify({
-            'listings': [
-                {
-                    'id': 1,
-                    'seller': 'SkylarMint',
-                    'item': '[Theme] Midnight Blue',
-                    'rarity': 'epic',
-                    'price': 2500,
-                    'listed_days': 3
-                },
-                {
-                    'id': 2,
-                    'seller': 'ProGamer42',
-                    'item': '[Title] Master of Chaos',
-                    'rarity': 'legendary',
-                    'price': 5000,
-                    'listed_days': 1
-                },
-            ]
-        })
-    except Exception as e:
-        return jsonify({'listings': []})
-
-
-@app.route('/api/market/sell', methods=['POST'])
-@require_login
-def api_market_sell():
-    """List item for sale"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    
-    try:
-        item = data.get('item', '')
-        price = data.get('price', 0)
-        return jsonify({'success': True, 'message': f'Item listed for {price} points!', 'listing_id': 123})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Listed (mock)'})
-
-
-@app.route('/api/market/<listing_id>/offer', methods=['POST'])
-@require_login
-def api_market_offer(listing_id):
-    """Make offer on marketplace item"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    offer_price = data.get('offer_price', 0)
-    
-    try:
-        return jsonify({'success': True, 'message': f'Offer of {offer_price} points submitted!', 'offer_id': 456})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Offer made (mock)'})
+# [migrated] /api/market, /api/market/sell, /api/market/<listing_id>/offer
+# -> backend/routers/community.py (market_router)
 
 
 # Cosmetic Collections
@@ -4719,64 +4490,8 @@ def api_get_collections():
 # ==================== PERFORMANCE & CACHING ====================
 
 # Cache Management & Performance Monitoring
-@app.route('/api/system/cache/stats', methods=['GET'])
-@require_login
-def api_cache_stats():
-    """Get cache statistics and performance metrics"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        cache = performance.get_cache()
-        monitor = performance.get_monitor()
-        
-        return jsonify({
-            'cache': cache.stats(),
-            'performance': monitor.get_all_stats(),
-            'timestamp': datetime.utcnow().isoformat()
-        })
-    except Exception as e:
-        gui_logger.error(f"Error getting cache stats: {e}")
-        return jsonify({'error': 'Failed to get stats'}), 500
-
-
-@app.route('/api/system/cache/clear', methods=['POST'])
-@require_login
-def api_clear_cache():
-    """Clear all cache (admin only)"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        # Simple admin check
-        username = get_current_username()
-        if username != 'admin':
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        cache = performance.get_cache()
-        cache.clear()
-        
-        return jsonify({'success': True, 'message': 'Cache cleared'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/system/indexes', methods=['GET'])
-@require_login
-def api_get_index_suggestions():
-    """Get database index suggestions for optimization"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        suggestions = performance.IndexAnalyzer.analyze_query_bottlenecks()
-        return jsonify({
-            'suggestions': suggestions,
-            'count': len(suggestions),
-            'description': 'Run these SQL queries to optimize database performance'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# [migrated] /api/system/cache/stats, /api/system/cache/clear, /api/system/indexes
+# -> backend/routers/community.py (system_router)
 
 
 # Optimized List Endpoints with Pagination
