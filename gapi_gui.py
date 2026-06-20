@@ -3852,78 +3852,8 @@ def api_purchase_item():
 
 
 # Streaming Center
-@app.route('/api/streaming/vods', methods=['GET'])
-@require_login
-def api_get_vods():
-    """Get user's video library (VODs)"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        vod_query = """
-            SELECT id, title, duration, views FROM stream_vods 
-            WHERE user_id = ? 
-            ORDER BY created_at DESC LIMIT 20
-        """
-        vods_rows = db.execute(vod_query, (user.id,)).fetchall()
-        
-        vods = []
-        for vod_id, title, duration, views in vods_rows:
-            vods.append({
-                'id': str(vod_id),
-                'title': title,
-                'duration': duration,
-                'views': views
-            })
-        
-        return jsonify({'vods': vods})
-    except Exception as e:
-        gui_logger.error(f"Error loading VODs: {e}")
-        # Mock data fallback
-        vods = [
-            {'id': '1', 'title': 'Epic Gaming Session', 'duration': '2:45:30', 'views': 234},
-            {'id': '2', 'title': 'Tournament Highlights', 'duration': '1:15:45', 'views': 567},
-        ]
-        return jsonify({'vods': vods})
-
-
-@app.route('/api/streaming/start', methods=['POST'])
-@require_login
-def api_start_stream():
-    """Start a live stream"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    title = data.get('title', '')
-    
-    if not title:
-        return jsonify({'error': 'Stream title required'}), 400
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Create stream VOD record
-        insert_query = "INSERT INTO stream_vods (user_id, title, duration, vod_url) VALUES (?, ?, ?, ?)"
-        db.execute(insert_query, (user.id, title, '0:00:00', 'rtmp://twitch.tv/...'))
-        db.commit()
-        
-        # Broadcast stream started event
-        if REALTIME_AVAILABLE:
-            try:
-                realtime.RealtimeEvents.stream_started(
-                    username=username,
-                    title=title,
-                    url='rtmp://twitch.tv/...'
-                )
-            except Exception as e:
-                gui_logger.warning(f'Failed to broadcast stream start: {e}')
-        
-        return jsonify({'success': True, 'message': 'Stream started', 'stream_url': 'rtmp://twitch.tv/...'})
-    except Exception as e:
-        gui_logger.error(f"Error starting stream: {e}")
-        return jsonify({'success': True, 'message': 'Stream started (mock)', 'stream_url': 'rtmp://twitch.tv/...'})
+# [migrated] /api/streaming/vods, /api/streaming/start
+# -> backend/routers/engagement.py (streaming_router)
 
 
 # Trading System
@@ -3940,46 +3870,7 @@ def api_start_stream():
 
 
 # Ranked System
-@app.route('/api/ranked', methods=['GET'])
-@require_login
-def api_get_ranked():
-    """Get ranked tier information"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Get or create ranked rating
-        ranked_query = "SELECT tier, tier_level FROM ranked_ratings WHERE user_id = ?"
-        ranked = db.execute(ranked_query, (user.id,)).fetchone()
-        
-        if ranked:
-            tier, tier_level = ranked
-        else:
-            tier, tier_level = 'bronze', 1
-        
-        tiers = ['Bronze', 'Silver', 'Gold', 'Diamond', 'Master']
-        tier_index = tiers.index(tier.capitalize()) if tier.lower() in [t.lower() for t in tiers] else 0
-        
-        return jsonify({
-            'current_tier_index': tier_index,
-            'current_rank': f'{tier.capitalize()} {tier_level}',
-            'current_rank_emoji': ['🥚', '🥈', '🥇', '💎', '👑'][tier_index],
-            'rating_points': 2450,
-            'rating_points_needed': 3000,
-            'tiers': tiers
-        })
-    except Exception as e:
-        gui_logger.error(f"Error loading ranked: {e}")
-        return jsonify({
-            'current_tier_index': 1,
-            'current_rank': 'Silver II',
-            'current_rank_emoji': '🥈',
-            'rating_points': 2450,
-            'rating_points_needed': 3000,
-            'tiers': ['Bronze', 'Silver', 'Gold', 'Diamond', 'Master']
-        })
+# [migrated] /api/ranked -> backend/routers/engagement.py (ranked_router)
 
 
 # Anti-Cheat Dashboard
@@ -4023,46 +3914,8 @@ def api_get_anticheat_info():
 # ==================== PHASE 7: Advanced Features ====================
 
 # Battle Pass System
-@app.route('/api/battlepass/current', methods=['GET'])
-@require_login
-def api_get_current_battlepass():
-    """Get current battle pass info"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'battle_pass': {
-                'name': 'Season 5: Storm Rising',
-                'season': 5,
-                'current_level': 47,
-                'experience': 8250,
-                'exp_to_next': 1750,
-                'max_level': 100,
-                'has_premium': True,
-                'days_remaining': 23
-            },
-            'rewards': [
-                {'level': 10, 'reward': '[Title] Storm Chaser', 'type': 'title'},
-                {'level': 25, 'reward': '500 Points', 'type': 'currency'},
-                {'level': 50, 'reward': '[Theme] Dark Storm', 'type': 'cosmetic'},
-                {'level': 100, 'reward': '[Frame] Legendary Guardian', 'type': 'cosmetic'},
-            ]
-        })
-    except Exception as e:
-        gui_logger.error(f"Error getting battle pass: {e}")
-        return jsonify({'error': 'Failed to load battle pass'}), 500
-
-
-@app.route('/api/battlepass/claim/<level>', methods=['POST'])
-@require_login
-def api_claim_battlepass_reward(level):
-    """Claim battle pass reward"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({'success': True, 'message': f'Reward for level {level} claimed!', 'item': '[Title] Storm Chaser'})
-    except Exception as e:
-        return jsonify({'success': True, 'message': f'Reward claimed (mock)'})
+# [migrated] /api/battlepass/current, /api/battlepass/claim/<level>
+# -> backend/routers/engagement.py (battlepass_router)
 
 
 # Tournaments: MIGRATED to FastAPI -> backend/routers/tournaments.py
@@ -4070,68 +3923,13 @@ def api_claim_battlepass_reward(level):
 
 
 # Content Creator Program
-@app.route('/api/creator/dashboard', methods=['GET'])
-@require_login
-def api_creator_dashboard():
-    """Creator program dashboard stats"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'tier': 'gold',
-            'followers': 125800,
-            'total_views': 2450000,
-            'revenue_share': 30,
-            'this_month_earnings': 3250,
-            'status': 'verified',
-            'next_tier_followers': 500000
-        })
-    except Exception as e:
-        return jsonify({'error': 'Creator data not available'}), 500
-
-
-@app.route('/api/creator/apply', methods=['POST'])
-@require_login
-def api_apply_creator():
-    """Apply for creator program"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    
-    try:
-        return jsonify({'success': True, 'message': 'Application submitted for review', 'status': 'pending'})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Applied (mock)'})
+# [migrated] /api/creator/dashboard, /api/creator/apply
+# -> backend/routers/engagement.py (creator_router)
 
 
 # Referral System
-@app.route('/api/referral/code', methods=['GET'])
-@require_login
-def api_get_referral_code():
-    """Get user's referral code"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'code': f'REFER{username.upper()}123',
-            'reward_per_use': 500,
-            'total_uses': 12,
-            'total_earned': 6000,
-            'active': True
-        })
-    except Exception as e:
-        return jsonify({'error': 'Referral system not available'}), 500
-
-
-@app.route('/api/referral/use/<code>', methods=['POST'])
-@require_login
-def api_use_referral_code(code):
-    """Use a referral code"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({'success': True, 'message': f'Gained 500 points from referral!', 'points_gained': 500})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Referral applied (mock)'})
+# [migrated] /api/referral/code, /api/referral/use/<code>
+# -> backend/routers/engagement.py (referral_router)
 
 
 # Seasonal Events
@@ -4187,46 +3985,7 @@ def api_claim_event_reward(event_id):
 
 
 # Progression Paths
-@app.route('/api/progression', methods=['GET'])
-@require_login
-def api_get_progression_paths():
-    """Get available progression paths"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'paths': [
-                {
-                    'id': 1,
-                    'name': 'Competitive Player',
-                    'description': 'Master competitive gameplay',
-                    'current_step': 5,
-                    'total_steps': 10,
-                    'progress': 50,
-                    'next_reward': '[Title] Rank Master'
-                },
-                {
-                    'id': 2,
-                    'name': 'Streamer Path',
-                    'description': 'Build your streaming career',
-                    'current_step': 2,
-                    'total_steps': 10,
-                    'progress': 20,
-                    'next_reward': '[Frame] Broadcaster Elite'
-                },
-                {
-                    'id': 3,
-                    'name': 'Collector',
-                    'description': 'Collect all cosmetics',
-                    'current_step': 8,
-                    'total_steps': 15,
-                    'progress': 53,
-                    'next_reward': '[Theme] Collector\'s Gold'
-                },
-            ]
-        })
-    except Exception as e:
-        return jsonify({'paths': []})
+# [migrated] /api/progression -> backend/routers/engagement.py (progression_router)
 
 
 # Trading Market
