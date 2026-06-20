@@ -2194,41 +2194,7 @@ def api_history_legacy():
 # First-time Setup Endpoints
 # ===========================================================================================
 
-@app.route('/api/filters/platform-options', methods=['GET'])
-@require_login
-def api_filter_platform_options():
-    """Return platform/device filter options limited to user-configured platforms."""
-    username = get_current_username()
-
-    users_param = request.args.get('users', '').strip()
-    requested_users = [u.strip() for u in users_param.split(',') if u.strip()] if users_param else []
-    usernames = requested_users or ([username] if username else [])
-
-    platforms = _collect_available_platforms(usernames)
-    platform_items = [
-        {
-            'value': platform,
-            'label': platform.title(),
-            'device': classify_device_for_platform(platform)
-        }
-        for platform in platforms
-    ]
-
-    device_values = sorted({
-        item['device'] for item in platform_items if item['device'] in {'pc', 'console'}
-    })
-    device_items = [
-        {
-            'value': device,
-            'label': 'PC' if device == 'pc' else 'Console'
-        }
-        for device in device_values
-    ]
-
-    return jsonify({
-        'platforms': platform_items,
-        'devices': device_items
-    })
+# MIGRATED to FastAPI: GET /api/filters/platform-options -> backend/routers/catalog.py (filters_router)
 
 
 def _game_identity_tokens(game: Optional[Dict]) -> Set[str]:
@@ -2267,45 +2233,7 @@ def _game_identity_tokens(game: Optional[Dict]) -> Set[str]:
 # MIGRATED to FastAPI: GET /api/game/<int:app_id>/details -> backend/routers/game.py
 
 
-@app.route('/api/favorite/<int:app_id>', methods=['POST', 'DELETE'])
-@require_login
-def api_toggle_favorite(app_id):
-    """Add or remove a game from favorites"""
-    if not ensure_db_available():
-        return jsonify({'error': 'Database not available'}), 503
-
-    global current_user
-    username = get_current_username()
-
-    if not username:
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    try:
-        db = database.SessionLocal()
-        try:
-            if request.method == 'POST':
-                if _db_favorites_service:
-                    success = _db_favorites_service.add(db, username, str(app_id))
-                else:
-                    success = database.add_favorite(db, username, str(app_id))
-                if success:
-                    return jsonify({'success': True, 'action': 'added'})
-                else:
-                    return jsonify({'error': 'Failed to add favorite'}), 500
-            else:
-                if _db_favorites_service:
-                    success = _db_favorites_service.remove(db, username, str(app_id))
-                else:
-                    success = database.remove_favorite(db, username, str(app_id))
-                if success:
-                    return jsonify({'success': True, 'action': 'removed'})
-                else:
-                    return jsonify({'error': 'Failed to remove favorite'}), 500
-        finally:
-            db.close()
-    except Exception as e:
-        gui_logger.error(f"Error toggling favorite: {e}")
-        return jsonify({'error': 'Failed to toggle favorite'}), 500
+# MIGRATED to FastAPI: POST/DELETE /api/favorite/<int:app_id> -> backend/routers/catalog.py (favorite_router)
 
 
 @app.route('/api/library')
@@ -2567,61 +2495,7 @@ def api_run_migration():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/favorites')
-@require_login
-def api_favorites():
-    """Get all favorite games"""
-    if not ensure_db_available():
-        return jsonify({'error': 'Database not available'}), 503
-
-    global current_user
-    username = get_current_username()
-
-    if not username:
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    try:
-        db = database.SessionLocal()
-        try:
-            if _db_favorites_service:
-                favorite_ids = _db_favorites_service.get_all(db, username)
-            else:
-                favorite_ids = database.get_user_favorites(db, username)
-
-            # Get cached library to look up game details
-            if _library_service:
-                cached_games = _library_service.get_cached(db, username)
-            else:
-                cached_games = database.get_cached_library(db, username)
-        finally:
-            db.close()
-
-        favorites = []
-        for app_id in favorite_ids:
-            game = next((g for g in cached_games if str(g.get('app_id')) == str(app_id)), None)
-            if game:
-                favorites.append({
-                    'app_id': app_id,
-                    'game_id': game.get('game_id') or f"steam:{app_id}",
-                    'name': game.get('name', 'Unknown'),
-                    'playtime_hours': round(game.get('playtime_hours', 0), 1),
-                    'platform': game.get('platform', 'steam'),
-                    'tags': game.get('tags', []),
-                })
-            else:
-                favorites.append({
-                    'app_id': app_id,
-                    'game_id': f"steam:{app_id}",
-                    'name': f'App ID {app_id} (Not in library)',
-                    'playtime_hours': 0,
-                    'platform': 'steam',
-                    'tags': [],
-                })
-
-        return jsonify({'favorites': favorites})
-    except Exception as e:
-        gui_logger.error(f"Error loading favorites: {e}")
-        return jsonify({'error': 'Failed to load favorites'}), 500
+# MIGRATED to FastAPI: GET /api/favorites -> backend/routers/catalog.py (favorites_router)
 
 
 # MIGRATED to FastAPI: see backend/routers/social_stats.py. The /api/stats
@@ -3747,18 +3621,7 @@ def api_get_challenges():
     return jsonify({'themes': themes, 'titles': titles})
 
 
-@app.route('/api/cosmetics/apply-theme', methods=['POST'])
-@require_login
-def api_apply_theme():
-    """Apply a theme to user profile"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    theme_id = data.get('theme_id')
-    
-    if not theme_id:
-        return jsonify({'error': 'Theme ID required'}), 400
-    
-    return jsonify({'success': True, 'message': 'Theme applied'})
+# MIGRATED to FastAPI: POST /api/cosmetics/apply-theme -> backend/routers/misc.py (cosmetics_router)
 
 
 # ---------------------------------------------------------------------------
@@ -3766,164 +3629,13 @@ def api_apply_theme():
 # ---------------------------------------------------------------------------
 
 # Shop & Marketplace
-@app.route('/api/shop', methods=['GET'])
-@require_login
-def api_shop():
-    """Get shop items for purchase"""
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(get_current_username())
-        
-        # Get all shop items
-        items_query = "SELECT id, name, icon, price, currency, premium FROM shop_items ORDER BY premium DESC"
-        items = db.execute(items_query).fetchall()
-        
-        # Get user's owned items
-        owned_query = "SELECT item_id FROM user_inventory WHERE user_id = ?"
-        owned_ids = set(row[0] for row in db.execute(owned_query, (user.id,)).fetchall())
-        
-        result = []
-        for item_id, name, icon, price, currency, premium in items:
-            result.append({
-                'id': str(item_id),
-                'icon': icon,
-                'name': name,
-                'price': price,
-                'currency': currency,
-                'premium': premium,
-                'owned': item_id in owned_ids
-            })
-        return jsonify({'items': result})
-    except Exception as e:
-        gui_logger.error(f"Error loading shop: {e}")
-        # Return mock data if DB unavailable
-        items = [
-            {'id': '1', 'icon': '🎨', 'name': 'Dark Neon Theme', 'price': 500, 'currency': 'xp', 'premium': False, 'owned': False},
-            {'id': '2', 'icon': '👑', 'name': 'Legendary Title', 'price': 100, 'currency': 'coins', 'premium': True, 'owned': False},
-        ]
-        return jsonify({'items': items})
-
-
-@app.route('/api/shop/purchase', methods=['POST'])
-@require_login
-def api_purchase_item():
-    """Purchase item from shop"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    item_id = data.get('item_id', '')
-    
-    if not item_id:
-        return jsonify({'error': 'Item ID required'}), 400
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Check if already owned
-        owned_query = "SELECT 1 FROM user_inventory WHERE user_id = ? AND item_id = ?"
-        if db.execute(owned_query, (user.id, int(item_id))).fetchone():
-            return jsonify({'error': 'Already owned'}), 400
-        
-        # Get item details
-        item_query = "SELECT name FROM shop_items WHERE id = ?"
-        item_result = db.execute(item_query, (int(item_id),)).fetchone()
-        item_name = item_result[0] if item_result else f'Item {item_id}'
-        
-        # Add to inventory
-        insert_query = "INSERT INTO user_inventory (user_id, item_id) VALUES (?, ?)"
-        db.execute(insert_query, (user.id, int(item_id)))
-        db.commit()
-        
-        # Broadcast shop purchase event
-        if REALTIME_AVAILABLE:
-            try:
-                realtime.RealtimeEvents.shop_purchase(
-                    username=username,
-                    item=item_name,
-                    item_type='cosmetic'
-                )
-            except Exception as e:
-                gui_logger.warning(f'Failed to broadcast shop purchase: {e}')
-        
-        return jsonify({'success': True, 'message': 'Purchase successful', 'new_balance': 1000})
-    except Exception as e:
-        gui_logger.error(f"Error purchasing item: {e}")
-        return jsonify({'success': True, 'message': 'Purchase successful (mock)', 'new_balance': 1000})
+# MIGRATED to FastAPI: GET /api/shop, POST /api/shop/purchase
+# -> backend/routers/misc.py (shop_router)
 
 
 # Streaming Center
-@app.route('/api/streaming/vods', methods=['GET'])
-@require_login
-def api_get_vods():
-    """Get user's video library (VODs)"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        vod_query = """
-            SELECT id, title, duration, views FROM stream_vods 
-            WHERE user_id = ? 
-            ORDER BY created_at DESC LIMIT 20
-        """
-        vods_rows = db.execute(vod_query, (user.id,)).fetchall()
-        
-        vods = []
-        for vod_id, title, duration, views in vods_rows:
-            vods.append({
-                'id': str(vod_id),
-                'title': title,
-                'duration': duration,
-                'views': views
-            })
-        
-        return jsonify({'vods': vods})
-    except Exception as e:
-        gui_logger.error(f"Error loading VODs: {e}")
-        # Mock data fallback
-        vods = [
-            {'id': '1', 'title': 'Epic Gaming Session', 'duration': '2:45:30', 'views': 234},
-            {'id': '2', 'title': 'Tournament Highlights', 'duration': '1:15:45', 'views': 567},
-        ]
-        return jsonify({'vods': vods})
-
-
-@app.route('/api/streaming/start', methods=['POST'])
-@require_login
-def api_start_stream():
-    """Start a live stream"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    title = data.get('title', '')
-    
-    if not title:
-        return jsonify({'error': 'Stream title required'}), 400
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Create stream VOD record
-        insert_query = "INSERT INTO stream_vods (user_id, title, duration, vod_url) VALUES (?, ?, ?, ?)"
-        db.execute(insert_query, (user.id, title, '0:00:00', 'rtmp://twitch.tv/...'))
-        db.commit()
-        
-        # Broadcast stream started event
-        if REALTIME_AVAILABLE:
-            try:
-                realtime.RealtimeEvents.stream_started(
-                    username=username,
-                    title=title,
-                    url='rtmp://twitch.tv/...'
-                )
-            except Exception as e:
-                gui_logger.warning(f'Failed to broadcast stream start: {e}')
-        
-        return jsonify({'success': True, 'message': 'Stream started', 'stream_url': 'rtmp://twitch.tv/...'})
-    except Exception as e:
-        gui_logger.error(f"Error starting stream: {e}")
-        return jsonify({'success': True, 'message': 'Stream started (mock)', 'stream_url': 'rtmp://twitch.tv/...'})
+# [migrated] /api/streaming/vods, /api/streaming/start
+# -> backend/routers/engagement.py (streaming_router)
 
 
 # Trading System
@@ -3940,129 +3652,18 @@ def api_start_stream():
 
 
 # Ranked System
-@app.route('/api/ranked', methods=['GET'])
-@require_login
-def api_get_ranked():
-    """Get ranked tier information"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        user = db_service.get_current_user(username)
-        
-        # Get or create ranked rating
-        ranked_query = "SELECT tier, tier_level FROM ranked_ratings WHERE user_id = ?"
-        ranked = db.execute(ranked_query, (user.id,)).fetchone()
-        
-        if ranked:
-            tier, tier_level = ranked
-        else:
-            tier, tier_level = 'bronze', 1
-        
-        tiers = ['Bronze', 'Silver', 'Gold', 'Diamond', 'Master']
-        tier_index = tiers.index(tier.capitalize()) if tier.lower() in [t.lower() for t in tiers] else 0
-        
-        return jsonify({
-            'current_tier_index': tier_index,
-            'current_rank': f'{tier.capitalize()} {tier_level}',
-            'current_rank_emoji': ['🥚', '🥈', '🥇', '💎', '👑'][tier_index],
-            'rating_points': 2450,
-            'rating_points_needed': 3000,
-            'tiers': tiers
-        })
-    except Exception as e:
-        gui_logger.error(f"Error loading ranked: {e}")
-        return jsonify({
-            'current_tier_index': 1,
-            'current_rank': 'Silver II',
-            'current_rank_emoji': '🥈',
-            'rating_points': 2450,
-            'rating_points_needed': 3000,
-            'tiers': ['Bronze', 'Silver', 'Gold', 'Diamond', 'Master']
-        })
+# [migrated] /api/ranked -> backend/routers/engagement.py (ranked_router)
 
 
 # Anti-Cheat Dashboard
-@app.route('/api/anticheat', methods=['GET'])
-@require_login
-def api_get_anticheat_info():
-    """Get anti-cheat integrity information"""
-    username = get_current_username()
-    
-    try:
-        db = db_service.get_db()
-        
-        # Calculate integrity score (simplified)
-        picks_query = "SELECT COUNT(*) FROM picks WHERE username = ?"
-        total_picks = db.execute(picks_query, (username,)).fetchone()[0]
-        
-        # Assume mostly clean picks (variance < 5%)
-        flagged_count = max(0, int(total_picks * 0.01))  # 1% flagged
-        integrity = 100 - (flagged_count / max(total_picks, 1) * 100)
-        
-        flagged_picks = [
-            {'session': 'Game Night #42', 'variance': 8.5, 'pick': 'Portal 2'},
-        ] if flagged_count > 0 else []
-        
-        return jsonify({
-            'integrity_score': round(integrity, 1),
-            'accuracy_variance': 2.1,
-            'response_time_ms': 145,
-            'flagged_picks': flagged_picks
-        })
-    except Exception as e:
-        gui_logger.error(f"Error getting anti-cheat info: {e}")
-        return jsonify({
-            'integrity_score': 99.2,
-            'accuracy_variance': 2.1,
-            'response_time_ms': 145,
-            'flagged_picks': []
-        })
+# MIGRATED to FastAPI: GET /api/anticheat -> backend/routers/misc.py (anticheat_router)
 
 
 # ==================== PHASE 7: Advanced Features ====================
 
 # Battle Pass System
-@app.route('/api/battlepass/current', methods=['GET'])
-@require_login
-def api_get_current_battlepass():
-    """Get current battle pass info"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'battle_pass': {
-                'name': 'Season 5: Storm Rising',
-                'season': 5,
-                'current_level': 47,
-                'experience': 8250,
-                'exp_to_next': 1750,
-                'max_level': 100,
-                'has_premium': True,
-                'days_remaining': 23
-            },
-            'rewards': [
-                {'level': 10, 'reward': '[Title] Storm Chaser', 'type': 'title'},
-                {'level': 25, 'reward': '500 Points', 'type': 'currency'},
-                {'level': 50, 'reward': '[Theme] Dark Storm', 'type': 'cosmetic'},
-                {'level': 100, 'reward': '[Frame] Legendary Guardian', 'type': 'cosmetic'},
-            ]
-        })
-    except Exception as e:
-        gui_logger.error(f"Error getting battle pass: {e}")
-        return jsonify({'error': 'Failed to load battle pass'}), 500
-
-
-@app.route('/api/battlepass/claim/<level>', methods=['POST'])
-@require_login
-def api_claim_battlepass_reward(level):
-    """Claim battle pass reward"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({'success': True, 'message': f'Reward for level {level} claimed!', 'item': '[Title] Storm Chaser'})
-    except Exception as e:
-        return jsonify({'success': True, 'message': f'Reward claimed (mock)'})
+# [migrated] /api/battlepass/current, /api/battlepass/claim/<level>
+# -> backend/routers/engagement.py (battlepass_router)
 
 
 # Tournaments: MIGRATED to FastAPI -> backend/routers/tournaments.py
@@ -4070,115 +3671,18 @@ def api_claim_battlepass_reward(level):
 
 
 # Content Creator Program
-@app.route('/api/creator/dashboard', methods=['GET'])
-@require_login
-def api_creator_dashboard():
-    """Creator program dashboard stats"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'tier': 'gold',
-            'followers': 125800,
-            'total_views': 2450000,
-            'revenue_share': 30,
-            'this_month_earnings': 3250,
-            'status': 'verified',
-            'next_tier_followers': 500000
-        })
-    except Exception as e:
-        return jsonify({'error': 'Creator data not available'}), 500
-
-
-@app.route('/api/creator/apply', methods=['POST'])
-@require_login
-def api_apply_creator():
-    """Apply for creator program"""
-    username = get_current_username()
-    data = request.get_json() or {}
-    
-    try:
-        return jsonify({'success': True, 'message': 'Application submitted for review', 'status': 'pending'})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Applied (mock)'})
+# [migrated] /api/creator/dashboard, /api/creator/apply
+# -> backend/routers/engagement.py (creator_router)
 
 
 # Referral System
-@app.route('/api/referral/code', methods=['GET'])
-@require_login
-def api_get_referral_code():
-    """Get user's referral code"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'code': f'REFER{username.upper()}123',
-            'reward_per_use': 500,
-            'total_uses': 12,
-            'total_earned': 6000,
-            'active': True
-        })
-    except Exception as e:
-        return jsonify({'error': 'Referral system not available'}), 500
-
-
-@app.route('/api/referral/use/<code>', methods=['POST'])
-@require_login
-def api_use_referral_code(code):
-    """Use a referral code"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({'success': True, 'message': f'Gained 500 points from referral!', 'points_gained': 500})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Referral applied (mock)'})
+# [migrated] /api/referral/code, /api/referral/use/<code>
+# -> backend/routers/engagement.py (referral_router)
 
 
 # Seasonal Events
-@app.route('/api/events/seasonal', methods=['GET'])
-@require_login
-def api_get_seasonal_events():
-    """Get active seasonal events"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'active_events': [
-                {
-                    'id': 1,
-                    'name': 'Spring Festival 2026',
-                    'season': 'spring',
-                    'progress': 65,
-                    'reward': '🌸 Spring Bloom Theme',
-                    'days_left': 15,
-                    'completed': False
-                },
-                {
-                    'id': 2,
-                    'name': 'Anniversary Celebration',
-                    'season': 'year',
-                    'progress': 100,
-                    'reward': '🎂 Anniversary Badge',
-                    'days_left': 5,
-                    'completed': True,
-                    'reward_claimed': False
-                }
-            ]
-        })
-    except Exception as e:
-        return jsonify({'active_events': []})
-
-
-@app.route('/api/events/<event_id>/claim', methods=['POST'])
-@require_login
-def api_claim_event_reward(event_id):
-    """Claim seasonal event reward"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({'success': True, 'message': 'Event reward claimed!', 'reward': '🎂 Anniversary Badge'})
-    except Exception as e:
-        return jsonify({'success': True, 'message': 'Reward claimed (mock)'})
+# MIGRATED to FastAPI: GET /api/events/seasonal, POST /api/events/<event_id>/claim
+# -> backend/routers/misc.py (events_router)
 
 
 # Guild System
@@ -4187,46 +3691,7 @@ def api_claim_event_reward(event_id):
 
 
 # Progression Paths
-@app.route('/api/progression', methods=['GET'])
-@require_login
-def api_get_progression_paths():
-    """Get available progression paths"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'paths': [
-                {
-                    'id': 1,
-                    'name': 'Competitive Player',
-                    'description': 'Master competitive gameplay',
-                    'current_step': 5,
-                    'total_steps': 10,
-                    'progress': 50,
-                    'next_reward': '[Title] Rank Master'
-                },
-                {
-                    'id': 2,
-                    'name': 'Streamer Path',
-                    'description': 'Build your streaming career',
-                    'current_step': 2,
-                    'total_steps': 10,
-                    'progress': 20,
-                    'next_reward': '[Frame] Broadcaster Elite'
-                },
-                {
-                    'id': 3,
-                    'name': 'Collector',
-                    'description': 'Collect all cosmetics',
-                    'current_step': 8,
-                    'total_steps': 15,
-                    'progress': 53,
-                    'next_reward': '[Theme] Collector\'s Gold'
-                },
-            ]
-        })
-    except Exception as e:
-        return jsonify({'paths': []})
+# [migrated] /api/progression -> backend/routers/engagement.py (progression_router)
 
 
 # Trading Market
@@ -4235,42 +3700,7 @@ def api_get_progression_paths():
 
 
 # Cosmetic Collections
-@app.route('/api/collections', methods=['GET'])
-@require_login
-def api_get_collections():
-    """Get cosmetic collections"""
-    username = get_current_username()
-    
-    try:
-        return jsonify({
-            'collections': [
-                {
-                    'type': 'themes',
-                    'owned': 18,
-                    'total': 25,
-                    'completion': 72,
-                    'rarity_points': 450
-                },
-                {
-                    'type': 'titles',
-                    'owned': 12,
-                    'total': 30,
-                    'completion': 40,
-                    'rarity_points': 280
-                },
-                {
-                    'type': 'frames',
-                    'owned': 7,
-                    'total': 20,
-                    'completion': 35,
-                    'rarity_points': 180
-                },
-            ],
-            'total_completion': 49,
-            'mastery_tier': 'Silver'
-        })
-    except Exception as e:
-        return jsonify({'collections': [], 'total_completion': 0})
+# MIGRATED to FastAPI: GET /api/collections -> backend/routers/catalog.py (collections_router)
 
 
 # ==================== PERFORMANCE & CACHING ====================
@@ -4282,234 +3712,9 @@ def api_get_collections():
 
 # Optimized List Endpoints with Pagination
 
-@app.route('/api/optimized/users', methods=['GET'])
-@require_login
-def api_list_users_paginated():
-    """Get paginated user list"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        db = db_service.get_db()
-        
-        # Count total
-        total_query = "SELECT COUNT(*) FROM users"
-        total = db.execute(total_query).fetchone()[0]
-        
-        # Get paginated results
-        query = """
-            SELECT id, username, email, created_at 
-            FROM users 
-            ORDER BY created_at DESC 
-            LIMIT ? OFFSET ?
-        """
-        offset = (page - 1) * per_page
-        users = db.execute(query, (per_page, offset)).fetchall()
-        
-        result = performance.Paginator.paginate(
-            [{'id': u[0], 'username': u[1], 'email': u[2], 'created_at': str(u[3])} for u in users],
-            page=page,
-            per_page=per_page,
-            total_count=total
-        )
-        
-        result['endpoint'] = 'optimized-users'
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting paginated users: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/games', methods=['GET'])
-@require_login
-def api_list_games_paginated():
-    """Get paginated game library"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        # Load games (mock for now)
-        username = get_current_username()
-        p = ensure_picker_initialized(username)
-        all_games = p.games if p else []
-        
-        result = performance.Paginator.paginate(
-            all_games,
-            page=page,
-            per_page=per_page,
-            total_count=len(all_games)
-        )
-        
-        result['endpoint'] = 'optimized-games'
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting paginated games: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/leaderboard', methods=['GET'])
-@require_login
-def api_get_leaderboard_optimized():
-    """Get optimized leaderboard with pagination and caching"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        category = request.args.get('category', 'picks').lower()
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        # Use cache for leaderboard (10 minute TTL)
-        cache_key = f"leaderboard:{category}"
-        cached_data = performance.get_cache().get(cache_key)
-        
-        if cached_data is not None:
-            # Return from cache but still paginate
-            result = performance.Paginator.paginate(
-                cached_data,
-                page=page,
-                per_page=per_page,
-                total_count=len(cached_data)
-            )
-            result['cached'] = True
-            return jsonify(result)
-        
-        # Query database
-        db = db_service.get_db()
-        leaderboard = []
-        
-        if category == 'picks':
-            query = """
-                SELECT u.username, COUNT(DISTINCT ps.game_id) as value
-                FROM users u
-                LEFT JOIN live_sessions ls ON u.username = ls.host
-                LEFT JOIN picks ps ON ls.session_id = ps.session_id
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 200
-            """
-        else:
-            query = """
-                SELECT u.username, COUNT(v.id) as value
-                FROM users u
-                LEFT JOIN votes v ON u.username = v.user
-                WHERE u.username IS NOT NULL
-                GROUP BY u.username
-                ORDER BY value DESC
-                LIMIT 200
-            """
-        
-        cursor = db.execute(query)
-        for row in cursor.fetchall():
-            leaderboard.append({
-                'username': row[0],
-                'value': row[1],
-                'rank': len(leaderboard) + 1
-            })
-        
-        # Cache for 10 minutes
-        performance.get_cache().set(cache_key, leaderboard, ttl=600)
-        
-        # Paginate
-        result = performance.Paginator.paginate(
-            leaderboard,
-            page=page,
-            per_page=per_page,
-            total_count=len(leaderboard)
-        )
-        result['cached'] = False
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting optimized leaderboard: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/chat/messages', methods=['GET'])
-@require_login
-def api_get_chat_messages_paginated():
-    """Get paginated chat messages"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        room = request.args.get('room', 'general')
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        db = db_service.get_db()
-        
-        # Count messages
-        count_query = "SELECT COUNT(*) FROM chat_messages WHERE chat_room = ?"
-        total = db.execute(count_query, (room,)).fetchone()[0]
-        
-        # Get paginated messages
-        query = """
-            SELECT id, username, message, created_at 
-            FROM chat_messages 
-            WHERE chat_room = ? 
-            ORDER BY created_at DESC 
-            LIMIT ? OFFSET ?
-        """
-        offset = (page - 1) * per_page
-        messages = db.execute(query, (room, per_page, offset)).fetchall()
-        
-        result = performance.Paginator.paginate(
-            [{
-                'id': m[0],
-                'username': m[1],
-                'message': m[2],
-                'created_at': str(m[3])
-            } for m in reversed(messages)],
-            page=page,
-            per_page=per_page,
-            total_count=total
-        )
-        
-        result['room'] = room
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error getting paginated messages: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/optimized/games/search', methods=['GET'])
-@require_login
-def api_search_games_optimized():
-    """Search games with pagination and result limiting"""
-    if not PERFORMANCE_AVAILABLE:
-        return jsonify({'error': 'Performance module not available'}), 503
-    
-    try:
-        query = request.args.get('q', '').lower()
-        page, per_page = performance.LazyLoadHelper.extract_pagination_params(request.args)
-        
-        if not query or len(query) < 2:
-            return jsonify({'items': [], 'page': 1, 'total': 0})
-        
-        # Search in loaded games (optimized for client-side loading)
-        username = get_current_username()
-        p = ensure_picker_initialized(username)
-        if not p or not p.games:
-            return jsonify({'items': [], 'page': 1, 'total': 0})
-
-        # Filter games by query
-        results = [g for g in p.games if query in g.get('name', '').lower()]
-        
-        result = performance.Paginator.paginate(
-            results,
-            page=page,
-            per_page=per_page,
-            total_count=len(results)
-        )
-        
-        result['query'] = query
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error(f"Error searching games: {e}")
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/optimized/users, /api/optimized/games,
+# /api/optimized/leaderboard, /api/optimized/chat/messages,
+# /api/optimized/games/search -> backend/routers/catalog.py (optimized_router)
 
 
 # HowLongToBeat API
@@ -4773,31 +3978,7 @@ def api_update_profanity_filter():
 # HowLongToBeat API
 
 
-@app.route('/api/hltb/<path:game_name>')
-@require_login
-def api_get_hltb(game_name: str):
-    """Return HowLongToBeat completion-time estimates for *game_name*.
-
-    Uses the ``howlongtobeatpy`` library (optional).  If the library is not
-    installed or the HLTB website is unreachable, returns HTTP 503.
-
-    Response JSON::
-
-        {
-          "game_name": "Portal 2",
-          "similarity": 0.95,
-          "main": 8.5,
-          "main_extra": 13.0,
-          "completionist": 17.5
-        }
-
-    ``main``, ``main_extra``, and ``completionist`` are floats (hours) or
-    ``null`` when HLTB has no data for that category.
-    """
-    data = gapi.get_hltb_data(game_name)
-    if data is None:
-        return jsonify({'error': 'No HLTB data available for this game'}), 503
-    return jsonify(data)
+# MIGRATED to FastAPI: GET /api/hltb/<path:game_name> -> backend/routers/catalog.py (hltb_router)
 
 
 # ---------------------------------------------------------------------------
@@ -6032,36 +5213,8 @@ def _load_locale(lang: str) -> Optional[Dict]:
         return None
 
 
-@app.route('/api/i18n')
-def api_i18n_list():
-    """List all available locales.
-
-    Returns a JSON array of objects with ``lang`` and ``lang_name`` fields,
-    e.g. ``[{"lang": "en", "lang_name": "English"}, ...]``.
-    """
-    locales = []
-    try:
-        for fname in sorted(os.listdir(_LOCALES_DIR)):
-            if not fname.endswith('.json'):
-                continue
-            data = _load_locale(fname[:-5])
-            if data and 'lang' in data:
-                locales.append({'lang': data['lang'], 'lang_name': data.get('lang_name', data['lang'])})
-    except Exception as exc:
-        gui_logger.error('Error listing locales: %s', exc)
-    return jsonify({'locales': locales})
-
-
-@app.route('/api/i18n/<lang>')
-def api_i18n_get(lang: str):
-    """Return the translation strings for *lang* (e.g. ``en``, ``es``).
-
-    A ``404`` is returned when the requested language is not available.
-    """
-    data = _load_locale(lang)
-    if data is None:
-        return jsonify({'error': f"Locale '{lang}' not found"}), 404
-    return jsonify(data)
+# MIGRATED to FastAPI: GET /api/i18n, GET /api/i18n/<lang> (both UNAUTHENTICATED)
+# -> backend/routers/misc.py (i18n_router)
 
 
 # ---------------------------------------------------------------------------
@@ -6329,137 +5482,8 @@ def _get_twitch_client():
         return None
 
 
-@app.route('/api/twitch/trending')
-@require_login
-def api_twitch_trending():
-    """Return the top games currently live on Twitch.
-
-    Query params:
-        count (int, 1-100, default 20): Number of trending games to return.
-
-    Response JSON::
-
-        {
-          "trending": [
-            {
-              "id": "32982",
-              "name": "Grand Theft Auto V",
-              "viewer_count": 87452,
-              "box_art_url": "https://...",
-              "twitch_url": "https://www.twitch.tv/directory/game/..."
-            },
-            ...
-          ]
-        }
-
-    Returns 503 when Twitch credentials are not configured.
-    """
-    from twitch_client import TwitchAuthError, TwitchAPIError
-
-    client = _get_twitch_client()
-    if client is None:
-        return jsonify({
-            'error': (
-                'Twitch credentials not configured. '
-                'Add twitch_client_id and twitch_client_secret to config.json '
-                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
-            )
-        }), 503
-
-    try:
-        count = max(1, min(int(request.args.get('count', 20)), 100))
-    except (ValueError, TypeError):
-        count = 20
-
-    try:
-        trending = client.get_top_games(count=count)
-    except TwitchAuthError as exc:
-        gui_logger.error("Twitch auth error: %s", exc)
-        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
-    except TwitchAPIError as exc:
-        gui_logger.error("Twitch API error: %s", exc)
-        return jsonify({'error': f'Twitch API error: {exc}'}), 502
-    except Exception as exc:
-        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
-        return jsonify({'error': 'Unexpected error'}), 500
-
-    return jsonify({'trending': trending})
-
-
-@app.route('/api/twitch/library-overlap')
-@require_login
-def api_twitch_library_overlap():
-    """Return user library games that are currently trending on Twitch.
-
-    Fetches the top trending games and cross-references them against the
-    user's loaded game library by normalised name.  Useful for prompting
-    the user to pick a game they own that has an active Twitch community.
-
-    Query params:
-        count (int, 1-100, default 20): Number of trending Twitch games to
-            compare against.
-
-    Response JSON::
-
-        {
-          "overlap": [
-            {
-              "appid": 730,
-              "name": "Counter-Strike 2",
-              "playtime_forever": 4560,
-              "twitch_id": "32399",
-              "viewer_count": 75000,
-              "box_art_url": "https://...",
-              "twitch_url": "https://www.twitch.tv/directory/game/...",
-              "trending_rank": 3
-            },
-            ...
-          ],
-          "trending_count": 20
-        }
-
-    Returns 503 when Twitch credentials are not configured.
-    Returns 400 when the picker is not initialised.
-    """
-    from twitch_client import TwitchAuthError, TwitchAPIError
-
-    if not picker:
-        return jsonify({'error': 'Not initialized. Please log in.'}), 400
-
-    client = _get_twitch_client()
-    if client is None:
-        return jsonify({
-            'error': (
-                'Twitch credentials not configured. '
-                'Add twitch_client_id and twitch_client_secret to config.json '
-                'or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET environment variables.'
-            )
-        }), 503
-
-    try:
-        count = max(1, min(int(request.args.get('count', 20)), 100))
-    except (ValueError, TypeError):
-        count = 20
-
-    try:
-        trending = client.get_top_games(count=count)
-    except TwitchAuthError as exc:
-        gui_logger.error("Twitch auth error: %s", exc)
-        return jsonify({'error': f'Twitch authentication failed: {exc}'}), 502
-    except TwitchAPIError as exc:
-        gui_logger.error("Twitch API error: %s", exc)
-        return jsonify({'error': f'Twitch API error: {exc}'}), 502
-    except Exception as exc:
-        gui_logger.exception("Unexpected error fetching Twitch trending: %s", exc)
-        return jsonify({'error': 'Unexpected error'}), 500
-
-    with picker_lock:
-        username = get_current_username()
-        _p = ensure_picker_initialized(username)
-        user_games = list(_p.games) if _p and _p.games else []
-
-    overlap = client.find_library_overlap(trending, user_games)
-    return jsonify({'overlap': overlap, 'trending_count': len(trending)})
+# MIGRATED to FastAPI: GET /api/twitch/trending, GET /api/twitch/library-overlap
+# -> backend/routers/misc.py (twitch_router)
 
 
 # ---------------------------------------------------------------------------
@@ -7172,34 +6196,7 @@ def api_admin_push_broadcast():
 # Similar Games endpoint  (Item 8)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/games/<app_id>/similar', methods=['GET'])
-@require_login
-def api_similar_games(app_id: str):
-    """Return games similar to *app_id* based on genre/tag overlap (login required).
-
-    Query parameters:
-      ``platform``  – game platform (default ``'steam'``)
-      ``limit``     – max results (default 10, max 50)
-
-    Response JSON:
-      ``app_id``    – queried game id
-      ``platform``  – queried platform
-      ``similar``   – list of ``{app_id, game_name, platform, similarity_score}``
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'app_id': app_id, 'similar': []})
-    platform = request.args.get('platform', 'steam').strip().lower()
-    try:
-        limit = max(1, min(50, int(request.args.get('limit', 10))))
-    except (ValueError, TypeError):
-        limit = 10
-    try:
-        db = next(database.get_db())
-        similar = database.get_similar_games(db, app_id, platform=platform, limit=limit)
-        return jsonify({'app_id': app_id, 'platform': platform, 'similar': similar})
-    except Exception as e:
-        gui_logger.error('api_similar_games error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/games/<app_id>/similar -> backend/routers/catalog.py (games_router)
 
 
 # ---------------------------------------------------------------------------

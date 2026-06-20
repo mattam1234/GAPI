@@ -307,22 +307,29 @@ class TestPWARoutes(unittest.TestCase):
 
 
 class TestTwitchRoutesNoCredentials(unittest.TestCase):
-    """Twitch routes should return 503 when no credentials are configured."""
+    """Twitch routes should return 503 when no credentials are configured.
+
+    Migrated to FastAPI: backend/routers/misc.py twitch_router. Auth is the
+    Flask-signed session cookie that backend.dependencies decodes — not the
+    legacy ``@patch('gapi_gui.current_user')`` seam.
+    """
 
     def setUp(self):
         import gapi_gui
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
         gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        self.client = TestClient(fastapi_app)
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'testuser'}))
 
-    @patch('gapi_gui.current_user', 'testuser')
     @patch('gapi_gui._get_twitch_client', return_value=None)
     def test_trending_503_without_credentials(self, _mock):
         resp = self.client.get('/api/twitch/trending')
         self.assertEqual(resp.status_code, 503)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('error', data)
 
-    @patch('gapi_gui.current_user', 'testuser')
     @patch('gapi_gui._get_twitch_client', return_value=None)
     def test_library_overlap_503_without_credentials(self, _mock):
         import gapi_gui
@@ -332,7 +339,7 @@ class TestTwitchRoutesNoCredentials(unittest.TestCase):
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.client.get('/api/twitch/library-overlap')
         self.assertEqual(resp.status_code, 503)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('error', data)
 
 
