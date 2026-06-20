@@ -416,6 +416,25 @@ Six more domains across three agents, integrated together.
 
 Full suite after integration: **2239 passed**. Flask routes remaining: **110**.
 
+## 11. Long-tail batch — engagement + misc + catalog (grab-bags)
+
+Three grab-bag agents cleared ~30 small/single-route domains.
+
+**✅ engagement** → `backend/routers/engagement.py` — creator, battlepass, referral,
+streaming, progression, ranked (12 routes; mostly stubs, several `db_service`-500
+mock fallbacks preserved).
+
+**✅ misc** → `backend/routers/misc.py` — i18n (kept **unauthenticated**), shop,
+events, twitch, cosmetics, anticheat (10 routes).
+
+**✅ catalog** → `backend/routers/catalog.py` — optimized (perf-cached reads),
+collections, favorites, favorite, games/{id}/similar, filters, hltb/{name:path}
+(11 routes). Confirmed `/api/optimized/*` were never in the cacheable allowlist
+(so `no-store`, faithfully replicated); preserved the `db_service`-500s on
+optimized users/leaderboard/chat.
+
+Full suite after integration: **2347 passed**. Flask routes remaining: **79**.
+
 ---
 
 ## Frontend (Phase 4, started)
