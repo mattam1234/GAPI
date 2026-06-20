@@ -26,9 +26,15 @@ from fastapi.responses import JSONResponse
 import gapi_gui
 import database
 from backend.dependencies import get_current_user, require_login
+from backend.ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 setup_router = APIRouter(prefix="/api/setup", tags=["auth"])
+
+# Restores the rate limits the legacy app intended (its @limiter.limit was
+# commented out): 20 logins/min and 10 registrations/hour, per client IP.
+_login_rate_limit = rate_limit("login", limit=20, window_seconds=60)
+_register_rate_limit = rate_limit("register", limit=10, window_seconds=3600)
 
 
 def _err(status_code, message):
@@ -80,7 +86,8 @@ def auth_current(username: Optional[str] = Depends(get_current_user)):
 
 
 @router.post("/register")
-def auth_register(body: Optional[dict] = Body(default=None)):
+def auth_register(body: Optional[dict] = Body(default=None),
+                  _rl: None = Depends(_register_rate_limit)):
     """Register a new user (does not log them in)."""
     g = gapi_gui
     data = body or {}
@@ -106,7 +113,8 @@ def auth_register(body: Optional[dict] = Body(default=None)):
 
 
 @router.post("/login")
-def auth_login(body: Optional[dict] = Body(default=None)):
+def auth_login(body: Optional[dict] = Body(default=None),
+               _rl: None = Depends(_login_rate_limit)):
     """Authenticate a user and establish the Flask session cookie."""
     g = gapi_gui
     data = body or {}
