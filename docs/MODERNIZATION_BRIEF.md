@@ -460,6 +460,34 @@ ab-tests, user-groups, push-broadcast).
 
 Full suite after integration: **2476 passed**. Flask routes remaining: **31**.
 
+## 13. Final remainders + infra — API surface complete
+
+**✅ library/users/multiuser remainders** → added to existing routers
+(`library.py`, `users.py`, `multiuser.py`): base `/api/library` + sync routes,
+`GET /api/users`/`/all`/`/online`, `/api/multiuser/common`/`/stats` (10 routes).
+
+**✅ infra/system** → `backend/routers/system_infra.py` (12 routes incl. the
+folded-in `/api/challenges`): health, status, changelog, csrf-token,
+errors/report, history, moderation/report, password-reset-request,
+platform/status, user/{u}/card, user-profile/{u}, challenges. Cacheable headers
+preserved for health + changelog (`public, max-age=60, swr=120`); the rest
+`no-store`. Unauthenticated routes kept unauthenticated (health/status/changelog/
+csrf-token/errors-report/password-reset-request).
+
+Full suite: **2551 passed**.
+
+### The API surface is fully on FastAPI
+
+The only `@app.route`s left in `gapi_gui.py` are **intentional**:
+- `/api/openapi.json`, `/api/docs` — superseded by FastAPI's native `/openapi.json`
+  + `/docs`; **retired in Phase 3** (not ported).
+- `/api/graphql` — GraphQL endpoint; handled separately if kept.
+- `/api/import/user-data` — dual JSON/multipart upload; needs `python-multipart`
+  + `UploadFile` (deferred).
+- `/api/users/legacy` — deprecated multi_picker dump; left to die.
+- `/`, `/favicon.ico`, `/manifest.json`, `/sw.js` — page/PWA shell; replaced by the
+  SPA in **Phase 4**.
+
 ---
 
 ## Frontend (Phase 4, started)
