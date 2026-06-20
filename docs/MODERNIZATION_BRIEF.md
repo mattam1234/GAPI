@@ -398,6 +398,24 @@ URI derived from `request.base_url`. `/api/platform/status` + the shared
 
 Full suite after integration: **2133 passed**. Flask routes remaining: **137**.
 
+## 10. Parallel batch — extensibility + social/stats + community
+
+Six more domains across three agents, integrated together.
+
+**✅ push + plugins** → `backend/routers/extensibility.py` (`push_router` +
+`plugins_router`, 8 routes). Plugins keep their two-DB-session admin-check quirk.
+`/api/admin/push/broadcast` stays in Flask (different prefix).
+
+**✅ app-friends + stats** → `backend/routers/social_stats.py` (7 routes).
+`/api/stats/compare/candidates` returns 200-with-empty on DB-unavailable/error
+(not an error code) — preserved.
+
+**✅ guilds + teams + market + system** → `backend/routers/community.py` (4 routers,
+12 routes). teams/guilds/market are `db_service`/dead-`try` mock stubs (preserved);
+`/api/system/cache/clear` keeps its inline `username == 'admin'` literal check.
+
+Full suite after integration: **2239 passed**. Flask routes remaining: **110**.
+
 ---
 
 ## Frontend (Phase 4, started)
