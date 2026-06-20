@@ -130,19 +130,24 @@ class TestRateLimiting(unittest.TestCase):
     """Rate-limiting decorators must be present on auth endpoints."""
 
     def test_login_has_rate_limit_decorator(self):
-        """The login view function must be wrapped by a rate-limit decorator
-        or be the no-op stub when Flask-Limiter is not installed."""
-        import inspect
-        fn = gapi_gui.app.view_functions.get('api_auth_login')
-        self.assertIsNotNone(fn, 'api_auth_login view must be registered')
-        # If Flask-Limiter is available the function is wrapped; if not it is
-        # still callable.  Either way it must accept requests.
-        self.assertTrue(callable(fn))
+        """Login migrated to FastAPI (backend/routers/auth.py): assert the route
+        is registered on the ASGI app (a missing-body POST yields 400, not 404).
+
+        NOTE: the legacy Flask route's @limiter.limit was commented out
+        ("Temporarily disabled for debugging"), so login was never actually
+        rate-limited. Re-adding real rate limiting is tracked as a feature gap."""
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
+        resp = TestClient(fastapi_app).post('/api/auth/login', json={})
+        self.assertNotEqual(resp.status_code, 404)
 
     def test_register_has_rate_limit_decorator(self):
-        fn = gapi_gui.app.view_functions.get('api_auth_register')
-        self.assertIsNotNone(fn, 'api_auth_register view must be registered')
-        self.assertTrue(callable(fn))
+        """Register migrated to FastAPI; assert route registration (see note in
+        test_login_has_rate_limit_decorator re: rate-limiting gap)."""
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
+        resp = TestClient(fastapi_app).post('/api/auth/register', json={})
+        self.assertNotEqual(resp.status_code, 404)
 
     def test_limiter_attribute_exists_on_module(self):
         self.assertTrue(hasattr(gapi_gui, 'limiter'),
