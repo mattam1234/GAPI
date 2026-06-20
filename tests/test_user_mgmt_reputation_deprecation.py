@@ -560,21 +560,22 @@ class TestUserGroupEndpoints(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # /api/admin/user-groups migrated to FastAPI (backend/routers/admin_growth.py).
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_create_group_requires_admin(self):
         resp = self.client.post('/api/admin/user-groups', json={'name': 'grp'})
         self.assertIn(resp.status_code, (401, 403))
 
     def test_create_group_503_when_db_unavailable(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', False):
                 resp = self.client.post('/api/admin/user-groups', json={'name': 'grp'})
         self.assertEqual(resp.status_code, 503)
 
     def test_create_group_missing_name_returns_400(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True):
                 resp = self.client.post('/api/admin/user-groups', json={})
@@ -585,19 +586,19 @@ class TestUserGroupEndpoints(unittest.TestCase):
         fake_grp = {'id': 1, 'name': 'beta', 'description': '',
                     'created_by': 'admin', 'created_at': '2026-01-01T00:00:00',
                     'member_count': 0}
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.create_user_group', return_value=fake_grp), \
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.post('/api/admin/user-groups', json={'name': 'beta'})
         self.assertEqual(resp.status_code, 201)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['name'], 'beta')
 
     def test_create_group_conflict_returns_409(self):
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.create_user_group', return_value={}), \
@@ -613,14 +614,14 @@ class TestUserGroupEndpoints(unittest.TestCase):
         mock_db = MagicMock()
         fake_groups = [{'id': 1, 'name': 'beta', 'description': '', 'created_by': 'admin',
                         'created_at': None, 'member_count': 3}]
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.list_user_groups', return_value=fake_groups), \
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/user-groups')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('groups', data)
         self.assertEqual(len(data['groups']), 1)
 
@@ -630,7 +631,7 @@ class TestUserGroupEndpoints(unittest.TestCase):
 
     def test_delete_group_not_found_returns_404(self):
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.delete_user_group', return_value=False), \
@@ -644,7 +645,7 @@ class TestUserGroupEndpoints(unittest.TestCase):
         self.assertIn(resp.status_code, (401, 403))
 
     def test_add_member_missing_username_400(self):
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True):
                 resp = self.client.post('/api/admin/user-groups/1/members', json={})
@@ -652,7 +653,7 @@ class TestUserGroupEndpoints(unittest.TestCase):
 
     def test_add_member_success_201(self):
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.add_group_member',
@@ -664,7 +665,7 @@ class TestUserGroupEndpoints(unittest.TestCase):
 
     def test_add_member_already_member_409(self):
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.add_group_member',
@@ -684,14 +685,14 @@ class TestUserGroupEndpoints(unittest.TestCase):
 
     def test_get_members_returns_list(self):
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True):
             _set_admin_session(self.client)
             with patch.object(gapi_gui, 'DB_AVAILABLE', True), \
                  patch('database.get_group_members', return_value=['alice', 'bob']), \
                  patch('database.get_db', return_value=iter([mock_db])):
                 resp = self.client.get('/api/admin/user-groups/1/members')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['members'], ['alice', 'bob'])
 
 

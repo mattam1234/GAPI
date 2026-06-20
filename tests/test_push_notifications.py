@@ -582,27 +582,28 @@ class TestAdminPushBroadcastEndpoint(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # /api/admin/push/broadcast migrated to FastAPI (backend/routers/admin_growth.py).
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
-        _set_user_session(self.client, 'bob')
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=False):
+        _fast_login(self.client, 'bob')
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=False):
             resp = self.client.post('/api/admin/push/broadcast',
                                     json={'title': 'Hi', 'body': 'Hello'})
         self.assertIn(resp.status_code, (401, 403))
 
     def test_503_when_db_unavailable(self):
-        _set_admin_session(self.client)
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
+        _fast_login(self.client, 'admin')
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True), \
              patch.object(gapi_gui, 'DB_AVAILABLE', False):
             resp = self.client.post('/api/admin/push/broadcast',
                                     json={'title': 'Hi', 'body': 'Hello'})
         self.assertEqual(resp.status_code, 503)
 
     def test_400_when_title_missing(self):
-        _set_admin_session(self.client)
+        _fast_login(self.client, 'admin')
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True), \
              patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.post('/api/admin/push/broadcast',
@@ -610,9 +611,9 @@ class TestAdminPushBroadcastEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_400_when_body_missing(self):
-        _set_admin_session(self.client)
+        _fast_login(self.client, 'admin')
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True), \
              patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.post('/api/admin/push/broadcast',
@@ -620,9 +621,9 @@ class TestAdminPushBroadcastEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_503_when_push_service_none(self):
-        _set_admin_session(self.client)
+        _fast_login(self.client, 'admin')
         mock_db = MagicMock()
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True), \
              patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch.object(gapi_gui, '_push_service', None), \
              patch('database.get_db', return_value=iter([mock_db])):
@@ -631,32 +632,32 @@ class TestAdminPushBroadcastEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
     def test_200_with_result_dict(self):
-        _set_admin_session(self.client)
+        _fast_login(self.client, 'admin')
         mock_db = MagicMock()
         mock_svc = MagicMock()
         mock_svc.broadcast.return_value = {
             'total': 5, 'sent': 5, 'failed': 0, 'skipped': 0, 'dry_run': False
         }
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True), \
              patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch.object(gapi_gui, '_push_service', mock_svc), \
              patch('database.get_db', return_value=iter([mock_db])):
             resp = self.client.post('/api/admin/push/broadcast',
                                     json={'title': 'News', 'body': 'Update available'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('total', data)
         self.assertIn('sent', data)
         self.assertEqual(data['sent'], 5)
 
     def test_dry_run_forwarded_to_service(self):
-        _set_admin_session(self.client)
+        _fast_login(self.client, 'admin')
         mock_db = MagicMock()
         mock_svc = MagicMock()
         mock_svc.broadcast.return_value = {
             'total': 3, 'sent': 0, 'failed': 0, 'skipped': 3, 'dry_run': True
         }
-        with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
+        with patch.object(gapi_gui._app_settings_service, 'is_admin', return_value=True), \
              patch.object(gapi_gui, 'DB_AVAILABLE', True), \
              patch.object(gapi_gui, '_push_service', mock_svc), \
              patch('database.get_db', return_value=iter([mock_db])):
