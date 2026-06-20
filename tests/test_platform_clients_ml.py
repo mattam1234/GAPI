@@ -492,14 +492,28 @@ class TestPlatformStatusRoute(unittest.TestCase):
             self.assertIn(plat, data['platforms'])
 
 
+def _fastapi_client():
+    """A FastAPI TestClient authenticated as ``testuser`` via signed cookie.
+
+    The /api/epic|gog|xbox/* routes are migrated to FastAPI
+    (backend/routers/platforms.py); auth is the Flask-signed session cookie that
+    backend.dependencies decodes — not the legacy ``@patch('gapi_gui.current_user')``.
+    """
+    import gapi_gui
+    from fastapi.testclient import TestClient
+    from backend.main import app as fastapi_app
+    gapi_gui.app.config['TESTING'] = True
+    client = TestClient(fastapi_app)
+    ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+    client.cookies.set('session', ser.dumps({'username': 'testuser'}))
+    return client
+
+
 class TestEpicRoutes(unittest.TestCase):
 
     def setUp(self):
-        import gapi_gui
-        gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        self.client = _fastapi_client()
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_epic_library_503_when_not_configured(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -508,7 +522,6 @@ class TestEpicRoutes(unittest.TestCase):
             resp = self.client.get('/api/epic/library')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_epic_library_503_when_not_authenticated(self):
         import gapi_gui
         epic_client = EpicOAuthClient('cid')
@@ -518,7 +531,6 @@ class TestEpicRoutes(unittest.TestCase):
             resp = self.client.get('/api/epic/library')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_epic_library_200_when_authenticated(self):
         import gapi_gui
         epic_client = EpicOAuthClient('cid')
@@ -532,7 +544,7 @@ class TestEpicRoutes(unittest.TestCase):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.client.get('/api/epic/library')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['platform'], 'epic')
         self.assertEqual(data['count'], 1)
 
@@ -540,11 +552,8 @@ class TestEpicRoutes(unittest.TestCase):
 class TestGOGRoutes(unittest.TestCase):
 
     def setUp(self):
-        import gapi_gui
-        gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        self.client = _fastapi_client()
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_gog_library_503_when_not_configured(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -553,7 +562,6 @@ class TestGOGRoutes(unittest.TestCase):
             resp = self.client.get('/api/gog/library')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_gog_library_200_when_authenticated(self):
         import gapi_gui
         gog_client = GOGOAuthClient('gid', 'gsec')
@@ -567,10 +575,9 @@ class TestGOGRoutes(unittest.TestCase):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.client.get('/api/gog/library')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['platform'], 'gog')
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_gog_oauth_callback_400_missing_code(self):
         import gapi_gui
         gog_client = GOGOAuthClient('gid', 'gsec')
@@ -585,11 +592,8 @@ class TestGOGRoutes(unittest.TestCase):
 class TestXboxRoutes(unittest.TestCase):
 
     def setUp(self):
-        import gapi_gui
-        gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        self.client = _fastapi_client()
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_xbox_library_503_when_not_configured(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -598,7 +602,6 @@ class TestXboxRoutes(unittest.TestCase):
             resp = self.client.get('/api/xbox/library')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_xbox_library_503_when_not_authenticated(self):
         import gapi_gui
         xbox_client = XboxAPIClient('xid', 'xsec')
@@ -608,7 +611,6 @@ class TestXboxRoutes(unittest.TestCase):
             resp = self.client.get('/api/xbox/library')
         self.assertEqual(resp.status_code, 503)
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_xbox_library_200_when_authenticated(self):
         import gapi_gui
         xbox_client = XboxAPIClient('xid', 'xsec')
@@ -621,7 +623,7 @@ class TestXboxRoutes(unittest.TestCase):
             with patch.object(gapi_gui, 'picker', fake_picker):
                 resp = self.client.get('/api/xbox/library')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['platform'], 'xbox')
         self.assertEqual(data['count'], 1)
 
