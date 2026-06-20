@@ -20,5 +20,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Split heavy/long-lived deps out of the app + per-route chunks so the
+        // initial payload stays small and these cache across deploys.
+        manualChunks: {
+          recharts: ['recharts'],
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          table: ['@tanstack/react-table'],
+        },
+      },
+    },
   },
 })

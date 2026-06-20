@@ -25,7 +25,7 @@ export function Dashboard() {
   const sample = data?.sample
 
   const topGames = useMemo(
-    () => (d?.top_games ?? []).map((g) => ({ name: g.game_name ?? g.game_id ?? '—', picks: g.pick_count })),
+    () => (d?.top_games ?? []).map((g: TopGame) => ({ name: g.game_name ?? g.game_id ?? '—', picks: g.pick_count })),
     [d],
   )
   const platforms = useMemo(
