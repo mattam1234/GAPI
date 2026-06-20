@@ -14,7 +14,7 @@ from fastapi import FastAPI
 
 import gapi_gui
 from backend.routers import (
-    achievements, admin_notifications, analytics, auth, backlog, budget,
+    achievements, admin_notifications, analytics, auth, backlog, batch, budget,
     challenges, chat, downloads, duplicates, export, friends, game, ignored,
     leaderboards, library, live_session, messages, multiuser, notifications,
     permissions, pick, playlists, presence, profile, recommendations, reviews,
@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(budget.router)
     app.include_router(ignored.router)
     app.include_router(backlog.router)
+    app.include_router(batch.router)
     app.include_router(voting.router)
     app.include_router(messages.router)
     app.include_router(library.router)
