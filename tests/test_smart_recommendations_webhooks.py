@@ -510,43 +510,45 @@ class TestSmartRecommendationsRoute(unittest.TestCase):
 
 
 class TestWebhookTestRoutes(unittest.TestCase):
+    """The webhook ``/test`` routes are now served by FastAPI
+    (backend/routers/notifications.py); exercise them through the FastAPI
+    TestClient with a signed Flask session cookie."""
 
     def setUp(self):
         import gapi_gui
+        from fastapi.testclient import TestClient
+        from backend.main import app as fastapi_app
         gapi_gui.app.config['TESTING'] = True
-        self.client = gapi_gui.app.test_client()
+        self.client = TestClient(fastapi_app)
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        self.client.cookies.set('session', ser.dumps({'username': 'testuser'}))
 
     def _logged_in(self, fn):
         import gapi_gui
-        with patch.object(gapi_gui, 'current_user', 'testuser'):
-            with patch.object(gapi_gui, 'picker', MagicMock(config={})):
-                return fn()
+        with patch.object(gapi_gui, 'picker', MagicMock(config={})):
+            return fn()
 
     def test_slack_test_503_when_not_configured(self):
         resp = self._logged_in(
-            lambda: self.client.post('/api/notifications/slack/test',
-                                     json={}, content_type='application/json')
+            lambda: self.client.post('/api/notifications/slack/test', json={})
         )
         self.assertEqual(resp.status_code, 503)
 
     def test_teams_test_503_when_not_configured(self):
         resp = self._logged_in(
-            lambda: self.client.post('/api/notifications/teams/test',
-                                     json={}, content_type='application/json')
+            lambda: self.client.post('/api/notifications/teams/test', json={})
         )
         self.assertEqual(resp.status_code, 503)
 
     def test_ifttt_test_503_when_not_configured(self):
         resp = self._logged_in(
-            lambda: self.client.post('/api/notifications/ifttt/test',
-                                     json={}, content_type='application/json')
+            lambda: self.client.post('/api/notifications/ifttt/test', json={})
         )
         self.assertEqual(resp.status_code, 503)
 
     def test_homeassistant_test_503_when_not_configured(self):
         resp = self._logged_in(
-            lambda: self.client.post('/api/notifications/homeassistant/test',
-                                     json={}, content_type='application/json')
+            lambda: self.client.post('/api/notifications/homeassistant/test', json={})
         )
         self.assertEqual(resp.status_code, 503)
 
@@ -554,27 +556,23 @@ class TestWebhookTestRoutes(unittest.TestCase):
     def test_slack_test_200_with_override_url(self, mock_post):
         mock_post.return_value = _resp_ok()
         import gapi_gui
-        with patch.object(gapi_gui, 'current_user', 'testuser'), \
-             patch.object(gapi_gui, 'picker', MagicMock(config={})):
+        with patch.object(gapi_gui, 'picker', MagicMock(config={})):
             resp = self.client.post(
                 '/api/notifications/slack/test',
                 json={'webhook_url': 'https://hooks.slack.com/fake'},
-                content_type='application/json',
             )
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['service'], 'slack')
 
     @patch('webhook_notifier.requests.post')
     def test_ifttt_test_200_with_override_key(self, mock_post):
         mock_post.return_value = _resp_ok()
         import gapi_gui
-        with patch.object(gapi_gui, 'current_user', 'testuser'), \
-             patch.object(gapi_gui, 'picker', MagicMock(config={})):
+        with patch.object(gapi_gui, 'picker', MagicMock(config={})):
             resp = self.client.post(
                 '/api/notifications/ifttt/test',
                 json={'ifttt_webhook_key': 'mykey', 'ifttt_event_name': 'ev'},
-                content_type='application/json',
             )
         self.assertEqual(resp.status_code, 200)
 
@@ -582,18 +580,16 @@ class TestWebhookTestRoutes(unittest.TestCase):
     def test_homeassistant_test_200_with_override(self, mock_post):
         mock_post.return_value = _resp_ok()
         import gapi_gui
-        with patch.object(gapi_gui, 'current_user', 'testuser'), \
-             patch.object(gapi_gui, 'picker', MagicMock(config={})):
+        with patch.object(gapi_gui, 'picker', MagicMock(config={})):
             resp = self.client.post(
                 '/api/notifications/homeassistant/test',
                 json={
                     'homeassistant_url': 'http://ha.local:8123',
                     'homeassistant_webhook_id': 'gapi_pick',
                 },
-                content_type='application/json',
             )
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual(data['service'], 'homeassistant')
 
 

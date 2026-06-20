@@ -347,4 +347,31 @@ Literal paths (`/active`, `/discord-locations`) registered before the catch-all
 explicit by-username DB lookup. Tests: `tests/test_backend_live_session.py`.
 
 Full suite after integration: **1989 passed**.
+
+## 8. Parallel batch — search + batch + notifications
+
+Three more self-contained domains, migrated by parallel worktree agents and
+integrated together (zero merge conflicts — disjoint router files + disjoint
+`gapi_gui.py` deletions; git auto-merged the `main.py` additions).
+
+**✅ search fully migrated** → `backend/routers/search.py` (7 routes, all
+`require_login`). Preserved a latent 500: `GET /trending` with non-numeric
+`days`/`limit` raises inside the try → 500 (legacy parsed inside the try).
+
+**✅ batch operations fully migrated** → `backend/routers/batch.py` (5 routes).
+**Gaps logged:** `add-to-playlist` and `delete` are count-only stubs (report
+success without mutating); `change-status` uses deprecated `datetime.utcnow()`.
+Preserved faithfully; flagged for the gap-closure pass.
+
+**✅ notifications remainder fully migrated** → added 8 routes to the existing
+`backend/routers/notifications.py` (`/mock`, bare list, `/read`, `/send`, and
+the slack/teams/ifttt/homeassistant webhook tests). `/send`'s admin gate is an
+inline 403-with-JSON-body (notification-service admin check), preserved as-is
+rather than swapped to the `require_admin_um` dependency. The notifications
+domain is now fully on FastAPI.
+
+Repointed legacy Flask-client tests that hit moved routes: search-history
+(`test_audit_search_history.py`) and webhook-test (`test_smart_recommendations_webhooks.py`).
+
+Full suite after integration: **2064 passed**. Flask routes remaining: ~160.
 </content>
