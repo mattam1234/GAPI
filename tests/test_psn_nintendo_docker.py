@@ -510,9 +510,10 @@ class TestPlatformStatusWithNewPlatforms(unittest.TestCase):
     def setUp(self):
         import gapi_gui
         gapi_gui.app.config['TESTING'] = True
-        self.app_client = gapi_gui.app.test_client()
+        # /api/platform/status migrated to FastAPI; auth is the Flask-signed
+        # session cookie that backend.dependencies decodes.
+        self.app_client = _fastapi_client()
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_status_includes_psn_and_nintendo(self):
         import gapi_gui
         fake_picker = MagicMock()
@@ -520,11 +521,10 @@ class TestPlatformStatusWithNewPlatforms(unittest.TestCase):
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.app_client.get('/api/platform/status')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('psn',      data['platforms'])
         self.assertIn('nintendo', data['platforms'])
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_psn_shows_authenticated_true(self):
         import gapi_gui
         psn_client = PSNClient()
@@ -534,10 +534,9 @@ class TestPlatformStatusWithNewPlatforms(unittest.TestCase):
         fake_picker.clients = {'psn': psn_client}
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.app_client.get('/api/platform/status')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['platforms']['psn']['authenticated'])
 
-    @patch('gapi_gui.current_user', 'testuser')
     def test_nintendo_shows_configured_and_note(self):
         import gapi_gui
         nintendo_client = NintendoEShopClient()
@@ -545,7 +544,7 @@ class TestPlatformStatusWithNewPlatforms(unittest.TestCase):
         fake_picker.clients = {'nintendo': nintendo_client}
         with patch.object(gapi_gui, 'picker', fake_picker):
             resp = self.app_client.get('/api/platform/status')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['platforms']['nintendo']['configured'])
         self.assertIn('note', data['platforms']['nintendo'])
 

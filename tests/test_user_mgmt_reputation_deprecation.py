@@ -883,7 +883,9 @@ class TestDeprecationHeaders(unittest.TestCase):
         self.assertIn('deprecated', msg.lower())
 
     def test_non_deprecated_endpoint_has_no_deprecation_header(self):
-        resp = self.client.get('/api/changelog')
+        # /api/changelog migrated to FastAPI; use a still-Flask, non-deprecated
+        # endpoint to exercise the legacy deprecation after_request.
+        resp = self.client.get('/api/openapi.json')
         self.assertIsNone(resp.headers.get('Deprecation'))
 
     def test_deprecated_endpoints_dict_populated(self):
