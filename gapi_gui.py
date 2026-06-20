@@ -2439,19 +2439,7 @@ def api_sync_status():
 # Admin Migration Endpoints (PostgreSQL)
 # ===========================================================================================
 
-@app.route('/api/admin/migrations', methods=['GET'])
-@require_admin
-def api_list_migrations():
-    """List available admin migrations (PostgreSQL)."""
-    migrations = []
-    for key, meta in ADMIN_MIGRATIONS.items():
-        migrations.append({
-            'id': key,
-            'label': meta['label'],
-            'description': meta['description'],
-            'sql': meta['sql']
-        })
-    return jsonify({'migrations': migrations})
+# MIGRATED to FastAPI: GET /api/admin/migrations -> backend/routers/admin_ops.py
 
 
 def _run_sql_statements(db, sql: str) -> None:
@@ -2463,36 +2451,7 @@ def _run_sql_statements(db, sql: str) -> None:
         db.execute(text(stmt))
 
 
-@app.route('/api/admin/migrations/run', methods=['POST'])
-@require_admin
-def api_run_migration():
-    """Run a selected migration with optional SQL override (admin only)."""
-    if not ensure_db_available():
-        return jsonify({'error': 'Database not available'}), 503
-
-    data = request.json or {}
-    migration_id = data.get('id')
-    sql_override = data.get('sql')
-
-    if not migration_id or migration_id not in ADMIN_MIGRATIONS:
-        return jsonify({'error': 'Invalid migration id'}), 400
-
-    sql = sql_override if isinstance(sql_override, str) and sql_override.strip() else ADMIN_MIGRATIONS[migration_id]['sql']
-
-    try:
-        db = database.SessionLocal()
-        _run_sql_statements(db, sql)
-        db.commit()
-        db.close()
-        return jsonify({'message': f'Migration {migration_id} executed successfully'})
-    except Exception as e:
-        try:
-            db.rollback()
-            db.close()
-        except Exception:
-            pass
-        gui_logger.exception('Migration failed: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: POST /api/admin/migrations/run -> backend/routers/admin_ops.py
 
 
 # MIGRATED to FastAPI: GET /api/favorites -> backend/routers/catalog.py (favorites_router)
@@ -3728,86 +3687,8 @@ def api_get_challenges():
 # AUDIT LOGGING ENDPOINTS
 # ───────────────────────────────────────────────────────────────────────────
 
-@app.route('/api/admin/audit-logs', methods=['GET'])
-@require_login
-def api_get_audit_logs():
-    """Get audit logs (admin only)."""
-    if not _audit_service:
-        return jsonify({'error': 'Audit service not available'}), 503
-    
-    username = get_current_username()
-    db = next(database.get_db())
-    try:
-        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        page = int(request.args.get('page', 1))
-        limit = min(int(request.args.get('limit', 50)), 200)
-        offset = (page - 1) * limit
-        
-        filters = {}
-        if request.args.get('action'):
-            filters['action'] = request.args.get('action')
-        if request.args.get('user'):
-            filters['username'] = request.args.get('user')
-        
-        result = _audit_service.get_audit_logs(db, limit=limit, offset=offset, filters=filters)
-        result['page'] = page
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if db:
-            db.close()
-
-
-@app.route('/api/admin/audit-logs/export', methods=['GET'])
-@require_login
-def api_export_audit_logs():
-    """Export audit logs as CSV (admin only)."""
-    if not _audit_service:
-        return jsonify({'error': 'Audit service not available'}), 503
-    
-    username = get_current_username()
-    db = next(database.get_db())
-    try:
-        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        csv_data = _audit_service.export_audit_logs(db)
-        return Response(
-            csv_data,
-            mimetype='text/csv',
-            headers={'Content-Disposition': 'attachment; filename=audit_logs.csv'}
-        )
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if db:
-            db.close()
-
-
-@app.route('/api/admin/user-activity/<target_user>', methods=['GET'])
-@require_login
-def api_get_user_activity(target_user):
-    """Get activity history for a user (admin only)."""
-    if not _audit_service:
-        return jsonify({'error': 'Audit service not available'}), 503
-    
-    username = get_current_username()
-    db = next(database.get_db())
-    try:
-        if not (_app_settings_service and _app_settings_service.is_admin(db, username)):
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        limit = min(int(request.args.get('limit', 50)), 200)
-        activity = _audit_service.get_user_activity(db, target_user, limit)
-        return jsonify({'user': target_user, 'activity': activity})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if db:
-            db.close()
+# MIGRATED to FastAPI: GET /api/admin/audit-logs, GET /api/admin/audit-logs/export,
+# GET /api/admin/user-activity/<target_user> -> backend/routers/admin_ops.py
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -5178,21 +5059,7 @@ def api_discord_bot_diagnostics():
     })
 
 
-@app.route('/api/admin/security-info', methods=['GET'])
-@require_admin
-def api_admin_security_info():
-    """Return the active security feature flags (admin only).
-
-    Response JSON:
-      - ``compression_enabled``: bool – Flask-Compress loaded
-      - ``rate_limiting_enabled``: bool – Flask-Limiter loaded
-      - ``security_headers_enabled``: bool – always True (built-in hook)
-    """
-    return jsonify({
-        'compression_enabled': _COMPRESS_AVAILABLE,
-        'rate_limiting_enabled': _LIMITER_AVAILABLE,
-        'security_headers_enabled': True,
-    })
+# MIGRATED to FastAPI: GET /api/admin/security-info -> backend/routers/admin_ops.py
 
 
 # Localization / i18n endpoints
@@ -5664,42 +5531,10 @@ def api_swagger_ui():
 # API Usage Statistics  (Phase 9C)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/admin/api-stats', methods=['GET'])
-@require_admin
-def api_admin_api_stats():
-    """Return per-endpoint call counts and latency statistics (admin only).
-
-    Response JSON:
-      ``stats``          – list of endpoint entries, sorted descending by call count.
-                           Each entry has ``endpoint``, ``calls``, ``errors``,
-                           ``avg_ms``, ``min_ms``, ``max_ms``, ``total_ms``.
-      ``endpoint_count`` – number of distinct tracked endpoints.
-    """
-    with _api_stats_lock:
-        rows = [
-            {
-                'endpoint': ep,
-                'calls': s['calls'],
-                'errors': s['errors'],
-                'avg_ms': round(s['total_ms'] / s['calls'], 2) if s['calls'] else 0.0,
-                'min_ms': round(s['min_ms'], 2) if s['min_ms'] is not None else 0.0,
-                'max_ms': round(s['max_ms'], 2),
-                'total_ms': round(s['total_ms'], 2),
-            }
-            for ep, s in _api_endpoint_stats.items()
-        ]
-    # Sort descending by call count for convenience
-    rows.sort(key=lambda r: r['calls'], reverse=True)
-    return jsonify({'stats': rows, 'endpoint_count': len(rows)})
-
-
-@app.route('/api/admin/api-stats/reset', methods=['POST'])
-@require_admin
-def api_admin_api_stats_reset():
-    """Reset all in-memory API usage counters (admin only)."""
-    with _api_stats_lock:
-        _api_endpoint_stats.clear()
-    return jsonify({'reset': True})
+# MIGRATED to FastAPI: GET /api/admin/api-stats, POST /api/admin/api-stats/reset
+# -> backend/routers/admin_ops.py. The after_request that POPULATES
+# _api_endpoint_stats still runs for un-migrated Flask routes; only the admin
+# read/reset endpoints moved.
 
 
 # ---------------------------------------------------------------------------
@@ -5740,33 +5575,8 @@ def api_errors_report():
     return jsonify({'recorded': True}), 201
 
 
-@app.route('/api/admin/client-errors', methods=['GET'])
-@require_admin
-def api_admin_client_errors():
-    """Return recent client-side error reports (admin only).
-
-    Query params:
-      ``limit`` – max entries to return (default 50, max 200)
-    """
-    try:
-        limit = min(int(request.args.get('limit', 50)), _CLIENT_ERROR_MAX)
-    except (ValueError, TypeError):
-        limit = 50
-    with _client_errors_lock:
-        # Iterate the deque in reverse (newest first) and take only `limit`
-        # items — avoids copying the entire buffer when limit is small.
-        total = len(_client_errors)
-        recent = list(reversed(list(_client_errors)[-limit:] if limit < total else _client_errors))
-    return jsonify({'errors': recent, 'total_stored': total})
-
-
-@app.route('/api/admin/client-errors/clear', methods=['POST'])
-@require_admin
-def api_admin_client_errors_clear():
-    """Clear the client-side error ring buffer (admin only)."""
-    with _client_errors_lock:
-        _client_errors.clear()
-    return jsonify({'cleared': True})
+# MIGRATED to FastAPI: GET /api/admin/client-errors,
+# POST /api/admin/client-errors/clear -> backend/routers/admin_ops.py
 
 
 # ---------------------------------------------------------------------------
@@ -5846,150 +5656,9 @@ def api_changelog():
 # Database Optimization & Maintenance  (Tier 3, item 10)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/admin/db/stats', methods=['GET'])
-@require_admin
-def api_admin_db_stats():
-    """Return per-table row counts and total database size (admin only).
-
-    Response JSON:
-      ``tables``     – list of ``{table, rows, size_bytes}`` sorted by row count
-      ``total_size_bytes`` – total on-disk DB size (0 if not measurable)
-      ``db_available``     – whether the DB module is loaded
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available', 'db_available': False}), 503
-    try:
-        db = next(database.get_db())
-        tables = database.get_table_stats(db)
-        total_size = database.get_db_size_bytes()
-        return jsonify({
-            'tables': tables,
-            'total_size_bytes': total_size,
-            'db_available': True,
-        })
-    except Exception as e:
-        gui_logger.error('api_admin_db_stats error: %s', e)
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/admin/db/apply-indexes', methods=['GET'])
-@require_admin
-def api_admin_db_apply_indexes_dryrun():
-    """Dry-run: list recommended indexes that are not yet present (admin only).
-
-    Response JSON mirrors ``POST /api/admin/db/apply-indexes`` with
-    ``dry_run: true``.
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    try:
-        db = next(database.get_db())
-        result = database.apply_indexes(db, dry_run=True)
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error('api_admin_db_apply_indexes_dryrun error: %s', e)
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/admin/db/apply-indexes', methods=['POST'])
-@require_admin
-def api_admin_db_apply_indexes():
-    """Create all missing recommended indexes (admin only).
-
-    Response JSON:
-      ``applied``  – DDL statements executed
-      ``skipped``  – DDL statements where the index already existed
-      ``errors``   – ``[{sql, error}]`` for any failures
-      ``dry_run``  – always ``false``
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    try:
-        db = next(database.get_db())
-        result = database.apply_indexes(db, dry_run=False)
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error('api_admin_db_apply_indexes error: %s', e)
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/admin/db/archive-old-picks', methods=['POST'])
-@require_admin
-def api_admin_db_archive_old_picks():
-    """Delete pick and completed live-session records older than N days (admin only).
-
-    Request JSON body (all optional):
-      ``days`` – retention period in days (default 365, min 1)
-
-    Response JSON:
-      ``deleted_picks``    – number of pick rows removed
-      ``deleted_sessions`` – number of live_session rows removed
-      ``cutoff_date``      – ISO 8601 cutoff timestamp
-      ``days``             – retention period used
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    data = request.get_json(silent=True, force=True) or {}
-    try:
-        days = max(1, int(data.get('days', 365)))
-    except (ValueError, TypeError):
-        days = 365
-    try:
-        db = next(database.get_db())
-        result = database.archive_old_picks(db, days=days)
-        return jsonify(result)
-    except Exception as e:
-        gui_logger.error('api_admin_db_archive_old_picks error: %s', e)
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/admin/db/backup', methods=['GET'])
-@require_admin
-def api_admin_db_backup():
-    """Download a database backup (admin only).
-
-    For SQLite databases: streams the database file as an attachment.
-    For PostgreSQL or other engines: returns connection info and instructions
-    for using pg_dump (no file is streamed).
-
-    Response for non-SQLite:
-      ``message``  – human-readable instructions
-      ``dialect``  – database dialect name
-    """
-    if not DB_AVAILABLE:
-        return jsonify({'error': 'Database not available'}), 503
-    try:
-        import sqlalchemy as _sa
-        dialect = database.engine.dialect.name if database.engine else 'unknown'
-        if dialect == 'sqlite':
-            db_url = str(database.engine.url)
-            path = db_url.replace('sqlite:///', '').replace('sqlite://', '')
-            if not path or not os.path.exists(path):
-                return jsonify({'error': 'SQLite file not found', 'path': path}), 404
-            filename = os.path.basename(path) or 'gapi.db'
-            import datetime as _dt
-            stamp = _dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-            download_name = f'gapi_backup_{stamp}.db'
-            return Response(
-                _stream_file(path),
-                mimetype='application/octet-stream',
-                headers={
-                    'Content-Disposition': f'attachment; filename="{download_name}"',
-                    'Content-Length': str(os.path.getsize(path)),
-                },
-            )
-        else:
-            return jsonify({
-                'message': (
-                    f'Automated backup download is only supported for SQLite. '
-                    f'For {dialect}, use the appropriate dump tool '
-                    f'(e.g., pg_dump for PostgreSQL) against your database server.'
-                ),
-                'dialect': dialect,
-            }), 200
-    except Exception as e:
-        gui_logger.error('api_admin_db_backup error: %s', e)
-        return jsonify({'error': str(e)}), 500
+# MIGRATED to FastAPI: GET /api/admin/db/stats,
+# GET+POST /api/admin/db/apply-indexes, POST /api/admin/db/archive-old-picks,
+# GET /api/admin/db/backup -> backend/routers/admin_ops.py
 
 
 def _stream_file(path: str, chunk_size: int = 65536):
@@ -6035,102 +5704,15 @@ def _stream_file(path: str, chunk_size: int = 65536):
 # Error Rate Dashboard  (Tier 3, item 12)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/admin/errors/rate', methods=['GET'])
-@require_admin
-def api_admin_error_rate():
-    """Return client-side error counts bucketed by hour for the last 24 hours (admin only).
-
-    Response JSON:
-      ``buckets``      – list of ``{hour, count}`` objects, newest last (24 items)
-      ``total_24h``    – total errors in last 24h window
-      ``total_all``    – total in the ring buffer (may span > 24h)
-    """
-    from datetime import timedelta
-    now = datetime.utcnow()
-    cutoff = now - timedelta(hours=24)
-    # Build 24 hour slots: 0 = oldest, 23 = most recent (current partial hour)
-    buckets = [{'hour': (now - timedelta(hours=23 - i)).strftime('%Y-%m-%dT%H:00Z'), 'count': 0}
-               for i in range(24)]
-    total_24h = 0
-    with _client_errors_lock:
-        errors_snapshot = list(_client_errors)
-        total_all = len(errors_snapshot)
-    for err in errors_snapshot:
-        ts_str = err.get('timestamp', '')
-        if not ts_str:
-            continue
-        try:
-            ts = datetime.fromisoformat(ts_str.replace('Z', ''))
-            # Strip timezone info if present so arithmetic stays offset-naive.
-            if ts.tzinfo is not None:
-                ts = ts.replace(tzinfo=None)
-        except (ValueError, AttributeError):
-            continue
-        if ts < cutoff:
-            continue
-        total_24h += 1
-        diff_hours = int((now - ts).total_seconds() // 3600)
-        slot = 23 - min(diff_hours, 23)
-        buckets[slot]['count'] += 1
-    return jsonify({
-        'buckets': buckets,
-        'total_24h': total_24h,
-        'total_all': total_all,
-    })
+# MIGRATED to FastAPI: GET /api/admin/errors/rate -> backend/routers/admin_ops.py
 
 
 # ---------------------------------------------------------------------------
 # Email notification management  (Tier 2, item 6 — email notifications)
 # ---------------------------------------------------------------------------
 
-@app.route('/api/admin/email/status', methods=['GET'])
-@require_admin
-def api_admin_email_status():
-    """Return the current email service configuration status (admin only).
-
-    Response JSON:
-      ``configured``  – ``true`` if ``SMTP_HOST`` is set
-      ``sender``      – configured sender address (empty when unconfigured)
-      ``host``        – SMTP host (empty when unconfigured)
-      ``port``        – SMTP port (0 when unconfigured)
-      ``use_tls``     – whether STARTTLS is enabled
-      ``use_ssl``     – whether SMTPS is enabled
-    """
-    if _email_service is None:
-        return jsonify({'configured': False, 'error': 'EmailService not loaded'})
-    return jsonify(_email_service.config_info())
-
-
-@app.route('/api/admin/email/test', methods=['POST'])
-@require_admin
-def api_admin_email_test():
-    """Send a test email to verify SMTP configuration (admin only).
-
-    Request JSON:
-      ``to``  – recipient email address (required)
-
-    Response JSON:
-      ``success``   – ``true`` when the test email was delivered
-      ``to``        – address the email was sent to
-      ``message``   – human-readable status message
-    """
-    if _email_service is None:
-        return jsonify({'success': False, 'message': 'EmailService not loaded'}), 503
-    if not _email_service.is_configured():
-        return jsonify({
-            'success': False,
-            'message': 'SMTP is not configured. Set SMTP_HOST in your environment.',
-        }), 503
-    data = request.get_json(silent=True, force=True) or {}
-    to_address = str(data.get('to', '')).strip()
-    if not _is_valid_email_address(to_address):
-        return jsonify({'success': False, 'message': 'Invalid or missing "to" address'}), 400
-    ok = _email_service.send_test_email(to_address)
-    return jsonify({
-        'success': ok,
-        'to': to_address,
-        'message': 'Test email sent successfully.' if ok else 'Failed to send test email.',
-    })
+# MIGRATED to FastAPI: GET /api/admin/email/status, POST /api/admin/email/test
+# -> backend/routers/admin_ops.py
 
 
 # MIGRATED to FastAPI: POST /api/admin/notifications/send-digests -> backend/routers/admin_notifications.py

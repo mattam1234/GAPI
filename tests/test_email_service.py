@@ -396,34 +396,42 @@ class _AppBase(unittest.TestCase):
 
 class TestEmailStatusEndpoint(_AppBase):
 
+    def setUp(self):
+        # /api/admin/email/status is migrated to FastAPI (admin_ops).
+        self.client = _FastTestClient(_fastapi_app)
+
     def test_requires_admin(self):
         resp = self.client.get('/api/admin/email/status')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_returns_200_for_admin(self):
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/email/status')
         self.assertEqual(resp.status_code, 200)
 
     def test_response_contains_configured_key(self):
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/email/status')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('configured', data)
 
     def test_not_configured_when_smtp_host_absent(self):
         mock_svc = EmailService(host='')  # real object, not configured
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
              patch.object(gapi_gui, '_email_service', mock_svc):
-            _set_admin_session(self.client)
             resp = self.client.get('/api/admin/email/status')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertFalse(data['configured'])
 
 
 class TestEmailTestEndpoint(_AppBase):
+
+    def setUp(self):
+        # /api/admin/email/test is migrated to FastAPI (admin_ops).
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_requires_admin(self):
         resp = self.client.post('/api/admin/email/test', json={'to': 'x@example.com'})
@@ -432,18 +440,18 @@ class TestEmailTestEndpoint(_AppBase):
     def test_returns_503_when_not_configured(self):
         mock_svc = MagicMock()
         mock_svc.is_configured.return_value = False
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
              patch.object(gapi_gui, '_email_service', mock_svc):
-            _set_admin_session(self.client)
             resp = self.client.post('/api/admin/email/test', json={'to': 'x@example.com'})
         self.assertEqual(resp.status_code, 503)
 
     def test_returns_400_for_invalid_address(self):
         mock_svc = MagicMock()
         mock_svc.is_configured.return_value = True
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
              patch.object(gapi_gui, '_email_service', mock_svc):
-            _set_admin_session(self.client)
             resp = self.client.post('/api/admin/email/test', json={'to': 'notanemail'})
         self.assertEqual(resp.status_code, 400)
 
@@ -451,12 +459,12 @@ class TestEmailTestEndpoint(_AppBase):
         mock_svc = MagicMock()
         mock_svc.is_configured.return_value = True
         mock_svc.send_test_email.return_value = True
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
              patch.object(gapi_gui, '_email_service', mock_svc):
-            _set_admin_session(self.client)
             resp = self.client.post('/api/admin/email/test', json={'to': 'test@example.com'})
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['success'])
         self.assertEqual(data['to'], 'test@example.com')
 
@@ -464,11 +472,11 @@ class TestEmailTestEndpoint(_AppBase):
         mock_svc = MagicMock()
         mock_svc.is_configured.return_value = True
         mock_svc.send_test_email.return_value = False
+        _set_admin_session(self.client)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True), \
              patch.object(gapi_gui, '_email_service', mock_svc):
-            _set_admin_session(self.client)
             resp = self.client.post('/api/admin/email/test', json={'to': 'test@example.com'})
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertFalse(data['success'])
 
 

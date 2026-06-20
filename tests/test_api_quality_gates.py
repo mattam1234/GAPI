@@ -17,12 +17,20 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fastapi.testclient import TestClient as _FastTestClient
+
 import gapi_gui
+from backend.main import app as _fastapi_app
 
 
 def _set_admin_session(client):
-    with client.session_transaction() as sess:
-        sess['username'] = 'admin'
+    """Log in as admin on either a Flask or FastAPI test client."""
+    if hasattr(client, 'session_transaction'):
+        with client.session_transaction() as sess:
+            sess['username'] = 'admin'
+    else:
+        ser = gapi_gui.app.session_interface.get_signing_serializer(gapi_gui.app)
+        client.cookies.set('session', ser.dumps({'username': 'admin'}))
 
 
 def _set_user_session(client, username='alice'):
@@ -52,25 +60,30 @@ class TestApiStats(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        # Flask client: still-Flask routes (/api/changelog) populate the shared
+        # in-memory _api_endpoint_stats via after_request. FastAPI client: the
+        # migrated admin read/reset endpoints (admin_ops). Both read/write the
+        # same gapi_gui module globals.
         self.client = gapi_gui.app.test_client()
+        self.api = _FastTestClient(_fastapi_app)
         with gapi_gui._api_stats_lock:
             gapi_gui._api_endpoint_stats.clear()
 
     def test_stats_require_admin(self):
-        resp = self.client.get('/api/admin/api-stats')
+        resp = self.api.get('/api/admin/api-stats')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_stats_returns_ok_for_admin(self):
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.get('/api/admin/api-stats')
+            resp = self.api.get('/api/admin/api-stats')
         self.assertEqual(resp.status_code, 200)
 
     def test_stats_response_shape(self):
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.get('/api/admin/api-stats')
-        data = json.loads(resp.data)
+            resp = self.api.get('/api/admin/api-stats')
+        data = resp.json()
         self.assertIn('stats', data)
         self.assertIn('endpoint_count', data)
 
@@ -107,10 +120,10 @@ class TestApiStats(unittest.TestCase):
 
     def test_stats_avg_ms_in_admin_response(self):
         self.client.get('/api/changelog')
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.get('/api/admin/api-stats')
-        data = json.loads(resp.data)
+            resp = self.api.get('/api/admin/api-stats')
+        data = resp.json()
         # changelog endpoint should appear in stats
         stats_list = data['stats']
         endpoints = {e['endpoint']: e for e in stats_list}
@@ -118,7 +131,7 @@ class TestApiStats(unittest.TestCase):
         self.assertIn('avg_ms', endpoints['api_changelog'])
 
     def test_stats_reset_requires_admin(self):
-        resp = self.client.post('/api/admin/api-stats/reset')
+        resp = self.api.post('/api/admin/api-stats/reset')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_stats_reset_clears_data(self):
@@ -126,11 +139,11 @@ class TestApiStats(unittest.TestCase):
         # Confirm data exists
         with gapi_gui._api_stats_lock:
             self.assertIn('api_changelog', gapi_gui._api_endpoint_stats)
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.post('/api/admin/api-stats/reset')
+            resp = self.api.post('/api/admin/api-stats/reset')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['reset'])
         # The changelog entry (from before reset) must be gone; the reset
         # endpoint itself may have been added after the clear.
@@ -142,10 +155,10 @@ class TestApiStats(unittest.TestCase):
         for _ in range(3):
             self.client.get('/api/changelog')
         self.client.get('/api/auth/current')
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.get('/api/admin/api-stats')
-        data = json.loads(resp.data)
+            resp = self.api.get('/api/admin/api-stats')
+        data = resp.json()
         stats_list = data['stats']
         # changelog (3 calls) must appear before auth_current (1 call)
         ep_names = [e['endpoint'] for e in stats_list]
@@ -166,7 +179,11 @@ class TestClientErrors(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
+        # Flask client: POST /api/errors/report is still Flask. FastAPI client:
+        # the migrated admin view/clear endpoints (admin_ops). Both share the
+        # gapi_gui._client_errors ring buffer.
         self.client = gapi_gui.app.test_client()
+        self.api = _FastTestClient(_fastapi_app)
         with gapi_gui._client_errors_lock:
             gapi_gui._client_errors.clear()
 
@@ -226,17 +243,17 @@ class TestClientErrors(unittest.TestCase):
         self.assertEqual(resp.status_code, 201)
 
     def test_view_errors_requires_admin(self):
-        resp = self.client.get('/api/admin/client-errors')
+        resp = self.api.get('/api/admin/client-errors')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_view_errors_returns_list(self):
         self._report(message='err1')
         self._report(message='err2')
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.get('/api/admin/client-errors')
+            resp = self.api.get('/api/admin/client-errors')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('errors', data)
         self.assertIn('total_stored', data)
         self.assertGreaterEqual(data['total_stored'], 2)
@@ -244,10 +261,10 @@ class TestClientErrors(unittest.TestCase):
     def test_view_errors_newest_first(self):
         self._report(message='first')
         self._report(message='second')
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.get('/api/admin/client-errors')
-        data = json.loads(resp.data)
+            resp = self.api.get('/api/admin/client-errors')
+        data = resp.json()
         messages = [e['message'] for e in data['errors']]
         self.assertEqual(messages[0], 'second')
         self.assertEqual(messages[1], 'first')
@@ -255,25 +272,25 @@ class TestClientErrors(unittest.TestCase):
     def test_view_errors_limit_param(self):
         for i in range(10):
             self._report(message=f'err{i}')
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.get('/api/admin/client-errors?limit=3')
-        data = json.loads(resp.data)
+            resp = self.api.get('/api/admin/client-errors?limit=3')
+        data = resp.json()
         self.assertLessEqual(len(data['errors']), 3)
 
     def test_clear_errors_requires_admin(self):
-        resp = self.client.post('/api/admin/client-errors/clear')
+        resp = self.api.post('/api/admin/client-errors/clear')
         self.assertIn(resp.status_code, (401, 403))
 
     def test_clear_errors_empties_buffer(self):
         self._report(message='to clear')
         with gapi_gui._client_errors_lock:
             self.assertEqual(len(gapi_gui._client_errors), 1)
+        _set_admin_session(self.api)
         with patch.object(gapi_gui.user_manager, 'is_admin', return_value=True):
-            _set_admin_session(self.client)
-            resp = self.client.post('/api/admin/client-errors/clear')
+            resp = self.api.post('/api/admin/client-errors/clear')
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertTrue(data['cleared'])
         with gapi_gui._client_errors_lock:
             self.assertEqual(len(gapi_gui._client_errors), 0)
