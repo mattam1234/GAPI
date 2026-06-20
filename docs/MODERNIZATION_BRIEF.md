@@ -490,6 +490,32 @@ The only `@app.route`s left in `gapi_gui.py` are **intentional**:
 
 ---
 
+## 14. Gap closure — stub domains become real features
+
+Per-domain ORM models now live in `backend/models/` (sharing `database.Base`);
+`create_app()` runs an idempotent `create_all` after routers load. This let
+parallel agents build features on disjoint files (no shared `database.py`/`main.py`
+edits). Naming note: where `database.py` already had legacy classes for the same
+concept (Guild/Team/Tournament), the new models use distinct class+table names
+(`Community*`, `Feature*`) to avoid SQLAlchemy registry collisions.
+
+**✅ trades** → `backend/models/trades.py` + `app/services/trade_service.py`. Real
+game-trade offers: `pending → accepted | declined`; only the recipient acts, only
+while pending (403/409 otherwise). Persisted, listed for both parties.
+
+**✅ guilds + teams** → `backend/models/community.py` + `community_service.py`.
+Named groups with owner + membership; creator auto-joins; idempotent join; 404 on
+missing; per-owner unique names. Response keys preserved (real data now).
+
+**✅ tournaments** → `backend/models/tournaments.py` + `tournament_service.py`.
+`upcoming → open → active → completed`; registration only while open (409 if
+full/closed), idempotent; detail returns participants + a seeded bracket when
+active.
+
+Latent-500/stub fakery removed from these routers. Full suite: **2579 passed**.
+
+---
+
 ## Frontend (Phase 4, started)
 
 The hybrid SPA scaffold landed (`frontend/`, React 18 + Vite + TS) — see
