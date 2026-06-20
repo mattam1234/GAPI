@@ -8,7 +8,7 @@ Covers:
   - Analytics dashboard + export served natively by FastAPI, reusing the
     existing AnalyticsService (via dependency override for determinism).
   - The strangler-fig mount: unmigrated paths fall through to the legacy Flask
-    app (GET /api/health).
+    app (GET /api/openapi.json).
 
 Run with:
     python -m pytest tests/test_backend_foundation.py
@@ -128,11 +128,12 @@ class BackendFoundationTest(unittest.TestCase):
     # --- strangler fallback to legacy Flask -----------------------------
 
     def test_unmigrated_path_falls_through_to_flask(self):
-        # /api/health is only defined in the legacy Flask app; reaching it
-        # proves the WSGI fallback mount works.
-        resp = self.client.get('/api/health')
+        # /api/openapi.json is only defined in the legacy Flask app; reaching it
+        # proves the WSGI fallback mount works. (/api/health migrated to
+        # FastAPI — backend/routers/system_infra.py.)
+        resp = self.client.get('/api/openapi.json')
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json().get('status'), 'healthy')
+        self.assertIn('openapi', resp.json())
 
     def test_openapi_schema_generated(self):
         # FastAPI auto-generates the spec that will retire openapi_spec.py.

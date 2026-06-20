@@ -883,7 +883,9 @@ class TestDeprecationHeaders(unittest.TestCase):
         self.assertIn('deprecated', msg.lower())
 
     def test_non_deprecated_endpoint_has_no_deprecation_header(self):
-        resp = self.client.get('/api/changelog')
+        # /api/changelog migrated to FastAPI; use a still-Flask, non-deprecated
+        # endpoint to exercise the legacy deprecation after_request.
+        resp = self.client.get('/api/openapi.json')
         self.assertIsNone(resp.headers.get('Deprecation'))
 
     def test_deprecated_endpoints_dict_populated(self):
@@ -905,9 +907,8 @@ class TestDeprecationHeaders(unittest.TestCase):
 
 class TestUsersListScopes(unittest.TestCase):
     def setUp(self):
-        gapi_gui.app.config['TESTING'] = True
-        gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # GET /api/users migrated to FastAPI (backend/routers/users.py).
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_users_list_scope_me_and_friends_limits_candidates(self):
         _set_user_session(self.client, 'alice')
@@ -928,7 +929,7 @@ class TestUsersListScopes(unittest.TestCase):
             resp = self.client.get('/api/users?scope=me_and_friends')
 
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual([u['username'] for u in data['users']], ['alice', 'bob'])
 
     def test_users_list_default_scope_keeps_platform_filter(self):
@@ -941,7 +942,7 @@ class TestUsersListScopes(unittest.TestCase):
             resp = self.client.get('/api/users')
 
         self.assertEqual(resp.status_code, 200)
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertEqual([u['username'] for u in data['users']], ['bob'])
 
 

@@ -423,7 +423,8 @@ class TestCSRFToken(unittest.TestCase):
     def setUp(self):
         gapi_gui.app.config['TESTING'] = True
         gapi_gui.app.config['SECRET_KEY'] = 'test-secret'
-        self.client = gapi_gui.app.test_client()
+        # GET /api/csrf-token migrated to FastAPI.
+        self.client = _FastTestClient(_fastapi_app)
 
     def test_get_csrf_token_returns_200(self):
         resp = self.client.get('/api/csrf-token')
@@ -431,7 +432,7 @@ class TestCSRFToken(unittest.TestCase):
 
     def test_response_contains_token(self):
         resp = self.client.get('/api/csrf-token')
-        data = json.loads(resp.data)
+        data = resp.json()
         self.assertIn('token', data)
         self.assertIsInstance(data['token'], str)
         self.assertGreater(len(data['token']), 10)
@@ -439,20 +440,20 @@ class TestCSRFToken(unittest.TestCase):
     def test_sets_csrf_cookie(self):
         resp = self.client.get('/api/csrf-token')
         # Cookie is set via Set-Cookie header
-        set_cookie = resp.headers.get('Set-Cookie', '')
+        set_cookie = resp.headers.get('set-cookie', '')
         self.assertIn('csrf_token', set_cookie)
 
     def test_cookie_value_matches_body_token(self):
         resp = self.client.get('/api/csrf-token')
-        data = json.loads(resp.data)
+        data = resp.json()
         token_in_body = data['token']
-        set_cookie = resp.headers.get('Set-Cookie', '')
+        set_cookie = resp.headers.get('set-cookie', '')
         # The cookie value appears right after "csrf_token="
         self.assertIn(f'csrf_token={token_in_body}', set_cookie)
 
     def test_tokens_are_unique_across_requests(self):
-        r1 = json.loads(self.client.get('/api/csrf-token').data)['token']
-        r2 = json.loads(self.client.get('/api/csrf-token').data)['token']
+        r1 = self.client.get('/api/csrf-token').json()['token']
+        r2 = self.client.get('/api/csrf-token').json()['token']
         self.assertNotEqual(r1, r2)
 
     def test_csrf_validation_bypassed_in_testing_mode(self):
@@ -482,7 +483,8 @@ class TestCacheControlHeaders(unittest.TestCase):
         self.assertIn('max-age=60', cc)
 
     def test_changelog_endpoint_is_cacheable(self):
-        resp = self.client.get('/api/changelog')
+        # /api/changelog migrated to FastAPI (still sets the cache header).
+        resp = _FastTestClient(_fastapi_app).get('/api/changelog')
         cc = resp.headers.get('Cache-Control', '')
         self.assertIn('public', cc)
 
