@@ -141,6 +141,16 @@ def create_app() -> FastAPI:
     app.include_router(catalog.hltb_router)
     app.include_router(system_infra.router)
 
+    # --- Feature tables --------------------------------------------------
+    # Idempotently create tables for the FastAPI-era feature models under
+    # backend/models/ (registered on the shared Base when their routers import
+    # them above). No-op for tables that already exist.
+    try:
+        import database as _database
+        _database.Base.metadata.create_all(bind=_database.engine)
+    except Exception:  # pragma: no cover - never block app startup on this
+        gapi_gui.gui_logger.exception("create_all for feature models failed")
+
     # --- Modern SPA console (Phase 4) ------------------------------------
     # Served under /app, BEFORE the catch-all Flask mount so it takes
     # precedence. Conditional: only mounts when the frontend has been built.
