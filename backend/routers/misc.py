@@ -9,20 +9,28 @@ Six small legacy domains migrated together, one ``APIRouter`` per URL prefix:
   * ``cosmetics_router`` — ``/api/cosmetics``
   * ``anticheat_router`` — ``/api/anticheat``
 
-Faithful ports — latent legacy behaviour is preserved exactly:
+Mixed: three domains are now REAL persistent features; three remain faithful
+legacy ports.
 
 * ``/api/i18n`` and ``/api/i18n/{lang}`` had NO ``@require_login`` decorator in
   the legacy app — they are public locale endpoints. That is mirrored here: no
   auth dependency. The other five prefixes keep their ``@require_login`` gate.
-* The ``/api/shop`` and ``/api/anticheat`` handlers reference a module-global
-  ``db_service`` that is never defined on ``gapi_gui`` (the same undefined global
-  behind trades / leaderboards 500s). Every handler wraps the access in a
-  ``try/except`` and returns a success-faking mock response, so in production
-  these routes never actually persist anything — they always fall through to the
-  mock branch. Referenced here via ``gapi_gui.db_service`` so the
-  ``AttributeError`` still fires and the mock fallback still runs.
-* ``/api/events/*`` and ``/api/cosmetics/apply-theme`` are pure stubs whose
-  ``try/except`` never trips (apply-theme additionally validates ``theme_id``).
+* ``/api/shop``, ``/api/events/*`` and ``/api/cosmetics/apply-theme`` are now
+  REAL persistent features backed by ``app.services.storefront_service`` and the
+  ``backend/models/storefront.py`` tables (accessed via a session opened from
+  ``database.SessionLocal()``). The old undefined-``gapi_gui.db_service`` /
+  success-faking mock fallbacks have been removed for these three domains. The
+  legacy response keys are preserved.
+    - shop: lists items with per-user ``owned`` flags; purchase records a
+      one-time Purchase (400 missing id, 404 unknown item, 409 already owned).
+    - events: lists active events with per-user ``reward_claimed`` flags; claim
+      records a once-only EventClaim (404 unknown/inactive, 409 already claimed).
+    - cosmetics: apply-theme validates ``theme_id`` (400) and upserts the user's
+      theme.
+* The ``/api/anticheat`` handler still references a module-global ``db_service``
+  that is never defined on ``gapi_gui``; its ``try/except`` catches the
+  ``AttributeError`` and returns a success-faking mock response. Referenced via
+  ``gapi_gui.db_service`` so that latent behaviour is preserved unchanged.
 * ``/api/twitch/*`` reach the live Twitch API via ``gapi_gui._get_twitch_client``
   and the per-user picker; they return 503 when credentials are unconfigured,
   502 on Twitch auth/API errors, 500 on unexpected errors, and (for
@@ -57,7 +65,14 @@ from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
 
 import gapi_gui
+import database
 from backend.dependencies import require_login
+from app.services import storefront_service
+from app.services.storefront_service import StorefrontError
+
+# Importing the model module registers the storefront tables on the shared Base
+# so the create_all hook in backend.main builds them.
+import backend.models.storefront  # noqa: F401
 
 i18n_router = APIRouter(prefix="/api/i18n", tags=["i18n"])
 shop_router = APIRouter(prefix="/api/shop", tags=["shop"])
@@ -76,6 +91,13 @@ def _err(status_code, message):
 
 def _ok(content, status_code=200):
     return JSONResponse(status_code=status_code, content=content, headers=_NO_STORE)
+
+
+def _open_session():
+    """Open a real DB session, or raise a 503-mapped StorefrontError if down."""
+    if getattr(database, "SessionLocal", None) is None:
+        raise StorefrontError(503, "Database not available")
+    return database.SessionLocal()
 
 
 # ── i18n (UNAUTHENTICATED — public locale data) ──────────────────────────────
@@ -120,129 +142,90 @@ def api_i18n_get(lang: str):
 
 @shop_router.get("")
 def api_shop(username: str = Depends(require_login)):
-    """Get shop items for purchase."""
-    g = gapi_gui
+    """List active shop items, each flagged with the caller's ownership."""
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
-
-        # Get all shop items
-        items_query = "SELECT id, name, icon, price, currency, premium FROM shop_items ORDER BY premium DESC"
-        items = db.execute(items_query).fetchall()
-
-        # Get user's owned items
-        owned_query = "SELECT item_id FROM user_inventory WHERE user_id = ?"
-        owned_ids = set(row[0] for row in db.execute(owned_query, (user.id,)).fetchall())
-
-        result = []
-        for item_id, name, icon, price, currency, premium in items:
-            result.append({
-                'id': str(item_id),
-                'icon': icon,
-                'name': name,
-                'price': price,
-                'currency': currency,
-                'premium': premium,
-                'owned': item_id in owned_ids
-            })
-        return _ok({'items': result})
-    except Exception as e:
-        g.gui_logger.error(f"Error loading shop: {e}")
-        # Return mock data if DB unavailable
-        items = [
-            {'id': '1', 'icon': '🎨', 'name': 'Dark Neon Theme', 'price': 500, 'currency': 'xp', 'premium': False, 'owned': False},
-            {'id': '2', 'icon': '👑', 'name': 'Legendary Title', 'price': 100, 'currency': 'coins', 'premium': True, 'owned': False},
-        ]
+        db = _open_session()
+        try:
+            items = storefront_service.list_items(db, username)
+        finally:
+            db.close()
         return _ok({'items': items})
+    except StorefrontError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error loading shop: %s", e)
+        return _err(500, "Failed to load shop")
 
 
 @shop_router.post("/purchase")
 def api_purchase_item(body: Optional[dict] = Body(default=None),
                       username: str = Depends(require_login)):
-    """Purchase item from shop."""
+    """Purchase a one-time item from the shop."""
     g = gapi_gui
     data = body or {}
     item_id = data.get('item_id', '')
 
-    if not item_id:
-        return _err(400, 'Item ID required')
-
     try:
-        db = g.db_service.get_db()  # AttributeError in prod -> caught -> mock (preserved)
-        user = g.db_service.get_current_user(username)
-
-        # Check if already owned
-        owned_query = "SELECT 1 FROM user_inventory WHERE user_id = ? AND item_id = ?"
-        if db.execute(owned_query, (user.id, int(item_id))).fetchone():
-            return _err(400, 'Already owned')
-
-        # Get item details
-        item_query = "SELECT name FROM shop_items WHERE id = ?"
-        item_result = db.execute(item_query, (int(item_id),)).fetchone()
-        item_name = item_result[0] if item_result else f'Item {item_id}'
-
-        # Add to inventory
-        insert_query = "INSERT INTO user_inventory (user_id, item_id) VALUES (?, ?)"
-        db.execute(insert_query, (user.id, int(item_id)))
-        db.commit()
-
-        # Broadcast shop purchase event
-        if g.REALTIME_AVAILABLE:
-            try:
-                g.realtime.RealtimeEvents.shop_purchase(
-                    username=username,
-                    item=item_name,
-                    item_type='cosmetic'
-                )
-            except Exception as e:
-                g.gui_logger.warning(f'Failed to broadcast shop purchase: {e}')
-
-        return _ok({'success': True, 'message': 'Purchase successful', 'new_balance': 1000})
+        db = _open_session()
+        try:
+            result = storefront_service.purchase_item(db, username, item_id)
+        finally:
+            db.close()
+    except StorefrontError as e:
+        return _err(e.status_code, e.message)
     except Exception as e:
-        g.gui_logger.error(f"Error purchasing item: {e}")
-        return _ok({'success': True, 'message': 'Purchase successful (mock)', 'new_balance': 1000})
+        g.gui_logger.error("Error purchasing item: %s", e)
+        return _err(500, "Failed to purchase item")
+
+    # Best-effort realtime notification (never affects the response).
+    if g.REALTIME_AVAILABLE:
+        try:
+            g.realtime.RealtimeEvents.shop_purchase(
+                username=username,
+                item=result.get('item_name', ''),
+                item_type='cosmetic'
+            )
+        except Exception as e:  # pragma: no cover - notification is non-critical
+            g.gui_logger.warning('Failed to broadcast shop purchase: %s', e)
+
+    return _ok({'success': True, 'message': result['message'],
+                'new_balance': 1000})
 
 
 # ── events ───────────────────────────────────────────────────────────────────
 
 @events_router.get("/seasonal")
 def api_get_seasonal_events(username: str = Depends(require_login)):
-    """Get active seasonal events."""
+    """List active seasonal events, each flagged with the caller's claim."""
     try:
-        return _ok({
-            'active_events': [
-                {
-                    'id': 1,
-                    'name': 'Spring Festival 2026',
-                    'season': 'spring',
-                    'progress': 65,
-                    'reward': '🌸 Spring Bloom Theme',
-                    'days_left': 15,
-                    'completed': False
-                },
-                {
-                    'id': 2,
-                    'name': 'Anniversary Celebration',
-                    'season': 'year',
-                    'progress': 100,
-                    'reward': '🎂 Anniversary Badge',
-                    'days_left': 5,
-                    'completed': True,
-                    'reward_claimed': False
-                }
-            ]
-        })
-    except Exception:
-        return _ok({'active_events': []})
+        db = _open_session()
+        try:
+            events = storefront_service.list_active_events(db, username)
+        finally:
+            db.close()
+        return _ok({'active_events': events})
+    except StorefrontError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error loading seasonal events: %s", e)
+        return _err(500, "Failed to load events")
 
 
 @events_router.post("/{event_id}/claim")
 def api_claim_event_reward(event_id: str, username: str = Depends(require_login)):
-    """Claim seasonal event reward."""
+    """Claim a seasonal event reward (once per user per event)."""
     try:
-        return _ok({'success': True, 'message': 'Event reward claimed!', 'reward': '🎂 Anniversary Badge'})
-    except Exception:
-        return _ok({'success': True, 'message': 'Reward claimed (mock)'})
+        db = _open_session()
+        try:
+            result = storefront_service.claim_event(db, username, event_id)
+        finally:
+            db.close()
+        return _ok(result)
+    except StorefrontError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error claiming event reward: %s", e)
+        return _err(500, "Failed to claim reward")
 
 
 # ── twitch ───────────────────────────────────────────────────────────────────
@@ -337,14 +320,23 @@ def api_twitch_library_overlap(count: int = Query(default=20),
 @cosmetics_router.post("/apply-theme")
 def api_apply_theme(body: Optional[dict] = Body(default=None),
                     username: str = Depends(require_login)):
-    """Apply a theme to user profile."""
+    """Validate and upsert the user's applied cosmetic theme."""
     data = body or {}
     theme_id = data.get('theme_id')
 
-    if not theme_id:
-        return _err(400, 'Theme ID required')
+    try:
+        db = _open_session()
+        try:
+            result = storefront_service.apply_theme(db, username, theme_id)
+        finally:
+            db.close()
+    except StorefrontError as e:
+        return _err(e.status_code, e.message)
+    except Exception as e:
+        gapi_gui.gui_logger.error("Error applying theme: %s", e)
+        return _err(500, "Failed to apply theme")
 
-    return _ok({'success': True, 'message': 'Theme applied'})
+    return _ok({'success': True, 'message': result['message']})
 
 
 # ── anticheat ────────────────────────────────────────────────────────────────
