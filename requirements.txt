@@ -26,7 +26,7 @@ tzdata>=2024.1                # IANA tz database for zoneinfo (schedule UTC conv
 # Backend modernization (FastAPI strangler-fig host — see docs/MODERNIZATION_BRIEF.md)
 # FastAPI is the ASGI entrypoint (backend.main:app); the legacy Flask app is
 # mounted as a WSGI fallback via a2wsgi until all domains are migrated.
-fastapi>=0.110
+fastapi>=0.138.0
 uvicorn[standard]>=0.29       # ASGI server (gunicorn -k uvicorn.workers.UvicornWorker in prod)
 a2wsgi>=1.10                  # WSGI->ASGI adapter for the legacy Flask fallback mount
 httpx>=0.27                   # used by fastapi.testclient (tests)
