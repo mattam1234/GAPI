@@ -21,7 +21,7 @@ flask>=2.0.0
 python-dotenv>=1.2.2
 flask-limiter>=4.1.1
 flask-compress>=1.14
-tzdata>=2024.1                # IANA tz database for zoneinfo (schedule UTC conversion; required on Windows)
+tzdata>=2026.2                # IANA tz database for zoneinfo (schedule UTC conversion; required on Windows)
 
 # Backend modernization (FastAPI strangler-fig host — see docs/MODERNIZATION_BRIEF.md)
 # FastAPI is the ASGI entrypoint (backend.main:app); the legacy Flask app is
